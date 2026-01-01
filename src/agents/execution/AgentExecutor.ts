@@ -1,8 +1,9 @@
 import type { AgentInstance } from "@/agents/types";
-import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { buildRalSummary } from "@/conversations/RalSummaryFormatter";
+import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { addConcurrentRALContext } from "@/conversations/utils/context-enhancers";
+import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
@@ -21,17 +22,24 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
-import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type { Tool as CoreTool, ModelMessage, TypedToolCall, TypedToolResult, ToolSet, ToolCallPart, ToolResultPart } from "ai";
+import type {
+    Tool as CoreTool,
+    ModelMessage,
+    ToolCallPart,
+    ToolResultPart,
+    ToolSet,
+    TypedToolCall,
+    TypedToolResult,
+} from "ai";
 import chalk from "chalk";
+import { shouldReleasePausedRALs } from "./ConcurrentRALCoordinator";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { ExecutionContext, StandaloneAgentContext } from "./types";
-import { shouldReleasePausedRALs } from "./ConcurrentRALCoordinator";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -41,9 +49,7 @@ export interface LLMCompletionRequest {
 }
 
 export class AgentExecutor {
-    constructor(
-        private standaloneContext?: StandaloneAgentContext
-    ) {}
+    constructor(private standaloneContext?: StandaloneAgentContext) {}
 
     /**
      * Prepare an LLM request without executing it.
@@ -78,7 +84,8 @@ export class AgentExecutor {
         }
 
         const toolNames = agent.tools || [];
-        const tools = toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
+        const tools =
+            toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
 
         return { messages, tools };
     }
@@ -110,7 +117,10 @@ export class AgentExecutor {
 
                 // Also check for RAL with queued injections (e.g., pairing checkpoint)
                 const injectionRal = !resumableRal
-                    ? ralRegistry.findRALWithInjections(context.agent.pubkey, context.conversationId)
+                    ? ralRegistry.findRALWithInjections(
+                          context.agent.pubkey,
+                          context.conversationId
+                      )
                     : undefined;
 
                 let ralNumber: number;
@@ -152,7 +162,7 @@ export class AgentExecutor {
                     span.addEvent("executor.ral_resumed_for_injection", {
                         "ral.number": ralNumber,
                         "injection.count": injectionRal.queuedInjections.length,
-                        "pending_delegations": injectionRal.pendingDelegations.length,
+                        pending_delegations: injectionRal.pendingDelegations.length,
                     });
                 } else {
                     // Create a new RAL for this execution
@@ -164,7 +174,10 @@ export class AgentExecutor {
                 }
 
                 // Check for other active RALs in this conversation
-                const existingRALs = ralRegistry.getActiveRALs(context.agent.pubkey, context.conversationId);
+                const existingRALs = ralRegistry.getActiveRALs(
+                    context.agent.pubkey,
+                    context.conversationId
+                );
 
                 span.setAttributes({
                     "ral.number": ralNumber,
@@ -182,7 +195,7 @@ export class AgentExecutor {
                 if (otherRALSummaries.length > 0) {
                     span.addEvent("executor.concurrent_rals", {
                         "ral.count": otherRALSummaries.length,
-                        "ral.numbers": otherRALSummaries.map(r => r.ralNumber).join(","),
+                        "ral.numbers": otherRALSummaries.map((r) => r.ralNumber).join(","),
                     });
 
                     // Pause other RALs to give this new RAL time to analyze and decide
@@ -194,7 +207,7 @@ export class AgentExecutor {
                     span.addEvent("rals_pause_attempt", {
                         pausing_ral: ralNumber,
                         active_ral_count: activeRalsBeforePause.length,
-                        active_ral_numbers: activeRalsBeforePause.map(r => r.ralNumber).join(","),
+                        active_ral_numbers: activeRalsBeforePause.map((r) => r.ralNumber).join(","),
                         other_ral_summary_count: otherRALSummaries.length,
                     });
 
@@ -237,8 +250,12 @@ export class AgentExecutor {
                 // Display execution start in console
                 const ralLabel = isResumption
                     ? ` (RAL #${ralNumber} resuming)`
-                    : existingRALs.length > 1 ? ` (RAL #${ralNumber})` : "";
-                console.log(chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}]${ralLabel} ━━━`));
+                    : existingRALs.length > 1
+                      ? ` (RAL #${ralNumber})`
+                      : "";
+                console.log(
+                    chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}]${ralLabel} ━━━`)
+                );
 
                 span.addEvent("executor.started", {
                     ral_number: ralNumber,
@@ -265,7 +282,8 @@ export class AgentExecutor {
                 span.setStatus({ code: SpanStatusCode.ERROR });
 
                 const errorMessage = formatAnyError(error);
-                const isCreditsError = errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
+                const isCreditsError =
+                    errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
 
                 const displayMessage = isCreditsError
                     ? "⚠️ Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
@@ -279,7 +297,9 @@ export class AgentExecutor {
                         await agentPublisher.error(
                             {
                                 message: displayMessage,
-                                errorType: isCreditsError ? "insufficient_credits" : "execution_error",
+                                errorType: isCreditsError
+                                    ? "insufficient_credits"
+                                    : "execution_error",
                             },
                             {
                                 triggeringEvent: context.triggeringEvent,
@@ -315,7 +335,9 @@ export class AgentExecutor {
     /**
      * Prepare execution context with all necessary components
      */
-    private prepareExecution(context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] }): {
+    private prepareExecution(
+        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] }
+    ): {
         fullContext: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] };
         toolTracker: ToolExecutionTracker;
         agentPublisher: AgentPublisher;
@@ -331,7 +353,8 @@ export class AgentExecutor {
 
         // Check for active pairings for this agent
         const hasActivePairings = projectContext.pairingManager
-            ? projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey).length > 0
+            ? projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey)
+                  .length > 0
             : false;
 
         const fullContext = {
@@ -366,7 +389,7 @@ export class AgentExecutor {
         agentPublisher: AgentPublisher,
         ralNumber: number
     ): Promise<NDKEvent | undefined> {
-        let completionEvent: CompleteEvent | undefined;
+        let completionEvent: CompleteEvent | undefined | null;
 
         try {
             completionEvent = await this.executeStreaming(context, toolTracker, ralNumber);
@@ -378,11 +401,20 @@ export class AgentExecutor {
             throw streamError;
         }
 
+        // null means stream error was handled - error event already published as finalization
+        if (completionEvent === null) {
+            return undefined;
+        }
+
         // Determine if we should wait for more delegations
         // Use context.hasPendingDelegations (captured at completion time) for delegation completions
         // This avoids race conditions where pendingDelegations array is modified by concurrent completions
         const ralRegistry = RALRegistry.getInstance();
-        const ralState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
+        const ralState = ralRegistry.getRAL(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
 
         // For non-delegation-completion executions, check current RAL state
         // For delegation completions, use the flag captured at completion time
@@ -399,7 +431,11 @@ export class AgentExecutor {
                 "delegation.pending_count": ralState?.pendingDelegations.length ?? 0,
             });
 
-            console.log(chalk.yellow(`\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting delegations`));
+            console.log(
+                chalk.yellow(
+                    `\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting delegations`
+                )
+            );
 
             return undefined;
         }
@@ -412,7 +448,7 @@ export class AgentExecutor {
 
         trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
-            "has_pending_delegations": hasPendingDelegations,
+            has_pending_delegations: hasPendingDelegations,
         });
 
         let responseEvent: NDKEvent;
@@ -423,7 +459,11 @@ export class AgentExecutor {
                 { content: completionEvent.message },
                 eventContext
             );
-            console.log(chalk.cyan(`\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting delegations)`));
+            console.log(
+                chalk.cyan(
+                    `\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting delegations)`
+                )
+            );
         } else {
             // Final completion - use complete() (kind:1, with p-tag)
             responseEvent = await agentPublisher.complete(
@@ -438,20 +478,21 @@ export class AgentExecutor {
 
         trace.getActiveSpan()?.addEvent("executor.published", {
             "event.id": responseEvent.id || "",
-            "is_completion": !hasPendingDelegations,
+            is_completion: !hasPendingDelegations,
         });
 
         return responseEvent;
     }
 
     /**
-     * Execute streaming and return the completion event
+     * Execute streaming and return the completion event.
+     * Returns null if a stream error was handled (error already published as finalization).
      */
     private async executeStreaming(
         context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
         toolTracker: ToolExecutionTracker,
         ralNumber: number
-    ): Promise<CompleteEvent | undefined> {
+    ): Promise<CompleteEvent | undefined | null> {
         const toolNames = context.agent.tools || [];
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
@@ -465,14 +506,19 @@ export class AgentExecutor {
         const ralRegistry = RALRegistry.getInstance();
         const conversationStore = context.conversationStore;
         if (!conversationStore) {
-            throw new Error("ConversationStore not available - execution requires ConversationStore");
+            throw new Error(
+                "ConversationStore not available - execution requires ConversationStore"
+            );
         }
 
         // Register RAL in ConversationStore
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
         // Build conversation messages from ConversationStore (single source of truth)
-        const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber);
+        const conversationMessages = await conversationStore.buildMessagesForRal(
+            context.agent.pubkey,
+            ralNumber
+        );
 
         // Build system prompt with agent identity, context, and instructions
         const projectContext = getProjectContext();
@@ -489,11 +535,12 @@ export class AgentExecutor {
             workingDirectory: context.workingDirectory,
             currentBranch: context.currentBranch,
             availableAgents: Array.from(projectContext.agents.values()),
+            mcpManager: projectContext.mcpManager,
         });
 
         // Combine system prompt with conversation messages
         const messages: ModelMessage[] = [
-            ...systemPromptMessages.map(sm => sm.message),
+            ...systemPromptMessages.map((sm) => sm.message),
             ...conversationMessages,
         ];
 
@@ -504,9 +551,16 @@ export class AgentExecutor {
             for (const ralSummary of context.otherRALSummaries) {
                 const storeMessages = conversationStore.getAllMessages();
                 // buildRalSummary returns the full summary with header, we just want the action lines
-                const summary = buildRalSummary(storeMessages, context.agent.pubkey, ralSummary.ralNumber);
+                const summary = buildRalSummary(
+                    storeMessages,
+                    context.agent.pubkey,
+                    ralSummary.ralNumber
+                );
                 // Extract just the action lines (skip the header "You have another reason-act-loop..." line)
-                const lines = summary.split("\n").slice(2).filter(l => l.trim());
+                const lines = summary
+                    .split("\n")
+                    .slice(2)
+                    .filter((l) => l.trim());
                 if (lines.length > 0) {
                     actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
                 }
@@ -555,6 +609,7 @@ export class AgentExecutor {
         let contentBuffer = "";
         let reasoningBuffer = "";
         let completionEvent: CompleteEvent | undefined;
+        let streamErrorHandled = false;
 
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
@@ -595,23 +650,33 @@ export class AgentExecutor {
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
             logger.error("[AgentExecutor] Stream error from LLMService", event);
+            streamErrorHandled = true;
 
             try {
                 const { message: errorMessage, errorType } = formatStreamError(event.error);
                 await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
             } catch (publishError) {
-                logger.error("Failed to publish stream error event", { error: formatAnyError(publishError) });
+                logger.error("Failed to publish stream error event", {
+                    error: formatAnyError(publishError),
+                });
             }
         });
 
-        llmService.on("session-captured", ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
-            sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
-        });
+        llmService.on(
+            "session-captured",
+            ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
+                sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
+            }
+        );
 
         llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
             const argsStr = event.args !== undefined ? JSON.stringify(event.args) : "";
             const argsPreview = argsStr.substring(0, 50);
-            console.log(chalk.yellow(`\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`));
+            console.log(
+                chalk.yellow(
+                    `\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`
+                )
+            );
 
             // Add tool-call message to ConversationStore for persistence
             conversationStore.addMessage({
@@ -619,12 +684,14 @@ export class AgentExecutor {
                 ral: ralNumber,
                 content: "",
                 messageType: "tool-call",
-                toolData: [{
-                    type: "tool-call",
-                    toolCallId: event.toolCallId,
-                    toolName: event.toolName,
-                    input: event.args ?? {},
-                }] as ToolCallPart[],
+                toolData: [
+                    {
+                        type: "tool-call",
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        input: event.args ?? {},
+                    },
+                ] as ToolCallPart[],
             });
 
             const toolEvent = await toolTracker.trackExecution({
@@ -650,14 +717,17 @@ export class AgentExecutor {
                 ral: ralNumber,
                 content: "",
                 messageType: "tool-result",
-                toolData: [{
-                    type: "tool-result" as const,
-                    toolCallId: event.toolCallId,
-                    toolName: event.toolName,
-                    output: event.result !== undefined
-                        ? { type: "json" as const, value: event.result }
-                        : { type: "text" as const, value: "" },
-                }] as ToolResultPart[],
+                toolData: [
+                    {
+                        type: "tool-result" as const,
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        output:
+                            event.result !== undefined
+                                ? { type: "json" as const, value: event.result }
+                                : { type: "text" as const, value: "" },
+                    },
+                ] as ToolResultPart[],
             });
 
             await toolTracker.completeExecution({
@@ -683,13 +753,15 @@ export class AgentExecutor {
 
             // prepareStep: async, rebuilds messages from ConversationStore on every step
             // This ensures injections and tool results are always included
-            const prepareStep = async (
-                step: {
-                    messages: ModelMessage[];
-                    stepNumber: number;
-                    steps: Array<{ toolCalls: Array<{ toolName: string }>; text: string; reasoningText?: string }>;
-                }
-            ): Promise<{ messages?: ModelMessage[] } | undefined> => {
+            const prepareStep = async (step: {
+                messages: ModelMessage[];
+                stepNumber: number;
+                steps: Array<{
+                    toolCalls: Array<{ toolName: string }>;
+                    text: string;
+                    reasoningText?: string;
+                }>;
+            }): Promise<{ messages?: ModelMessage[] } | undefined> => {
                 // Update accumulated messages tracker
                 latestAccumulatedMessages = step.messages;
 
@@ -707,7 +779,7 @@ export class AgentExecutor {
                         hasReleasedPausedRALs = true;
 
                         const triggeringToolCalls = stepsInfo
-                            .flatMap(s => s.toolCalls.map(tc => tc.toolName))
+                            .flatMap((s) => s.toolCalls.map((tc) => tc.toolName))
                             .join(", ");
 
                         const releasedCount = ralRegistry.releaseOtherRALs(
@@ -763,7 +835,7 @@ export class AgentExecutor {
 
                 // Combine system prompt with fresh conversation messages
                 const rebuiltMessages: ModelMessage[] = [
-                    ...systemPromptMessages.map(sm => sm.message),
+                    ...systemPromptMessages.map((sm) => sm.message),
                     ...conversationMessages,
                 ];
 
@@ -780,8 +852,15 @@ export class AgentExecutor {
                     const actionHistory = new Map<number, string>();
                     for (const ralSummary of currentOtherRALs) {
                         const storeMessages = conversationStore.getAllMessages();
-                        const summary = buildRalSummary(storeMessages, context.agent.pubkey, ralSummary.ralNumber);
-                        const lines = summary.split("\n").slice(2).filter(l => l.trim());
+                        const summary = buildRalSummary(
+                            storeMessages,
+                            context.agent.pubkey,
+                            ralSummary.ralNumber
+                        );
+                        const lines = summary
+                            .split("\n")
+                            .slice(2)
+                            .filter((l) => l.trim());
                         if (lines.length > 0) {
                             actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
                         }
@@ -859,7 +938,9 @@ export class AgentExecutor {
                         // latestAccumulatedMessages has messages up to but not including this step.
                         // We need to add the assistant's tool calls and the tool results.
                         const toolCalls = lastStep.toolCalls ?? [];
-                        const messagesWithToolCalls: ModelMessage[] = [...latestAccumulatedMessages];
+                        const messagesWithToolCalls: ModelMessage[] = [
+                            ...latestAccumulatedMessages,
+                        ];
 
                         // Add assistant message with tool calls (if any)
                         if (toolCalls.length > 0) {
@@ -885,9 +966,10 @@ export class AgentExecutor {
                                     toolName: tr.toolName,
                                     // Wrap output in LanguageModelV2ToolResultOutput format
                                     // The AI SDK expects { type: 'json', value: ... } for object outputs
-                                    output: tr.output !== undefined
-                                        ? { type: "json" as const, value: tr.output }
-                                        : { type: "text" as const, value: "" },
+                                    output:
+                                        tr.output !== undefined
+                                            ? { type: "json" as const, value: tr.output }
+                                            : { type: "text" as const, value: "" },
                                 })),
                             });
                         }
@@ -911,7 +993,11 @@ export class AgentExecutor {
                 return false;
             };
 
-            await llmService.stream(messages, toolsObject, { abortSignal, prepareStep, onStopCheck });
+            await llmService.stream(messages, toolsObject, {
+                abortSignal,
+                prepareStep,
+                onStopCheck,
+            });
         } catch (streamError) {
             // Check if this was an abort from a stop signal (kind 24134)
             if (abortSignal.aborted) {
@@ -928,16 +1014,26 @@ export class AgentExecutor {
                 throw streamError;
             }
 
-            try {
-                const { message: errorMessage, errorType } = formatStreamError(streamError);
-                await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
-            } catch (publishError) {
-                logger.error("Failed to publish stream error event", { error: formatAnyError(publishError) });
+            // Only publish error if not already handled by stream-error event
+            if (!streamErrorHandled) {
+                try {
+                    const { message: errorMessage, errorType } = formatStreamError(streamError);
+                    await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
+                } catch (publishError) {
+                    logger.error("Failed to publish stream error event", {
+                        error: formatAnyError(publishError),
+                    });
+                }
             }
             throw streamError;
         } finally {
             // Mark as no longer streaming
-            ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, false);
+            ralRegistry.setStreaming(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber,
+                false
+            );
 
             // Safety release: ensure any RALs we paused are released on cleanup
             if (!hasReleasedPausedRALs) {
@@ -970,7 +1066,11 @@ export class AgentExecutor {
 
         // Clear RAL if execution completed without pending delegations
         // We clear for any terminal finish reason (not just "stop"/"end" - Gemini returns "other")
-        const finalRalState = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, ralNumber);
+        const finalRalState = ralRegistry.getRAL(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
 
         if (!finalRalState?.pendingDelegations.length) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
@@ -978,6 +1078,11 @@ export class AgentExecutor {
             // Complete RAL in ConversationStore and persist
             conversationStore.completeRal(context.agent.pubkey, ralNumber);
             await conversationStore.save();
+        }
+
+        // Return null if stream error was handled (error event already published)
+        if (streamErrorHandled) {
+            return null;
         }
 
         return completionEvent;

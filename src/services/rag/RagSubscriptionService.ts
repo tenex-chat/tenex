@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
+import { getProjectContext } from "@/services/projects";
 import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
@@ -198,8 +199,12 @@ export class RagSubscriptionService {
                 );
             }
 
-            // Import mcpManager dynamically to avoid circular dependency
-            const { mcpManager } = await import("../mcp/MCPManager");
+            // Get mcpManager from project context
+            const projectCtx = getProjectContext();
+            const mcpManager = projectCtx.mcpManager;
+            if (!mcpManager) {
+                throw new Error("MCPManager not available in project context");
+            }
 
             // Try to subscribe to resource updates
             let subscriptionSupported = true;
@@ -372,13 +377,16 @@ export class RagSubscriptionService {
             const listener = this.resourceListeners.get(listenerKey);
 
             if (listener) {
-                const { mcpManager } = await import("../mcp/MCPManager");
+                const projectCtx = getProjectContext();
+                const mcpManager = projectCtx.mcpManager;
 
-                // Unsubscribe from the resource
-                await mcpManager.unsubscribeFromResource(
-                    subscription.mcpServerId,
-                    subscription.resourceUri
-                );
+                if (mcpManager) {
+                    // Unsubscribe from the resource
+                    await mcpManager.unsubscribeFromResource(
+                        subscription.mcpServerId,
+                        subscription.resourceUri
+                    );
+                }
 
                 this.resourceListeners.delete(listenerKey);
             }
@@ -522,8 +530,12 @@ export class RagSubscriptionService {
         }
 
         try {
-            // Import mcpManager here to avoid circular dependency
-            const { mcpManager } = await import("../mcp/MCPManager");
+            // Get mcpManager from project context
+            const projectCtx = getProjectContext();
+            const mcpManager = projectCtx.mcpManager;
+            if (!mcpManager) {
+                throw new Error("MCPManager not available in project context");
+            }
 
             // Read the current resource content
             const result = await mcpManager.readResource(

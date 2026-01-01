@@ -8,7 +8,7 @@ import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
 import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
-import { mcpService } from "@/services/mcp/MCPManager";
+import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
@@ -41,6 +41,7 @@ export class ProjectRuntime {
     private eventHandler: EventHandler | null = null;
     private statusPublisher: ProjectStatusService | null = null;
     private operationsStatusPublisher: OperationsStatusService | null = null;
+    private mcpManager: MCPManager = new MCPManager();
 
     private isRunning = false;
     private startTime: Date | null = null;
@@ -118,6 +119,9 @@ export class ProjectRuntime {
 
             // Load MCP tools from project event
             await this.initializeMCPTools();
+
+            // Set mcpManager on context for use by tools and services
+            this.context.mcpManager = this.mcpManager;
 
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
@@ -432,10 +436,10 @@ export class ProjectRuntime {
 
             // Initialize MCP service if any tools were installed
             if (installedCount.success > 0) {
-                await mcpService.initialize(this.metadataPath, this.projectBasePath);
+                await this.mcpManager.initialize(this.metadataPath, this.projectBasePath);
 
-                const runningServers = mcpService.getRunningServers();
-                const availableTools = Object.keys(mcpService.getCachedTools());
+                const runningServers = this.mcpManager.getRunningServers();
+                const availableTools = Object.keys(this.mcpManager.getCachedTools());
 
                 trace.getActiveSpan()?.addEvent("project_runtime.mcp_service_initialized", {
                     "mcp.running_servers": runningServers.length,

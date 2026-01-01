@@ -1,4 +1,4 @@
-import { mcpService } from "@/services/mcp/MCPManager";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isValidToolName } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -105,16 +105,25 @@ export function validateAndSeparateTools(toolNames: string[]): {
 /**
  * Resolve MCP tools - check if requested MCP tools are available
  * Returns array of available MCP tool names
+ *
+ * If mcpManager is not provided, returns all requested MCP tools without validation.
+ * This allows agent loading to proceed before MCP is initialized - actual tool
+ * availability is checked at execution time in getToolsObject.
  */
-export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string): string[] {
+export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string, mcpManager?: MCPManager): string[] {
     if (mcpToolRequests.length === 0) {
         return [];
+    }
+
+    // If no MCPManager available, keep all MCP tool requests - they'll be validated at execution time
+    if (!mcpManager) {
+        return mcpToolRequests;
     }
 
     const availableMcpTools: string[] = [];
 
     try {
-        const allMcpTools = mcpService.getCachedTools();
+        const allMcpTools = mcpManager.getCachedTools();
         for (const toolName of mcpToolRequests) {
             if (allMcpTools[toolName]) {
                 availableMcpTools.push(toolName);
@@ -122,6 +131,8 @@ export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string): s
         }
     } catch (error) {
         logger.debug(`Could not load MCP tools for agent "${agentSlug}":`, error);
+        // Return all requested tools on error - validation will happen at execution time
+        return mcpToolRequests;
     }
 
     return availableMcpTools;
@@ -133,8 +144,11 @@ export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string): s
  * 2. Validate
  * 3. Resolve MCP tools
  * Returns final list of valid, available tool names
+ *
+ * @param mcpManager - Optional MCPManager for validating MCP tools. If not provided,
+ *                     MCP tool names are kept without validation (validated at execution time).
  */
-export function processAgentTools(requestedTools: string[], agentSlug: string): string[] {
+export function processAgentTools(requestedTools: string[], agentSlug: string, mcpManager?: MCPManager): string[] {
     // Step 1: Normalize
     const normalized = normalizeAgentTools(requestedTools);
 
@@ -142,7 +156,7 @@ export function processAgentTools(requestedTools: string[], agentSlug: string): 
     const { validTools, mcpToolRequests } = validateAndSeparateTools(normalized);
 
     // Step 3: Resolve MCP tools
-    const mcpTools = resolveMCPTools(mcpToolRequests, agentSlug);
+    const mcpTools = resolveMCPTools(mcpToolRequests, agentSlug, mcpManager);
 
     // Combine and return
     return [...validTools, ...mcpTools];

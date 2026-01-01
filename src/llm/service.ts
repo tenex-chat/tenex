@@ -1,6 +1,7 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
     type GenerateTextResult,
@@ -19,13 +20,12 @@ import {
     streamText,
     wrapLanguageModel,
 } from "ai";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
-import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
+import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import {
     compileMessagesForClaudeCode,
@@ -115,6 +115,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private cachedContentForComplete = "";
+    private hasStreamError = false;
 
     constructor(
         private readonly registry: ProviderRegistryProvider<any, any> | null,
@@ -358,7 +359,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 this.provider === "claudeCode" &&
                 result.providerMetadata?.["claude-code"]?.sessionId
             ) {
-                const capturedSessionId = result.providerMetadata["claude-code"].sessionId as string;
+                const capturedSessionId = result.providerMetadata["claude-code"]
+                    .sessionId as string;
                 trace.getActiveSpan()?.addEvent("llm.session_captured", {
                     "session.id": capturedSessionId,
                 });
@@ -425,6 +427,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         processedMessages = this.addCacheControl(processedMessages);
 
         const startTime = Date.now();
+        this.hasStreamError = false;
 
         const reviewModel = this.getLanguageModel();
         const progressMonitor = new ProgressMonitor(reviewModel);
@@ -470,7 +473,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // Smooth streaming with 15ms delay and line-based chunking
             experimental_transform: smoothStream({
                 delayInMs: 15,
-                chunking: "line"
+                chunking: "line",
             }),
 
             providerOptions: {
@@ -482,6 +485,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(),
             onError: ({ error }) => {
+                // Mark that we had a stream error - prevents complete event emission
+                this.hasStreamError = true;
                 // Emit stream-error event for the executor to handle and publish to user
                 this.emit("stream-error", { error });
             },
@@ -548,9 +553,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 break;
             case "tool-error": {
                 // Handle tool execution errors - emit as tool-did-execute with error flag
-                const errorMsg = chunk.error instanceof Error
-                    ? chunk.error.message
-                    : String(chunk.error);
+                const errorMsg =
+                    chunk.error instanceof Error ? chunk.error.message : String(chunk.error);
 
                 logger.error(`[LLMService] Tool '${chunk.toolName}' threw an error`, {
                     toolCallId: chunk.toolCallId,
@@ -571,7 +575,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     toolCallId: chunk.toolCallId,
                     result: {
                         type: "error-text",
-                        text: `Tool execution failed: ${errorMsg}`
+                        text: `Tool execution failed: ${errorMsg}`,
                     },
                     error: true,
                 });
@@ -623,6 +627,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private createFinishHandler(): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
         return async (e) => {
             try {
+                // Don't emit complete if there was a stream error
+                // The error event will be the finalization instead
+                if (this.hasStreamError) {
+                    this.cachedContentForComplete = "";
+                    return;
+                }
+
                 // Check for invalid tool calls and mark span as error
                 const activeSpan = trace.getActiveSpan();
                 if (activeSpan) {
@@ -689,10 +700,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 }
 
                 // For streaming, use cached content or e.text
-                const finalMessage =
-                    this.cachedContentForComplete
-                        ? this.cachedContentForComplete
-                        : e.text || "";
+                const finalMessage = this.cachedContentForComplete
+                    ? this.cachedContentForComplete
+                    : e.text || "";
 
                 if (
                     this.provider === "claudeCode" &&
@@ -704,13 +714,15 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 }
 
                 // Extract OpenRouter-specific usage data
-                const openrouterUsage = (e.providerMetadata?.openrouter as {
-                    usage?: {
-                        cost?: number;
-                        promptTokensDetails?: { cachedTokens?: number };
-                        completionTokensDetails?: { reasoningTokens?: number };
-                    };
-                })?.usage;
+                const openrouterUsage = (
+                    e.providerMetadata?.openrouter as {
+                        usage?: {
+                            cost?: number;
+                            promptTokensDetails?: { cachedTokens?: number };
+                            completionTokensDetails?: { reasoningTokens?: number };
+                        };
+                    }
+                )?.usage;
 
                 this.emit("complete", {
                     message: finalMessage,
@@ -726,7 +738,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // Clear cached content after use
                 this.cachedContentForComplete = "";
-                
             } catch (error) {
                 logger.error("[LLMService] Error in onFinish handler", {
                     error: error instanceof Error ? error.message : String(error),

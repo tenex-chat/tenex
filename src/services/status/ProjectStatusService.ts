@@ -11,7 +11,6 @@ import {
     isProjectContextInitialized,
 } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
-import { mcpService } from "@/services/mcp/MCPManager";
 import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -349,15 +348,17 @@ export class ProjectStatusService {
 
             // Add all MCP tools (with empty agent sets initially)
             // Agents will be added to their MCP tools in the loop below
-            try {
-                const mcpTools = mcpService.getCachedTools();
-                for (const toolName of Object.keys(mcpTools)) {
-                    if (toolName && !toolAgentMap.has(toolName)) {
-                        toolAgentMap.set(toolName, new Set());
+            if (projectCtx.mcpManager) {
+                try {
+                    const mcpTools = projectCtx.mcpManager.getCachedTools();
+                    for (const toolName of Object.keys(mcpTools)) {
+                        if (toolName && !toolAgentMap.has(toolName)) {
+                            toolAgentMap.set(toolName, new Set());
+                        }
                     }
+                } catch {
+                    // MCP tools might not be available yet, that's okay
                 }
-            } catch {
-                // MCP tools might not be available yet, that's okay
             }
 
             // Then build a map of tool name -> set of agent slugs that have access

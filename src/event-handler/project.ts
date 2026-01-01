@@ -3,7 +3,6 @@ import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
 import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
-import { mcpService } from "../services/mcp/MCPManager";
 import {
     getInstalledMCPEventIds,
     installMCPServerFromEvent,
@@ -151,8 +150,8 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
 
         // Reload MCP service if there were any MCP tool changes
         const hasMCPChanges = newMCPEventIds.length > 0 || mcpToolsToRemove.length > 0;
-        if (hasMCPChanges) {
-            await mcpService.reload(metadataPath);
+        if (hasMCPChanges && currentContext.mcpManager) {
+            await currentContext.mcpManager.reload(metadataPath);
         }
 
         // Update the existing project context atomically

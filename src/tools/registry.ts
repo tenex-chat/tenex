@@ -6,7 +6,6 @@
 
 import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
-import { mcpService } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
 import type { AISdkTool, ToolFactory, ToolName } from "./types";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
@@ -267,14 +266,14 @@ export function getToolsObject(
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
-    // Separate dynamic tools and regular tools (MCP tools are added automatically)
+    // Separate regular tools, dynamic tools, and MCP tools
     const regularTools: ToolName[] = [];
     const dynamicToolNames: string[] = [];
+    const mcpToolNames: string[] = [];
 
     for (const name of names) {
         if (name.startsWith("mcp__")) {
-            // Skip MCP tool names - we'll add all available MCP tools automatically
-            continue;
+            mcpToolNames.push(name);
         } else if (name in toolFactories) {
             regularTools.push(name as ToolName);
         } else if (dynamicToolService.isDynamicTool(name)) {
@@ -339,16 +338,18 @@ export function getToolsObject(
         }
     }
 
-    // Add all available MCP tools
-    try {
-        // Get all MCP tools from service
-        const allMcpTools = mcpService.getCachedTools();
-
-        // Add all MCP tools to the tools object
-        Object.assign(tools, allMcpTools);
-    } catch (error) {
-        // MCP not available, continue without MCP tools
-        console.debug("Could not load MCP tools:", error);
+    // Add only requested MCP tools
+    if (mcpToolNames.length > 0 && context.mcpManager) {
+        try {
+            const allMcpTools = context.mcpManager.getCachedTools();
+            for (const name of mcpToolNames) {
+                if (allMcpTools[name]) {
+                    tools[name] = allMcpTools[name];
+                }
+            }
+        } catch (error) {
+            console.debug("Could not load MCP tools:", error);
+        }
     }
 
     return tools;
