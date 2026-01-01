@@ -3,6 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
+import { ConversationStore } from "@/conversations/ConversationStore";
 
 // Mock git utilities
 const mockListWorktrees = mock(() => Promise.resolve([]));
@@ -150,20 +151,26 @@ describe("ExecutionContextFactory", () => {
             // Setup
             mockGetCurrentBranchWithFallback.mockResolvedValue("main");
             const mockConversation = { id: "test-conversation" };
-            mockCoordinator.getConversation = mock(() => mockConversation);
+            const originalGet = ConversationStore.get;
+            ConversationStore.get = mock(() => mockConversation) as typeof ConversationStore.get;
 
-            // Execute
-            const context = await createExecutionContext({
-                agent: mockAgent,
-                conversationId: "test-conversation",
-                projectBasePath,
-                triggeringEvent: mockEvent,
-                conversationCoordinator: mockCoordinator,
-            });
+            try {
+                // Execute
+                const context = await createExecutionContext({
+                    agent: mockAgent,
+                    conversationId: "test-conversation",
+                    projectBasePath,
+                    triggeringEvent: mockEvent,
+                    conversationCoordinator: mockCoordinator,
+                });
 
-            // Assert
-            expect(context.getConversation()).toBe(mockConversation);
-            expect(mockCoordinator.getConversation).toHaveBeenCalledWith("test-conversation");
+                // Assert
+                expect(context.getConversation()).toBe(mockConversation);
+                expect(ConversationStore.get).toHaveBeenCalledWith("test-conversation");
+            } finally {
+                // Restore
+                ConversationStore.get = originalGet;
+            }
         });
 
         it("should use project root with fallback branch when no branch tag", async () => {
