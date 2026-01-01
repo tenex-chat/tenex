@@ -24,6 +24,7 @@ export function createListScheduledTasksTool(_context: ExecutionContext): AISdkT
                 // Format tasks for output
                 const formattedTasks = tasks.map((task) => ({
                     id: task.id,
+                    title: task.title,
                     prompt: task.prompt,
                     createdAt: task.createdAt,
                     schedule: task.schedule,

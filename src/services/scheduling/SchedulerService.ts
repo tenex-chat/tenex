@@ -10,6 +10,7 @@ import { getProjectContext } from "@/services/projects";
 
 interface ScheduledTask {
     id: string;
+    title?: string; // Human-readable title for the scheduled task
     schedule: string; // Cron expression
     prompt: string;
     lastRun?: string;
@@ -20,6 +21,9 @@ interface ScheduledTask {
     agentPubkey?: string; // Alias for toPubkey for backwards compatibility
     projectId: string; // Project A-tag ID (format: "31933:authorPubkey:dTag")
 }
+
+// Export the type so it can be used by other modules
+export type { ScheduledTask };
 
 export class SchedulerService {
     private static instance: SchedulerService;
@@ -66,7 +70,8 @@ export class SchedulerService {
         prompt: string,
         fromPubkey: string,
         toPubkey: string,
-        projectId?: string
+        projectId?: string,
+        title?: string
     ): Promise<string> {
         // Validate cron expression
         if (!cron.validate(schedule)) {
@@ -89,6 +94,7 @@ export class SchedulerService {
         // Store locally for cron management
         const task: ScheduledTask = {
             id: taskId,
+            title,
             schedule,
             prompt,
             fromPubkey,
