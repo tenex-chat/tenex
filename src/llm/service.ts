@@ -115,7 +115,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private cachedContentForComplete = "";
-    private hasStreamError = false;
 
     constructor(
         private readonly registry: ProviderRegistryProvider<any, any> | null,
@@ -427,7 +426,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         processedMessages = this.addCacheControl(processedMessages);
 
         const startTime = Date.now();
-        this.hasStreamError = false;
 
         const reviewModel = this.getLanguageModel();
         const progressMonitor = new ProgressMonitor(reviewModel);
@@ -485,8 +483,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             onChunk: this.handleChunk.bind(this),
             onFinish: this.createFinishHandler(),
             onError: ({ error }) => {
-                // Mark that we had a stream error - prevents complete event emission
-                this.hasStreamError = true;
                 // Emit stream-error event for the executor to handle and publish to user
                 this.emit("stream-error", { error });
             },
@@ -627,13 +623,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private createFinishHandler(): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
         return async (e) => {
             try {
-                // Don't emit complete if there was a stream error
-                // The error event will be the finalization instead
-                if (this.hasStreamError) {
-                    this.cachedContentForComplete = "";
-                    return;
-                }
-
                 // Check for invalid tool calls and mark span as error
                 const activeSpan = trace.getActiveSpan();
                 if (activeSpan) {
