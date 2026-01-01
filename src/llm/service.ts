@@ -546,6 +546,37 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             case "tool-result":
                 this.handleToolResult(chunk.toolCallId, chunk.toolName, chunk.output);
                 break;
+            case "tool-error": {
+                // Handle tool execution errors - emit as tool-did-execute with error flag
+                const errorMsg = chunk.error instanceof Error
+                    ? chunk.error.message
+                    : String(chunk.error);
+
+                logger.error(`[LLMService] Tool '${chunk.toolName}' threw an error`, {
+                    toolCallId: chunk.toolCallId,
+                    toolName: chunk.toolName,
+                    error: errorMsg,
+                });
+
+                trace.getActiveSpan()?.addEvent("llm.tool_error", {
+                    "tool.name": chunk.toolName,
+                    "tool.call_id": chunk.toolCallId,
+                    "tool.error_message": errorMsg,
+                });
+
+                // Emit tool-did-execute with error info so it gets persisted to conversation
+                // Format the error as a result object that the LLM can understand
+                this.emit("tool-did-execute", {
+                    toolName: chunk.toolName,
+                    toolCallId: chunk.toolCallId,
+                    result: {
+                        type: "error-text",
+                        text: `Tool execution failed: ${errorMsg}`
+                    },
+                    error: true,
+                });
+                break;
+            }
             case "tool-input-start":
                 // Tool input is starting to stream
                 trace.getActiveSpan()?.addEvent("llm.tool_input_start", {
