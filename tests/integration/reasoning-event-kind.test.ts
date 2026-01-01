@@ -7,7 +7,6 @@ describe("Reasoning Events with Tags", () => {
         it("should use kind:1 for all conversation events", () => {
             // Verify we're using standard kinds
             expect(NDKKind.Text).toBe(1);
-            expect(NDKKind.GenericReply).toBe(1111); // deprecated, kept for backwards compatibility
         });
     });
 

@@ -111,9 +111,9 @@ async function executeBugList(_context: ExecutionContext): Promise<BugListOutput
         filter: { "#a": [TENEX_BACKEND_PROJECT_ATAG], "#t": [ALPHA_BUG_HASHTAG] },
     });
 
-    // Fetch all kind:11 bug reports
+    // Fetch all bug reports
     const bugEvents = await ndk.fetchEvents({
-        kinds: [11],
+        kinds: [1],
         "#a": [TENEX_BACKEND_PROJECT_ATAG],
         "#t": [ALPHA_BUG_HASHTAG],
     });
@@ -125,9 +125,9 @@ async function executeBugList(_context: ExecutionContext): Promise<BugListOutput
     // Process all bugs in parallel for better performance
     const bugs = await Promise.all(
         Array.from(bugEvents).map(async (bugEvent) => {
-            // Fetch replies (kind:1111) for this bug
+            // Fetch replies for this bug
             const replies = await ndk.fetchEvents({
-                kinds: [1111],
+                kinds: [1],
                 "#e": [bugEvent.id],
                 "#a": [TENEX_BACKEND_PROJECT_ATAG],
             });

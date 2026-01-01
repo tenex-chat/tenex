@@ -5,9 +5,6 @@ export enum NostrKind {
     // Standard kinds
     TEXT_NOTE = 1,
     REACTION = 7,
-
-    // Custom application kinds
-    GENERIC_REPLY = 1111,
     ARTICLE = 30023,
 }
 

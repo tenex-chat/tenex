@@ -74,7 +74,7 @@ describe("PairingManager", () => {
       expect(pairingManager.hasPairing(delegationId)).toBe(true);
       expect(mockNDK.subscribe).toHaveBeenCalledWith(
         {
-          kinds: [1111],
+          kinds: [1],
           "#e": [delegationId],
         },
         { closeOnEose: false }

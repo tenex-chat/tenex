@@ -283,7 +283,7 @@ Total: 5 files`,
                 data: {
                     content:
                         "I'll help you analyze the code. Let me delegate this to the appropriate agents.",
-                    kind: 1111,
+                    kind: 1,
                 },
             },
             {

@@ -49,7 +49,7 @@ async function executeDelegateExternal(
 
   // Create delegation event
   const chatEvent = new NDKEvent(ndk);
-  chatEvent.kind = 11;
+  chatEvent.kind = 1;
   chatEvent.content = content;
   chatEvent.tags.push(["p", pubkey]);
 

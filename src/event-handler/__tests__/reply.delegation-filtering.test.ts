@@ -99,7 +99,7 @@ describe("Delegation Event Filtering Bug", () => {
             id: "delegation-event-id",
             pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
             content: "Delegating task to claude-code",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],
@@ -162,7 +162,7 @@ describe("Delegation Event Filtering Bug", () => {
             id: "agent-event-no-ptags",
             pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
             content: "Agent status update",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],
@@ -207,7 +207,7 @@ describe("Delegation Event Filtering Bug", () => {
             id: "agent-event-non-system",
             pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
             content: "Message to external user",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],

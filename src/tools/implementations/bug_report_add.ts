@@ -39,9 +39,9 @@ async function executeBugReportAdd(
         throw new Error(`Bug report not found: ${input.bugId}`);
     }
 
-    // Verify it's actually a bug report (kind:11 with alpha-bug tag)
-    if (bugEvent.kind !== 11) {
-        throw new Error(`Event ${input.bugId} is not a bug report (kind ${bugEvent.kind}, expected 11)`);
+    // Verify it's actually a bug report (kind:1 with alpha-bug tag)
+    if (bugEvent.kind !== 1) {
+        throw new Error(`Event ${input.bugId} is not a bug report (kind ${bugEvent.kind}, expected 1)`);
     }
 
     const hasBugTag = bugEvent.tags.some((t) => t[0] === "t" && t[1] === ALPHA_BUG_HASHTAG);
@@ -54,9 +54,9 @@ async function executeBugReportAdd(
         agent: context.agent.name,
     });
 
-    // Create kind:1111 reply (generic reply)
+    // Create reply
     const reply = new NDKEvent(ndk);
-    reply.kind = 1111;
+    reply.kind = 1;
     reply.content = input.content;
 
     // Add threading tags per NIP-22

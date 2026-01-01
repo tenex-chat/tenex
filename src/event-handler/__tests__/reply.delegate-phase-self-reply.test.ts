@@ -80,7 +80,7 @@ describe("Agent Phase Self-Reply", () => {
             id: "event-self-phase",
             pubkey: "pm-phases-pubkey", // PM's pubkey
             content: "Switching to execution phase",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],
@@ -133,7 +133,7 @@ describe("Agent Phase Self-Reply", () => {
             id: "event-regular-self",
             pubkey: "regular-agent-pubkey", // Regular agent's pubkey
             content: "Trying to reply to myself",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],
@@ -181,7 +181,7 @@ describe("Agent Phase Self-Reply", () => {
             id: "event-mixed",
             pubkey: "pm-phases-pubkey", // PM's pubkey
             content: "Phase transition and delegation",
-            kind: 1111,
+            kind: 1,
             tags: [
                 ["E", "conv-root"],
                 ["K", "11"],

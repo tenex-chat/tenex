@@ -4,7 +4,7 @@ describe("reply.ts - NDKTask Delegation Flow", () => {
     describe("Integration Tests", () => {
         it.todo("should process task completion and reactivate delegating agent");
         it.todo("should handle multi-agent delegation with all completions");
-        it.todo("should create orphaned conversation for kind:11 replies");
+        it.todo("should create orphaned conversation for kind:1 replies");
         it.todo("should route messages to p-tagged agents");
         it.todo("should find conversations via task mappings");
     });
