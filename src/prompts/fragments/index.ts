@@ -19,6 +19,7 @@ import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
+import { memorizedReportsFragment } from "./27-memorized-reports";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { alphaModeFragment } from "./alpha-mode";
 import { concurrentRALContextFragment } from "./concurrent-ral-context";
@@ -56,6 +57,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(retrievedLessonsFragment);
     fragmentRegistry.register(ragInstructionsFragment);
     fragmentRegistry.register(mcpResourcesFragment);
+    fragmentRegistry.register(memorizedReportsFragment);
     fragmentRegistry.register(worktreeContextFragment);
 }
 

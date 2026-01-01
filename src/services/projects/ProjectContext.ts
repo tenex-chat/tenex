@@ -3,10 +3,11 @@ import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PairingManager } from "@/services/pairing";
+import type { ReportInfo } from "@/services/reports/ReportService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type { NDKProject } from "@nostr-dev-kit/ndk";
+import type { NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -55,6 +56,18 @@ export class ProjectContext {
      * Key: agent pubkey, Value: array of lessons (limited to most recent 50 per agent)
      */
     public readonly agentLessons: Map<string, NDKAgentLesson[]>;
+
+    /**
+     * Reports cache for this project
+     * Key: compound key "author:slug", Value: ReportInfo object
+     * Using compound key allows efficient lookup by both slug and author
+     */
+    public readonly reports: Map<string, ReportInfo>;
+
+    /**
+     * Maximum number of reports to cache per project (memory efficiency)
+     */
+    private static readonly MAX_REPORTS_CACHE_SIZE = 200;
 
     /**
      * PairingManager for real-time delegation supervision (optional, initialized when needed)
@@ -172,6 +185,7 @@ export class ProjectContext {
         }
 
         this.agentLessons = new Map();
+        this.reports = new Map();
     }
 
     // =====================================================================================
@@ -232,6 +246,226 @@ export class ProjectContext {
      */
     getAllLessons(): NDKAgentLesson[] {
         return Array.from(this.agentLessons.values()).flat();
+    }
+
+    // =====================================================================================
+    // REPORT MANAGEMENT
+    // =====================================================================================
+
+    /**
+     * Generate a compound key for report storage
+     */
+    private static reportKey(authorPubkey: string, slug: string): string {
+        return `${authorPubkey}:${slug}`;
+    }
+
+    /**
+     * Add or update a report in the cache
+     * @param report The report info to add/update
+     */
+    addReport(report: ReportInfo): void {
+        // Extract author pubkey from npub or use as-is
+        const authorPubkey = this.extractPubkeyFromReport(report);
+        if (!authorPubkey) {
+            logger.warn("Cannot add report without author pubkey", { slug: report.slug });
+            return;
+        }
+
+        const key = ProjectContext.reportKey(authorPubkey, report.slug);
+
+        // Check if this is a deleted report
+        if (report.isDeleted) {
+            // Remove from cache instead of adding
+            this.reports.delete(key);
+            logger.debug("📰 Removed deleted report from cache", {
+                slug: report.slug,
+                author: authorPubkey.substring(0, 8),
+            });
+            return;
+        }
+
+        // Add/update the report
+        this.reports.set(key, report);
+
+        // Enforce cache size limit (LRU-style: oldest entries first based on Map insertion order)
+        if (this.reports.size > ProjectContext.MAX_REPORTS_CACHE_SIZE) {
+            const oldestKey = this.reports.keys().next().value;
+            if (oldestKey) {
+                this.reports.delete(oldestKey);
+                logger.debug("📰 Evicted oldest report from cache due to size limit");
+            }
+        }
+
+        logger.debug("📰 Added/updated report in cache", {
+            slug: report.slug,
+            author: authorPubkey.substring(0, 8),
+            cacheSize: this.reports.size,
+        });
+    }
+
+    /**
+     * Add a report directly from an NDKArticle event
+     * Converts the article to ReportInfo and adds to cache
+     */
+    addReportFromArticle(article: NDKArticle): void {
+        const report = this.articleToReportInfo(article);
+        this.addReport(report);
+    }
+
+    /**
+     * Get a report by slug for a specific agent
+     */
+    getReport(agentPubkey: string, slug: string): ReportInfo | undefined {
+        const key = ProjectContext.reportKey(agentPubkey, slug);
+        return this.reports.get(key);
+    }
+
+    /**
+     * Get a report by slug (searches all authors)
+     * Returns the first match found
+     */
+    getReportBySlug(slug: string): ReportInfo | undefined {
+        for (const report of this.reports.values()) {
+            if (report.slug === slug) {
+                return report;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Get all reports from the cache
+     */
+    getAllReports(): ReportInfo[] {
+        return Array.from(this.reports.values());
+    }
+
+    /**
+     * Get reports for a specific agent by pubkey
+     */
+    getReportsForAgent(agentPubkey: string): ReportInfo[] {
+        const reports: ReportInfo[] = [];
+        const prefix = `${agentPubkey}:`;
+        for (const [key, report] of this.reports) {
+            if (key.startsWith(prefix)) {
+                reports.push(report);
+            }
+        }
+        return reports;
+    }
+
+    /**
+     * Get all memorized reports (reports tagged with memorize=true)
+     */
+    getMemorizedReports(): ReportInfo[] {
+        return Array.from(this.reports.values()).filter((report) => report.isMemorized);
+    }
+
+    /**
+     * Get memorized reports for a specific agent
+     */
+    getMemorizedReportsForAgent(agentPubkey: string): ReportInfo[] {
+        return this.getReportsForAgent(agentPubkey).filter((report) => report.isMemorized);
+    }
+
+    /**
+     * Get reports by hashtag
+     */
+    getReportsByHashtag(hashtag: string): ReportInfo[] {
+        return Array.from(this.reports.values()).filter(
+            (report) => report.hashtags?.includes(hashtag)
+        );
+    }
+
+    /**
+     * Get report cache statistics
+     */
+    getReportCacheStats(): { total: number; memorized: number; byAuthor: Record<string, number> } {
+        const byAuthor: Record<string, number> = {};
+        let memorized = 0;
+
+        for (const report of this.reports.values()) {
+            const author = this.extractPubkeyFromReport(report) || "unknown";
+            byAuthor[author.substring(0, 8)] = (byAuthor[author.substring(0, 8)] || 0) + 1;
+            if (report.isMemorized) memorized++;
+        }
+
+        return {
+            total: this.reports.size,
+            memorized,
+            byAuthor,
+        };
+    }
+
+    /**
+     * Clear all reports from cache
+     */
+    clearReports(): void {
+        this.reports.clear();
+    }
+
+    /**
+     * Extract pubkey from report (handles both npub and hex formats)
+     */
+    private extractPubkeyFromReport(report: ReportInfo): string | undefined {
+        if (!report.author) return undefined;
+
+        // If it's an npub, try to decode it
+        if (report.author.startsWith("npub1")) {
+            try {
+                const { nip19 } = require("nostr-tools");
+                const decoded = nip19.decode(report.author);
+                if (decoded.type === "npub") {
+                    return decoded.data as string;
+                }
+            } catch {
+                // Fall through to return as-is
+            }
+        }
+
+        // Assume it's already a hex pubkey
+        return report.author;
+    }
+
+    /**
+     * Convert an NDKArticle to ReportInfo (extracted from ReportService)
+     */
+    private articleToReportInfo(article: NDKArticle): ReportInfo {
+        // Extract hashtags from tags (excluding the "memorize" tag)
+        const hashtags = article.tags
+            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize")
+            .map((tag: string[]) => tag[1]);
+
+        // Extract project reference if present
+        const projectTag = article.tags.find(
+            (tag: string[]) => tag[0] === "a" && tag[1]?.includes(":31933:")
+        );
+        const projectReference = projectTag ? projectTag[1] : undefined;
+
+        // Check if deleted
+        const isDeleted = article.tags.some((tag: string[]) => tag[0] === "deleted");
+
+        // Check if memorized
+        const isMemorized = article.tags.some(
+            (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
+        );
+
+        // Get author npub
+        const authorNpub = article.author.npub;
+
+        return {
+            id: `nostr:${article.encode()}`,
+            slug: article.dTag || "",
+            title: article.title,
+            summary: article.summary,
+            content: article.content,
+            author: authorNpub,
+            publishedAt: article.published_at,
+            hashtags: hashtags.length > 0 ? hashtags : undefined,
+            projectReference,
+            isDeleted,
+            isMemorized,
+        };
     }
 
     /**

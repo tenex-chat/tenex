@@ -53,6 +53,12 @@ export class SubscriptionFilterBuilder {
         );
         filters.push(...lessonFilters);
 
+        // Add report filter
+        const reportFilter = this.buildReportFilter(config.knownProjects);
+        if (reportFilter) {
+            filters.push(reportFilter);
+        }
+
         return filters;
     }
 
@@ -140,6 +146,23 @@ export class SubscriptionFilterBuilder {
     }
 
     /**
+     * Build filter for report events (kind 30023 - NDKArticle)
+     * Monitors reports tagged with our project
+     * @param knownProjects - Set of project A-tags (format: "31933:authorPubkey:dTag")
+     * @returns NDKFilter for report events or null if no projects
+     */
+    static buildReportFilter(knownProjects: Set<string>): NDKFilter | null {
+        if (knownProjects.size === 0) {
+            return null;
+        }
+
+        return {
+            kinds: [30023], // NDKArticle kind - reports
+            "#a": Array.from(knownProjects), // Reports tagged with our project(s)
+        };
+    }
+
+    /**
      * Compare two filter sets to determine if they're equivalent
      * @param filters1 - First set of filters
      * @param filters2 - Second set of filters
@@ -168,17 +191,19 @@ export class SubscriptionFilterBuilder {
         projectTaggedCount: number;
         agentMentionsCount: number;
         lessonFilters: number;
+        reportFilter: boolean;
     } {
         let projectFilter = false;
         let projectTaggedCount = 0;
         let agentMentionsCount = 0;
         let lessonFilters = 0;
+        let reportFilter = false;
 
         for (const filter of filters) {
             if (filter.kinds?.includes(31933)) {
                 projectFilter = true;
             }
-            if (filter["#a"]) {
+            if (filter["#a"] && !filter.kinds?.includes(30023)) {
                 projectTaggedCount = (filter["#a"] as string[]).length;
             }
             if (filter["#p"]) {
@@ -186,6 +211,9 @@ export class SubscriptionFilterBuilder {
             }
             if (filter.kinds?.includes(NDKKind.AgentLesson)) {
                 lessonFilters++;
+            }
+            if (filter.kinds?.includes(30023)) {
+                reportFilter = true;
             }
         }
 
@@ -195,6 +223,7 @@ export class SubscriptionFilterBuilder {
             projectTaggedCount,
             agentMentionsCount,
             lessonFilters,
+            reportFilter,
         };
     }
 }
