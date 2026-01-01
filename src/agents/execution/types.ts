@@ -2,6 +2,7 @@ import type { Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { CompleteEvent } from "@/llm/service";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
@@ -64,3 +65,12 @@ export interface StandaloneAgentContext {
     project?: NDKProject;
     getLessonsForAgent?: (pubkey: string) => NDKAgentLesson[];
 }
+
+/**
+ * Result of executeStreaming - discriminated union for clear error handling.
+ * - 'complete': Stream finished successfully with a completion event
+ * - 'error-handled': Stream error occurred and was already published to user
+ */
+export type StreamExecutionResult =
+    | { kind: "complete"; event: CompleteEvent }
+    | { kind: "error-handled" };
