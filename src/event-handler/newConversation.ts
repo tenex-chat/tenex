@@ -58,7 +58,7 @@ export const handleNewConversation = async (
             return;
         }
 
-        // Use first agent for kind 11 (new conversation)
+        // Use first agent for new conversation
         const targetAgent = targetAgents[0];
 
         // Create execution context (new conversations don't have branch tags)

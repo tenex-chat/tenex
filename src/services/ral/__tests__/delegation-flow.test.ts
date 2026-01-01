@@ -254,7 +254,7 @@ describe("RAL Delegation Flow", () => {
             const completionEvent = {
                 id: "response-event-id",
                 pubkey: mockAgent2.pubkey,
-                kind: 1111,
+                kind: 1,
                 content: "Task completed! Here are the results.",
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
@@ -317,7 +317,7 @@ describe("RAL Delegation Flow", () => {
             const unrelatedEvent = {
                 id: "unrelated-event",
                 pubkey: "random-pubkey",
-                kind: 1111,
+                kind: 1,
                 content: "Some random message",
                 tags: [],
                 getMatchingTags: () => [],
@@ -369,7 +369,7 @@ describe("RAL Delegation Flow", () => {
             const firstCompletion = {
                 id: "response-1",
                 pubkey: mockAgent2.pubkey,
-                kind: 1111,
+                kind: 1,
                 content: "Task 1 done",
                 tags: [
                     ["e", "delegation-1"],
@@ -414,7 +414,7 @@ describe("RAL Delegation Flow", () => {
             const secondCompletion = {
                 id: "response-2",
                 pubkey: "agent3pubkey",
-                kind: 1111,
+                kind: 1,
                 content: "Task 2 done",
                 tags: [
                     ["e", "delegation-2"],
@@ -473,7 +473,7 @@ describe("RAL Delegation Flow", () => {
             const completionEvent = {
                 id: "agent2-response-event",
                 pubkey: mockAgent2.pubkey,
-                kind: 1111,
+                kind: 1,
                 content: "I have completed the subtask. Here are the results.",
                 tags: [
                     ["e", "delegation-full-flow-test"],

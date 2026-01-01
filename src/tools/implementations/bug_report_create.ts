@@ -38,9 +38,9 @@ async function executeBugReportCreate(
         agent: context.agent.name,
     });
 
-    // Create kind:11 event (conversation root)
+    // Create bug report event
     const event = new NDKEvent(ndk);
-    event.kind = 11;
+    event.kind = 1;
     event.content = `# ${input.title}\n\n${input.description}`;
 
     // Add required tags

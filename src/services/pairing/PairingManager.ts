@@ -67,7 +67,7 @@ export class PairingManager {
     const ndk = getNDK();
     const sub = ndk.subscribe(
       {
-        kinds: [1111],
+        kinds: [1],
         "#e": [delegationId],
       },
       { closeOnEose: false }
