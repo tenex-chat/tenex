@@ -219,7 +219,7 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Encode a delegation intent into N kind:1111 conversation events.
+     * Encode a delegation intent into kind:1 conversation events.
      * Creates one event per delegation, each with its own content and tags.
      */
     encodeDelegation(intent: DelegationIntent, context: EventContext): NDKEvent[] {
@@ -273,7 +273,7 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Encode an Ask intent into a kind:1111 event with suggestions as tags.
+     * Encode an Ask intent into a kind:1 event with suggestions as tags.
      * Creates an event that asks a question to the project manager/human user.
      */
     encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
@@ -354,6 +354,7 @@ export class AgentEventEncoder {
 
     /**
      * Encode an error intent into an error event.
+     * Error events act as finalization: they have p-tag (triggers notification) and status=completed.
      */
     encodeError(intent: ErrorIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
@@ -365,6 +366,10 @@ export class AgentEventEncoder {
 
         // Mark as error
         event.tag(["error", intent.errorType || "system"]);
+
+        // Error events are finalization events - notify the user
+        event.tag(["p", context.triggeringEvent.pubkey]);
+        event.tag(["status", "completed"]);
 
         // Add standard metadata
         this.addStandardTags(event, context);
@@ -540,11 +545,11 @@ export class AgentEventEncoder {
 
         // Add tool-args tag with JSON serialization
         // If args are provided and can be serialized, add them
-        // If the serialized args are > 1000 chars, add empty tag
+        // If the serialized args are > 100k chars, add empty tag
         if (intent.args !== undefined) {
             try {
                 const serialized = JSON.stringify(intent.args);
-                if (serialized.length <= 1000) {
+                if (serialized.length <= 100000) {
                     event.tag(["tool-args", serialized]);
                 } else {
                     event.tag(["tool-args"]);

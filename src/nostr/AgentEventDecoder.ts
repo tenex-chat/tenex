@@ -44,7 +44,6 @@ export class AgentEventDecoder {
 
     /**
      * Check if this is a task completion event (for NDKTask kind:1934)
-     * Note: This is different from delegation completions (kind:1111)
      */
     static isTaskCompletionEvent(event: NDKEvent): boolean {
         // Only for actual NDKTask completions, not delegations
@@ -101,14 +100,13 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Check if event is a delegation request (kind:1 or kind:1111 from agent to agent)
+     * Check if event is a delegation request (kind:1 from agent to agent)
      */
     static isDelegationRequest(
         event: NDKEvent,
         systemAgents?: Map<string, AgentInstance>
     ): boolean {
-        // Must be kind:1 or kind:1111 (for backwards compatibility)
-        if (event.kind !== 1 && event.kind !== 1111) return false;
+        if (event.kind !== 1) return false;
 
         // If we have system agents, verify it's from an agent
         if (systemAgents) {
@@ -129,11 +127,10 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Check if event is a delegation completion (kind:1 or kind:1111 with status:completed)
+     * Check if event is a delegation completion (kind:1 with status:completed)
      */
     static isDelegationCompletion(event: NDKEvent): boolean {
-        // Accept both kind:1 and kind:1111 for backwards compatibility
-        return (event.kind === 1 || event.kind === 1111) && event.tagValue("status") === "completed";
+        return event.kind === 1 && event.tagValue("status") === "completed";
     }
 
     /**
