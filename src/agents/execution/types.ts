@@ -3,6 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 
 export interface ExecutionContext {
@@ -36,6 +37,7 @@ export interface ExecutionContext {
     hasActivePairings?: boolean; // True when this agent has active pairing sessions - enables stop_pairing tool
     ralNumber?: number; // The RAL number for this execution - set by AgentExecutor during execution
     conversationStore?: ConversationStore; // Single source of truth for conversation state - injected by AgentExecutor during execution
+    mcpManager?: MCPManager; // Per-project MCP manager for MCP tool access
 
     /**
      * Reference to the active tools object used by the LLM service.

@@ -30,21 +30,11 @@ interface MCPClientEntry {
 }
 
 export class MCPManager {
-    private static instance: MCPManager;
     private clients: Map<string, MCPClientEntry> = new Map();
     private isInitialized = false;
     private metadataPath?: string;
     private workingDirectory?: string;
     private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
-
-    private constructor() {}
-
-    static getInstance(): MCPManager {
-        if (!MCPManager.instance) {
-            MCPManager.instance = new MCPManager();
-        }
-        return MCPManager.instance;
-    }
 
     /**
      * Initialize MCP manager with project paths
@@ -569,6 +559,5 @@ export class MCPManager {
     }
 }
 
-export const mcpManager = MCPManager.getInstance();
-// Export as mcpService for compatibility with existing code
-export const mcpService = mcpManager;
+// MCPManager is now per-project - create instances in ProjectRuntime
+// No more singleton export

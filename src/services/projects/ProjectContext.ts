@@ -1,6 +1,7 @@
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PairingManager } from "@/services/pairing";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
@@ -64,6 +65,11 @@ export class ProjectContext {
      * Status publisher for immediately publishing project status updates
      */
     public statusPublisher?: ProjectStatusService;
+
+    /**
+     * MCP manager for this project's MCP tool access
+     */
+    public mcpManager?: MCPManager;
 
     constructor(project: NDKProject, agentRegistry: AgentRegistry) {
         this.project = project;

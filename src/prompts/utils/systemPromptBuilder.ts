@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 
@@ -41,6 +42,7 @@ export interface BuildSystemPromptOptions {
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
+    mcpManager?: MCPManager; // MCP manager for this project
 }
 
 export interface BuildStandalonePromptOptions {
@@ -69,7 +71,8 @@ async function addCoreAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     conversation?: ConversationStore,
-    agentLessons?: Map<string, NDKAgentLesson[]>
+    agentLessons?: Map<string, NDKAgentLesson[]>,
+    mcpManager?: MCPManager
 ): Promise<void> {
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
@@ -82,18 +85,16 @@ async function addCoreAgentFragments(
         agentLessons: agentLessons || new Map(),
     });
 
-    // Add MCP resources if agent has RAG subscription tools
+    // Add MCP resources if agent has RAG subscription tools and mcpManager is available
     const hasRagSubscriptionTools = agent.tools.includes("rag_subscription_create");
 
-    if (hasRagSubscriptionTools) {
-        // Lazy-load MCPManager to avoid circular dependency
-        const { mcpManager } = await import("@/services/mcp/MCPManager");
+    if (hasRagSubscriptionTools && mcpManager) {
         const runningServers = mcpManager.getRunningServers();
 
         // Fetch resources from all running servers
         const { logger } = await import("@/utils/logger");
         const resourcesPerServer = await Promise.all(
-            runningServers.map(async (serverName) => {
+            runningServers.map(async (serverName: string) => {
                 try {
                     const [resources, templates] = await Promise.all([
                         mcpManager.listResources(serverName),
@@ -172,6 +173,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         conversation,
         agentLessons,
         alphaMode,
+        mcpManager,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
@@ -206,7 +208,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     }
 
     // Add core agent fragments using shared composition
-    await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons);
+    await addCoreAgentFragments(systemPromptBuilder, agent, conversation, agentLessons, mcpManager);
 
     // Add agent-specific fragments
     addAgentFragments(systemPromptBuilder, agent, availableAgents, options.projectManagerPubkey);
