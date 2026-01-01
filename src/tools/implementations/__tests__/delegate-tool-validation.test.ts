@@ -54,8 +54,13 @@ describe("Delegation tools - Self-delegation validation", () => {
     });
 
     describe("delegate tool", () => {
-        it("should reject self-delegation without phase by slug", async () => {
-            const context = createMockContext();
+        it("should allow self-delegation without phase by slug", async () => {
+            const context = {
+                ...createMockContext(),
+                agentPublisher: {
+                    delegate: async () => "mock-delegation-id",
+                } as any,
+            };
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -64,17 +69,19 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                // Self-delegation is now allowed with phase, so error says "requires a phase"
-                expect(error.message).toContain("Self-delegation requires a phase");
-            }
+            // Self-delegation without phase is now allowed
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
         });
 
-        it("should reject self-delegation without phase by pubkey", async () => {
-            const context = createMockContext();
+        it("should allow self-delegation without phase by pubkey", async () => {
+            const context = {
+                ...createMockContext(),
+                agentPublisher: {
+                    delegate: async () => "mock-delegation-id",
+                } as any,
+            };
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -83,16 +90,19 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Self-delegation requires a phase");
-            }
+            // Self-delegation without phase is now allowed
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
         });
 
-        it("should reject when self without phase is included in multiple recipients", async () => {
-            const context = createMockContext();
+        it("should allow self in multiple recipients without phase", async () => {
+            const context = {
+                ...createMockContext(),
+                agentPublisher: {
+                    delegate: async () => "mock-delegation-id",
+                } as any,
+            };
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -102,13 +112,11 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                // Will fail on self-delegation without phase
-                expect(error.message).toContain("Self-delegation requires a phase");
-            }
+            // Self-delegation without phase is now allowed
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
+            expect(result.pendingDelegations).toHaveLength(2);
         });
     });
 
