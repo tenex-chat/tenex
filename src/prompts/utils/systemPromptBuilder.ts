@@ -3,11 +3,18 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import { SchedulerService } from "@/services/scheduling";
+import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
+
+/**
+ * List of scheduling-related tools that trigger the scheduled tasks context
+ */
+const SCHEDULING_TOOLS = ["schedule_task", "schedule_task_cancel", "schedule_tasks_list"] as const;
 
 export interface BuildSystemPromptOptions {
     // Required data
@@ -77,6 +84,25 @@ async function addCoreAgentFragments(
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
         builder.add("referenced-article", conversation.metadata.referencedArticle);
+    }
+
+    // Add scheduled tasks context if agent has scheduling tools
+    const hasSchedulingTools = agent.tools.some((tool) =>
+        SCHEDULING_TOOLS.includes(tool as (typeof SCHEDULING_TOOLS)[number])
+    );
+
+    if (hasSchedulingTools) {
+        try {
+            const schedulerService = SchedulerService.getInstance();
+            const allTasks = await schedulerService.getTasks();
+            builder.add("scheduled-tasks", {
+                agent,
+                scheduledTasks: allTasks,
+            });
+        } catch (error) {
+            // Scheduler might not be initialized yet, log and continue
+            logger.debug("Could not fetch scheduled tasks for prompt:", error);
+        }
     }
 
     // Add retrieved lessons

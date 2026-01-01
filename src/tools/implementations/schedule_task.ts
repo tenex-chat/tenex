@@ -15,6 +15,10 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
         description:
             "Schedule a task using cron notation (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes)",
         inputSchema: z.object({
+            title: z
+                .string()
+                .optional()
+                .describe("A human-readable title for the scheduled task (e.g., 'Daily standup reminder')"),
             prompt: z.string().describe("The prompt to execute when the task runs"),
             schedule: z
                 .string()
@@ -28,7 +32,7 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
                     "Target agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"
                 ),
         }),
-        execute: async ({ prompt, schedule, targetAgent }) => {
+        execute: async ({ title, prompt, schedule, targetAgent }) => {
             try {
                 // Validate cron expression
                 if (!cron.validate(schedule)) {
@@ -59,12 +63,14 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
                 // The agent scheduling the task is always the current agent
                 const fromPubkey = context.agent.pubkey;
 
-                // Add task to scheduler with both pubkeys
+                // Add task to scheduler with both pubkeys and optional title
                 const taskId = await schedulerService.addTask(
                     schedule,
                     prompt,
                     fromPubkey,
-                    toPubkey
+                    toPubkey,
+                    undefined, // projectId - let it be resolved from context
+                    title
                 );
 
                 logger.info(
@@ -75,6 +81,7 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
                     success: true,
                     taskId,
                     message: `Task scheduled successfully with ID: ${taskId}`,
+                    title,
                     schedule,
                     prompt,
                     targetAgent: targetAgent || "self",
@@ -92,9 +99,10 @@ export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
 
     // Attach getHumanReadableContent as non-enumerable property
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: { prompt: string; schedule: string; targetAgent?: string }) => {
+        value: (args: { title?: string; prompt: string; schedule: string; targetAgent?: string }) => {
             const target = args.targetAgent ? ` for ${args.targetAgent}` : "";
-            return `Scheduling task with cron '${args.schedule}'${target}: ${args.prompt}`;
+            const titlePart = args.title ? `'${args.title}' ` : "";
+            return `Scheduling task ${titlePart}with cron '${args.schedule}'${target}: ${args.prompt}`;
         },
         enumerable: false,
         configurable: true,
