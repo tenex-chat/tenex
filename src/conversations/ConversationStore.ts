@@ -585,6 +585,32 @@ export class ConversationStore {
         return this.eventIdSet.has(eventId);
     }
 
+    /**
+     * Check if a tool call with the given toolCallId exists.
+     */
+    hasToolCall(toolCallId: string): boolean {
+        return this.state.messages.some(
+            (m) =>
+                m.messageType === "tool-call" &&
+                (m.toolData as ToolCallPart[] | undefined)?.some(
+                    (part) => part.toolCallId === toolCallId
+                )
+        );
+    }
+
+    /**
+     * Check if a tool result with the given toolCallId exists.
+     */
+    hasToolResult(toolCallId: string): boolean {
+        return this.state.messages.some(
+            (m) =>
+                m.messageType === "tool-result" &&
+                (m.toolData as ToolResultPart[] | undefined)?.some(
+                    (part) => part.toolCallId === toolCallId
+                )
+        );
+    }
+
     // Injection Operations
 
     addInjection(injection: Injection): void {
