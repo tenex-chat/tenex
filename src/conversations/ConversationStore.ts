@@ -547,6 +547,20 @@ export class ConversationStore {
         return activeRals.map((r) => r.id);
     }
 
+    /**
+     * Get all active RALs for all agents in this conversation.
+     * Used for reconciliation after daemon restart.
+     */
+    getAllActiveRals(): Map<string, number[]> {
+        const result = new Map<string, number[]>();
+        for (const [agentPubkey, rals] of Object.entries(this.state.activeRal)) {
+            if (rals.length > 0) {
+                result.set(agentPubkey, rals.map((r) => r.id));
+            }
+        }
+        return result;
+    }
+
     // Message Operations
 
     addMessage(entry: ConversationEntry): void {
