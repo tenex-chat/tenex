@@ -10,7 +10,6 @@ import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
-import { handleNewConversation } from "./newConversation";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { trace } from "@opentelemetry/api";
@@ -25,14 +24,6 @@ const IGNORED_EVENT_KINDS = [
 export class EventHandler {
     private agentExecutor!: AgentExecutor;
     private isUpdatingProject = false;
-
-    constructor(
-        /**
-         * Project directory (normal git repository root).
-         * Worktrees are in .worktrees/ subdirectory.
-         */
-        private projectBasePath: string
-    ) {}
 
     async initialize(): Promise<void> {
         this.agentExecutor = new AgentExecutor();
@@ -119,16 +110,8 @@ export class EventHandler {
 
         switch (event.kind) {
             case NDKKind.Text: // kind 1 - unified conversation format
-            case NDKKind.GenericReply: // kind 1111 (deprecated, for backwards compatibility)
                 await handleChatMessage(event, {
                     agentExecutor: this.agentExecutor,
-                });
-                break;
-
-            case NDKKind.Thread: // kind 11 (deprecated, for backwards compatibility)
-                await handleNewConversation(event, {
-                    agentExecutor: this.agentExecutor,
-                    projectBasePath: this.projectBasePath,
                 });
                 break;
 
