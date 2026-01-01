@@ -805,10 +805,14 @@ export class ConversationStore {
 
     /**
      * Add an NDKEvent as a message entry.
+     * Only kind:1 (text) events are stored in conversations.
      * Stores the content and targeting info; role is derived during message building.
      */
     addEventMessage(event: NDKEvent, isFromAgent: boolean): void {
         if (!event.id) return;
+
+        // Only store kind:1 (text) events in conversations
+        if (event.kind !== 1) return;
 
         // Skip if already added
         if (this.hasEventId(event.id)) return;
