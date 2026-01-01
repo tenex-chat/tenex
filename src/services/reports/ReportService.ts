@@ -3,7 +3,7 @@ import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
-import { type NDKFilter, NDKArticle } from "@nostr-dev-kit/ndk";
+import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
 
 export interface ReportData {
@@ -12,6 +12,7 @@ export interface ReportData {
     summary: string;
     content: string;
     hashtags?: string[];
+    memorize?: boolean;
 }
 
 export interface ReportInfo {
@@ -25,6 +26,7 @@ export interface ReportInfo {
     hashtags?: string[];
     projectReference?: string;
     isDeleted?: boolean;
+    isMemorized?: boolean;
 }
 
 export interface ReportSummary {
@@ -81,6 +83,11 @@ export class ReportService {
             article.tags.push(...data.hashtags.map((tag) => ["t", tag]));
         }
 
+        // Add memorize tag if requested - this marks the report for system prompt injection
+        if (data.memorize) {
+            article.tags.push(["t", "memorize"]);
+        }
+
         // Tag the current project using a-tag
         const projectTagId = projectCtx.project.tagId();
         article.tags.push(["a", projectTagId]);
@@ -98,8 +105,41 @@ export class ReportService {
 
     /**
      * Read a report by slug or naddr
+     * First tries the cache, then falls back to NDK fetch if not found
      */
     async readReport(identifier: string, agentPubkey?: string): Promise<ReportInfo | null> {
+        const projectCtx = getProjectContext();
+
+        // First, try to find in cache
+        if (identifier.startsWith("naddr1")) {
+            // Decode the naddr to extract slug and author
+            const decoded = nip19.decode(identifier);
+            if (decoded.type === "naddr" && decoded.data.kind === 30023) {
+                const cachedReport = projectCtx.getReport(decoded.data.pubkey, decoded.data.identifier);
+                if (cachedReport) {
+                    logger.debug("📰 Report found in cache (by naddr)", { slug: decoded.data.identifier });
+                    return cachedReport;
+                }
+            }
+        } else if (agentPubkey) {
+            // Try cache lookup by agent pubkey and slug
+            const cachedReport = projectCtx.getReport(agentPubkey, identifier);
+            if (cachedReport) {
+                logger.debug("📰 Report found in cache (by slug)", { slug: identifier });
+                return cachedReport;
+            }
+        } else {
+            // Try to find by slug across all authors
+            const cachedReport = projectCtx.getReportBySlug(identifier);
+            if (cachedReport) {
+                logger.debug("📰 Report found in cache (by slug, any author)", { slug: identifier });
+                return cachedReport;
+            }
+        }
+
+        // Cache miss - fall back to NDK fetch
+        logger.debug("📰 Report not in cache, fetching from NDK", { identifier });
+
         let article: NDKArticle | null = null;
 
         // Check if identifier is an naddr
@@ -139,11 +179,17 @@ export class ReportService {
             return null;
         }
 
-        return this.articleToReportInfo(article);
+        const reportInfo = this.articleToReportInfo(article);
+
+        // Add to cache for future lookups
+        projectCtx.addReport(reportInfo);
+
+        return reportInfo;
     }
 
     /**
      * List reports from project agents
+     * Uses cached reports for fast lookup
      */
     async listReports(agentPubkeys?: string[]): Promise<ReportSummary[]> {
         const projectCtx = getProjectContext();
@@ -151,62 +197,63 @@ export class ReportService {
             throw new Error("No project context available");
         }
 
-        // Get the project's tag ID to filter articles
-        const projectTagId = projectCtx.project.tagId();
+        // Get reports from cache
+        let cachedReports = projectCtx.getAllReports();
 
-        // Build the filter for fetching articles
-        interface ArticleFilter {
-            kinds: number[];
-            "#a": string[];
-            authors?: string[];
-        }
-
-        const filter: ArticleFilter = {
-            kinds: [30023],
-            "#a": [projectTagId], // Articles that tag this project
-        };
-
-        // If agent pubkeys provided, filter by them
+        // Filter by agent pubkeys if provided
         if (agentPubkeys && agentPubkeys.length > 0) {
-            filter.authors = agentPubkeys;
-        }
-
-        // Fetch the articles
-        const events = await this.ndk.fetchEvents(filter as unknown as NDKFilter);
-
-        // Process the articles
-        const reports: ReportSummary[] = [];
-
-        for (const event of events) {
-            const article = NDKArticle.from(event);
-
-            // Check if article is deleted
-            const isDeleted = article.tags.some((tag) => tag[0] === "deleted");
-            if (isDeleted) {
-                continue; // Skip deleted articles
-            }
-
-            // Extract hashtags
-            const hashtags = article.tags.filter((tag) => tag[0] === "t").map((tag) => tag[1]);
-
-            // Get author npub
-            const authorNpub = article.author.npub;
-
-            reports.push({
-                id: `nostr:${article.encode()}`,
-                slug: article.dTag || "",
-                title: article.title,
-                summary: article.summary,
-                author: authorNpub,
-                publishedAt: article.published_at,
-                hashtags: hashtags.length > 0 ? hashtags : undefined,
+            const pubkeySet = new Set(agentPubkeys);
+            cachedReports = cachedReports.filter((report) => {
+                // Extract pubkey from author (could be npub or hex)
+                const authorPubkey = this.extractPubkeyFromAuthor(report.author);
+                return authorPubkey && pubkeySet.has(authorPubkey);
             });
         }
+
+        // Filter out deleted reports and convert to ReportSummary
+        const reports: ReportSummary[] = cachedReports
+            .filter((report) => !report.isDeleted)
+            .map((report) => ({
+                id: report.id,
+                slug: report.slug,
+                title: report.title,
+                summary: report.summary,
+                author: report.author,
+                publishedAt: report.publishedAt,
+                hashtags: report.hashtags,
+            }));
 
         // Sort reports by published date (newest first)
         reports.sort((a, b) => (b.publishedAt || 0) - (a.publishedAt || 0));
 
+        logger.debug("📰 Listed reports from cache", {
+            total: reports.length,
+            cacheSize: projectCtx.reports.size,
+        });
+
         return reports;
+    }
+
+    /**
+     * Extract hex pubkey from author string (handles npub and hex formats)
+     */
+    private extractPubkeyFromAuthor(author: string): string | undefined {
+        if (!author) return undefined;
+
+        // If it's an npub, decode it
+        if (author.startsWith("npub1")) {
+            try {
+                const decoded = nip19.decode(author);
+                if (decoded.type === "npub") {
+                    return decoded.data as string;
+                }
+            } catch {
+                return undefined;
+            }
+        }
+
+        // Assume it's already a hex pubkey
+        return author;
     }
 
     /**
@@ -303,8 +350,10 @@ export class ReportService {
      * Convert an NDKArticle to ReportInfo
      */
     private articleToReportInfo(article: NDKArticle): ReportInfo {
-        // Extract hashtags from tags
-        const hashtags = article.tags.filter((tag) => tag[0] === "t").map((tag) => tag[1]);
+        // Extract hashtags from tags (excluding the "memorize" tag)
+        const hashtags = article.tags
+            .filter((tag) => tag[0] === "t" && tag[1] !== "memorize")
+            .map((tag) => tag[1]);
 
         // Extract project reference if present
         const projectTag = article.tags.find(
@@ -314,6 +363,9 @@ export class ReportService {
 
         // Check if deleted
         const isDeleted = article.tags.some((tag) => tag[0] === "deleted");
+
+        // Check if memorized
+        const isMemorized = article.tags.some((tag) => tag[0] === "t" && tag[1] === "memorize");
 
         // Get author npub
         const authorNpub = article.author.npub;
@@ -329,6 +381,66 @@ export class ReportService {
             hashtags: hashtags.length > 0 ? hashtags : undefined,
             projectReference,
             isDeleted,
+            isMemorized,
         };
+    }
+
+    /**
+     * Get memorized reports for a specific agent.
+     * Returns reports that have the "memorize" tag.
+     * Uses cached reports for instant lookup.
+     */
+    getMemorizedReports(agentPubkey: string): ReportInfo[] {
+        const projectCtx = getProjectContext();
+        if (!projectCtx?.project) {
+            throw new Error("No project context available");
+        }
+
+        // Get memorized reports for this agent from cache
+        const reports = projectCtx.getMemorizedReportsForAgent(agentPubkey);
+
+        // Filter out deleted reports (should already be excluded, but double-check)
+        const activeReports = reports.filter((report) => !report.isDeleted);
+
+        // Sort by published date (oldest first - so they appear in chronological order in the prompt)
+        activeReports.sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
+
+        logger.debug("📚 Retrieved memorized reports from cache", {
+            agentPubkey: agentPubkey.substring(0, 16),
+            count: activeReports.length,
+            slugs: activeReports.map((r) => r.slug),
+        });
+
+        return activeReports;
+    }
+
+    /**
+     * Get all memorized reports for any agent.
+     * Useful for project-wide memorized knowledge.
+     */
+    getAllMemorizedReports(): ReportInfo[] {
+        const projectCtx = getProjectContext();
+        if (!projectCtx?.project) {
+            throw new Error("No project context available");
+        }
+
+        // Get all memorized reports from cache
+        const reports = projectCtx.getMemorizedReports();
+
+        // Filter out deleted reports
+        const activeReports = reports.filter((report) => !report.isDeleted);
+
+        // Sort by published date (oldest first)
+        activeReports.sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
+
+        return activeReports;
+    }
+
+    /**
+     * Get report cache statistics for monitoring
+     */
+    getCacheStats(): { total: number; memorized: number; byAuthor: Record<string, number> } {
+        const projectCtx = getProjectContext();
+        return projectCtx.getReportCacheStats();
     }
 }

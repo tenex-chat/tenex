@@ -3,6 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -110,6 +111,22 @@ async function addCoreAgentFragments(
         agent,
         agentLessons: agentLessons || new Map(),
     });
+
+    // Add memorized reports - retrieved from cache (no async fetch needed)
+    try {
+        const reportService = new ReportService();
+        const memorizedReports = reportService.getMemorizedReports(agent.pubkey);
+        if (memorizedReports.length > 0) {
+            builder.add("memorized-reports", { reports: memorizedReports });
+            logger.debug("📚 Added memorized reports to system prompt (from cache)", {
+                agent: agent.name,
+                count: memorizedReports.length,
+            });
+        }
+    } catch (error) {
+        // Report service might fail if no project context
+        logger.debug("Could not get memorized reports from cache:", error);
+    }
 
     // Add MCP resources if agent has RAG subscription tools and mcpManager is available
     const hasRagSubscriptionTools = agent.tools.includes("rag_subscription_create");

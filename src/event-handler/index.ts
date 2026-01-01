@@ -147,6 +147,10 @@ export class EventHandler {
                 await this.handleLessonEvent(event);
                 break;
 
+            case 30023: // NDKArticle - Reports
+                await this.handleReportEvent(event);
+                break;
+
             default:
                 this.handleDefaultEvent(event);
         }
@@ -351,6 +355,45 @@ export class EventHandler {
             }
         } catch (error) {
             logger.error("Failed to handle lesson event", {
+                eventId: event.id,
+                error: formatAnyError(error),
+            });
+        }
+    }
+
+    private async handleReportEvent(event: NDKEvent): Promise<void> {
+        const { NDKArticle } = await import("@nostr-dev-kit/ndk");
+
+        try {
+            const projectCtx = getProjectContext();
+
+            // Verify this report belongs to our project by checking a-tag
+            const projectTagId = projectCtx.project.tagId();
+            const reportProjectTag = event.tags.find(
+                (tag: string[]) => tag[0] === "a" && tag[1] === projectTagId
+            );
+
+            if (!reportProjectTag) {
+                // Report doesn't belong to our project, ignore
+                return;
+            }
+
+            // Convert to NDKArticle
+            const article = NDKArticle.from(event);
+
+            // Add to project context cache
+            projectCtx.addReportFromArticle(article);
+
+            trace.getActiveSpan()?.addEvent("event_handler.report_cached", {
+                "report.slug": article.dTag || "",
+                "report.author": event.pubkey.substring(0, 8),
+                "report.isDeleted": article.tags.some((tag: string[]) => tag[0] === "deleted"),
+                "report.isMemorized": article.tags.some(
+                    (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
+                ),
+            });
+        } catch (error) {
+            logger.error("Failed to handle report event", {
                 eventId: event.id,
                 error: formatAnyError(error),
             });
