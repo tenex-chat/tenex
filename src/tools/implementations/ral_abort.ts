@@ -38,6 +38,22 @@ async function executeRalAbort(
       targetRalNumber: ral_number,
     });
 
+    // Mark the RAL as complete in ConversationStore so its messages become visible
+    const conversationStore = context.getConversation();
+    if (conversationStore) {
+      conversationStore.completeRal(context.agent.pubkey, ral_number);
+
+      // Inject system message about the abort
+      conversationStore.addMessage({
+        pubkey: context.agent.pubkey,
+        ral: ral_number,
+        content: `⚠️ RAL #${ral_number} was aborted. Work may be incomplete.`,
+        messageType: "text",
+      });
+
+      await conversationStore.save();
+    }
+
     return {
       success: true,
       message: `RAL #${ral_number} has been aborted. Any in-progress work has been cancelled.`,

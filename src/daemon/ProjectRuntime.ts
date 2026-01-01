@@ -13,6 +13,7 @@ import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { RALRegistry } from "@/services/ral";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -126,6 +127,9 @@ export class ProjectRuntime {
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
             ConversationStore.initialize(this.metadataPath, agentPubkeys);
+
+            // Reconcile any orphaned RALs from a previous daemon run
+            await this.reconcileOrphanedRals();
 
             // Initialize pairing manager for real-time delegation supervision
             const { PairingManager } = await import("@/services/pairing");
@@ -456,6 +460,66 @@ export class ProjectRuntime {
                 stack: error instanceof Error ? error.stack : undefined,
             });
             // Don't throw - allow project to start even if MCP initialization fails
+        }
+    }
+
+    /**
+     * Scan all persisted conversations and reconcile orphaned RALs.
+     * An orphaned RAL is one that's marked as "active" in ConversationStore
+     * but doesn't exist in RALRegistry (because daemon was restarted).
+     */
+    private async reconcileOrphanedRals(): Promise<void> {
+        const conversationsDir = path.join(this.metadataPath, "conversations");
+
+        let files: string[];
+        try {
+            files = await fs.readdir(conversationsDir);
+        } catch {
+            return; // No conversations directory yet
+        }
+
+        const ralRegistry = RALRegistry.getInstance();
+        let totalReconciled = 0;
+
+        for (const file of files) {
+            if (!file.endsWith(".json")) continue;
+
+            const conversationId = file.replace(".json", "");
+            const store = ConversationStore.getOrLoad(conversationId);
+
+            const allActiveRals = store.getAllActiveRals();
+            let modified = false;
+
+            for (const [agentPubkey, ralNumbers] of allActiveRals) {
+                for (const ralNumber of ralNumbers) {
+                    // RALRegistry is empty after restart - any active RAL in ConversationStore is orphaned
+                    const exists = ralRegistry.getRAL(agentPubkey, conversationId, ralNumber);
+                    if (!exists) {
+                        logger.info(`[ProjectRuntime] Reconciling orphaned RAL #${ralNumber}`, {
+                            conversationId: conversationId.substring(0, 8),
+                            agentPubkey: agentPubkey.substring(0, 8),
+                        });
+
+                        store.addMessage({
+                            pubkey: agentPubkey,
+                            ral: ralNumber,
+                            content: `⚠️ RAL #${ralNumber} was interrupted (daemon restart). Work may be incomplete.`,
+                            messageType: "text",
+                        });
+                        store.completeRal(agentPubkey, ralNumber);
+                        modified = true;
+                        totalReconciled++;
+                    }
+                }
+            }
+
+            if (modified) {
+                await store.save();
+            }
+        }
+
+        if (totalReconciled > 0) {
+            logger.info(`[ProjectRuntime] Reconciled ${totalReconciled} orphaned RAL(s)`);
         }
     }
 }
