@@ -66,6 +66,9 @@ import { createTodoAddTool, createTodoUpdateTool } from "./implementations/todo"
 import { createWebFetchTool } from "./implementations/web_fetch";
 import { createWebSearchTool } from "./implementations/web_search";
 
+// Nostr tools
+import { createNostrFetchTool } from "./implementations/nostr_fetch";
+
 /**
  * Metadata about tools that doesn't require instantiation.
  * Tools declare hasSideEffects: false if they are read-only operations.
@@ -94,6 +97,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     discover_capabilities: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
+    nostr_fetch: { hasSideEffects: false },
 };
 
 /**
@@ -190,6 +194,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Web tools
     web_fetch: createWebFetchTool,
     web_search: createWebSearchTool,
+
+    // Nostr tools
+    nostr_fetch: createNostrFetchTool,
 };
 
 /**
