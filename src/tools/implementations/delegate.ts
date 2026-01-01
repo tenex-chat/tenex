@@ -130,11 +130,6 @@ async function executeDelegate(
       }
     }
 
-    if (pubkey === context.agent.pubkey && !phase) {
-      throw new Error(
-        "Self-delegation requires a phase. Use delegate with a phase parameter."
-      );
-    }
 
     // Publish delegation event
     if (!context.agentPublisher) {
