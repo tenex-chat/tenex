@@ -139,7 +139,7 @@ export class ProjectRuntime {
             this.context.pairingManager = pairingManager;
 
             // Initialize event handler
-            this.eventHandler = new EventHandler(this.projectBasePath);
+            this.eventHandler = new EventHandler();
             await this.eventHandler.initialize();
 
             // Start status publisher
