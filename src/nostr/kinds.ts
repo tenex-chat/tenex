@@ -21,6 +21,7 @@ export const NDKKind = {
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
 
     // Tenex custom kinds (2xxxx range)
+    TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
     TenexOperationsStatus: 24133 as BaseNDKKind,

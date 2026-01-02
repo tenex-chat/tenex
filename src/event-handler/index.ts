@@ -115,6 +115,14 @@ export class EventHandler {
                 });
                 break;
 
+            case NDKKind.TenexBootProject: // kind 24000 - project boot request
+                // Boot already happened by virtue of event routing - nothing to do
+                trace.getActiveSpan()?.addEvent("event_handler.boot_request", {
+                    "event.id": event.id,
+                    "event.author": event.pubkey.substring(0, 8),
+                });
+                break;
+
             case NDKProject.kind: // kind 31933
                 if (this.isUpdatingProject) {
                     logger.warn("Project update already in progress, skipping event", {
