@@ -38,37 +38,6 @@ export class RuntimeLifecycle {
     }
 
     /**
-     * Start or get an existing runtime for a project.
-     * This method prevents duplicate startups by tracking promises.
-     *
-     * @param projectId - The project ID (format: "31933:authorPubkey:dTag")
-     * @param project - The NDKProject instance
-     * @returns Promise resolving to the started ProjectRuntime
-     */
-    async getOrStartRuntime(projectId: string, project: NDKProject): Promise<ProjectRuntime> {
-        // Check if already active
-        const existingRuntime = this.activeRuntimes.get(projectId);
-        if (existingRuntime) {
-            trace.getActiveSpan()?.addEvent("runtime_lifecycle.using_existing", {
-                "project.id": projectId,
-            });
-            return existingRuntime;
-        }
-
-        // Check if currently being started (prevent duplicate startups)
-        const startingPromise = this.startingRuntimes.get(projectId);
-        if (startingPromise) {
-            trace.getActiveSpan()?.addEvent("runtime_lifecycle.waiting_for_startup", {
-                "project.id": projectId,
-            });
-            return startingPromise;
-        }
-
-        // Start new runtime
-        return this.startRuntime(projectId, project);
-    }
-
-    /**
      * Start a new runtime for a project.
      * This is the single source of truth for runtime startup logic.
      *
