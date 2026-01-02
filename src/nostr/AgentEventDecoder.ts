@@ -212,8 +212,12 @@ export class AgentEventDecoder {
     /**
      * Event kinds that should never be routed to projects.
      * These events are informational or transient and don't require processing.
+     * - kind:0 (Metadata) and kind:3 (Contacts) are global identity events
+     * - Status events are daemon-level only
      */
     private static readonly NEVER_ROUTE_EVENT_KINDS = [
+        NDKKind.Metadata, // kind:0 - user profile metadata
+        NDKKind.Contacts, // kind:3 - contact list
         NDKKind.TenexProjectStatus,
         NDKKind.TenexOperationsStatus,
     ];
@@ -309,12 +313,15 @@ export class AgentEventDecoder {
      */
     static classifyForDaemon(
         event: NDKEvent
-    ): "never_route" | "project" | "lesson" | "conversation" | "unknown" {
+    ): "never_route" | "project" | "lesson" | "conversation" | "boot" | "unknown" {
         if (this.isNeverRouteKind(event)) return "never_route";
         if (this.isProjectEvent(event)) return "project";
         if (this.isLessonEvent(event)) return "lesson";
         if (event.kind === NDKKind.Text) {
             return "conversation";
+        }
+        if (event.kind === NDKKind.TenexBootProject) {
+            return "boot";
         }
         return "unknown";
     }
