@@ -294,25 +294,36 @@ export class Daemon {
             return;
         }
 
-        // Get or start the runtime using RuntimeLifecycle
-        let runtime;
+        // Check if runtime exists
+        let runtime = this.runtimeLifecycle.getRuntime(projectId);
 
-        try {
-            const existingRuntime = this.runtimeLifecycle.getRuntime(projectId);
-            if (existingRuntime) {
-                runtime = existingRuntime;
-            } else {
-                // Start the project runtime lazily
+        if (!runtime) {
+            // Only kind:1 (Text) and kind:24000 (TenexBootProject) can boot projects
+            const canBootProject = event.kind === 1 || event.kind === 24000;
+
+            if (!canBootProject) {
+                addRoutingEvent(span, "dropped", { reason: "no_runtime_and_cannot_boot" });
+                await logDropped(
+                    this.routingLogger,
+                    event,
+                    `Project not running and kind:${event.kind} cannot boot projects`
+                );
+                return;
+            }
+
+            // Start the project runtime
+            try {
                 addRoutingEvent(span, "project_runtime_start", {
                     title: project.tagValue("title") || "untitled",
+                    bootKind: event.kind,
                 });
-                runtime = await this.runtimeLifecycle.getOrStartRuntime(projectId, project);
+                runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
                 await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+            } catch (error) {
+                logger.error("Failed to start runtime", { projectId, error });
+                await logDropped(this.routingLogger, event, "Failed to start runtime");
+                return;
             }
-        } catch (error) {
-            logger.error("Failed to get/start runtime", { projectId, error });
-            await logDropped(this.routingLogger, event, "Failed to start runtime");
-            return;
         }
 
         // Log successful routing
