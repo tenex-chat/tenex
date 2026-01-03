@@ -87,6 +87,7 @@ export const AI_SDK_PROVIDERS = [
     "ollama",
     "claudeCode",
     "gemini-cli",
+    "codexCli",
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 

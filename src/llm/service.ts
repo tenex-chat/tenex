@@ -274,9 +274,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();
 
-        // Convert system messages for Claude Code resume sessions
+        // Convert system messages for Claude Code/Codex CLI resume sessions
         let processedMessages = messages;
-        if (this.provider === "claudeCode" && this.sessionId) {
+        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
             processedMessages = convertSystemMessagesForResume(messages);
         }
 
@@ -353,12 +353,26 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 }
             }
 
-            // Capture session ID from provider metadata if using Claude Code
+            // Capture session ID from provider metadata if using Claude Code or Codex CLI
             if (
                 this.provider === "claudeCode" &&
                 result.providerMetadata?.["claude-code"]?.sessionId
             ) {
                 const capturedSessionId = result.providerMetadata["claude-code"]
+                    .sessionId as string;
+                trace.getActiveSpan()?.addEvent("llm.session_captured", {
+                    "session.id": capturedSessionId,
+                });
+                // Emit session ID for storage by the executor
+                this.emit("session-captured", { sessionId: capturedSessionId });
+            }
+
+            // Capture session ID from provider metadata if using Codex CLI
+            if (
+                this.provider === "codexCli" &&
+                result.providerMetadata?.["codex-cli"]?.sessionId
+            ) {
+                const capturedSessionId = result.providerMetadata["codex-cli"]
                     .sessionId as string;
                 trace.getActiveSpan()?.addEvent("llm.session_captured", {
                     "session.id": capturedSessionId,
@@ -416,9 +430,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
 
-        // Convert system messages for Claude Code resume sessions
+        // Convert system messages for Claude Code/Codex CLI resume sessions
         let processedMessages = messages;
-        if (this.provider === "claudeCode" && this.sessionId) {
+        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
             processedMessages = convertSystemMessagesForResume(messages);
         }
 
@@ -457,8 +471,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            // Don't pass tools for claudeCode - it has its own built-in tools that conflict
-            ...(this.provider !== "claudeCode" && { tools }),
+            // Don't pass tools for claudeCode/codexCli - they have their own built-in tools that conflict
+            ...(this.provider !== "claudeCode" && this.provider !== "codexCli" && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -712,6 +726,16 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     e.providerMetadata?.["claude-code"]?.sessionId
                 ) {
                     const capturedSessionId = e.providerMetadata["claude-code"].sessionId as string;
+                    // Emit session ID for storage by the executor
+                    this.emit("session-captured", { sessionId: capturedSessionId });
+                }
+
+                // Capture session ID for Codex CLI
+                if (
+                    this.provider === "codexCli" &&
+                    e.providerMetadata?.["codex-cli"]?.sessionId
+                ) {
+                    const capturedSessionId = e.providerMetadata["codex-cli"].sessionId as string;
                     // Emit session ID for storage by the executor
                     this.emit("session-captured", { sessionId: capturedSessionId });
                 }

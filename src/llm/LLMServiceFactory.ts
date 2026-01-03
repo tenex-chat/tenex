@@ -5,9 +5,10 @@ import { trace, type Span } from "@opentelemetry/api";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createProviderRegistry } from "ai";
+import { createProviderRegistry, type LanguageModel } from "ai";
 // Using 'any' for provider types due to version mismatch between different provider packages
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
+import { type CodexCliSettings, createCodexCli } from "ai-sdk-provider-codex-cli";
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import { createOllama } from "ollama-ai-provider-v2";
 import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
@@ -137,6 +138,11 @@ export class LLMServiceFactory {
 
                     case "claudeCode": {
                         // Claude Code is always available, no initialization needed
+                        break;
+                    }
+
+                    case "codexCli": {
+                        // Codex CLI is always available (uses local codex CLI), no initialization needed
                         break;
                     }
 
@@ -275,6 +281,88 @@ export class LLMServiceFactory {
             );
         }
 
+        // Handle Codex CLI provider specially (similar to Claude Code)
+        if (actualProvider === "codexCli") {
+            // Extract tool names from the provided tools
+            const toolNames = context?.tools ? Object.keys(context.tools) : [];
+            const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
+
+            trace.getActiveSpan()?.addEvent("llm_factory.creating_codex_cli", {
+                "agent.name": context?.agentName ?? "",
+                "agent.slug": agentSlug ?? "",
+                "session.id": context?.sessionId ?? "",
+                "tools.count": regularTools.length,
+                "tenex_tools.enabled": this.enableTenexTools,
+            });
+
+            // Create SDK MCP server for local TENEX tools if enabled and tools exist
+            const tenexSdkServer =
+                this.enableTenexTools && regularTools.length > 0 && context?.tools
+                    ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
+                    : undefined;
+
+            // Build mcpServers configuration
+            const mcpServersConfig: Record<string, any> = {};
+
+            // Add TENEX tools wrapper if enabled
+            if (tenexSdkServer) {
+                mcpServersConfig.tenex = tenexSdkServer;
+            }
+
+            // Add TENEX's MCP servers from config
+            const mcpConfig = configService.getMCP();
+            if (mcpConfig.enabled && mcpConfig.servers) {
+                for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
+                    // Convert TENEX's MCPServerConfig to Codex CLI's MCP server config
+                    mcpServersConfig[serverName] = {
+                        transport: "stdio" as const,
+                        command: serverConfig.command,
+                        args: serverConfig.args,
+                        env: serverConfig.env,
+                    };
+                }
+
+                trace.getActiveSpan()?.addEvent("llm_factory.codex_mcp_servers_added", {
+                    "mcp.server_count": Object.keys(mcpConfig.servers).length,
+                    "mcp.servers": Object.keys(mcpConfig.servers).join(", "),
+                });
+            }
+
+            // Create Codex CLI provider with runtime configuration
+            const defaultSettings: CodexCliSettings = {
+                allowNpx: true,
+                skipGitRepoCheck: true,
+                cwd: context?.workingDirectory,
+                mcpServers: mcpServersConfig,
+                approvalMode: "on-failure",
+                sandboxMode: "workspace-write",
+                verbose: true,
+                logger: {
+                    warn: (message: string) => logger.warn("[CodexCli]", message),
+                    error: (message: string) => logger.error("[CodexCli]", message),
+                    info: (message: string) => logger.info("[CodexCli]", message),
+                    debug: (message: string) => logger.debug("[CodexCli]", message),
+                },
+            };
+
+            const providerFunction = createCodexCli({
+                defaultSettings,
+            });
+
+            // Type assertion: CodexCliProvider is compatible with the expected function type
+            // Both return LanguageModel-compatible types (LanguageModelV3 extends LanguageModel)
+            return new LLMService(
+                null,
+                "codexCli",
+                config.model,
+                config.temperature,
+                config.maxTokens,
+                providerFunction as unknown as typeof providerFunction & ((model: string, options?: ClaudeCodeSettings) => LanguageModel),
+                context?.sessionId,
+                agentSlug
+            );
+        }
+
         // For standard providers, check if provider is available
         if (!this.providers.has(actualProvider)) {
             const available = Array.from(this.providers.keys());
@@ -305,11 +393,12 @@ export class LLMServiceFactory {
      * Check if a provider is available
      */
     hasProvider(providerName: string): boolean {
-        // Check standard providers, Claude Code (always available), or Gemini CLI (always available)
+        // Check standard providers, Claude Code, Gemini CLI, or Codex CLI (all always available)
         return (
             this.providers.has(providerName) ||
             providerName === "claudeCode" ||
-            providerName === "gemini-cli"
+            providerName === "gemini-cli" ||
+            providerName === "codexCli"
         );
     }
 
