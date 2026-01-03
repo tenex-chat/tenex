@@ -551,17 +551,31 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 // Handle tool execution errors - emit as tool-did-execute with error flag
                 const errorMsg =
                     chunk.error instanceof Error ? chunk.error.message : String(chunk.error);
+                const errorStack = chunk.error instanceof Error ? chunk.error.stack : undefined;
 
                 logger.error(`[LLMService] Tool '${chunk.toolName}' threw an error`, {
                     toolCallId: chunk.toolCallId,
                     toolName: chunk.toolName,
                     error: errorMsg,
+                    stack: errorStack,
                 });
 
-                trace.getActiveSpan()?.addEvent("llm.tool_error", {
+                // Log BOTH error event AND execution complete event for consistency
+                const activeSpan = trace.getActiveSpan();
+                activeSpan?.addEvent("llm.tool_error", {
                     "tool.name": chunk.toolName,
                     "tool.call_id": chunk.toolCallId,
                     "tool.error_message": errorMsg,
+                    "tool.error_type": chunk.error?.constructor?.name || "Error",
+                });
+
+                // IMPORTANT: Also log tool_did_execute for error cases
+                // This ensures trace analysis can find tool completion regardless of success/failure
+                activeSpan?.addEvent("llm.tool_did_execute", {
+                    "tool.name": chunk.toolName,
+                    "tool.call_id": chunk.toolCallId,
+                    "tool.error": true,
+                    "tool.error_message": errorMsg.substring(0, 200),
                 });
 
                 // Emit tool-did-execute with error info so it gets persisted to conversation
