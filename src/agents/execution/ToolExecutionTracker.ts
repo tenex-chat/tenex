@@ -299,11 +299,26 @@ export class ToolExecutionTracker {
 
         // Log errors explicitly for visibility
         if (error) {
+            // Extract error details for better logging
+            const errorDetails = this.extractErrorDetails(result);
+
             logger.error("[ToolExecutionTracker] Tool execution failed", {
                 toolName: execution.toolName,
                 toolCallId,
                 toolEventId: execution.toolEventId,
+                errorType: errorDetails?.type || "unknown",
+                errorMessage: errorDetails?.message || "No details available",
                 result,
+            });
+
+            // IMPORTANT: Log error event in telemetry for trace analysis
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.addEvent("tool.execution_error", {
+                "tool.name": execution.toolName,
+                "tool.call_id": toolCallId,
+                "tool.error": true,
+                "tool.error_type": errorDetails?.type || "unknown",
+                "tool.error_message": (errorDetails?.message || "").substring(0, 200),
             });
         }
 
@@ -498,6 +513,57 @@ export class ToolExecutionTracker {
 
         // Default format
         return `Executing ${toolName}`;
+    }
+
+    /**
+     * Extract error details from a tool result for better logging and telemetry.
+     * Handles various error result formats from AI SDK and shell tool.
+     *
+     * @param result - The tool result that may contain error information
+     * @returns Error details or null if not an error result
+     */
+    private extractErrorDetails(result: unknown): { message: string; type: string } | null {
+        if (typeof result !== "object" || result === null) {
+            return null;
+        }
+
+        const res = result as Record<string, unknown>;
+
+        // AI SDK error-text format
+        if (res.type === "error-text" && typeof res.text === "string") {
+            return { message: res.text, type: "error-text" };
+        }
+
+        // AI SDK error-json format
+        if (res.type === "error-json" && typeof res.json === "object") {
+            const errorJson = res.json as Record<string, unknown>;
+            const message = errorJson.message || errorJson.error || JSON.stringify(errorJson);
+            return { message: String(message), type: "error-json" };
+        }
+
+        // Shell tool structured error format
+        if (res.type === "shell-error") {
+            const shellError = res as {
+                error?: string;
+                exitCode?: number | null;
+                stderr?: string;
+            };
+            const message = shellError.error ||
+                shellError.stderr ||
+                `Exit code: ${shellError.exitCode}`;
+            return { message, type: "shell-error" };
+        }
+
+        // Generic error object with message property
+        if (typeof res.error === "string") {
+            return { message: res.error, type: "generic" };
+        }
+
+        if (typeof res.message === "string") {
+            return { message: res.message, type: "generic" };
+        }
+
+        return null;
     }
 
     /**
