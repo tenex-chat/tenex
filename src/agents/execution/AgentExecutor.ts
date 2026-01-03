@@ -1,4 +1,10 @@
 import type { AgentInstance } from "@/agents/types";
+import {
+    supervisorOrchestrator,
+    registerDefaultHeuristics,
+    updateKnownAgentSlugs,
+    type PostCompletionContext,
+} from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { buildRalSummary } from "@/conversations/RalSummaryFormatter";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
@@ -50,7 +56,10 @@ export interface LLMCompletionRequest {
 }
 
 export class AgentExecutor {
-    constructor(private standaloneContext?: StandaloneAgentContext) {}
+    constructor(private standaloneContext?: StandaloneAgentContext) {
+        // Initialize supervision heuristics
+        registerDefaultHeuristics();
+    }
 
     /**
      * Prepare an LLM request without executing it.
@@ -446,6 +455,112 @@ export class AgentExecutor {
         if (!completionEvent) {
             throw new Error("LLM execution completed without producing a completion event");
         }
+
+        // === POST-COMPLETION SUPERVISION CHECK ===
+        // Run heuristics to detect suspicious agent behavior before publishing
+        const executionId = `${context.agent.pubkey}:${context.conversationId}:${ralNumber}`;
+
+        // Check if we've exceeded max retries for supervision
+        if (supervisorOrchestrator.hasExceededMaxRetries(executionId)) {
+            logger.warn("[AgentExecutor] Supervision max retries exceeded, publishing anyway", {
+                agent: context.agent.slug,
+                ralNumber,
+            });
+            supervisorOrchestrator.clearState(executionId);
+        } else {
+            // Build supervision context
+            const conversationStore = context.conversationStore;
+            const projectContext = getProjectContext();
+
+            // Get tool calls from conversation store
+            const storeMessages = conversationStore?.getAllMessages() || [];
+            const toolCallsMade = storeMessages
+                .filter(m => m.ral === ralNumber && m.messageType === "tool-call" && m.toolData)
+                .flatMap(m => m.toolData?.map(td => {
+                    if (td.type === "tool-call" && "toolName" in td) {
+                        return td.toolName;
+                    }
+                    return undefined;
+                }).filter(Boolean) as string[] || []);
+
+            // Build the system prompt for context
+            const conversation = context.getConversation();
+            const systemPromptMessages = conversation ? await buildSystemPromptMessages({
+                agent: context.agent,
+                project: projectContext.project,
+                conversation,
+                projectBasePath: context.projectBasePath,
+                workingDirectory: context.workingDirectory,
+                currentBranch: context.currentBranch,
+                availableAgents: Array.from(projectContext.agents.values()),
+                mcpManager: projectContext.mcpManager,
+            }) : [];
+            const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
+
+            // Update known agent slugs for delegation heuristic
+            updateKnownAgentSlugs(Array.from(projectContext.agents.values()).map(a => a.slug));
+
+            // Build conversation history
+            const conversationMessages = conversationStore
+                ? await conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber)
+                : [];
+
+            const toolNames = context.agent.tools || [];
+            const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+
+            const supervisionContext: PostCompletionContext = {
+                agentSlug: context.agent.slug,
+                agentPubkey: context.agent.pubkey,
+                hasPhases: !!context.agent.phases,
+                messageContent: completionEvent.message || "",
+                toolCallsMade,
+                systemPrompt,
+                conversationHistory: conversationMessages,
+                availableTools: toolsObject,
+            };
+
+            const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext);
+
+            if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
+                trace.getActiveSpan()?.addEvent("executor.supervision_violation", {
+                    "ral.number": ralNumber,
+                    "heuristic.id": supervisionResult.heuristicId || "unknown",
+                    "action.type": supervisionResult.correctionAction.type,
+                });
+
+                logger.info("[AgentExecutor] Supervision detected violation", {
+                    agent: context.agent.slug,
+                    heuristic: supervisionResult.heuristicId,
+                    actionType: supervisionResult.correctionAction.type,
+                });
+
+                if (supervisionResult.correctionAction.type === "suppress-publish" &&
+                    supervisionResult.correctionAction.reEngage) {
+                    // Increment retry count
+                    supervisorOrchestrator.incrementRetryCount(executionId);
+
+                    // Inject correction message as user message
+                    if (supervisionResult.correctionAction.message) {
+                        ralRegistry.queueUserMessage(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            supervisionResult.correctionAction.message
+                        );
+                    }
+
+                    console.log(
+                        chalk.yellow(
+                            `\n⚠️ ${context.agent.slug} (RAL #${ralNumber}) - supervision correction applied, re-engaging`
+                        )
+                    );
+
+                    // Re-execute the agent
+                    return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
+                }
+            }
+        }
+        // === END SUPERVISION CHECK ===
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
