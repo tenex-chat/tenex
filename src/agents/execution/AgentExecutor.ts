@@ -460,6 +460,11 @@ export class AgentExecutor {
         // Run heuristics to detect suspicious agent behavior before publishing
         const executionId = `${context.agent.pubkey}:${context.conversationId}:${ralNumber}`;
 
+        logger.info("[AgentExecutor] Running supervision check", {
+            agent: context.agent.slug,
+            ralNumber,
+        });
+
         // Check if we've exceeded max retries for supervision
         if (supervisorOrchestrator.hasExceededMaxRetries(executionId)) {
             logger.warn("[AgentExecutor] Supervision max retries exceeded, publishing anyway", {
@@ -558,6 +563,11 @@ export class AgentExecutor {
                     // Re-execute the agent
                     return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
                 }
+            } else {
+                logger.info("[AgentExecutor] Supervision check passed", {
+                    agent: context.agent.slug,
+                    ralNumber,
+                });
             }
         }
         // === END SUPERVISION CHECK ===
