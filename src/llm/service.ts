@@ -177,14 +177,15 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         let baseModel: LanguageModel;
 
         if (this.claudeCodeProviderFunction) {
-            // Claude Code provider
+            // Claude Code or Codex CLI provider
             const options: ClaudeCodeSettings = {};
 
             if (this.sessionId) {
                 // When resuming, only pass the resume option
                 options.resume = this.sessionId;
-            } else if (messages) {
-                // When NOT resuming, compile all messages
+            } else if (messages && this.provider === "claudeCode") {
+                // Only Claude Code supports customSystemPrompt/appendSystemPrompt
+                // Codex CLI doesn't support these options
                 const { customSystemPrompt, appendSystemPrompt } =
                     compileMessagesForClaudeCode(messages);
 
