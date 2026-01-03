@@ -250,6 +250,7 @@ export class ConfigurationManager {
             ollama: "llama3.1:8b",
             claudeCode: "claude-3-5-sonnet-20241022", // Default model for Claude Code
             "gemini-cli": "gemini-2.0-flash-exp",
+            codexCli: "gpt-5.1-codex", // Default model for Codex CLI
         };
         return defaults[provider] || "";
     }

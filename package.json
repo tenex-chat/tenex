@@ -75,6 +75,7 @@
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "ai": "^6.0.3",
     "ai-sdk-provider-claude-code": "^3.0.1",
+    "ai-sdk-provider-codex-cli": "^1.0.4",
     "ai-sdk-provider-gemini-cli": "^2.0.0-beta.2",
     "apache-arrow": "^21.1.0",
     "chalk": "^5.6.2",

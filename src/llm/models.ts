@@ -18,6 +18,8 @@ export const KNOWN_MODELS = {
     // ClaudeCode - accepts any model name
     claudeCode: ["opus", "sonnet"],
     "gemini-cli": ["gemini-2.5-pro", "gemini-2.5-flash"],
+    // CodexCli - GPT-5.1/5.2 via OpenAI Codex CLI
+    codexCli: ["gpt-5.1-codex", "gpt-5.2-codex"],
 };
 
 /**

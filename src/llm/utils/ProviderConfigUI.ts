@@ -18,6 +18,7 @@ export class ProviderConfigUI {
             ollama: "Ollama (Local models)",
             claudeCode: "Claude Code",
             "gemini-cli": "Gemini CLI (via GCloud)",
+            codexCli: "Codex CLI (GPT-5.1/5.2)",
         };
         return names[provider] || provider;
     }
@@ -29,8 +30,8 @@ export class ProviderConfigUI {
         provider: string,
         currentConfig?: TenexLLMs
     ): Promise<{ apiKey: string }> {
-        if (provider === "claudeCode" || provider === "gemini-cli") {
-            // Claude Code and Gemini CLI don't require an API key
+        if (provider === "claudeCode" || provider === "gemini-cli" || provider === "codexCli") {
+            // Claude Code, Gemini CLI, and Codex CLI don't require an API key
             console.log(
                 chalk.green(
                     `✓ ${ProviderConfigUI.getProviderDisplayName(provider)} provider configured (no API key required)`
