@@ -5,7 +5,7 @@ import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
-const searchConversationsSchema = z.object({
+const conversationSearchSchema = z.object({
     query: z.string().describe("Search query to match against conversation titles"),
     limit: z
         .number()
@@ -13,7 +13,7 @@ const searchConversationsSchema = z.object({
         .describe("Maximum number of results to return. Defaults to 20."),
 });
 
-type SearchConversationsInput = z.infer<typeof searchConversationsSchema>;
+type ConversationSearchInput = z.infer<typeof conversationSearchSchema>;
 
 interface ConversationSummary {
     id: string;
@@ -24,7 +24,7 @@ interface ConversationSummary {
     lastActivity?: number;
 }
 
-interface SearchConversationsOutput {
+interface ConversationSearchOutput {
     success: boolean;
     conversations: ConversationSummary[];
     total: number;
@@ -46,10 +46,10 @@ function summarizeConversation(conversation: ConversationStore): ConversationSum
     };
 }
 
-async function executeSearchConversations(
-    input: SearchConversationsInput,
+async function executeConversationSearch(
+    input: ConversationSearchInput,
     context: ExecutionContext
-): Promise<SearchConversationsOutput> {
+): Promise<ConversationSearchOutput> {
     const { query, limit = 20 } = input;
 
     logger.info("🔍 Searching conversations", {
@@ -78,20 +78,20 @@ async function executeSearchConversations(
     };
 }
 
-export function createSearchConversationsTool(context: ExecutionContext): AISdkTool {
+export function createConversationSearchTool(context: ExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Search conversations by title. Returns matching conversations with summary information including ID, title, phase, message count, and timestamps.",
 
-        inputSchema: searchConversationsSchema,
+        inputSchema: conversationSearchSchema,
 
-        execute: async (input: SearchConversationsInput) => {
-            return await executeSearchConversations(input, context);
+        execute: async (input: ConversationSearchInput) => {
+            return await executeConversationSearch(input, context);
         },
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ query, limit }: SearchConversationsInput) => {
+        value: ({ query, limit }: ConversationSearchInput) => {
             return limit
                 ? `Searching conversations for "${query}" (limit: ${limit})`
                 : `Searching conversations for "${query}"`;

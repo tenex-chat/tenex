@@ -45,7 +45,7 @@ import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
-import { createSearchConversationsTool } from "./implementations/search_conversations";
+import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createWriteFileTool } from "./implementations/write_file";
@@ -80,7 +80,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     codebase_search: { hasSideEffects: false },
     conversation_get: { hasSideEffects: false },
     conversation_list: { hasSideEffects: false },
-    search_conversations: { hasSideEffects: false },
+    conversation_search: { hasSideEffects: false },
     lesson_get: { hasSideEffects: false },
     agents_list: { hasSideEffects: false },
     agents_read: { hasSideEffects: false },
@@ -156,7 +156,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     schedule_tasks_list: createListScheduledTasksTool,
 
     // Conversation search
-    search_conversations: createSearchConversationsTool,
+    conversation_search: createConversationSearchTool,
 
     shell: createShellTool,
 
