@@ -248,9 +248,9 @@ export class ConfigurationManager {
             anthropic: "claude-3-5-sonnet-latest",
             openai: "gpt-4",
             ollama: "llama3.1:8b",
-            claudeCode: "claude-3-5-sonnet-20241022", // Default model for Claude Code
+            "claude-code": "claude-3-5-sonnet-20241022",
             "gemini-cli": "gemini-2.0-flash-exp",
-            codexCli: "gpt-5.1-codex", // Default model for Codex CLI
+            "codex-cli": "gpt-5.1-codex",
         };
         return defaults[provider] || "";
     }

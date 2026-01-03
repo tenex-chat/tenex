@@ -6,7 +6,6 @@
  */
 
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
-import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type {
@@ -23,8 +22,8 @@ import { TenexToolsAdapter } from "../TenexToolsAdapter";
 export class ClaudeCodeProvider extends AgentProvider {
     private enableTenexTools = true;
 
-    private static readonly _metadata: ProviderMetadata = AgentProvider.createMetadata(
-        "claudeCode",
+    static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
+        "claude-code",
         "Claude Code",
         "Claude with built-in coding tools and MCP support",
         "agent",
@@ -41,7 +40,7 @@ export class ClaudeCodeProvider extends AgentProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return ClaudeCodeProvider._metadata;
+        return ClaudeCodeProvider.METADATA;
     }
 
     /**
@@ -88,7 +87,8 @@ export class ClaudeCodeProvider extends AgentProvider {
                 : undefined;
 
         // Build mcpServers configuration
-        // biome-ignore lint/suspicious/noExplicitAny: MCP server config types vary between providers
+        // ClaudeCodeSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
+        // biome-ignore lint/suspicious/noExplicitAny: ClaudeCodeSettings.mcpServers accepts varied server types
         const mcpServersConfig: Record<string, any> = {};
 
         // Add TENEX tools wrapper if enabled
@@ -96,9 +96,9 @@ export class ClaudeCodeProvider extends AgentProvider {
             mcpServersConfig.tenex = tenexSdkServer;
         }
 
-        // Add TENEX's MCP servers from config
-        const mcpConfig = configService.getMCP();
-        if (mcpConfig.enabled && mcpConfig.servers) {
+        // Add MCP servers from context (passed from services layer)
+        const mcpConfig = context.mcpConfig;
+        if (mcpConfig?.enabled && mcpConfig.servers) {
             for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
                 mcpServersConfig[serverName] = {
                     type: "stdio" as const,

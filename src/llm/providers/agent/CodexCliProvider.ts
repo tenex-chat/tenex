@@ -6,7 +6,6 @@
  */
 
 import { type CodexCliSettings, createCodexCli } from "ai-sdk-provider-codex-cli";
-import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type {
@@ -23,8 +22,8 @@ import { TenexToolsAdapter } from "../TenexToolsAdapter";
 export class CodexCliProvider extends AgentProvider {
     private enableTenexTools = true;
 
-    private static readonly _metadata: ProviderMetadata = AgentProvider.createMetadata(
-        "codexCli",
+    static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
+        "codex-cli",
         "Codex CLI",
         "OpenAI Codex with built-in coding tools and MCP support",
         "agent",
@@ -41,7 +40,7 @@ export class CodexCliProvider extends AgentProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return CodexCliProvider._metadata;
+        return CodexCliProvider.METADATA;
     }
 
     /**
@@ -86,7 +85,8 @@ export class CodexCliProvider extends AgentProvider {
                 : undefined;
 
         // Build mcpServers configuration
-        // biome-ignore lint/suspicious/noExplicitAny: MCP server config types vary between providers
+        // CodexCliSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
+        // biome-ignore lint/suspicious/noExplicitAny: CodexCliSettings.mcpServers accepts varied server types
         const mcpServersConfig: Record<string, any> = {};
 
         // Add TENEX tools wrapper if enabled
@@ -94,9 +94,9 @@ export class CodexCliProvider extends AgentProvider {
             mcpServersConfig.tenex = tenexSdkServer;
         }
 
-        // Add TENEX's MCP servers from config
-        const mcpConfig = configService.getMCP();
-        if (mcpConfig.enabled && mcpConfig.servers) {
+        // Add MCP servers from context (passed from services layer)
+        const mcpConfig = context.mcpConfig;
+        if (mcpConfig?.enabled && mcpConfig.servers) {
             for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
                 // Codex CLI uses 'transport' instead of 'type'
                 mcpServersConfig[serverName] = {
@@ -130,13 +130,9 @@ export class CodexCliProvider extends AgentProvider {
             },
         };
 
-        // Handle session resumption
-        // Note: Codex CLI may not support session resumption yet
-        // The 'resume' property is optional and may need to be added
-        // to the CodexCliSettings type in the future
+        // Handle session resumption if the provider supports it
         if (context.sessionId) {
-            // biome-ignore lint/suspicious/noExplicitAny: resume may not be in type definition yet
-            (settings as any).resume = context.sessionId;
+            (settings as CodexCliSettings & { resume?: string }).resume = context.sessionId;
         }
 
         return settings;

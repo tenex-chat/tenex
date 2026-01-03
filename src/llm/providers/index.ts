@@ -61,38 +61,39 @@ import { providerRegistry } from "./registry";
 /**
  * All available provider registrations
  *
+ * Each provider exposes static metadata to avoid wasteful instantiation.
  * Add new providers to this array to make them available.
  */
 export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
     // Standard providers
     {
         Provider: OpenRouterProvider,
-        metadata: new OpenRouterProvider().metadata,
+        metadata: OpenRouterProvider.METADATA,
     },
     {
         Provider: AnthropicProvider,
-        metadata: new AnthropicProvider().metadata,
+        metadata: AnthropicProvider.METADATA,
     },
     {
         Provider: OpenAIProvider,
-        metadata: new OpenAIProvider().metadata,
+        metadata: OpenAIProvider.METADATA,
     },
     {
         Provider: OllamaProvider,
-        metadata: new OllamaProvider().metadata,
+        metadata: OllamaProvider.METADATA,
     },
     {
         Provider: GeminiCliProvider,
-        metadata: new GeminiCliProvider().metadata,
+        metadata: GeminiCliProvider.METADATA,
     },
     // Agent providers
     {
         Provider: ClaudeCodeProvider,
-        metadata: new ClaudeCodeProvider().metadata,
+        metadata: ClaudeCodeProvider.METADATA,
     },
     {
         Provider: CodexCliProvider,
-        metadata: new CodexCliProvider().metadata,
+        metadata: CodexCliProvider.METADATA,
     },
 ];
 

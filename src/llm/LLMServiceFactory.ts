@@ -5,14 +5,6 @@
  * This module provides a simplified interface that delegates to the
  * modular ProviderRegistry for actual provider management.
  *
- * ## Migration Notes
- *
- * This factory has been refactored to use the modular ProviderRegistry.
- * The previous monolithic switch statement has been replaced with a
- * plugin-based architecture where each provider is defined in its own file.
- *
- * The public API remains unchanged for backward compatibility.
- *
  * @see src/llm/providers for individual provider implementations
  */
 
@@ -26,6 +18,7 @@ import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { LLMService } from "./service";
 import {
     providerRegistry,
+    type MCPConfig,
     type ProviderInitConfig,
     type ProviderRuntimeContext,
 } from "./providers";
@@ -75,7 +68,7 @@ export class LLMServiceFactory {
 
                 // Also ensure agent providers are initialized (they don't need API keys)
                 // Add them with empty configs if not already present
-                const agentProviders = ["claudeCode", "codexCli", "gemini-cli"];
+                const agentProviders = ["claude-code", "codex-cli", "gemini-cli"];
                 for (const providerId of agentProviders) {
                     if (!configs[providerId]) {
                         configs[providerId] = {
@@ -127,8 +120,10 @@ export class LLMServiceFactory {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
             sessionId?: string;
-            /** Working directory path for Claude Code execution */
+            /** Working directory path for agent execution */
             workingDirectory?: string;
+            /** MCP configuration - passed from services layer to providers */
+            mcpConfig?: MCPConfig;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -149,6 +144,7 @@ export class LLMServiceFactory {
             agentName: context?.agentName,
             sessionId: context?.sessionId,
             workingDirectory: context?.workingDirectory,
+            mcpConfig: context?.mcpConfig,
             enableTenexTools: this.enableTenexTools,
         };
 
@@ -166,7 +162,7 @@ export class LLMServiceFactory {
         // Create the model from the provider
         const modelResult = provider.createModel(config.model, runtimeContext);
 
-        // For agent providers (claudeCode, codexCli), use their provider function
+        // For agent providers (claude-code, codex-cli), use their provider function
         if (modelResult.bypassRegistry && modelResult.providerFunction) {
             return new LLMService(
                 null,

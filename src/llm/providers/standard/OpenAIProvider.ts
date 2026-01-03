@@ -13,7 +13,7 @@ import { StandardProvider } from "../base/StandardProvider";
  * OpenAI provider implementation
  */
 export class OpenAIProvider extends StandardProvider {
-    private static readonly _metadata: ProviderMetadata = StandardProvider.createMetadata(
+    static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
         "openai",
         "OpenAI",
         "Direct access to GPT models",
@@ -28,7 +28,7 @@ export class OpenAIProvider extends StandardProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return OpenAIProvider._metadata;
+        return OpenAIProvider.METADATA;
     }
 
     protected createProviderInstance(config: ProviderInitConfig): unknown {

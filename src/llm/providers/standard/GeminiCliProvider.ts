@@ -13,7 +13,7 @@ import { StandardProvider } from "../base/StandardProvider";
  * Gemini CLI provider implementation
  */
 export class GeminiCliProvider extends StandardProvider {
-    private static readonly _metadata: ProviderMetadata = StandardProvider.createMetadata(
+    static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
         "gemini-cli",
         "Gemini CLI",
         "Access Gemini models via CLI with OAuth",
@@ -28,7 +28,7 @@ export class GeminiCliProvider extends StandardProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return GeminiCliProvider._metadata;
+        return GeminiCliProvider.METADATA;
     }
 
     protected createProviderInstance(_config: ProviderInitConfig): unknown {

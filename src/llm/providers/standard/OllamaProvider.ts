@@ -13,7 +13,7 @@ import { StandardProvider } from "../base/StandardProvider";
  * Ollama provider implementation
  */
 export class OllamaProvider extends StandardProvider {
-    private static readonly _metadata: ProviderMetadata = StandardProvider.createMetadata(
+    static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
         "ollama",
         "Ollama",
         "Run open-source LLMs locally",
@@ -28,7 +28,7 @@ export class OllamaProvider extends StandardProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return OllamaProvider._metadata;
+        return OllamaProvider.METADATA;
     }
 
     protected createProviderInstance(config: ProviderInitConfig): unknown {

@@ -13,7 +13,7 @@ import { StandardProvider } from "../base/StandardProvider";
  * OpenRouter provider implementation
  */
 export class OpenRouterProvider extends StandardProvider {
-    private static readonly _metadata: ProviderMetadata = StandardProvider.createMetadata(
+    static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
         "openrouter",
         "OpenRouter",
         "Access multiple AI models through a single API",
@@ -28,7 +28,7 @@ export class OpenRouterProvider extends StandardProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return OpenRouterProvider._metadata;
+        return OpenRouterProvider.METADATA;
     }
 
     protected createProviderInstance(config: ProviderInitConfig): unknown {

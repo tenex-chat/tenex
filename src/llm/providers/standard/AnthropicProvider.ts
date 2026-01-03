@@ -13,7 +13,7 @@ import { StandardProvider } from "../base/StandardProvider";
  * Anthropic provider implementation
  */
 export class AnthropicProvider extends StandardProvider {
-    private static readonly _metadata: ProviderMetadata = StandardProvider.createMetadata(
+    static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
         "anthropic",
         "Anthropic",
         "Direct access to Claude models",
@@ -28,7 +28,7 @@ export class AnthropicProvider extends StandardProvider {
     );
 
     get metadata(): ProviderMetadata {
-        return AnthropicProvider._metadata;
+        return AnthropicProvider.METADATA;
     }
 
     protected createProviderInstance(config: ProviderInitConfig): unknown {

@@ -76,6 +76,23 @@ export interface ProviderInitConfig {
 }
 
 /**
+ * MCP server configuration for agent providers
+ */
+export interface MCPServerConfig {
+    command: string;
+    args: string[];
+    env?: Record<string, string>;
+}
+
+/**
+ * MCP configuration passed to providers
+ */
+export interface MCPConfig {
+    enabled: boolean;
+    servers: Record<string, MCPServerConfig>;
+}
+
+/**
  * Runtime context for creating LLM services
  */
 export interface ProviderRuntimeContext {
@@ -87,8 +104,8 @@ export interface ProviderRuntimeContext {
     sessionId?: string;
     /** Working directory for agent execution */
     workingDirectory?: string;
-    /** MCP servers configuration */
-    mcpServers?: Record<string, unknown>;
+    /** MCP configuration - passed from services layer to avoid layer violations */
+    mcpConfig?: MCPConfig;
     /** Whether TENEX tools should be enabled */
     enableTenexTools?: boolean;
 }
