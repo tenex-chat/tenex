@@ -242,6 +242,30 @@ export class ConfigurationManager {
         }
     }
 
+    static async setSupervisionModel(llmsConfig: TenexLLMs): Promise<void> {
+        const configNames = Object.keys(llmsConfig.configurations);
+
+        if (configNames.length === 0) {
+            console.log(chalk.yellow("⚠️  No configurations available"));
+            return;
+        }
+
+        const { name } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "name",
+                message: "Select supervision model:",
+                choices: configNames.map((n) => ({
+                    name: n === llmsConfig.supervision ? `${n} (current)` : n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        llmsConfig.supervision = name;
+        console.log(chalk.green(`✅ Supervision model set to "${name}"`));
+    }
+
     private static getDefaultModelForProvider(provider: AISdkProvider): string {
         const defaults: Record<AISdkProvider, string> = {
             openrouter: "openai/gpt-4",

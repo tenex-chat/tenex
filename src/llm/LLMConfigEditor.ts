@@ -38,6 +38,10 @@ export class LLMConfigEditor {
                         name: `Summarization model: ${llmsConfig.summarization || "none"}`,
                         value: "summarization",
                     },
+                    {
+                        name: `Supervision model: ${llmsConfig.supervision || "none"}`,
+                        value: "supervision",
+                    },
                     { name: "Test configuration", value: "test" },
                     { name: "Exit", value: "exit" },
                 ],
@@ -57,6 +61,7 @@ export class LLMConfigEditor {
             if (action === "delete") await ConfigurationManager.delete(llmsConfig);
             if (action === "default") await ConfigurationManager.setDefault(llmsConfig);
             if (action === "summarization") await ConfigurationManager.setSummarizationModel(llmsConfig);
+            if (action === "supervision") await ConfigurationManager.setSupervisionModel(llmsConfig);
             await this.saveConfig(llmsConfig);
         }
 
