@@ -1,31 +1,54 @@
+/**
+ * LLM Service Factory
+ *
+ * Factory for creating LLM services with proper provider initialization.
+ * This module provides a simplified interface that delegates to the
+ * modular ProviderRegistry for actual provider management.
+ *
+ * ## Migration Notes
+ *
+ * This factory has been refactored to use the modular ProviderRegistry.
+ * The previous monolithic switch statement has been replaced with a
+ * plugin-based architecture where each provider is defined in its own file.
+ *
+ * The public API remains unchanged for backward compatibility.
+ *
+ * @see src/llm/providers for individual provider implementations
+ */
+
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { trace, type Span } from "@opentelemetry/api";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createProviderRegistry, type LanguageModel } from "ai";
-// Using 'any' for provider types due to version mismatch between different provider packages
-import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
-import { type CodexCliSettings, createCodexCli } from "ai-sdk-provider-codex-cli";
-import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
-import { createOllama } from "ollama-ai-provider-v2";
-import { TenexToolsAdapter } from "./providers/TenexToolsAdapter";
+import { trace } from "@opentelemetry/api";
+import type { LanguageModel, ProviderRegistryProvider } from "ai";
+import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
+
 import { LLMService } from "./service";
-import { config as configService } from "@/services/ConfigService";
+import {
+    providerRegistry,
+    type ProviderInitConfig,
+    type ProviderRuntimeContext,
+} from "./providers";
 
 /**
  * Factory for creating LLM services with proper provider initialization
+ *
+ * This factory provides a high-level interface for:
+ * - Initializing providers from configuration
+ * - Creating LLMService instances
+ * - Checking provider availability
+ *
+ * The actual provider management is delegated to the ProviderRegistry.
  */
 export class LLMServiceFactory {
-    private providers: Map<string, any> = new Map();
-    private registry: ReturnType<typeof createProviderRegistry> | null = null;
-    private enableTenexTools = true; // Global flag: provide TENEX tools to claude-code agents (default: true)
+    private enableTenexTools = true;
     private initialized = false;
 
     /**
      * Initialize providers from configuration
+     *
+     * @param providerConfigs Map of provider names to their configurations
+     * @param options Additional options for initialization
      */
     async initializeProviders(
         providerConfigs: Record<string, { apiKey: string }>,
@@ -35,148 +58,68 @@ export class LLMServiceFactory {
 
         return tracer.startActiveSpan("initializeProviders", async (span) => {
             try {
-                await this.doInitializeProviders(providerConfigs, options, span);
+                this.enableTenexTools = options?.enableTenexTools !== false;
+
+                // Convert to ProviderInitConfig format
+                const configs: Record<string, ProviderInitConfig> = {};
+                for (const [name, config] of Object.entries(providerConfigs)) {
+                    if (config?.apiKey) {
+                        configs[name] = {
+                            apiKey: config.apiKey,
+                            options: {
+                                enableTenexTools: this.enableTenexTools,
+                            },
+                        };
+                    }
+                }
+
+                // Also ensure agent providers are initialized (they don't need API keys)
+                // Add them with empty configs if not already present
+                const agentProviders = ["claudeCode", "codexCli", "gemini-cli"];
+                for (const providerId of agentProviders) {
+                    if (!configs[providerId]) {
+                        configs[providerId] = {
+                            options: {
+                                enableTenexTools: this.enableTenexTools,
+                            },
+                        };
+                    }
+                }
+
+                // Initialize through the registry
+                const results = await providerRegistry.initialize(configs, options);
+
+                // Log initialization results
+                const successful = results.filter(r => r.success).map(r => r.providerId);
+                const failed = results.filter(r => !r.success);
+
+                if (successful.length > 0) {
+                    span.addEvent("llm_factory.providers_initialized", {
+                        "providers.count": successful.length,
+                        "providers.names": successful.join(", "),
+                    });
+                }
+
+                if (failed.length > 0) {
+                    for (const f of failed) {
+                        logger.error(`[LLMServiceFactory] Failed to initialize provider ${f.providerId}`, {
+                            error: f.error,
+                        });
+                    }
+                }
+
+                this.initialized = true;
             } finally {
                 span.end();
             }
         });
     }
 
-    private async doInitializeProviders(
-        providerConfigs: Record<string, { apiKey: string }>,
-        options: { enableTenexTools?: boolean } | undefined,
-        span: Span
-    ): Promise<void> {
-        this.providers.clear();
-        this.enableTenexTools = options?.enableTenexTools !== false; // Default to true
-
-        // Check if mock mode is enabled
-        if (process.env.USE_MOCK_LLM === "true") {
-            span.addEvent("llm_factory.mock_mode_enabled");
-
-            // Dynamically import MockProvider only when needed to avoid loading test dependencies
-            try {
-                const { createMockProvider } = await import("./providers/MockProvider");
-                this.providers.set("mock", createMockProvider());
-            } catch (error) {
-                logger.error("[LLMServiceFactory] Failed to load MockProvider:", error);
-                throw new Error(
-                    "Mock mode is enabled but MockProvider could not be loaded. Make sure test dependencies are installed."
-                );
-            }
-
-            // In mock mode, we only use the mock provider
-            // Other providers can still be initialized but won't be used by default
-        }
-
-        for (const [name, config] of Object.entries(providerConfigs)) {
-            if (!config?.apiKey) {
-                continue;
-            }
-
-            try {
-                switch (name) {
-                    case "openrouter":
-                        this.providers.set(
-                            name,
-                            createOpenRouter({
-                                apiKey: config.apiKey,
-                                headers: {
-                                    "X-Title": "TENEX",
-                                    "HTTP-Referer": "https://tenex.chat/",
-                                },
-                            })
-                        );
-                        break;
-
-                    case "anthropic":
-                        this.providers.set(
-                            name,
-                            createAnthropic({
-                                apiKey: config.apiKey,
-                            })
-                        );
-                        break;
-
-                    case "openai":
-                        this.providers.set(
-                            name,
-                            createOpenAI({
-                                apiKey: config.apiKey,
-                            })
-                        );
-                        break;
-
-                    case "ollama": {
-                        // For Ollama, apiKey is actually the base URL
-                        // The library expects the URL to include /api path
-                        let baseURL: string | undefined;
-                        if (config.apiKey === "local") {
-                            // Use default (library provides http://127.0.0.1:11434/api)
-                            baseURL = undefined;
-                        } else {
-                            // Custom URL - ensure it ends with /api
-                            baseURL = config.apiKey.endsWith("/api")
-                                ? config.apiKey
-                                : `${config.apiKey.replace(/\/$/, "")}/api`;
-                        }
-
-                        // Create Ollama provider with custom base URL if provided
-                        const ollamaProvider = createOllama(baseURL ? { baseURL } : undefined);
-
-                        this.providers.set(name, ollamaProvider as any);
-                        break;
-                    }
-
-                    case "gemini-cli": {
-                        this.providers.set(
-                            name,
-                            createGeminiProvider({ authType: "oauth-personal" }) as any
-                        );
-                        break;
-                    }
-
-                    case "claudeCode": {
-                        // Claude Code is always available, no initialization needed
-                        break;
-                    }
-
-                    case "codexCli": {
-                        // Codex CLI is always available (uses local codex CLI), no initialization needed
-                        break;
-                    }
-
-                    default:
-                        logger.warn(`[LLMServiceFactory] Unknown provider type: ${name}`);
-                }
-            } catch (error) {
-                logger.error(`[LLMServiceFactory] Failed to initialize provider ${name}`, {
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-        }
-
-        // Create the provider registry with all configured providers
-        if (this.providers.size > 0) {
-            const providerObject = Object.fromEntries(this.providers.entries());
-            this.registry = createProviderRegistry(providerObject);
-            span.addEvent("llm_factory.registry_created", {
-                "providers.count": this.providers.size,
-                "providers.names": Array.from(this.providers.keys()).join(", "),
-            });
-        } else {
-            logger.warn("[LLMServiceFactory] No providers were successfully initialized");
-            // Create an empty registry to avoid null checks everywhere
-            this.registry = createProviderRegistry({});
-        }
-
-        this.initialized = true;
-    }
-
     /**
      * Create an LLM service from a resolved configuration
+     *
      * @param config LLM configuration
-     * @param context Optional runtime context for Claude Code
+     * @param context Optional runtime context for agents
      */
     createService(
         config: LLMConfiguration,
@@ -197,188 +140,51 @@ export class LLMServiceFactory {
             ? context.agentName.toLowerCase().replace(/\s+/g, "-")
             : undefined;
 
-        // If mock mode is enabled, always use mock provider regardless of config
+        // Determine the actual provider (mock mode handling)
         const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
 
-        // Handle Claude Code provider specially
-        if (actualProvider === "claudeCode") {
-            // Extract tool names from the provided tools
-            const toolNames = context?.tools ? Object.keys(context.tools) : [];
-            const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
+        // Build the runtime context for the provider
+        const runtimeContext: ProviderRuntimeContext = {
+            tools: context?.tools,
+            agentName: context?.agentName,
+            sessionId: context?.sessionId,
+            workingDirectory: context?.workingDirectory,
+            enableTenexTools: this.enableTenexTools,
+        };
 
-            trace.getActiveSpan()?.addEvent("llm_factory.creating_claude_code", {
-                "agent.name": context?.agentName ?? "",
-                "agent.slug": agentSlug ?? "",
-                "session.id": context?.sessionId ?? "",
-                "tools.count": regularTools.length,
-                "tenex_tools.enabled": this.enableTenexTools,
-            });
+        // Get the provider from the registry
+        const provider = providerRegistry.getProvider(actualProvider);
 
-            // Create SDK MCP server for local TENEX tools if enabled and tools exist
-            const tenexSdkServer =
-                this.enableTenexTools && regularTools.length > 0 && context?.tools
-                    ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
-                    : undefined;
-
-            // Build mcpServers configuration
-            const mcpServersConfig: Record<string, any> = {};
-
-            // Add TENEX tools wrapper if enabled
-            if (tenexSdkServer) {
-                mcpServersConfig.tenex = tenexSdkServer;
-            }
-
-            // Add TENEX's MCP servers from config
-            // Load MCP config and convert TENEX MCP servers to Claude Code format
-            const mcpConfig = configService.getMCP();
-            if (mcpConfig.enabled && mcpConfig.servers) {
-                for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
-                    // Convert TENEX's MCPServerConfig to Claude Code's McpStdioServerConfig
-                    mcpServersConfig[serverName] = {
-                        type: "stdio" as const,
-                        command: serverConfig.command,
-                        args: serverConfig.args,
-                        env: serverConfig.env,
-                    };
-                }
-
-                trace.getActiveSpan()?.addEvent("llm_factory.mcp_servers_added", {
-                    "mcp.server_count": Object.keys(mcpConfig.servers).length,
-                    "mcp.servers": Object.keys(mcpConfig.servers).join(", "),
-                });
-            }
-
-            // Create Claude Code provider with runtime configuration
-            // IMPORTANT: Always pass mcpServers and allowedTools explicitly (even if empty)
-            // to override any old session state that might have TENEX tools registered
-            const defaultSettings: ClaudeCodeSettings = {
-                permissionMode: "bypassPermissions",
-                verbose: true,
-                cwd: context?.workingDirectory,
-                mcpServers: mcpServersConfig,
-                disallowedTools: [],
-                logger: {
-                    warn: (message: string) => logger.warn("[ClaudeCode]", message),
-                    error: (message: string) => logger.error("[ClaudeCode]", message),
-                    info: (message: string) => logger.info("[ClaudeCode]", message),
-                    debug: (message: string) => logger.debug("[ClaudeCode]", message),
-                },
-            };
-
-            const providerFunction = createClaudeCode({
-                defaultSettings,
-            });
-
-            return new LLMService(
-                null,
-                "claudeCode",
-                config.model,
-                config.temperature,
-                config.maxTokens,
-                providerFunction,
-                context?.sessionId,
-                agentSlug
-            );
-        }
-
-        // Handle Codex CLI provider specially (similar to Claude Code)
-        if (actualProvider === "codexCli") {
-            // Extract tool names from the provided tools
-            const toolNames = context?.tools ? Object.keys(context.tools) : [];
-            const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
-
-            trace.getActiveSpan()?.addEvent("llm_factory.creating_codex_cli", {
-                "agent.name": context?.agentName ?? "",
-                "agent.slug": agentSlug ?? "",
-                "session.id": context?.sessionId ?? "",
-                "tools.count": regularTools.length,
-                "tenex_tools.enabled": this.enableTenexTools,
-            });
-
-            // Create SDK MCP server for local TENEX tools if enabled and tools exist
-            const tenexSdkServer =
-                this.enableTenexTools && regularTools.length > 0 && context?.tools
-                    ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
-                    : undefined;
-
-            // Build mcpServers configuration
-            const mcpServersConfig: Record<string, any> = {};
-
-            // Add TENEX tools wrapper if enabled
-            if (tenexSdkServer) {
-                mcpServersConfig.tenex = tenexSdkServer;
-            }
-
-            // Add TENEX's MCP servers from config
-            const mcpConfig = configService.getMCP();
-            if (mcpConfig.enabled && mcpConfig.servers) {
-                for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
-                    // Convert TENEX's MCPServerConfig to Codex CLI's MCP server config
-                    mcpServersConfig[serverName] = {
-                        transport: "stdio" as const,
-                        command: serverConfig.command,
-                        args: serverConfig.args,
-                        env: serverConfig.env,
-                    };
-                }
-
-                trace.getActiveSpan()?.addEvent("llm_factory.codex_mcp_servers_added", {
-                    "mcp.server_count": Object.keys(mcpConfig.servers).length,
-                    "mcp.servers": Object.keys(mcpConfig.servers).join(", "),
-                });
-            }
-
-            // Create Codex CLI provider with runtime configuration
-            const defaultSettings: CodexCliSettings = {
-                allowNpx: true,
-                skipGitRepoCheck: true,
-                cwd: context?.workingDirectory,
-                mcpServers: mcpServersConfig,
-                approvalMode: "on-failure",
-                sandboxMode: "workspace-write",
-                verbose: true,
-                logger: {
-                    warn: (message: string) => logger.warn("[CodexCli]", message),
-                    error: (message: string) => logger.error("[CodexCli]", message),
-                    info: (message: string) => logger.info("[CodexCli]", message),
-                    debug: (message: string) => logger.debug("[CodexCli]", message),
-                },
-            };
-
-            const providerFunction = createCodexCli({
-                defaultSettings,
-            });
-
-            // Type assertion: CodexCliProvider is compatible with the expected function type
-            // Both return LanguageModel-compatible types (LanguageModelV3 extends LanguageModel)
-            return new LLMService(
-                null,
-                "codexCli",
-                config.model,
-                config.temperature,
-                config.maxTokens,
-                providerFunction as unknown as typeof providerFunction & ((model: string, options?: ClaudeCodeSettings) => LanguageModel),
-                context?.sessionId,
-                agentSlug
-            );
-        }
-
-        // For standard providers, check if provider is available
-        if (!this.providers.has(actualProvider)) {
-            const available = Array.from(this.providers.keys());
+        if (!provider) {
+            const available = providerRegistry.getAvailableProviders().map(p => p.id);
             throw new Error(
                 `Provider "${actualProvider}" not available. ` +
-                    `Initialized providers: ${available.length > 0 ? available.join(", ") : "none"}`
+                `Initialized providers: ${available.length > 0 ? available.join(", ") : "none"}`
             );
         }
 
-        // Return standard LLMService with registry
-        if (!this.registry) {
-            throw new Error("Provider registry not initialized");
+        // Create the model from the provider
+        const modelResult = provider.createModel(config.model, runtimeContext);
+
+        // For agent providers (claudeCode, codexCli), use their provider function
+        if (modelResult.bypassRegistry && modelResult.providerFunction) {
+            return new LLMService(
+                null,
+                actualProvider,
+                config.model,
+                config.temperature,
+                config.maxTokens,
+                modelResult.providerFunction as (model: string, options?: ClaudeCodeSettings) => LanguageModel,
+                context?.sessionId,
+                agentSlug
+            );
         }
 
+        // For standard providers, use the AI SDK registry
+        const registry = providerRegistry.getAiSdkRegistry();
+
         return new LLMService(
-            this.registry,
+            registry,
             actualProvider,
             config.model,
             config.temperature,
@@ -393,35 +199,45 @@ export class LLMServiceFactory {
      * Check if a provider is available
      */
     hasProvider(providerName: string): boolean {
-        // Check standard providers, Claude Code, Gemini CLI, or Codex CLI (all always available)
-        return (
-            this.providers.has(providerName) ||
-            providerName === "claudeCode" ||
-            providerName === "gemini-cli" ||
-            providerName === "codexCli"
-        );
+        return providerRegistry.hasProvider(providerName);
     }
 
     /**
-     * Get the provider registry
+     * Get the AI SDK provider registry
      * Useful for direct access to language models
      */
-    getRegistry(): ReturnType<typeof createProviderRegistry> {
-        if (!this.registry) {
+    // biome-ignore lint/suspicious/noExplicitAny: AI SDK registry types are complex
+    getRegistry(): ProviderRegistryProvider<any, any> {
+        if (!this.initialized) {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }
-        return this.registry;
+        return providerRegistry.getAiSdkRegistry();
+    }
+
+    /**
+     * Get list of available providers
+     */
+    getAvailableProviders(): string[] {
+        return providerRegistry.getAvailableProviders().map(p => p.id);
+    }
+
+    /**
+     * Get list of all registered providers (even if not initialized)
+     */
+    getRegisteredProviders(): string[] {
+        return providerRegistry.getRegisteredProviders().map(p => p.id);
     }
 
     /**
      * Reset the factory (mainly for testing)
      */
     reset(): void {
-        this.providers.clear();
-        this.registry = null;
+        providerRegistry.reset();
         this.initialized = false;
     }
 }
 
-// Export singleton instance
+/**
+ * Export singleton instance
+ */
 export const llmServiceFactory = new LLMServiceFactory();
