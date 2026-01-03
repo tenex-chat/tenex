@@ -47,7 +47,7 @@ export type ToolName =
     | "rag_subscription_list"
     | "rag_subscription_get"
     | "rag_subscription_delete"
-    | "search_conversations"
+    | "conversation_search"
     | "bug_list"
     | "bug_report_create"
     | "bug_report_add"
