@@ -79,15 +79,16 @@ export type { ExecutionContext };
 
 /**
  * AI SDK supported providers
+ * Note: Provider IDs use kebab-case consistently
  */
 export const AI_SDK_PROVIDERS = [
     "openrouter",
     "anthropic",
     "openai",
     "ollama",
-    "claudeCode",
+    "claude-code",
     "gemini-cli",
-    "codexCli",
+    "codex-cli",
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 
