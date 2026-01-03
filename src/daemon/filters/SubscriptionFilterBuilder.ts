@@ -81,7 +81,8 @@ export class SubscriptionFilterBuilder {
 
     /**
      * Build filter for events tagging known projects via A-tags
-     * Only kind:1 (conversations) and kind:24000 (boot requests) can boot projects
+     * Receives all events tagged to our projects - the Daemon decides
+     * which events can boot a cold project vs which require a running one
      * @param knownProjects - Set of project IDs (format: "31933:authorPubkey:dTag")
      * @returns NDKFilter for project-tagged events or null if no projects
      */
@@ -91,7 +92,6 @@ export class SubscriptionFilterBuilder {
         }
 
         return {
-            kinds: [NDKKind.Text, NDKKind.TenexBootProject], // Only conversations and boot requests
             "#a": Array.from(knownProjects),
             limit: 0, // Continuous subscription
         };
@@ -99,7 +99,8 @@ export class SubscriptionFilterBuilder {
 
     /**
      * Build filter for events mentioning agents via P-tags
-     * Only kind:1 (conversations) should route to agents
+     * Receives all events mentioning our agents - the Daemon decides
+     * which events can boot a cold project vs which require a running one
      * @param agentPubkeys - Set of agent pubkeys to monitor
      * @returns NDKFilter for agent mentions or null if no agents
      */
@@ -109,7 +110,6 @@ export class SubscriptionFilterBuilder {
         }
 
         return {
-            kinds: [NDKKind.Text], // Only conversations
             "#p": Array.from(agentPubkeys),
             limit: 0, // Continuous subscription
         };
