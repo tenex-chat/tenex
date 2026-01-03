@@ -1,3 +1,4 @@
+import { config as configService } from "@/services/ConfigService";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -28,24 +29,27 @@ export class ConfigurationTester {
             },
         ]);
 
-        const config = llmsConfig.configurations[name];
+        const llmConfig = llmsConfig.configurations[name];
         console.log(chalk.yellow(`\nTesting configuration "${name}"...`));
-        console.log(chalk.gray(`Provider: ${config.provider}, Model: ${config.model}`));
+        console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
 
         try {
+            // Load full config (needed for MCP server configs in claudeCode/codexCli providers)
+            await configService.loadConfig();
+
             // Initialize providers before testing
             await llmServiceFactory.initializeProviders(llmsConfig.providers);
 
             // Create the service using the factory
-            const service = llmServiceFactory.createService(config);
+            const service = llmServiceFactory.createService(llmConfig);
 
             console.log(chalk.cyan("📡 Sending test message..."));
             const result = await service.complete(
                 [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
                 {},
                 {
-                    temperature: config.temperature,
-                    maxTokens: config.maxTokens,
+                    temperature: llmConfig.temperature,
+                    maxTokens: llmConfig.maxTokens,
                 }
             );
 
@@ -77,7 +81,7 @@ export class ConfigurationTester {
             if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
                 console.log(chalk.yellow("\n💡 Invalid or expired API key"));
             } else if (errorMessage?.includes("404")) {
-                console.log(chalk.yellow(`\n💡 Model '${config.model}' may not be available`));
+                console.log(chalk.yellow(`\n💡 Model '${llmConfig.model}' may not be available`));
             } else if (errorMessage?.includes("rate limit")) {
                 console.log(chalk.yellow("\n💡 Rate limit hit. Please wait and try again"));
             }
@@ -90,14 +94,14 @@ export class ConfigurationTester {
      * Test a configuration for summarization using generateObject
      */
     static async testSummarization(llmsConfig: TenexLLMs, configName: string): Promise<void> {
-        const config = llmsConfig.configurations[configName];
-        if (!config) {
+        const llmConfig = llmsConfig.configurations[configName];
+        if (!llmConfig) {
             console.log(chalk.red(`❌ Configuration "${configName}" not found`));
             return;
         }
 
         console.log(chalk.yellow(`\nTesting summarization with "${configName}"...`));
-        console.log(chalk.gray(`Provider: ${config.provider}, Model: ${config.model}`));
+        console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
 
         // Schema that mimics what we'd use for kind 513 summaries
         const SummarySchema = z.object({
@@ -107,11 +111,14 @@ export class ConfigurationTester {
         });
 
         try {
+            // Load full config (needed for MCP server configs in claudeCode/codexCli providers)
+            await configService.loadConfig();
+
             // Initialize providers before testing
             await llmServiceFactory.initializeProviders(llmsConfig.providers);
 
             // Create the service using the factory
-            const service = llmServiceFactory.createService(config);
+            const service = llmServiceFactory.createService(llmConfig);
 
             console.log(chalk.cyan("📡 Testing generateObject..."));
 
@@ -165,7 +172,7 @@ Assistant: Great choice. OAuth is secure and user-friendly. Let me outline the s
             if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
                 console.log(chalk.yellow("\n💡 Invalid or expired API key"));
             } else if (errorMessage?.includes("404")) {
-                console.log(chalk.yellow(`\n💡 Model '${config.model}' may not be available`));
+                console.log(chalk.yellow(`\n💡 Model '${llmConfig.model}' may not be available`));
             } else if (errorMessage?.includes("rate limit")) {
                 console.log(chalk.yellow("\n💡 Rate limit hit. Please wait and try again"));
             } else if (
