@@ -78,6 +78,7 @@ export class ClaudeCodeProvider extends AgentProvider {
             "session.id": context.sessionId ?? "",
             "tools.count": regularTools.length,
             "tenex_tools.enabled": this.enableTenexTools,
+            "cwd.from_context": context.workingDirectory ?? "(undefined)",
         });
 
         // Create SDK MCP server for local TENEX tools if enabled
@@ -119,6 +120,10 @@ export class ClaudeCodeProvider extends AgentProvider {
             permissionMode: "bypassPermissions",
             verbose: true,
             cwd: context.workingDirectory,
+            // Ensure Bash tool uses the project working directory, not the session's stored cwd
+            env: {
+                CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
+            },
             mcpServers: mcpServersConfig,
             disallowedTools: [],
             logger: {

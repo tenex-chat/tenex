@@ -120,6 +120,8 @@ export interface ProviderModelResult {
     providerFunction?: (model: string, options?: unknown) => LanguageModel;
     /** Whether this provider bypasses the standard registry */
     bypassRegistry: boolean;
+    /** Agent settings (cwd, env, mcpServers, etc.) for agent providers */
+    agentSettings?: unknown;
 }
 
 /**

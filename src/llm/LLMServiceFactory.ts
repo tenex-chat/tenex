@@ -171,6 +171,7 @@ export class LLMServiceFactory {
                 config.temperature,
                 config.maxTokens,
                 modelResult.providerFunction as (model: string, options?: ClaudeCodeSettings) => LanguageModel,
+                modelResult.agentSettings as ClaudeCodeSettings,
                 context?.sessionId,
                 agentSlug
             );
@@ -185,6 +186,7 @@ export class LLMServiceFactory {
             config.model,
             config.temperature,
             config.maxTokens,
+            undefined,
             undefined,
             context?.sessionId,
             agentSlug
