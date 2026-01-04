@@ -175,9 +175,33 @@ export class EventHandler {
 
         // Only update if we know this conversation
         if (ConversationStore.has(conversationId)) {
+            // Collect metadata updates from tags
+            const updates: Record<string, string | undefined> = {};
+
             const title = metadata.title;
             if (title) {
-                ConversationStore.setConversationTitle(conversationId, title);
+                updates.title = title;
+            }
+
+            // Parse status-label tag
+            const statusLabelTag = event.tags.find((tag: string[]) => tag[0] === "status-label");
+            if (statusLabelTag && statusLabelTag[1]) {
+                updates.statusLabel = statusLabelTag[1];
+            }
+
+            // Parse status-current-activity tag
+            const statusActivityTag = event.tags.find((tag: string[]) => tag[0] === "status-current-activity");
+            if (statusActivityTag && statusActivityTag[1]) {
+                updates.statusCurrentActivity = statusActivityTag[1];
+            }
+
+            // Apply all updates at once
+            if (Object.keys(updates).length > 0) {
+                await ConversationStore.updateConversationMetadata(conversationId, updates);
+                logger.debug("Updated conversation metadata", {
+                    conversationId: conversationId.substring(0, 8),
+                    updates: Object.keys(updates),
+                });
             }
         }
     }
