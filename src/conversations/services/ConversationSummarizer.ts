@@ -55,9 +55,9 @@ export class ConversationSummarizer {
                     {
                         role: "system",
                         content: `You are a helpful assistant that generates concise titles, summaries, and status information for technical conversations.
-Generate a title (5-10 words) that captures the main topic or goal.
+Generate a title (~5 words) that captures the main topic or goal.
 Generate a summary (2-3 sentences) highlighting key decisions, progress, and current status.
-Generate a status_label that concisely describes the overall status (e.g., "In Progress", "Blocked", "Completed", "Planning").
+Generate a status_label that concisely describes the overall status (e.g., "Researching", "In Progress", "Blocked", "Completed", "Planning"). You are not limited to these examples—choose the most appropriate label.
 Generate a status_current_activity that describes what is currently being done or what comes next (e.g., "Waiting for approval", "Implementing feature X", "Debugging issue").
 Focus on what was accomplished or discussed, not on the process.`,
                     },
