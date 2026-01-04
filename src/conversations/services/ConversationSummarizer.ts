@@ -49,19 +49,21 @@ export class ConversationSummarizer {
                 return;
             }
 
-            // Generate title and summary
+            // Generate title, summary, and status information
             const { object: result } = await llmService.generateObject(
                 [
                     {
                         role: "system",
-                        content: `You are a helpful assistant that generates concise titles and summaries for technical conversations.
+                        content: `You are a helpful assistant that generates concise titles, summaries, and status information for technical conversations.
 Generate a title (5-10 words) that captures the main topic or goal.
 Generate a summary (2-3 sentences) highlighting key decisions, progress, and current status.
+Generate a status_label that concisely describes the overall status (e.g., "In Progress", "Blocked", "Completed", "Planning").
+Generate a status_current_activity that describes what is currently being done or what comes next (e.g., "Waiting for approval", "Implementing feature X", "Debugging issue").
 Focus on what was accomplished or discussed, not on the process.`,
                     },
                     {
                         role: "user",
-                        content: `Please generate a title and summary for this conversation:\n\n${conversationContent}`,
+                        content: `Please generate a title, summary, and status information for this conversation:\n\n${conversationContent}`,
                     },
                 ],
                 z.object({
@@ -69,6 +71,12 @@ Focus on what was accomplished or discussed, not on the process.`,
                     summary: z
                         .string()
                         .describe("A 2-3 sentence summary of key points and progress"),
+                    status_label: z
+                        .string()
+                        .describe("A concise status label (e.g., 'In Progress', 'Blocked', 'Completed')"),
+                    status_current_activity: z
+                        .string()
+                        .describe("Description of current activity or what comes next"),
                 })
             );
 
@@ -84,6 +92,12 @@ Focus on what was accomplished or discussed, not on the process.`,
             }
             if (result.summary) {
                 event.tags.push(["summary", result.summary]);
+            }
+            if (result.status_label) {
+                event.tags.push(["status-label", result.status_label]);
+            }
+            if (result.status_current_activity) {
+                event.tags.push(["status-current-activity", result.status_current_activity]);
             }
             event.tags.push(["a", this.context.project.tagId()]); // Project reference
             event.tags.push(["model", summarizationConfig.model]);
