@@ -4,7 +4,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
 
 /**
@@ -116,7 +116,7 @@ export class AgentEventEncoder {
      * Forward branch tag from triggering event to reply event.
      * Ensures agents carry forward the branch context from the message they're replying to.
      */
-    private forwardBranchTag(event: NDKEvent, context: EventContext): void {
+    public forwardBranchTag(event: NDKEvent, context: EventContext): void {
         const branchTag = context.triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
         if (branchTag) {
             event.tag(["branch", branchTag[1]]);
@@ -422,34 +422,6 @@ export class AgentEventEncoder {
     pTagProjectOwner(event: NDKEvent): undefined {
         const projectCtx = getProjectContext();
         event.tag(["p", projectCtx.project.pubkey]);
-    }
-
-    /**
-     * Encode a task creation with proper conversation tagging.
-     * Creates an NDKTask that references the triggering event.
-     */
-    encodeTask(
-        title: string,
-        content: string,
-        context: EventContext,
-        claudeSessionId?: string
-    ): NDKTask {
-        const task = new NDKTask(getNDK());
-        task.title = title;
-        task.content = content;
-
-        // Add conversation tags (E, K, P for root, e for triggering)
-        this.addConversationTags(task, context);
-
-        // Add session ID if provided
-        if (claudeSessionId) {
-            task.tags.push(["claude-session", claudeSessionId]);
-        }
-
-        // Add standard metadata tags (project, phase, etc)
-        this.addStandardTags(task, context);
-
-        return task;
     }
 
     /**

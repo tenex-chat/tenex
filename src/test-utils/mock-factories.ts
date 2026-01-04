@@ -161,8 +161,6 @@ export function createMockExecutionContext(
         thinking: async () => mockEvent,
         typing: async () => {},
         conversation: async () => mockEvent,
-        task: async () => mockEvent,
-        createTask: async () => mockEvent,
         lesson: async () => mockEvent,
     };
 

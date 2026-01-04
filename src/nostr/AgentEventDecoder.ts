@@ -1,7 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services/projects";
-import { type NDKEvent, NDKTask } from "@nostr-dev-kit/ndk";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * AgentEventDecoder - Utilities for decoding and analyzing Nostr events
@@ -40,21 +40,6 @@ export class AgentEventDecoder {
     static isEventFromAgent(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
         const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
         return agentPubkeys.has(event.pubkey);
-    }
-
-    /**
-     * Check if this is a task completion event (for NDKTask kind:1934)
-     */
-    static isTaskCompletionEvent(event: NDKEvent): boolean {
-        // Only for actual NDKTask completions, not delegations
-        if (
-            event.tagValue("K") === NDKTask.kind.toString() &&
-            event.tagValue("P") === event.tagValue("p")
-        ) {
-            return true;
-        }
-
-        return false;
     }
 
     /**
