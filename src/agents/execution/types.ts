@@ -72,5 +72,5 @@ export interface StandaloneAgentContext {
  * - 'error-handled': Stream error occurred and was already published to user
  */
 export type StreamExecutionResult =
-    | { kind: "complete"; event: CompleteEvent }
+    | { kind: "complete"; event: CompleteEvent; aborted?: boolean }
     | { kind: "error-handled" };

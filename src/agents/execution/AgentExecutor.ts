@@ -104,6 +104,8 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
+        const executeStart = Date.now();
+        console.log(`[${executeStart}] AgentExecutor.execute START for ${context.agent.slug}`);
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
                 "agent.slug": context.agent.slug,
@@ -176,10 +178,14 @@ export class AgentExecutor {
                     });
                 } else {
                     // Create a new RAL for this execution
+                    // Pass trace context so stop events can be correlated
+                    const spanContext = span.spanContext();
+                    console.log(`[RAL] Creating with trace context: traceId=${spanContext.traceId?.substring(0, 8)} spanId=${spanContext.spanId?.substring(0, 8)}`);
                     ralNumber = ralRegistry.create(
                         context.agent.pubkey,
                         context.conversationId,
-                        context.triggeringEvent.id
+                        context.triggeringEvent.id,
+                        { traceId: spanContext.traceId, spanId: spanContext.spanId }
                     );
                 }
 
@@ -416,6 +422,25 @@ export class AgentExecutor {
             return undefined;
         }
 
+        // Execution was aborted by stop signal - publish stopped message, skip supervision
+        if (result.aborted) {
+            const agentPublisher = context.agentPublisher;
+            if (!agentPublisher) {
+                throw new Error("AgentPublisher not found in execution context");
+            }
+            const eventContext = createEventContext(context);
+            const responseEvent = await agentPublisher.complete(
+                { content: "Manually stopped by user" },
+                eventContext
+            );
+            console.log(chalk.yellow(`\n🛑 ${context.agent.slug} (RAL #${ralNumber}) manually stopped`));
+
+            // Add event to conversation history
+            await ConversationStore.addEvent(context.conversationId, responseEvent);
+
+            return responseEvent;
+        }
+
         const completionEvent = result.event;
 
         // Determine if we should wait for more delegations
@@ -621,8 +646,12 @@ export class AgentExecutor {
         toolTracker: ToolExecutionTracker,
         ralNumber: number
     ): Promise<StreamExecutionResult> {
+        const streamStart = Date.now();
+        console.log(`[${streamStart}] executeStreaming START`);
+
         const toolNames = context.agent.tools || [];
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms tools object built`);
 
         // Store reference to active tools in context for dynamic tool injection
         // This allows create_dynamic_tool to add new tools mid-stream
@@ -630,6 +659,7 @@ export class AgentExecutor {
 
         const sessionManager = new SessionManager(context.agent, context.conversationId);
         const { sessionId } = sessionManager.getSession();
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms session manager ready`);
 
         const ralRegistry = RALRegistry.getInstance();
         const conversationStore = context.conversationStore;
@@ -643,10 +673,12 @@ export class AgentExecutor {
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
         // Build conversation messages from ConversationStore (single source of truth)
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildMessagesForRal START`);
         const conversationMessages = await conversationStore.buildMessagesForRal(
             context.agent.pubkey,
             ralNumber
         );
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildMessagesForRal DONE (${conversationMessages.length} messages)`);
 
         // Build system prompt with agent identity, context, and instructions
         const projectContext = getProjectContext();
@@ -655,6 +687,7 @@ export class AgentExecutor {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildSystemPromptMessages START`);
         const systemPromptMessages = await buildSystemPromptMessages({
             agent: context.agent,
             project: projectContext.project,
@@ -665,6 +698,7 @@ export class AgentExecutor {
             availableAgents: Array.from(projectContext.agents.values()),
             mcpManager: projectContext.mcpManager,
         });
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildSystemPromptMessages DONE`);
 
         // Combine system prompt with conversation messages
         const messages: ModelMessage[] = [
@@ -724,9 +758,12 @@ export class AgentExecutor {
             "conversation.count": conversationMessages.length,
         });
 
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms registerOperation START`);
         const abortSignal = llmOpsRegistry.registerOperation(context);
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms registerOperation DONE (abort signal ready)`);
 
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
+        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms LLM service created`);
 
         const agentPublisher = context.agentPublisher;
         if (!agentPublisher) {
@@ -1224,6 +1261,12 @@ export class AgentExecutor {
         if (!result) {
             throw new Error("LLM stream completed without emitting complete or stream-error event");
         }
+
+        // Set aborted flag if stop signal was triggered
+        if (result.kind === "complete") {
+            result.aborted = abortSignal.aborted;
+        }
+
         return result;
     }
 }
