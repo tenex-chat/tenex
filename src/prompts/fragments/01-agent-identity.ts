@@ -43,6 +43,7 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
         const contextLines = [
             "## Project Context",
             `- Title: "${projectTitle}"`,
+            `- Today's Date: ${new Date().toISOString().split("T")[0]}`,
         ];
         if (workingDirectory) {
             contextLines.push(`- Absolute Path: ${workingDirectory}`);

@@ -8,7 +8,6 @@ import {
     NDKEvent,
     NDKPrivateKeySigner,
     type NDKProject,
-    type NDKTask,
 } from "@nostr-dev-kit/ndk";
 import {
     AgentEventEncoder,
@@ -147,13 +146,16 @@ export class AgentPublisher {
     /**
      * Publish a delegation event
      */
-    async delegate(params: {
-        recipient: string;
-        content: string;
-        phase?: string;
-        phaseInstructions?: string;
-        branch?: string;
-    }): Promise<string> {
+    async delegate(
+        params: {
+            recipient: string;
+            content: string;
+            phase?: string;
+            phaseInstructions?: string;
+            branch?: string;
+        },
+        context: EventContext
+    ): Promise<string> {
         // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const ndk = getNDK();
@@ -166,9 +168,6 @@ export class AgentPublisher {
 
         // No e-tag: delegation events start separate conversations
 
-        // Add project a-tag (required for event routing)
-        this.encoder.aTagProject(event);
-
         // Add phase tags if present
         if (params.phase) {
             event.tags.push(["phase", params.phase]);
@@ -178,6 +177,14 @@ export class AgentPublisher {
         }
         if (params.branch) {
             event.tags.push(["branch", params.branch]);
+        }
+
+        // Add standard metadata (project tag, model, cost, execution time, etc)
+        this.encoder.addStandardTags(event, context);
+
+        // Forward branch tag from triggering event if not explicitly set
+        if (!params.branch) {
+            this.encoder.forwardBranchTag(event, context);
         }
 
         injectTraceContext(event);
@@ -236,12 +243,15 @@ export class AgentPublisher {
     /**
      * Publish a delegation follow-up event
      */
-    async delegateFollowup(params: {
-        recipient: string;
-        content: string;
-        delegationEventId: string;
-        replyToEventId?: string;
-    }): Promise<string> {
+    async delegateFollowup(
+        params: {
+            recipient: string;
+            content: string;
+            delegationEventId: string;
+            replyToEventId?: string;
+        },
+        context: EventContext
+    ): Promise<string> {
         // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const ndk = getNDK();
@@ -255,13 +265,16 @@ export class AgentPublisher {
         // Add reference to the original delegation event
         event.tags.push(["e", params.delegationEventId]);
 
-        // Add project a-tag (required for event routing)
-        this.encoder.aTagProject(event);
-
         // Reply to specific response event if provided (for threading)
         if (params.replyToEventId) {
             event.tags.push(["e", params.replyToEventId]);
         }
+
+        // Add standard metadata (project tag, model, cost, execution time, etc)
+        this.encoder.addStandardTags(event, context);
+
+        // Forward branch tag from triggering event
+        this.encoder.forwardBranchTag(event, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -315,58 +328,6 @@ export class AgentPublisher {
         await this.safePublish(event, `tool:${intent.toolName}`, parentContext);
 
         return event;
-    }
-
-    /**
-     * Create a task event that references the triggering event.
-     * Used for Claude Code and other task-based executions.
-     */
-    async createTask(
-        title: string,
-        content: string,
-        context: EventContext,
-        claudeSessionId?: string
-    ): Promise<NDKTask> {
-        // Capture context before async operations that may lose it
-        const parentContext = otelContext.active();
-        // Use encoder to create task with proper tagging
-        const task = this.encoder.encodeTask(title, content, context, claudeSessionId);
-
-        // Sign with agent's signer
-        injectTraceContext(task);
-        await this.agent.sign(task);
-        await this.safePublish(task, "task event", parentContext);
-
-        return task;
-    }
-
-    /**
-     * Publish a task update (progress or completion).
-     * Strips "p" tags to avoid notifications.
-     */
-    async publishTaskUpdate(
-        task: NDKTask,
-        content: string,
-        context: EventContext,
-        status = "in-progress"
-    ): Promise<NDKEvent> {
-        // Capture context before async operations that may lose it
-        const parentContext = otelContext.active();
-        const update = task.reply();
-        update.content = content;
-
-        // Strip all "p" tags (no notifications)
-        update.tags = update.tags.filter((t) => t[0] !== "p");
-
-        // Add standard tags using existing encoder methods
-        this.encoder.addStandardTags(update, context);
-
-        update.tag(["status", status]);
-        injectTraceContext(update);
-        await this.agent.sign(update);
-        await this.safePublish(update, "task update", parentContext);
-
-        return update;
     }
 
     // ===== Agent Creation Events (from src/agents/AgentPublisher.ts) =====
