@@ -24,7 +24,6 @@ import { worktreeContextFragment } from "./30-worktree-context";
 import { alphaModeFragment } from "./alpha-mode";
 import { concurrentRALContextFragment } from "./concurrent-ral-context";
 import { debugModeFragment } from "./debug-mode";
-import { delegatedTaskContextFragment } from "./delegated-task-context";
 import { delegationCompletionFragment } from "./delegation-completion";
 import { phaseTransitionFragment } from "./phase-transition";
 
@@ -39,7 +38,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(concurrentRALContextFragment);
-    fragmentRegistry.register(delegatedTaskContextFragment);
     fragmentRegistry.register(debugModeFragment);
     fragmentRegistry.register(delegationCompletionFragment);
     fragmentRegistry.register(phaseTransitionFragment);

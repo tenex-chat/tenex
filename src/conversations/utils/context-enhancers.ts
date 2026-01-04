@@ -225,18 +225,3 @@ export function addConcurrentRALContext(
     return true;
 }
 
-/**
- * Find the index of the triggering event (last user message) in the messages array.
- * This is used to track where the RAL's unique content starts.
- * @param messages - The messages array to search
- * @returns The index of the last user message, or messages.length - 1 if none found
- */
-export function findTriggeringEventIndex(messages: ModelMessage[]): number {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].role === "user") {
-            return i;
-        }
-    }
-    // Fallback to last message if no user message found
-    return messages.length - 1;
-}

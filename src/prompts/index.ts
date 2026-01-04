@@ -8,9 +8,6 @@ export type { FragmentConfig, PromptFragment } from "./core/types";
 // Priority 01 - Identity
 import "./fragments/01-agent-identity";
 
-// Priority 02 - Delegated task context (conditional)
-import "./fragments/delegated-task-context";
-
 // Priority 10 - Early context
 import "./fragments/10-referenced-article"; // Conditional
 
