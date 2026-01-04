@@ -50,6 +50,8 @@ export interface ConversationMetadata {
     plan?: string;
     projectPath?: string;
     last_user_message?: string;
+    statusLabel?: string;
+    statusCurrentActivity?: string;
     referencedArticle?: {
         title: string;
         content: string;

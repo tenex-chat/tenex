@@ -4,6 +4,7 @@ import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "../conversations/ConversationStore";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
+import { ConversationSummarizer } from "../conversations/services/ConversationSummarizer";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
@@ -241,4 +242,23 @@ async function handleReplyLogic(
     });
 
     await Promise.all(executionPromises);
+
+    // Trigger conversation summarization (with recursion prevention via event type check)
+    // This is placed AFTER agent execution to avoid triggering summarization during execution
+    // The summarizer will publish metadata events (kind 513), not text events (kind 1),
+    // so metadata events won't trigger this chat message handler again
+    if (!AgentEventDecoder.isAgentInternalMessage(event)) {
+        try {
+            const summarizer = new ConversationSummarizer(projectCtx);
+            await summarizer.summarizeAndPublish(conversation);
+            trace.getActiveSpan()?.addEvent("reply.summarization_triggered", {
+                "conversation.id": conversation.id,
+            });
+        } catch (error) {
+            logger.error("Failed to trigger conversation summarization", {
+                conversationId: conversation.id,
+                error: formatAnyError(error),
+            });
+        }
+    }
 }
