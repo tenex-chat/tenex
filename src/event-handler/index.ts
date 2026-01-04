@@ -12,7 +12,7 @@ import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
-import { trace } from "@opentelemetry/api";
+import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
 
 const IGNORED_EVENT_KINDS = [
     NDKKind.Metadata,
@@ -307,6 +307,7 @@ export class EventHandler {
         const { RALRegistry } = await import("../services/ral");
         const { AgentRouter } = await import("./AgentRouter");
         const projectCtx = getProjectContext();
+        const stopTracer = trace.getTracer("tenex.event-handler");
 
         // For each e-tag (conversation ID), block the p-tagged agents
         for (const [, conversationId] of eTags) {
@@ -328,10 +329,52 @@ export class EventHandler {
                     AgentRouter.processStopSignal(event, conversation, projectCtx);
                     agentsBlocked++;
 
-                    // Abort all running RALs for this agent
+                    // Get the RAL's trace context to parent the stop span under agent execution
                     const ralRegistry = RALRegistry.getInstance();
+                    const activeRals = ralRegistry.getActiveRALs(agentPubkey, conversationId);
+                    const targetRal = activeRals[0];
+
+                    console.log(`[STOP] RAL trace context: activeRals=${activeRals.length} traceId=${targetRal?.traceId?.substring(0, 8)} spanId=${targetRal?.executionSpanId?.substring(0, 8)}`);
+
+                    // Build parent context from stored trace info
+                    let parentContext = otelContext.active();
+                    if (targetRal?.traceId && targetRal?.executionSpanId) {
+                        // Create a parent span context from the stored trace info
+                        const parentSpanContext = {
+                            traceId: targetRal.traceId,
+                            spanId: targetRal.executionSpanId,
+                            traceFlags: TraceFlags.SAMPLED,
+                            isRemote: false,
+                        };
+                        parentContext = trace.setSpanContext(otelContext.active(), parentSpanContext);
+                    }
+
+                    // Create a span for the stop - parented under the agent execution
+                    const stopSpan = stopTracer.startSpan(
+                        "tenex.stop_command",
+                        {
+                            attributes: {
+                                "event.id": event.id,
+                                "event.kind": event.kind,
+                                "event.author": event.pubkey.substring(0, 8),
+                                "stop.agent_slug": agent.slug,
+                                "stop.agent_pubkey": agentPubkey.substring(0, 8),
+                                "stop.conversation_id": conversationId.substring(0, 8),
+                                "stop.active_rals": activeRals.length,
+                            },
+                        },
+                        parentContext
+                    );
+
+                    // Abort all running RALs for this agent
                     const aborted = ralRegistry.abortAllForAgent(agentPubkey, conversationId);
                     ralsAborted += aborted;
+
+                    stopSpan.setAttribute("stop.rals_aborted", aborted);
+                    stopSpan.end();
+
+                    const stopSpanContext = stopSpan.spanContext();
+                    console.log(`[STOP] Created span: traceId=${stopSpanContext.traceId?.substring(0, 8)} spanId=${stopSpanContext.spanId?.substring(0, 8)} parent=${targetRal?.executionSpanId?.substring(0, 8) || 'none'}`);
 
                     logger.info(`[EventHandler] Stopped agent ${agent.slug} in conversation ${conversationId.substring(0, 8)}`, {
                         ralsAborted: aborted,

@@ -95,6 +95,7 @@ export interface EventContext {
     model?: string;
     cost?: number; // LLM cost in USD
     phase?: string; // Current phase for phase-aware events
+    ralNumber: number; // RAL number for this execution - required for all conversational events
 }
 
 /**
@@ -350,6 +351,9 @@ export class AgentEventEncoder {
         if (context.executionTime) {
             event.tag(["execution-time", context.executionTime.toString()]);
         }
+
+        // RAL metadata
+        event.tag(["llm-ral", context.ralNumber.toString()]);
     }
 
     /**

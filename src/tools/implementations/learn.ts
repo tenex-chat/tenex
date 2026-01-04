@@ -64,12 +64,17 @@ async function executeLessonLearn(
     // Get conversation for the event context
     const conversation = context.getConversation();
 
+    if (context.ralNumber === undefined) {
+        throw new Error("ralNumber is required for learn tool but was undefined");
+    }
+
     // Create event context
     const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
         rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: context.agent.llmConfig,
+        ralNumber: context.ralNumber,
     };
 
     // Use shared AgentPublisher instance from context to create and publish the lesson

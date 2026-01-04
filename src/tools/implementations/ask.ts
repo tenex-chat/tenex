@@ -38,6 +38,10 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
     hasSuggestions: !!suggestions,
   });
 
+  if (context.ralNumber === undefined) {
+    throw new Error("ralNumber is required for ask tool but was undefined");
+  }
+
   const eventId = await context.agentPublisher.ask(
     {
       recipient: ownerPubkey,
@@ -48,6 +52,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
       triggeringEvent: context.triggeringEvent,
       rootEvent: { id: context.getConversation()?.getRootEventId() ?? context.triggeringEvent.id },
       conversationId: context.conversationId,
+      ralNumber: context.ralNumber,
     }
   );
 
@@ -58,6 +63,8 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         type: "ask" as const,
         delegationConversationId: eventId,
         recipientPubkey: ownerPubkey,
+        senderPubkey: context.agent.pubkey,
+        prompt: content,
         suggestions,
       },
     ],
