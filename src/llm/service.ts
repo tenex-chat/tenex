@@ -112,6 +112,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         model: string,
         options?: ClaudeCodeSettings
     ) => LanguageModel;
+    private readonly claudeCodeBaseSettings?: ClaudeCodeSettings;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private cachedContentForComplete = "";
@@ -123,6 +124,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         temperature?: number,
         maxTokens?: number,
         claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
+        claudeCodeBaseSettings?: ClaudeCodeSettings,
         sessionId?: string,
         agentSlug?: string
     ) {
@@ -132,6 +134,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         this.temperature = temperature;
         this.maxTokens = maxTokens;
         this.claudeCodeProviderFunction = claudeCodeProviderFunction;
+        this.claudeCodeBaseSettings = claudeCodeBaseSettings;
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
 
@@ -178,10 +181,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         if (this.claudeCodeProviderFunction) {
             // Claude Code or Codex CLI provider
-            const options: ClaudeCodeSettings = {};
+            // Start with base settings (cwd, env, mcpServers, etc.) from createAgentSettings
+            const options: ClaudeCodeSettings = { ...this.claudeCodeBaseSettings };
 
             if (this.sessionId) {
-                // When resuming, only pass the resume option
+                // When resuming, add the resume option
                 options.resume = this.sessionId;
             } else if (messages && this.provider === "claudeCode") {
                 // Only Claude Code supports customSystemPrompt/appendSystemPrompt

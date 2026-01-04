@@ -93,6 +93,7 @@ export abstract class AgentProvider extends BaseProvider {
             model,
             providerFunction: this.providerFunction,
             bypassRegistry: true,
+            agentSettings: settings,
         };
     }
 
