@@ -96,27 +96,6 @@ export function hasReasoningTag(event: NDKEvent): boolean {
 }
 
 /**
- * Log thinking block removal for debugging
- * @param eventId - The event ID being processed
- * @param originalLength - Original content length
- * @param strippedLength - Length after stripping
- */
-export function logThinkingBlockRemoval(
-    eventId: string,
-    originalLength: number,
-    strippedLength: number
-): void {
-    if (originalLength !== strippedLength) {
-        logger.debug("[CONTENT_UTILS] Removed thinking blocks from content", {
-            eventId: eventId.substring(0, 8),
-            originalLength,
-            strippedLength,
-            removed: originalLength - strippedLength,
-        });
-    }
-}
-
-/**
  * Common image file extensions and their MIME types
  */
 const IMAGE_EXTENSIONS: Record<string, string> = {
