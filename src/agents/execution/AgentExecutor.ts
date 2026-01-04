@@ -1151,11 +1151,33 @@ export class AgentExecutor {
                             });
                         }
 
+                        // Merge pending delegations instead of replacing them
+                        const currentRal = ralRegistry.getRAL(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber
+                        );
+                        const existingDelegations = currentRal?.pendingDelegations || [];
+
+                        // Merge and deduplicate by delegationConversationId
+                        const mergedDelegations = [...existingDelegations];
+                        for (const newDelegation of pendingDelegations) {
+                            if (
+                                !mergedDelegations.some(
+                                    (d) =>
+                                        d.delegationConversationId ===
+                                        newDelegation.delegationConversationId
+                                )
+                            ) {
+                                mergedDelegations.push(newDelegation);
+                            }
+                        }
+
                         ralRegistry.setPendingDelegations(
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber,
-                            pendingDelegations
+                            mergedDelegations
                         );
 
                         // Tool calls and results are already added to ConversationStore
