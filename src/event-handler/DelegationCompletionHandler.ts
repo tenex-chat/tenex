@@ -58,9 +58,7 @@ export async function handleDelegationCompletion(
         const state = ralRegistry.recordCompletion({
             delegationConversationId: delegationEventId,
             recipientPubkey: event.pubkey,
-            recipientSlug: projectCtx.getAgentByPubkey(event.pubkey)?.slug,
             response: event.content,
-            responseEventId: event.id,
             completedAt: Date.now(),
         });
 

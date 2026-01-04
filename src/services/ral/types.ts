@@ -33,7 +33,8 @@ export interface TodoItem {
 interface BasePendingDelegation {
   delegationConversationId: string;
   recipientPubkey: string;
-  recipientSlug?: string;
+  senderPubkey: string;
+  prompt: string;
 }
 
 interface StandardDelegation extends BasePendingDelegation {
@@ -42,6 +43,8 @@ interface StandardDelegation extends BasePendingDelegation {
 
 interface FollowupDelegation extends BasePendingDelegation {
   type: "followup";
+  /** The event ID of the followup message (needed for routing responses) */
+  followupEventId?: string;
 }
 
 interface ExternalDelegation extends BasePendingDelegation {
@@ -60,12 +63,18 @@ export type PendingDelegation =
   | ExternalDelegation
   | AskDelegation;
 
+export interface DelegationMessage {
+  senderPubkey: string;
+  recipientPubkey: string;
+  content: string;
+  timestamp: number;
+}
+
 export interface CompletedDelegation {
   delegationConversationId: string;
   recipientPubkey: string;
-  recipientSlug?: string;
-  response: string;
-  responseEventId?: string;
+  senderPubkey: string;
+  transcript: DelegationMessage[];
   completedAt: number;
 }
 
@@ -99,6 +108,10 @@ export interface RALState {
   pausePromise?: Promise<void>;
   /** Resolver function to unpause this RAL */
   pauseResolver?: () => void;
+  /** OTEL trace ID for correlating stop events with the agent execution */
+  traceId?: string;
+  /** OTEL span ID of the agent execution span - used as parent for stop spans */
+  executionSpanId?: string;
 }
 
 export interface StopExecutionSignal {

@@ -79,7 +79,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-event-123",
                     recipientPubkey: mockAgent2.pubkey,
-                    recipientSlug: "agent2",
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Please help with this task",
                 },
             ];
@@ -98,6 +98,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-event-456",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task prompt",
                 },
             ];
@@ -120,26 +121,25 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-event-789",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task prompt",
                 },
             ];
 
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, pendingDelegations);
 
-            const completion: CompletedDelegation = {
+            const updatedState = registry.recordCompletion({
                 delegationConversationId: "delegation-event-789",
                 recipientPubkey: mockAgent2.pubkey,
                 response: "Task completed successfully",
-                responseEventId: "response-event-abc",
                 completedAt: Date.now(),
-            };
-
-            const updatedState = registry.recordCompletion(completion);
+            });
 
             expect(updatedState).toBeDefined();
             expect(updatedState?.pendingDelegations).toHaveLength(0);
             expect(updatedState?.completedDelegations).toHaveLength(1);
-            expect(updatedState?.completedDelegations[0].response).toBe("Task completed successfully");
+            // Transcript has 2 entries: prompt (index 0) and response (index 1)
+            expect(updatedState?.completedDelegations[0].transcript[1].content).toBe("Task completed successfully");
         });
 
         it("should track partial completions correctly", () => {
@@ -149,11 +149,13 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-1",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task 1",
                 },
                 {
                     delegationConversationId: "delegation-2",
                     recipientPubkey: "agent3pubkey",
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task 2",
                 },
             ];
@@ -196,6 +198,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "del-1",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task",
                 },
             ]);
@@ -214,6 +217,7 @@ describe("RAL Delegation Flow", () => {
                     {
                         delegationConversationId: "del-123",
                         recipientPubkey: "pubkey",
+                        senderPubkey: "senderpubkey",
                         prompt: "task",
                     },
                 ],
@@ -245,7 +249,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "original-delegation-event-id",
                     recipientPubkey: mockAgent2.pubkey,
-                    recipientSlug: "agent2",
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Please complete this task",
                 },
             ]);
@@ -309,6 +313,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "my-delegation-id",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task",
                 },
             ]);
@@ -356,11 +361,13 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-1",
                     recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task 1",
                 },
                 {
                     delegationConversationId: "delegation-2",
                     recipientPubkey: "agent3pubkey",
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Task 2",
                 },
             ]);
@@ -458,7 +465,7 @@ describe("RAL Delegation Flow", () => {
                 {
                     delegationConversationId: "delegation-full-flow-test",
                     recipientPubkey: mockAgent2.pubkey,
-                    recipientSlug: "agent2",
+                    senderPubkey: mockAgent.pubkey,
                     prompt: "Handle this subtask",
                 },
             ];
@@ -515,7 +522,8 @@ describe("RAL Delegation Flow", () => {
             const stateAfterCompletion = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
             expect(stateAfterCompletion?.pendingDelegations).toHaveLength(0);
             expect(stateAfterCompletion?.completedDelegations).toHaveLength(1);
-            expect(stateAfterCompletion?.completedDelegations[0].response).toBe(
+            // Transcript has 2 entries: prompt (index 0) and response (index 1)
+            expect(stateAfterCompletion?.completedDelegations[0].transcript[1].content).toBe(
                 "I have completed the subtask. Here are the results."
             );
 

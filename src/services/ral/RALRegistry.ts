@@ -1,4 +1,5 @@
 import { trace } from "@opentelemetry/api";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type {
   RALState,
@@ -12,7 +13,7 @@ export interface RALSummary {
   ralId: string;
   isStreaming: boolean;
   currentTool?: string;
-  pendingDelegations: Array<{ recipientSlug?: string; delegationConversationId: string }>;
+  pendingDelegations: Array<{ recipientPubkey: string; delegationConversationId: string }>;
   createdAt: number;
   hasPendingDelegations: boolean;
 }
@@ -115,7 +116,12 @@ export class RALRegistry {
    * Create a new RAL entry for an agent+conversation pair.
    * Returns the RAL number assigned to this execution.
    */
-  create(agentPubkey: string, conversationId: string, originalTriggeringEventId?: string): number {
+  create(
+    agentPubkey: string,
+    conversationId: string,
+    originalTriggeringEventId?: string,
+    traceContext?: { traceId: string; spanId: string }
+  ): number {
     const id = crypto.randomUUID();
     const now = Date.now();
     const key = this.makeKey(agentPubkey, conversationId);
@@ -136,6 +142,8 @@ export class RALRegistry {
       createdAt: now,
       lastActivityAt: now,
       originalTriggeringEventId,
+      traceId: traceContext?.traceId,
+      executionSpanId: traceContext?.spanId,
     };
 
     // Get or create the conversation's RAL map
@@ -183,7 +191,7 @@ export class RALRegistry {
         isStreaming: r.isStreaming,
         currentTool: r.currentTool,
         pendingDelegations: r.pendingDelegations.map(d => ({
-          recipientSlug: d.recipientSlug,
+          recipientPubkey: d.recipientPubkey,
           delegationConversationId: d.delegationConversationId,
         })),
         createdAt: r.createdAt,
@@ -264,6 +272,12 @@ export class RALRegistry {
     // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
     for (const d of pendingDelegations) {
       this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
+
+      // For followup delegations, also map the followup event ID
+      // This ensures responses e-tagging either the original or followup are routed correctly
+      if (d.type === "followup" && d.followupEventId) {
+        this.delegationToRal.set(d.followupEventId, { key, ralNumber });
+      }
     }
 
     trace.getActiveSpan()?.addEvent("ral.delegations_set", {
@@ -274,29 +288,97 @@ export class RALRegistry {
   }
 
   /**
-   * Record a delegation completion (looks up RAL from delegation event ID)
+   * Record a delegation completion (looks up RAL from delegation event ID).
+   * Builds a transcript from the pending delegation's prompt and the response.
+   * For followups, appends both the followup prompt and response to the transcript.
    */
-  recordCompletion(completion: CompletedDelegation): RALState | undefined {
+  recordCompletion(completion: {
+    delegationConversationId: string;
+    recipientPubkey: string;
+    response: string;
+    completedAt: number;
+  }): RALState | undefined {
     const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
 
     const ral = this.states.get(location.key)?.get(location.ralNumber);
     if (!ral) return undefined;
 
-    ral.completedDelegations.push(completion);
     ral.lastActivityAt = Date.now();
+
+    // Find the pending delegation to get the prompt and sender info
+    const pendingDelegation = ral.pendingDelegations.find(
+      p => p.delegationConversationId === completion.delegationConversationId
+    );
+
+    if (!pendingDelegation) {
+      logger.warn("[RALRegistry] No pending delegation found for completion", {
+        delegationConversationId: completion.delegationConversationId.substring(0, 8),
+      });
+      return undefined;
+    }
+
+    // Check if this delegation already has a completed entry (followup case)
+    const existingCompletion = ral.completedDelegations.find(
+      c => c.delegationConversationId === completion.delegationConversationId
+    );
+
+    if (existingCompletion) {
+      // Append the followup prompt and response to the transcript
+      existingCompletion.transcript.push({
+        senderPubkey: pendingDelegation.senderPubkey,
+        recipientPubkey: pendingDelegation.recipientPubkey,
+        content: pendingDelegation.prompt,
+        timestamp: completion.completedAt - 1, // Just before the response
+      });
+      existingCompletion.transcript.push({
+        senderPubkey: completion.recipientPubkey,
+        recipientPubkey: pendingDelegation.senderPubkey,
+        content: completion.response,
+        timestamp: completion.completedAt,
+      });
+
+      trace.getActiveSpan()?.addEvent("ral.followup_response_appended", {
+        "ral.id": ral.id,
+        "ral.number": ral.ralNumber,
+        "delegation.completed_conversation_id": completion.delegationConversationId,
+        "delegation.transcript_length": existingCompletion.transcript.length,
+      });
+    } else {
+      // Create new completed delegation with initial transcript
+      ral.completedDelegations.push({
+        delegationConversationId: completion.delegationConversationId,
+        recipientPubkey: completion.recipientPubkey,
+        senderPubkey: pendingDelegation.senderPubkey,
+        transcript: [
+          {
+            senderPubkey: pendingDelegation.senderPubkey,
+            recipientPubkey: pendingDelegation.recipientPubkey,
+            content: pendingDelegation.prompt,
+            timestamp: completion.completedAt - 1,
+          },
+          {
+            senderPubkey: completion.recipientPubkey,
+            recipientPubkey: pendingDelegation.senderPubkey,
+            content: completion.response,
+            timestamp: completion.completedAt,
+          },
+        ],
+        completedAt: completion.completedAt,
+      });
+
+      trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
+        "ral.id": ral.id,
+        "ral.number": ral.ralNumber,
+        "delegation.completed_conversation_id": completion.delegationConversationId,
+        "delegation.remaining_pending": ral.pendingDelegations.length - 1,
+      });
+    }
 
     // Remove from pending
     ral.pendingDelegations = ral.pendingDelegations.filter(
       (p) => p.delegationConversationId !== completion.delegationConversationId
     );
-
-    trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
-      "ral.id": ral.id,
-      "ral.number": ral.ralNumber,
-      "delegation.completed_conversation_id": completion.delegationConversationId,
-      "delegation.remaining_pending": ral.pendingDelegations.length,
-    });
 
     return ral;
   }
@@ -498,6 +580,10 @@ export class RALRegistry {
       // Clean up delegation mappings
       for (const d of ral.pendingDelegations) {
         this.delegationToRal.delete(d.delegationConversationId);
+        // Also clean up followup event ID mapping
+        if (d.type === "followup" && d.followupEventId) {
+          this.delegationToRal.delete(d.followupEventId);
+        }
       }
       for (const d of ral.completedDelegations) {
         this.delegationToRal.delete(d.delegationConversationId);
@@ -594,42 +680,40 @@ export class RALRegistry {
 
   /**
    * Build a message containing delegation results for injection into the RAL.
-   * Shows complete status of all delegations - both completed and pending.
-   * Uses short event IDs (8 chars) for readability while maintaining reference ability.
+   * Shows complete conversation transcript for each delegation.
+   * Uses full delegation conversation IDs so agents can use them with delegate_followup.
+   * Format: [@sender -> @recipient]: message content
    */
-  buildDelegationResultsMessage(completions: CompletedDelegation[], pending: PendingDelegation[] = []): string {
+  async buildDelegationResultsMessage(completions: CompletedDelegation[], pending: PendingDelegation[] = []): Promise<string> {
     if (completions.length === 0) {
       return "";
     }
 
+    const pubkeyService = getPubkeyService();
     const lines: string[] = [];
-    lines.push("=== DELEGATION STATUS ===");
-    lines.push("");
 
-    // Format completed delegations
-    lines.push(`## Completed (${completions.length})`);
-    lines.push("");
-
+    // Format completed delegations as conversation transcripts
     for (const c of completions) {
-      const agent = c.recipientSlug ? `@${c.recipientSlug}` : c.recipientPubkey.substring(0, 8);
-      const shortId = c.delegationConversationId.substring(0, 8);
-      lines.push(`### ${agent} (${shortId})`);
-      lines.push(c.response);
+      lines.push(`# Delegation ID: ${c.delegationConversationId}`);
+      lines.push("");
+
+      for (const msg of c.transcript) {
+        const senderName = await pubkeyService.getName(msg.senderPubkey);
+        const recipientName = await pubkeyService.getName(msg.recipientPubkey);
+        lines.push(`[@${senderName} -> @${recipientName}]: ${msg.content}`);
+      }
       lines.push("");
     }
 
-    // Format pending delegations
-    lines.push("## Pending");
-    if (pending.length === 0) {
-      lines.push("None (all delegations complete)");
-    } else {
-      const pendingAgents = pending.map(p =>
-        p.recipientSlug ? `@${p.recipientSlug}` : p.recipientPubkey.substring(0, 8)
-      ).join(", ");
-      lines.push(pendingAgents);
+    // Only show pending section if there are any
+    if (pending.length > 0) {
+      lines.push("# Pending Delegations");
+      for (const p of pending) {
+        const recipientName = await pubkeyService.getName(p.recipientPubkey);
+        lines.push(`- @${recipientName} (${p.delegationConversationId})`);
+      }
+      lines.push("");
     }
-    lines.push("");
-    lines.push("=== END STATUS ===");
 
     return lines.join("\n");
   }

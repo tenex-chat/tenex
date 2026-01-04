@@ -4,6 +4,7 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { createEventContext } from "@/utils/phase-utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -26,13 +27,21 @@ async function executeDelegateFollowup(
   const { delegation_conversation_id, message } = input;
 
   // First, try to find the delegation in the local RALRegistry (faster and more reliable)
+  // Check both pending and completed delegations (followup may happen after first response)
   const ralRegistry = RALRegistry.getInstance();
   const ralState = ralRegistry.findStateWaitingForDelegation(delegation_conversation_id);
-  const pendingDelegation = ralState?.pendingDelegations.find(
+
+  // Look in pending delegations first
+  let delegation = ralState?.pendingDelegations.find(
     (d) => d.delegationConversationId === delegation_conversation_id
   );
 
-  let recipientPubkey = pendingDelegation?.recipientPubkey;
+  // Also check completed delegations (followup after a response)
+  const completedDelegation = ralState?.completedDelegations.find(
+    (d) => d.delegationConversationId === delegation_conversation_id
+  );
+
+  let recipientPubkey = delegation?.recipientPubkey ?? completedDelegation?.recipientPubkey;
 
   // Fall back to NDK fetch if not found locally (e.g., external delegations or stale state)
   if (!recipientPubkey) {
@@ -64,19 +73,26 @@ async function executeDelegateFollowup(
     recipientPubkey: recipientPubkey.substring(0, 8),
   });
 
-  const eventId = await context.agentPublisher.delegateFollowup({
+  const eventContext = createEventContext(context);
+  const followupEventId = await context.agentPublisher.delegateFollowup({
     recipient: recipientPubkey,
     content: message,
     delegationEventId: delegation_conversation_id,
-  });
+  }, eventContext);
 
+  // Return the ORIGINAL delegation conversation ID, not the new followup event ID.
+  // This ensures routing back to the same RAL when the followup response arrives.
+  // We also include followupEventId so it can be mapped for response routing.
   return {
     __stopExecution: true,
     pendingDelegations: [
       {
         type: "followup" as const,
-        delegationConversationId: eventId,
+        delegationConversationId: delegation_conversation_id,
         recipientPubkey,
+        senderPubkey: context.agent.pubkey,
+        prompt: message,
+        followupEventId,
       },
     ],
   };

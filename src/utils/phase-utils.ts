@@ -44,11 +44,16 @@ export function createEventContext(context: ExecutionContext, model?: string): E
     // Extract phase directly from triggering event if it's a phase delegation
     const phaseContext = extractPhaseContext(context.triggeringEvent);
 
+    if (context.ralNumber === undefined) {
+        throw new Error("ralNumber is required for EventContext but was undefined");
+    }
+
     return {
         triggeringEvent: context.triggeringEvent,
         rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: model ?? context.agent.llmConfig,
         phase: phaseContext?.phase,
+        ralNumber: context.ralNumber,
     };
 }

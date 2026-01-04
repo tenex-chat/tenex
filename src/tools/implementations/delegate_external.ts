@@ -70,6 +70,8 @@ async function executeDelegateExternal(
         type: "external" as const,
         delegationConversationId: chatEvent.id,
         recipientPubkey: pubkey,
+        senderPubkey: context.agent.pubkey,
+        prompt: content,
         projectId: cleanProjectId,
       },
     ],

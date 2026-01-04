@@ -5,6 +5,7 @@ import type { PendingDelegation, StopExecutionSignal, TodoItem } from "@/service
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
+import { createEventContext } from "@/utils/phase-utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -70,7 +71,7 @@ async function executeDelegate(
     const currentRal = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, context.ralNumber);
     if (currentRal && currentRal.pendingDelegations.length > 0) {
       const pendingRecipients = currentRal.pendingDelegations
-        .map(d => d.recipientSlug || d.recipientPubkey.substring(0, 8))
+        .map(d => d.recipientPubkey.substring(0, 8))
         .join(", ");
       throw new Error(
         `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
@@ -136,18 +137,20 @@ async function executeDelegate(
       throw new Error("AgentPublisher not available");
     }
 
+    const eventContext = createEventContext(context);
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
       content: delegation.prompt,
       phase,
       phaseInstructions,
       branch: delegation.branch,
-    });
+    }, eventContext);
 
     pendingDelegations.push({
       delegationConversationId: eventId,
       recipientPubkey: pubkey,
-      recipientSlug: delegation.recipient,
+      senderPubkey: context.agent.pubkey,
+      prompt: delegation.prompt,
     });
 
     // Start pairing supervision if requested
@@ -174,7 +177,6 @@ async function executeDelegate(
             {
               delegationId: eventId,
               recipientPubkey: pubkey,
-              recipientSlug: delegation.recipient,
               interval: delegation.pair.interval,
             },
             context.agent.pubkey,
