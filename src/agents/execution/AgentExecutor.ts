@@ -6,6 +6,7 @@ import {
     type PostCompletionContext,
     type PreToolContext,
 } from "@/agents/supervision";
+import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
@@ -355,13 +356,19 @@ export class AgentExecutor {
         const ralRegistry = RALRegistry.getInstance();
 
         for (const [toolName, tool] of Object.entries(toolsObject)) {
+            // Skip tools without execute function
+            if (!tool.execute) {
+                wrappedTools[toolName] = tool;
+                continue;
+            }
+
             // Preserve the original tool's properties
             const originalExecute = tool.execute.bind(tool);
 
             // Create wrapped tool
             wrappedTools[toolName] = {
                 ...tool,
-                execute: async (input: unknown) => {
+                execute: async (input: unknown, options: ToolExecutionOptions) => {
                     try {
                         // Build PreToolContext for this tool
                         const conversation = context.getConversation();
@@ -433,10 +440,10 @@ export class AgentExecutor {
                                 }
                             );
 
-                            // If we have a message to inject, queue it
+                            // Queue correction message if available (for both inject-message and block-tool)
                             if (
-                                supervisionResult.correctionAction.type === "inject-message" &&
-                                supervisionResult.correctionAction.message
+                                supervisionResult.correctionAction.message &&
+                                supervisionResult.correctionAction.reEngage
                             ) {
                                 ralRegistry.queueUserMessage(
                                     context.agent.pubkey,
@@ -455,14 +462,14 @@ export class AgentExecutor {
                             agent: context.agent.slug,
                         });
 
-                        return await originalExecute(input);
+                        return await originalExecute(input, options);
                     } catch (error) {
                         logger.error(`[AgentExecutor] Error during pre-tool supervision check`, {
                             tool: toolName,
                             error: formatAnyError(error),
                         });
                         // On supervision error, allow tool to execute (fail-safe)
-                        return await originalExecute(input);
+                        return await originalExecute(input, options);
                     }
                 },
             };
@@ -949,7 +956,6 @@ export class AgentExecutor {
                     reasoningText?: string;
                 }>;
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
-                console.log("RUNNING prepareStep for step", step.stepNumber, step.steps[step.stepNumber]);
                 // Update accumulated messages tracker
                 latestAccumulatedMessages = step.messages;
 
