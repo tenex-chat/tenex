@@ -41,34 +41,56 @@ export async function handleDelegationCompletion(
     try {
         const ralRegistry = RALRegistry.getInstance();
 
-        // Find which delegation this responds to (via e-tag)
-        const delegationEventId = TagExtractor.getFirstETag(event);
-        if (!delegationEventId) {
+        // Find which delegation this responds to (via e-tags)
+        // For threaded conversations, we need to check ALL e-tags, not just the first one
+        // NIP-10: The last 'e' tag is the reply target, but we should try all to find a matching delegation
+        const eTags = TagExtractor.getETags(event);
+        if (eTags.length === 0) {
             span.addEvent("no_e_tag");
             span.setStatus({ code: SpanStatusCode.OK });
             return { recorded: false };
         }
 
-        span.setAttribute("delegation.event_id", delegationEventId);
+        // Try e-tags in reverse order (last to first) as per NIP-10 convention
+        // The last e-tag is typically the direct reply target in threaded conversations
+        let location = null;
+        let delegationEventId = null;
 
-        // Get the target agent for logging
-        const projectCtx = getProjectContext();
+        for (let i = eTags.length - 1; i >= 0; i--) {
+            const eTag = eTags[i];
+            span.addEvent("trying_delegation_etag", {
+                "delegation.event_id": eTag,
+                "etag.index": i,
+            });
 
-        // Record the completion (looks up RAL internally via delegation conversation ID)
-        const location = ralRegistry.recordCompletion({
-            delegationConversationId: delegationEventId,
-            recipientPubkey: event.pubkey,
-            response: event.content,
-            completedAt: Date.now(),
-        });
+            // Record the completion (looks up RAL internally via delegation conversation ID)
+            const result = ralRegistry.recordCompletion({
+                delegationConversationId: eTag,
+                recipientPubkey: event.pubkey,
+                response: event.content,
+                completedAt: Date.now(),
+            });
+
+            if (result) {
+                location = result;
+                delegationEventId = eTag;
+                break; // Found a matching delegation
+            }
+        }
 
         if (!location) {
             span.addEvent("no_waiting_ral", {
-                "delegation.event_id": delegationEventId,
+                "delegation.etags_checked": eTags.length,
+                "delegation.first_etag": eTags[0],
             });
             span.setStatus({ code: SpanStatusCode.OK });
             return { recorded: false };
         }
+
+        span.setAttribute("delegation.event_id", delegationEventId || "unknown");
+
+        // Get the target agent for logging
+        const projectCtx = getProjectContext();
 
         // Note: We don't spawn an execution here - the normal event routing in reply.ts
         // handles that via delegationTarget detection. This handler just records the completion.
@@ -93,14 +115,14 @@ export async function handleDelegationCompletion(
         });
 
         span.addEvent("completion_recorded", {
-            "delegation.event_id": delegationEventId,
+            "delegation.event_id": delegationEventId!, // Non-null when location is set
             "responder.pubkey": event.pubkey,
             "response.length": event.content?.length || 0,
         });
         span.setStatus({ code: SpanStatusCode.OK });
 
         logger.info("[handleDelegationCompletion] Recorded delegation completion", {
-            delegationEventId: delegationEventId.substring(0, 8),
+            delegationEventId: delegationEventId!.substring(0, 8),
             agentSlug,
             conversationId: location.conversationId.substring(0, 8),
             completionEventId: event.id?.substring(0, 8),
