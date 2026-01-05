@@ -1,7 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { getNDK } from "@/nostr";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
@@ -18,7 +17,13 @@ const delegateFollowupSchema = z.object({
 });
 
 type DelegateFollowupInput = z.infer<typeof delegateFollowupSchema>;
-type DelegateFollowupOutput = StopExecutionSignal;
+
+interface DelegateFollowupOutput {
+  success: boolean;
+  message: string;
+  delegationConversationId: string;
+  followupEventId: string;
+}
 
 async function executeDelegateFollowup(
   input: DelegateFollowupInput,
@@ -73,22 +78,43 @@ async function executeDelegateFollowup(
     delegationEventId: delegation_conversation_id,
   }, eventContext);
 
-  // Return the ORIGINAL delegation conversation ID, not the new followup event ID.
-  // This ensures routing back to the same RAL when the followup response arrives.
-  // We also include followupEventId so it can be mapped for response routing.
+  // Register the followup as a pending delegation for response routing
+  // but DON'T return StopExecutionSignal - agent can continue and acknowledge to user
+  const newDelegation = {
+    type: "followup" as const,
+    delegationConversationId: delegation_conversation_id,
+    recipientPubkey,
+    senderPubkey: context.agent.pubkey,
+    prompt: message,
+    followupEventId,
+    ralNumber: effectiveRalNumber,
+  };
+
+  // Merge with existing pending delegations
+  const existingDelegations = ralRegistry.getConversationPendingDelegations(
+    context.agent.pubkey,
+    context.conversationId,
+    effectiveRalNumber
+  );
+
+  const mergedDelegations = [...existingDelegations];
+  if (!mergedDelegations.some(d => d.delegationConversationId === delegation_conversation_id)) {
+    mergedDelegations.push(newDelegation);
+  }
+
+  ralRegistry.setPendingDelegations(
+    context.agent.pubkey,
+    context.conversationId,
+    effectiveRalNumber,
+    mergedDelegations
+  );
+
+  // Return normal result - agent continues without blocking
   return {
-    __stopExecution: true,
-    pendingDelegations: [
-      {
-        type: "followup" as const,
-        delegationConversationId: delegation_conversation_id,
-        recipientPubkey,
-        senderPubkey: context.agent.pubkey,
-        prompt: message,
-        followupEventId,
-        ralNumber: effectiveRalNumber,
-      },
-    ],
+    success: true,
+    message: `Follow-up sent. The agent will respond when ready.`,
+    delegationConversationId: delegation_conversation_id,
+    followupEventId,
   };
 }
 

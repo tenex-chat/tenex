@@ -137,6 +137,29 @@ class MetadataDebounceManager {
     }
 
     /**
+     * Mark the first publish as done for a conversation.
+     * This ensures subsequent schedulePublish calls will debounce instead of publishing immediately.
+     * Use this when doing immediate metadata generation outside the debounce manager.
+     */
+    markFirstPublishDone(conversationId: string): void {
+        let state = this.debounceStates.get(conversationId);
+        if (!state) {
+            state = {
+                timerId: null,
+                firstExecutionDone: true,
+                maxDeadline: Date.now() + MAX_DELAY_MS,
+                pendingPublishFn: null,
+            };
+            this.debounceStates.set(conversationId, state);
+        } else {
+            state.firstExecutionDone = true;
+        }
+        logger.debug("[MetadataDebounce] Marked first publish done", {
+            conversationId: conversationId.substring(0, 8),
+        });
+    }
+
+    /**
      * Cleanup for a specific conversation. Clears timer without publishing.
      */
     cleanup(conversationId: string): void {

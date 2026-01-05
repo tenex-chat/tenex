@@ -70,6 +70,13 @@ export async function handleDelegationCompletion(
             return { recorded: false };
         }
 
+        // Wake up the waiting RAL to process the completion
+        ralRegistry.wakeUp(
+            location.agentPubkey,
+            location.conversationId,
+            location.ralNumber
+        );
+
         // Get counts from conversation storage
         const pendingDelegations = ralRegistry.getConversationPendingDelegations(
             location.agentPubkey, location.conversationId, location.ralNumber

@@ -22,6 +22,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
@@ -872,6 +873,42 @@ export class AgentExecutor {
                     });
                 }
 
+                // Add response context - tell agent who they're responding to
+                const pubkeyService = getPubkeyService();
+                const respondingToName = await pubkeyService.getName(context.triggeringEvent.pubkey);
+                const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                let responseContextContent = `Your response will be sent to @${respondingToName}.`;
+
+                // Collect all delegated agents (both pending and completed)
+                const allDelegatedPubkeys = [
+                    ...pendingDelegations.map(d => d.recipientPubkey),
+                    ...completedDelegations.map(d => d.recipientPubkey),
+                ];
+
+                if (allDelegatedPubkeys.length > 0) {
+                    const delegatedAgentNames = await Promise.all(
+                        allDelegatedPubkeys.map(pk => pubkeyService.getName(pk))
+                    );
+                    const uniqueNames = [...new Set(delegatedAgentNames)];
+                    responseContextContent += `\nYou have delegations to: ${uniqueNames.map(n => `@${n}`).join(", ")}.`;
+                    responseContextContent += `\nIf you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.`;
+                }
+
+                rebuiltMessages.push({
+                    role: "system",
+                    content: responseContextContent,
+                });
+
                 return { messages: rebuiltMessages };
             };
 
@@ -963,7 +1000,31 @@ export class AgentExecutor {
                         // Just save the store state (don't complete RAL - pending delegations).
                         conversationStore.save();
 
-                        return true;
+                        // Mark as not streaming (about to wait)
+                        ralRegistry.setStreaming(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            false
+                        );
+
+                        // Wait for wake-up (blocks until message or delegation completion)
+                        await ralRegistry.waitForWakeUp(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber
+                        );
+
+                        // Mark as streaming again (resumed)
+                        ralRegistry.setStreaming(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            true
+                        );
+
+                        // Return false to CONTINUE execution (don't stop)
+                        return false;
                     }
                 }
 
