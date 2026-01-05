@@ -7,8 +7,5 @@
 // Project status (single project context)
 export { ProjectStatusService } from "./ProjectStatusService";
 
-// Daemon status (multi-project daemon)
-export { DaemonStatusService } from "./DaemonStatusService";
-
 // Operations status (LLM operations)
 export { OperationsStatusService } from "./OperationsStatusService";

@@ -231,6 +231,41 @@ export class AgentStorage {
     }
 
     /**
+     * Clean up old agents with the same slug in overlapping projects.
+     * When a new agent is saved with a slug that already exists,
+     * remove the old agent from projects that overlap with the new agent.
+     */
+    private async cleanupDuplicateSlugs(
+        slug: string,
+        newPubkey: string,
+        newProjects: string[]
+    ): Promise<void> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return;
+
+        const existingPubkey = this.index.bySlug[slug];
+        if (!existingPubkey || existingPubkey === newPubkey) return;
+
+        const existingAgent = await this.loadAgent(existingPubkey);
+        if (!existingAgent) return;
+
+        // Find overlapping projects
+        const overlappingProjects = existingAgent.projects.filter((p) => newProjects.includes(p));
+        if (overlappingProjects.length === 0) return;
+
+        logger.info(`Cleaning up duplicate slug '${slug}'`, {
+            oldPubkey: existingPubkey.substring(0, 8),
+            newPubkey: newPubkey.substring(0, 8),
+            overlappingProjects,
+        });
+
+        // Remove old agent from overlapping projects
+        for (const projectDTag of overlappingProjects) {
+            await this.removeAgentFromProject(existingPubkey, projectDTag);
+        }
+    }
+
+    /**
      * Save an agent and update index
      */
     async saveAgent(agent: StoredAgent): Promise<void> {
@@ -242,6 +277,9 @@ export class AgentStorage {
 
         // Load existing agent to check for changes
         const existing = await this.loadAgent(pubkey);
+
+        // Clean up old agents with same slug in overlapping projects
+        await this.cleanupDuplicateSlugs(agent.slug, pubkey, agent.projects);
 
         // Save agent file
         await fs.writeFile(filePath, JSON.stringify(agent, null, 2));
@@ -366,7 +404,8 @@ export class AgentStorage {
     }
 
     /**
-     * Get all agents for a project (uses index for O(1) lookup)
+     * Get all agents for a project (uses index for O(1) lookup).
+     * Deduplicates by slug, keeping only the agent currently in bySlug index.
      */
     async getProjectAgents(projectDTag: string): Promise<StoredAgent[]> {
         if (!this.index) await this.loadIndex();
@@ -374,11 +413,19 @@ export class AgentStorage {
 
         const pubkeys = this.index.byProject[projectDTag] || [];
         const agents: StoredAgent[] = [];
+        const seenSlugs = new Set<string>();
 
         for (const pubkey of pubkeys) {
             const agent = await this.loadAgent(pubkey);
-            if (agent) {
+            if (!agent) continue;
+
+            // Skip if we've already seen this slug - keep only the canonical one
+            if (seenSlugs.has(agent.slug)) continue;
+
+            // Only include if this pubkey is the canonical one for this slug
+            if (this.index.bySlug[agent.slug] === pubkey) {
                 agents.push(agent);
+                seenSlugs.add(agent.slug);
             }
         }
 

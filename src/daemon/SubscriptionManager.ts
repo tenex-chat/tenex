@@ -213,7 +213,7 @@ export class SubscriptionManager {
     }
 
     /**
-     * Manually update known projects (called by ProjectContextManager)
+     * Manually update known projects (called by Daemon)
      */
     updateKnownProjects(projectIds: string[]): void {
         const oldSize = this.knownProjects.size;
@@ -229,7 +229,7 @@ export class SubscriptionManager {
     }
 
     /**
-     * Manually update agent pubkeys (called by ProjectContextManager)
+     * Manually update agent pubkeys (called by Daemon)
      */
     updateAgentPubkeys(pubkeys: Hexpubkey[]): void {
         const oldSize = this.agentPubkeys.size;
@@ -245,7 +245,7 @@ export class SubscriptionManager {
     }
 
     /**
-     * Manually update agent definition IDs (called by ProjectContextManager)
+     * Manually update agent definition IDs (called by Daemon)
      */
     updateAgentDefinitionIds(eventIds: string[]): void {
         const span = lessonTracer.startSpan("tenex.lesson.subscription_update", {
