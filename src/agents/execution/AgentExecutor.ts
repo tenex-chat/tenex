@@ -1000,7 +1000,7 @@ export class AgentExecutor {
                         // Just save the store state (don't complete RAL - pending delegations).
                         conversationStore.save();
 
-                        // Mark as not streaming (about to wait)
+                        // Mark as not streaming - execution is pausing for delegation
                         ralRegistry.setStreaming(
                             context.agent.pubkey,
                             context.conversationId,
@@ -1008,23 +1008,11 @@ export class AgentExecutor {
                             false
                         );
 
-                        // Wait for wake-up (blocks until message or delegation completion)
-                        await ralRegistry.waitForWakeUp(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber
-                        );
-
-                        // Mark as streaming again (resumed)
-                        ralRegistry.setStreaming(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            true
-                        );
-
-                        // Return false to CONTINUE execution (don't stop)
-                        return false;
+                        // Stop execution - a new execution will be spawned when:
+                        // 1. Delegation completes (via normal event routing)
+                        // 2. User sends a new message (via normal event routing)
+                        // The new execution will pick up via findResumableRAL/findRALWithInjections
+                        return true;
                     }
                 }
 

@@ -265,8 +265,8 @@ async function handleReplyLogic(
         const activeRal = ralRegistry.getState(targetAgent.pubkey, conversation.id);
 
         // Check if we should inject into an active execution instead of starting a new one
-        if (activeRal) {
-            // RAL exists - inject message into active execution
+        if (activeRal && activeRal.isStreaming) {
+            // RAL is actively streaming - inject message for next prepareStep
             ralRegistry.queueUserMessage(
                 targetAgent.pubkey,
                 conversation.id,
@@ -274,22 +274,29 @@ async function handleReplyLogic(
                 event.content
             );
 
-            // If agent is waiting (not streaming), wake it up to process the message
-            if (!activeRal.isStreaming) {
-                ralRegistry.wakeUp(
-                    targetAgent.pubkey,
-                    conversation.id,
-                    activeRal.ralNumber
-                );
-            }
-
             trace.getActiveSpan()?.addEvent("reply.message_injected", {
                 "agent.slug": targetAgent.slug,
                 "ral.number": activeRal.ralNumber,
                 "message.length": event.content.length,
-                "woke_up": !activeRal.isStreaming,
             });
-            return; // Don't spawn new execution (RAL already exists)
+            return; // Don't spawn new execution - active one will process on next step
+        }
+
+        // RAL either doesn't exist or isn't streaming (waiting for delegation).
+        // If not streaming, inject the message so the new execution can pick it up.
+        if (activeRal && !activeRal.isStreaming) {
+            ralRegistry.queueUserMessage(
+                targetAgent.pubkey,
+                conversation.id,
+                activeRal.ralNumber,
+                event.content
+            );
+            trace.getActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
+                "agent.slug": targetAgent.slug,
+                "ral.number": activeRal.ralNumber,
+                "message.length": event.content.length,
+            });
+            // Fall through to spawn new execution - it will resume via findRALWithInjections
         }
 
         // Check if this agent has a resumable RAL - if so, use the original triggering event
