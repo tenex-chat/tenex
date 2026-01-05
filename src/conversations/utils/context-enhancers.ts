@@ -1,6 +1,6 @@
 /**
  * Context enhancers for message generation strategies
- * Purpose: Add special contexts like voice mode, debug mode, delegation completion, and concurrent RAL coordination
+ * Purpose: Add special contexts like voice mode, debug mode, delegation completion
  * These are pure functions that take minimal parameters and return enhanced content
  */
 
@@ -8,12 +8,9 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import { isVoiceMode } from "@/prompts/fragments/20-voice-mode";
 import { isDebugMode } from "@/prompts/fragments/debug-mode";
 import { getPubkeyService } from "@/services/PubkeyService";
-import type { RALSummary } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
-import { buildContext } from "@/agents/execution/ConcurrentRALCoordinator";
 
 /**
  * Add voice mode context if applicable
@@ -172,56 +169,3 @@ export async function addAllSpecialContexts(
 
     return result;
 }
-
-/**
- * Add concurrent RAL context when there are other active RALs
- * @param messages - The messages array to add to
- * @param otherRALSummaries - Summaries of other active RALs
- * @param currentRALNumber - The current RAL's number
- * @param actionHistory - Map of RAL number to action history string
- * @param triggeringEventContent - Content of the triggering event for telemetry
- * @param agentName - Name of the agent for logging
- * @returns True if concurrent context was added
- */
-export function addConcurrentRALContext(
-    messages: ModelMessage[],
-    otherRALSummaries: RALSummary[],
-    currentRALNumber: number,
-    actionHistory: Map<number, string>,
-    triggeringEventContent?: string,
-    agentName?: string
-): boolean {
-    if (otherRALSummaries.length === 0) {
-        return false;
-    }
-
-    const concurrentContext = buildContext(
-        otherRALSummaries,
-        currentRALNumber,
-        actionHistory
-    );
-
-    messages.push({
-        role: "system",
-        content: concurrentContext,
-    });
-
-    trace.getActiveSpan()?.addEvent("context_enhancer.concurrent_ral_added", {
-        "ral.number": currentRALNumber,
-        "other_ral.count": otherRALSummaries.length,
-        "other_ral.numbers": otherRALSummaries.map(r => r.ralNumber).join(","),
-        "triggering_event.content": triggeringEventContent?.substring(0, 500) || "",
-        "context.length": concurrentContext.length,
-    });
-
-    if (agentName) {
-        logger.debug("[CONTEXT_ENHANCER] Added concurrent RAL context", {
-            agent: agentName,
-            currentRAL: currentRALNumber,
-            otherRALCount: otherRALSummaries.length,
-        });
-    }
-
-    return true;
-}
-

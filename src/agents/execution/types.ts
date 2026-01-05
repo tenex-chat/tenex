@@ -34,7 +34,6 @@ export interface ExecutionContext {
     hasPendingDelegations?: boolean; // True when there are still pending delegations (partial completion)
     debug?: boolean; // True when running in debug mode - enables additional output like event IDs
     alphaMode?: boolean; // True when running in alpha mode - enables bug reporting tools
-    hasConcurrentRALs?: boolean; // True when other RALs are active - enables RAL management tools
     hasActivePairings?: boolean; // True when this agent has active pairing sessions - enables stop_pairing tool
     ralNumber?: number; // The RAL number for this execution - set by AgentExecutor during execution
     conversationStore?: ConversationStore; // Single source of truth for conversation state - injected by AgentExecutor during execution

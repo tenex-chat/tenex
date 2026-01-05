@@ -70,9 +70,6 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "bug_list",
     "bug_report_create",
     "bug_report_add",
-    // RAL management tools (injected when hasConcurrentRALs is true)
-    "ral_inject",
-    "ral_abort",
     // Pairing tools (injected when hasActivePairings is true)
     "stop_pairing",
     // Todo tools (excluded from 24010 events - all agents get via CORE_AGENT_TOOLS)

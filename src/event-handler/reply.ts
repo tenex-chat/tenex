@@ -243,10 +243,37 @@ async function handleReplyLogic(
 
     // Execute each target agent in parallel
     const executionPromises = filteredAgents.map(async (targetAgent) => {
+        const ralRegistry = RALRegistry.getInstance();
+        const activeRal = ralRegistry.getState(targetAgent.pubkey, conversation.id);
+
+        // Check if we should inject into an active execution instead of starting a new one
+        if (activeRal) {
+            const shouldWake = ralRegistry.shouldWakeUpExecution(
+                targetAgent.pubkey,
+                conversation.id
+            );
+
+            if (!shouldWake) {
+                // Agent is actively running - inject message, it will see on next step
+                ralRegistry.queueUserMessage(
+                    targetAgent.pubkey,
+                    conversation.id,
+                    activeRal.ralNumber,
+                    event.content
+                );
+
+                trace.getActiveSpan()?.addEvent("reply.message_injected", {
+                    "agent.slug": targetAgent.slug,
+                    "ral.number": activeRal.ralNumber,
+                    "message.length": event.content.length,
+                });
+                return; // Don't spawn new execution
+            }
+        }
+
         // Check if this agent has a resumable RAL - if so, use the original triggering event
         // This ensures p-tags go to the original requester, not the delegatee
         let triggeringEventForContext = event;
-        const ralRegistry = RALRegistry.getInstance();
         const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversation.id);
 
         if (resumableRal?.originalTriggeringEventId) {
