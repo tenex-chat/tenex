@@ -26,22 +26,12 @@ async function executeDelegateFollowup(
 ): Promise<DelegateFollowupOutput> {
   const { delegation_conversation_id, message } = input;
 
-  // First, try to find the delegation in the local RALRegistry (faster and more reliable)
-  // Check both pending and completed delegations (followup may happen after first response)
+  // Find the delegation in conversation storage (persists even after RAL is cleared)
   const ralRegistry = RALRegistry.getInstance();
-  const ralState = ralRegistry.findStateWaitingForDelegation(delegation_conversation_id);
+  const delegationInfo = ralRegistry.findDelegation(delegation_conversation_id);
 
-  // Look in pending delegations first
-  let delegation = ralState?.pendingDelegations.find(
-    (d) => d.delegationConversationId === delegation_conversation_id
-  );
-
-  // Also check completed delegations (followup after a response)
-  const completedDelegation = ralState?.completedDelegations.find(
-    (d) => d.delegationConversationId === delegation_conversation_id
-  );
-
-  let recipientPubkey = delegation?.recipientPubkey ?? completedDelegation?.recipientPubkey;
+  let recipientPubkey = delegationInfo?.pending?.recipientPubkey ?? delegationInfo?.completed?.recipientPubkey;
+  let ralNumber = delegationInfo?.ralNumber;
 
   // Fall back to NDK fetch if not found locally (e.g., external delegations or stale state)
   if (!recipientPubkey) {
@@ -62,6 +52,9 @@ async function executeDelegateFollowup(
       `Delegation conversation ${delegation_conversation_id} has no recipient. Cannot determine who to send follow-up to.`
     );
   }
+
+  // Use the original delegation's ralNumber if available, otherwise use current context
+  const effectiveRalNumber = ralNumber ?? context.ralNumber!;
 
   if (!context.agentPublisher) {
     throw new Error("AgentPublisher not available");
@@ -93,6 +86,7 @@ async function executeDelegateFollowup(
         senderPubkey: context.agent.pubkey,
         prompt: message,
         followupEventId,
+        ralNumber: effectiveRalNumber,
       },
     ],
   };

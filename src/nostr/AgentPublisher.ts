@@ -2,6 +2,7 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { getLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { logger } from "@/utils/logger";
 import { context as otelContext, propagation, trace, SpanStatusCode, type Context } from "@opentelemetry/api";
 import {
@@ -22,12 +23,27 @@ import {
 /**
  * Inject W3C trace context into an event's tags.
  * This allows the daemon to link incoming events back to their parent span.
+ * Also adds trace_context_llm which links to the LLM execution span for better debugging.
  */
 function injectTraceContext(event: NDKEvent): void {
     const carrier: Record<string, string> = {};
     propagation.inject(otelContext.active(), carrier);
     if (carrier.traceparent) {
         event.tags.push(["trace_context", carrier.traceparent]);
+    }
+
+    // Add trace context that links to LLM execution span (more useful for debugging)
+    const activeSpan = trace.getActiveSpan();
+    if (activeSpan) {
+        const spanContext = activeSpan.spanContext();
+        const traceId = spanContext.traceId;
+
+        // Use LLM span ID if available (links to actual LLM execution)
+        // Otherwise fall back to current span ID
+        const llmSpanId = getLLMSpanId(traceId);
+        const spanIdToUse = llmSpanId || spanContext.spanId;
+
+        event.tags.push(["trace_context_llm", `00-${traceId}-${spanIdToUse}-01`]);
     }
 }
 
@@ -200,25 +216,23 @@ export class AgentPublisher {
     async ask(
         params: {
             recipient: string;
-            content: string;
+            tldr: string;
+            context: string;
             suggestions?: string[];
         },
-        context: EventContext
+        _eventContext: EventContext
     ): Promise<string> {
         // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
-        event.content = params.content;
+        event.content = `${params.tldr}\n\n---\n\n${params.context}`;
 
         // Add recipient p-tag
         event.tags.push(["p", params.recipient]);
 
-        // Add e-tag for conversation root
-        if (context.rootEvent?.id) {
-            event.tags.push(["e", context.rootEvent.id]);
-        }
+        // No e-tag: ask events start separate conversations (like delegate)
 
         // Add project a-tag (required for event routing)
         this.encoder.aTagProject(event);

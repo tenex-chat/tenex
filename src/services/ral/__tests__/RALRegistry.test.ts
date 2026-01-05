@@ -39,9 +39,10 @@ describe("RALRegistry", () => {
       expect(state?.agentPubkey).toBe(agentPubkey);
       expect(state?.conversationId).toBe(conversationId);
       expect(state?.isStreaming).toBe(false);
-      expect(state?.pendingDelegations).toEqual([]);
-      expect(state?.completedDelegations).toEqual([]);
       expect(state?.queuedInjections).toEqual([]);
+      // Delegations are now stored at conversation level, not on RALState
+      expect(registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber)).toEqual([]);
+      expect(registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber)).toEqual([]);
       expect(state?.createdAt).toBeDefined();
       expect(state?.lastActivityAt).toBeDefined();
     });
@@ -162,22 +163,28 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
           prompt: "Do task 1",
+          ralNumber,
         },
         {
+          type: "delegate",
           delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
           recipientSlug: "agent-2",
+          senderPubkey: agentPubkey,
           prompt: "Do task 2",
+          ralNumber,
         },
       ];
 
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.pendingDelegations).toEqual(pendingDelegations);
+      const storedDelegations = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(storedDelegations).toEqual(pendingDelegations);
     });
 
     it("should create delegation event ID to RAL key mappings", () => {
@@ -185,14 +192,20 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
           prompt: "Task 1",
+          ralNumber,
         },
         {
+          type: "delegate",
           delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
           prompt: "Task 2",
+          ralNumber,
         },
       ];
 
@@ -237,9 +250,12 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
       const delegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-123",
           recipientPubkey: "recipient",
+          senderPubkey: agentPubkey,
           prompt: "Task",
+          ralNumber,
         },
       ];
 
@@ -255,45 +271,54 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-event-1",
           recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
           prompt: "Task 1",
+          ralNumber,
         },
         {
+          type: "delegate",
           delegationConversationId: "del-event-2",
           recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
           prompt: "Task 2",
+          ralNumber,
         },
       ];
 
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
-      const completion: CompletedDelegation = {
+      const location = registry.recordCompletion({
         delegationConversationId: "del-event-1",
         recipientPubkey: "recipient-1",
         response: "Task completed",
-        responseEventId: "response-123",
         completedAt: Date.now(),
-      };
+      });
 
-      const updatedState = registry.recordCompletion(completion);
+      expect(location).toBeDefined();
+      expect(location?.agentPubkey).toBe(agentPubkey);
+      expect(location?.conversationId).toBe(conversationId);
+      expect(location?.ralNumber).toBe(ralNumber);
 
-      expect(updatedState).toBeDefined();
-      expect(updatedState?.completedDelegations).toHaveLength(1);
-      expect(updatedState?.completedDelegations[0]).toEqual(completion);
-      expect(updatedState?.pendingDelegations).toHaveLength(1);
-      expect(updatedState?.pendingDelegations[0].delegationConversationId).toBe("del-event-2");
+      // Verify delegation moved from pending to completed
+      const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(completed).toHaveLength(1);
+      expect(completed[0].delegationConversationId).toBe("del-event-1");
+      expect(pending).toHaveLength(1);
+      expect(pending[0].delegationConversationId).toBe("del-event-2");
     });
 
     it("should return undefined for non-existent delegation", () => {
-      const completion: CompletedDelegation = {
+      const result = registry.recordCompletion({
         delegationConversationId: "nonexistent",
         recipientPubkey: "recipient-1",
         response: "Done",
         completedAt: Date.now(),
-      };
+      });
 
-      const result = registry.recordCompletion(completion);
       expect(result).toBeUndefined();
     });
 
@@ -302,9 +327,12 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-123",
           recipientPubkey: "recipient",
+          senderPubkey: agentPubkey,
           prompt: "Task",
+          ralNumber,
         },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
@@ -315,15 +343,15 @@ describe("RALRegistry", () => {
       const start = Date.now();
       while (Date.now() - start < 2) {}
 
-      const completion: CompletedDelegation = {
+      const location = registry.recordCompletion({
         delegationConversationId: "del-123",
         recipientPubkey: "recipient",
         response: "Done",
         completedAt: Date.now(),
-      };
+      });
 
-      const updatedState = registry.recordCompletion(completion);
-
+      expect(location).toBeDefined();
+      const updatedState = registry.getState(agentPubkey, conversationId);
       expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
     });
   });
@@ -479,9 +507,12 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-pending-1",
           recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
           prompt: "Task 1",
+          ralNumber,
         },
       ];
 
@@ -555,40 +586,47 @@ describe("RALRegistry", () => {
 
       const delegations1: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-conv1",
           recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
           prompt: "Task for conv1",
+          ralNumber: ralNumber1,
         },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber1, delegations1);
 
       const delegations2: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-conv2",
           recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
           prompt: "Task for conv2",
+          ralNumber: ralNumber2,
         },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId2, ralNumber2, delegations2);
 
       // Complete delegation for conversation 1
-      const completion: CompletedDelegation = {
+      registry.recordCompletion({
         delegationConversationId: "del-conv1",
         recipientPubkey: "recipient-1",
         response: "Done",
         completedAt: Date.now(),
-      };
-      registry.recordCompletion(completion);
+      });
 
       // Conversation 1 should have completion
-      const state1 = registry.getState(agentPubkey, conversationId);
-      expect(state1?.completedDelegations).toHaveLength(1);
-      expect(state1?.pendingDelegations).toHaveLength(0);
+      const completed1 = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber1);
+      const pending1 = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber1);
+      expect(completed1).toHaveLength(1);
+      expect(pending1).toHaveLength(0);
 
       // Conversation 2 should be unaffected
-      const state2 = registry.getState(agentPubkey, conversationId2);
-      expect(state2?.completedDelegations).toHaveLength(0);
-      expect(state2?.pendingDelegations).toHaveLength(1);
+      const completed2 = registry.getConversationCompletedDelegations(agentPubkey, conversationId2, ralNumber2);
+      const pending2 = registry.getConversationPendingDelegations(agentPubkey, conversationId2, ralNumber2);
+      expect(completed2).toHaveLength(0);
+      expect(pending2).toHaveLength(1);
     });
   });
 
@@ -633,7 +671,14 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       const delegations: PendingDelegation[] = [
-        { delegationConversationId: "del-1", recipientPubkey: "recipient", prompt: "Task" },
+        {
+          type: "delegate",
+          delegationConversationId: "del-1",
+          recipientPubkey: "recipient",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
 
@@ -648,23 +693,26 @@ describe("RALRegistry", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
 
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.pendingDelegations).toEqual([]);
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending).toEqual([]);
     });
 
     it("should handle pending delegation without optional fields", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       const delegation: PendingDelegation = {
+        type: "delegate",
         delegationConversationId: "del-123",
         recipientPubkey: "recipient",
+        senderPubkey: agentPubkey,
         prompt: "Task",
+        ralNumber,
       };
 
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
 
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.pendingDelegations[0]).toEqual(delegation);
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending[0]).toEqual(delegation);
     });
 
     it("should handle completed delegation without optional fields", () => {
@@ -672,23 +720,27 @@ describe("RALRegistry", () => {
 
       const pendingDelegations: PendingDelegation[] = [
         {
+          type: "delegate",
           delegationConversationId: "del-123",
           recipientPubkey: "recipient",
+          senderPubkey: agentPubkey,
           prompt: "Task",
+          ralNumber,
         },
       ];
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, pendingDelegations);
 
-      const completion: CompletedDelegation = {
+      const location = registry.recordCompletion({
         delegationConversationId: "del-123",
         recipientPubkey: "recipient",
         response: "Done",
         completedAt: Date.now(),
-      };
+      });
 
-      const updatedState = registry.recordCompletion(completion);
-
-      expect(updatedState?.completedDelegations[0]).toEqual(completion);
+      expect(location).toBeDefined();
+      const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+      expect(completed).toHaveLength(1);
+      expect(completed[0].delegationConversationId).toBe("del-123");
     });
   });
 

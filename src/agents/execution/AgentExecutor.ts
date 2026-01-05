@@ -26,6 +26,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
+import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
@@ -104,8 +105,6 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
-        const executeStart = Date.now();
-        console.log(`[${executeStart}] AgentExecutor.execute START for ${context.agent.slug}`);
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
                 "agent.slug": context.agent.slug,
@@ -115,7 +114,7 @@ export class AgentExecutor {
                 "triggering_event.id": context.triggeringEvent.id,
                 "triggering_event.kind": context.triggeringEvent.kind || 0,
             },
-        });
+        }, otelContext.active());
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
@@ -143,11 +142,19 @@ export class AgentExecutor {
                     ralNumber = resumableRal.ralNumber;
                     isResumption = true;
 
+                    // Get delegations from conversation storage
+                    const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                        context.agent.pubkey, context.conversationId, resumableRal.ralNumber
+                    );
+                    const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                        context.agent.pubkey, context.conversationId, resumableRal.ralNumber
+                    );
+
                     // Inject delegation results into the RAL as user message
                     // Include pending delegations so agent knows what's still outstanding
-                    const resultsMessage = ralRegistry.buildDelegationResultsMessage(
-                        resumableRal.completedDelegations,
-                        resumableRal.pendingDelegations
+                    const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
+                        completedDelegations,
+                        pendingDelegations
                     );
                     if (resultsMessage) {
                         ralRegistry.queueUserMessage(
@@ -163,24 +170,26 @@ export class AgentExecutor {
 
                     span.addEvent("executor.ral_resumed", {
                         "ral.number": ralNumber,
-                        "delegation.completed_count": resumableRal.completedDelegations.length,
-                        "delegation.pending_count": resumableRal.pendingDelegations.length,
+                        "delegation.completed_count": completedDelegations.length,
+                        "delegation.pending_count": pendingDelegations.length,
                     });
                 } else if (injectionRal) {
                     // Resume RAL with queued injections (pairing checkpoint)
                     ralNumber = injectionRal.ralNumber;
                     isResumption = true;
 
+                    const injectionRalPending = ralRegistry.getConversationPendingDelegations(
+                        context.agent.pubkey, context.conversationId, injectionRal.ralNumber
+                    );
                     span.addEvent("executor.ral_resumed_for_injection", {
                         "ral.number": ralNumber,
                         "injection.count": injectionRal.queuedInjections.length,
-                        pending_delegations: injectionRal.pendingDelegations.length,
+                        pending_delegations: injectionRalPending.length,
                     });
                 } else {
                     // Create a new RAL for this execution
                     // Pass trace context so stop events can be correlated
                     const spanContext = span.spanContext();
-                    console.log(`[RAL] Creating with trace context: traceId=${spanContext.traceId?.substring(0, 8)} spanId=${spanContext.spanId?.substring(0, 8)}`);
                     ralNumber = ralRegistry.create(
                         context.agent.pubkey,
                         context.conversationId,
@@ -259,20 +268,7 @@ export class AgentExecutor {
                     });
                 }
 
-                // Get the model info early for console output
-                const llmService = context.agent.createLLMService({});
-                const modelInfo = llmService.model || "unknown";
-
                 // Display execution start in console
-                const ralLabel = isResumption
-                    ? ` (RAL #${ralNumber} resuming)`
-                    : existingRALs.length > 1
-                      ? ` (RAL #${ralNumber})`
-                      : "";
-                console.log(
-                    chalk.cyan(`\n━━━ ${context.agent.slug} [${modelInfo}]${ralLabel} ━━━`)
-                );
-
                 span.addEvent("executor.started", {
                     ral_number: ralNumber,
                     is_resumption: isResumption,
@@ -321,6 +317,7 @@ export class AgentExecutor {
                                 triggeringEvent: context.triggeringEvent,
                                 rootEvent: { id: conversation.getRootEventId() },
                                 conversationId: conversation.id,
+                                ralNumber: 0, // Error during execution - no active RAL
                             }
                         );
                     } catch (publishError) {
@@ -433,7 +430,6 @@ export class AgentExecutor {
                 { content: "Manually stopped by user" },
                 eventContext
             );
-            console.log(chalk.yellow(`\n🛑 ${context.agent.slug} (RAL #${ralNumber}) manually stopped`));
 
             // Add event to conversation history
             await ConversationStore.addEvent(context.conversationId, responseEvent);
@@ -447,17 +443,19 @@ export class AgentExecutor {
         // Use context.hasPendingDelegations (captured at completion time) for delegation completions
         // This avoids race conditions where pendingDelegations array is modified by concurrent completions
         const ralRegistry = RALRegistry.getInstance();
-        const ralState = ralRegistry.getRAL(
+
+        // Get pending delegations from conversation storage
+        const currentPendingDelegations = ralRegistry.getConversationPendingDelegations(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
-        // For non-delegation-completion executions, check current RAL state
+        // For non-delegation-completion executions, check current pending count
         // For delegation completions, use the flag captured at completion time
         const hasPendingDelegations = context.isDelegationCompletion
             ? context.hasPendingDelegations
-            : (ralState?.pendingDelegations.length ?? 0) > 0;
+            : currentPendingDelegations.length > 0;
 
         // If agent generated no meaningful response and we're waiting for delegations, don't publish anything
         // This handles the case where the agent only called delegate() without outputting any text
@@ -465,14 +463,8 @@ export class AgentExecutor {
         if (!hasMessageContent && hasPendingDelegations) {
             trace.getActiveSpan()?.addEvent("executor.awaiting_delegations", {
                 "ral.number": ralNumber,
-                "delegation.pending_count": ralState?.pendingDelegations.length ?? 0,
+                "delegation.pending_count": currentPendingDelegations.length,
             });
-
-            console.log(
-                chalk.yellow(
-                    `\n⏳ ${context.agent.slug} (RAL #${ralNumber}) - awaiting delegations`
-                )
-            );
 
             return undefined;
         }
@@ -579,12 +571,6 @@ export class AgentExecutor {
                         );
                     }
 
-                    console.log(
-                        chalk.yellow(
-                            `\n⚠️ ${context.agent.slug} (RAL #${ralNumber}) - supervision correction applied, re-engaging`
-                        )
-                    );
-
                     // Re-execute the agent
                     return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
                 }
@@ -612,18 +598,12 @@ export class AgentExecutor {
                 { content: completionEvent.message },
                 eventContext
             );
-            console.log(
-                chalk.cyan(
-                    `\n💬 ${context.agent.slug} (RAL #${ralNumber}) - responded (awaiting delegations)`
-                )
-            );
         } else {
             // Final completion - use complete() (kind:1, with p-tag)
             responseEvent = await agentPublisher.complete(
                 { content: completionEvent.message, usage: completionEvent.usage },
                 eventContext
             );
-            console.log(chalk.green(`\n✅ ${context.agent.slug} (RAL #${ralNumber}) completed`));
         }
 
         // Add event to conversation history immediately
@@ -646,12 +626,8 @@ export class AgentExecutor {
         toolTracker: ToolExecutionTracker,
         ralNumber: number
     ): Promise<StreamExecutionResult> {
-        const streamStart = Date.now();
-        console.log(`[${streamStart}] executeStreaming START`);
-
         const toolNames = context.agent.tools || [];
         const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms tools object built`);
 
         // Store reference to active tools in context for dynamic tool injection
         // This allows create_dynamic_tool to add new tools mid-stream
@@ -659,7 +635,6 @@ export class AgentExecutor {
 
         const sessionManager = new SessionManager(context.agent, context.conversationId);
         const { sessionId } = sessionManager.getSession();
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms session manager ready`);
 
         const ralRegistry = RALRegistry.getInstance();
         const conversationStore = context.conversationStore;
@@ -673,12 +648,10 @@ export class AgentExecutor {
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
 
         // Build conversation messages from ConversationStore (single source of truth)
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildMessagesForRal START`);
         const conversationMessages = await conversationStore.buildMessagesForRal(
             context.agent.pubkey,
             ralNumber
         );
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildMessagesForRal DONE (${conversationMessages.length} messages)`);
 
         // Build system prompt with agent identity, context, and instructions
         const projectContext = getProjectContext();
@@ -687,7 +660,6 @@ export class AgentExecutor {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildSystemPromptMessages START`);
         const systemPromptMessages = await buildSystemPromptMessages({
             agent: context.agent,
             project: projectContext.project,
@@ -698,7 +670,6 @@ export class AgentExecutor {
             availableAgents: Array.from(projectContext.agents.values()),
             mcpManager: projectContext.mcpManager,
         });
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms buildSystemPromptMessages DONE`);
 
         // Combine system prompt with conversation messages
         const messages: ModelMessage[] = [
@@ -758,12 +729,9 @@ export class AgentExecutor {
             "conversation.count": conversationMessages.length,
         });
 
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms registerOperation START`);
         const abortSignal = llmOpsRegistry.registerOperation(context);
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms registerOperation DONE (abort signal ready)`);
 
         const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
-        console.log(`[${Date.now()}] +${Date.now() - streamStart}ms LLM service created`);
 
         const agentPublisher = context.agentPublisher;
         if (!agentPublisher) {
@@ -800,12 +768,8 @@ export class AgentExecutor {
             if (event.from === "reasoning-delta") {
                 await flushReasoningBuffer();
             }
-
-            // Flush content buffer when switching away from text
-            if (event.from === "text-delta" && contentBuffer.trim().length > 0) {
-                await agentPublisher.conversation({ content: contentBuffer }, eventContext);
-                contentBuffer = "";
-            }
+            // Content buffer is NOT flushed here - completion event handles final publish
+            // to avoid duplicate messages (content would be published both here and at completion)
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
@@ -930,6 +894,7 @@ export class AgentExecutor {
                     reasoningText?: string;
                 }>;
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
+                console.log("RUNNING prepareStep for step", step.stepNumber, step.steps[step.stepNumber]);
                 // Update accumulated messages tracker
                 latestAccumulatedMessages = step.messages;
 
@@ -1152,12 +1117,11 @@ export class AgentExecutor {
                         }
 
                         // Merge pending delegations instead of replacing them
-                        const currentRal = ralRegistry.getRAL(
+                        const existingDelegations = ralRegistry.getConversationPendingDelegations(
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber
                         );
-                        const existingDelegations = currentRal?.pendingDelegations || [];
 
                         // Merge and deduplicate by delegationConversationId
                         const mergedDelegations = [...existingDelegations];
@@ -1253,6 +1217,12 @@ export class AgentExecutor {
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
+
+            // Clear LLM span ID to prevent memory leaks
+            const currentSpan = trace.getActiveSpan();
+            if (currentSpan) {
+                clearLLMSpanId(currentSpan.spanContext().traceId);
+            }
         }
 
         // Flush any remaining reasoning buffer
@@ -1260,19 +1230,19 @@ export class AgentExecutor {
             await flushReasoningBuffer();
         }
 
-        if (!sessionId && llmService.provider === "claudeCode" && result?.kind === "complete") {
+        if (!sessionId && llmService.provider === "claude-code" && result?.kind === "complete") {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
         // Clear RAL if execution completed without pending delegations
         // We clear for any terminal finish reason (not just "stop"/"end" - Gemini returns "other")
-        const finalRalState = ralRegistry.getRAL(
+        const finalPendingDelegations = ralRegistry.getConversationPendingDelegations(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
-        if (!finalRalState?.pendingDelegations.length) {
+        if (finalPendingDelegations.length === 0) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
             // Complete RAL in ConversationStore and persist

@@ -1,5 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -100,6 +101,7 @@ function safeCopy<T>(data: T): T {
  */
 function serializeConversation(conversation: ConversationStore): Record<string, unknown> {
     const messages = conversation.getAllMessages();
+    const pubkeyService = getPubkeyService();
 
     return {
         // Strictly enforce primitive types for top-level fields
@@ -129,14 +131,18 @@ function serializeConversation(conversation: ConversationStore): Record<string, 
                 ? entry.content
                 : JSON.stringify(entry.toolData ?? []);
 
+            // Convert pubkeys to human-readable names/slugs
+            const from = pubkeyService.getNameSync(entry.pubkey);
+            const targetedAgents = entry.targetedPubkeys?.map(pk => pubkeyService.getNameSync(pk));
+
             return {
                 role,
                 content,
                 messageType: entry.messageType,
-                pubkey: entry.pubkey,
+                from,
                 eventId: entry.eventId,
                 timestamp: entry.timestamp,
-                targetedPubkeys: entry.targetedPubkeys,
+                targetedAgents,
             };
         })
     };

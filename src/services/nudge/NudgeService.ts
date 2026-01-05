@@ -35,7 +35,7 @@ export class NudgeService {
             attributes: {
                 "nudge.requested_count": eventIds.length,
             },
-        });
+        }, otelContext.active());
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {

@@ -3,11 +3,17 @@ import { getProjectContext } from "@/services/projects";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { createEventContext } from "@/utils/phase-utils";
 import { tool } from "ai";
 import { z } from "zod";
 
 const askSchema = z.object({
-  content: z.string().describe("The question to ask the project manager or human user"),
+  tldr: z.string().describe(
+    "A brief one-liner summary of what you're asking. This helps the user quickly understand the question at a glance."
+  ),
+  context: z.string().describe(
+    "Full background and all information the user needs to make a decision. CRITICAL: The user has NO access to your conversation history - include ALL relevant details, prior decisions, constraints, and reasoning. Be comprehensive."
+  ),
   suggestions: z
     .array(z.string())
     .optional()
@@ -20,7 +26,7 @@ type AskInput = z.infer<typeof askSchema>;
 type AskOutput = StopExecutionSignal;
 
 async function executeAsk(input: AskInput, context: ExecutionContext): Promise<AskOutput> {
-  const { content, suggestions } = input;
+  const { tldr, context: askContext, suggestions } = input;
 
   const projectCtx = getProjectContext();
   const ownerPubkey = projectCtx?.project?.pubkey;
@@ -38,22 +44,15 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
     hasSuggestions: !!suggestions,
   });
 
-  if (context.ralNumber === undefined) {
-    throw new Error("ralNumber is required for ask tool but was undefined");
-  }
-
+  const eventContext = createEventContext(context);
   const eventId = await context.agentPublisher.ask(
     {
       recipient: ownerPubkey,
-      content,
+      tldr,
+      context: askContext,
       suggestions,
     },
-    {
-      triggeringEvent: context.triggeringEvent,
-      rootEvent: { id: context.getConversation()?.getRootEventId() ?? context.triggeringEvent.id },
-      conversationId: context.conversationId,
-      ralNumber: context.ralNumber,
-    }
+    eventContext
   );
 
   return {
@@ -64,8 +63,9 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
         delegationConversationId: eventId,
         recipientPubkey: ownerPubkey,
         senderPubkey: context.agent.pubkey,
-        prompt: content,
+        prompt: `${tldr}\n\n${askContext}`,
         suggestions,
+        ralNumber: context.ralNumber!,
       },
     ],
   };
@@ -74,7 +74,12 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
 export function createAskTool(context: ExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
-      "Ask a question to the project owner and wait for their response. Supports open-ended questions (no suggestions), yes/no questions (suggestions=['Yes', 'No']), or multiple choice questions (custom suggestions list). Use criteria: ONLY use this tool when you need clarification or help FROM A HUMAN, do not use this to ask questions to other agents.",
+      "Ask a question to the project owner and wait for their response. " +
+      "IMPORTANT: This creates a completely new conversation - the user has ZERO context from your current work. " +
+      "You MUST provide comprehensive context in the 'context' field including all background information, " +
+      "prior decisions, constraints, and reasoning needed for the user to understand and answer your question. " +
+      "The 'tldr' should be a brief one-liner so they can quickly grasp what's being asked. " +
+      "After asking, you can use delegate_followup with the returned delegationConversationId to send follow-up questions if needed.",
     inputSchema: askSchema,
     execute: async (input: AskInput) => {
       return await executeAsk(input, context);
@@ -82,11 +87,11 @@ export function createAskTool(context: ExecutionContext): AISdkTool {
   });
 
   Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: ({ content, suggestions }: AskInput) => {
+    value: ({ tldr, suggestions }: AskInput) => {
       if (suggestions && suggestions.length > 0) {
-        return `Asking: "${content}" [${suggestions.join(", ")}]`;
+        return `Asking: "${tldr}" [${suggestions.join(", ")}]`;
       }
-      return `Asking: "${content}"`;
+      return `Asking: "${tldr}"`;
     },
     enumerable: false,
     configurable: true,
