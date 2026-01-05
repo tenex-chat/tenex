@@ -158,8 +158,8 @@ export class SupervisorOrchestrator {
                     // Get correction action
                     const correctionAction = heuristic.getCorrectionAction(verification);
 
-                    // If action requires a message, build it
-                    if (correctionAction.type === "inject-message" && !correctionAction.message) {
+                    // Build correction message if action type supports it
+                    if ((correctionAction.type === "inject-message" || correctionAction.type === "block-tool") && !correctionAction.message) {
                         correctionAction.message = heuristic.buildCorrectionMessage(
                             context,
                             verification
@@ -247,8 +247,8 @@ export class SupervisorOrchestrator {
                     // Get correction action
                     const correctionAction = heuristic.getCorrectionAction(verification);
 
-                    // If action requires a message, build it
-                    if (correctionAction.type === "inject-message" && !correctionAction.message) {
+                    // Build correction message if action type supports it
+                    if ((correctionAction.type === "inject-message" || correctionAction.type === "block-tool") && !correctionAction.message) {
                         correctionAction.message = heuristic.buildCorrectionMessage(
                             context,
                             verification
