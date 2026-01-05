@@ -95,7 +95,6 @@ mock.module("../../event-handler/AgentRouter", () => ({
             }
             return agents;
         }),
-        filterOutSelfReplies: mock((event: any, agents: any[]) => agents),
     },
 }));
 

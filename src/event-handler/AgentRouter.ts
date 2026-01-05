@@ -140,20 +140,6 @@ export class AgentRouter {
     }
 
     /**
-     * Filter out agents that would process their own message (self-reply).
-     * Exception: Agents with phases defined can self-reply for phase transitions.
-     */
-    static filterOutSelfReplies(event: NDKEvent, targetAgents: AgentInstance[]): AgentInstance[] {
-        return targetAgents.filter((agent) => {
-            if (agent.pubkey !== event.pubkey) {
-                return true;
-            }
-            // Allow self-reply only if agent has phases (for phase transitions)
-            return agent.phases && Object.keys(agent.phases).length > 0;
-        });
-    }
-
-    /**
      * Resolve routing target for a delegation completion.
      * Returns the agent and conversation ID where the waiting RAL lives,
      * or null if the delegation wasn't recorded or agent not found.

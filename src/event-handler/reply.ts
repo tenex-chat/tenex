@@ -246,21 +246,11 @@ async function handleReplyLogic(
         return;
     }
 
-    // Filter out self-replies (phase-aware filtering is now in AgentRouter)
-    const filteredAgents = AgentRouter.filterOutSelfReplies(event, targetAgents);
-
-    if (filteredAgents.length === 0) {
-        activeSpan?.addEvent("reply.skipped_self_reply", {
-            "routing.reason": "all_agents_would_process_own_message",
-        });
-        return;
-    }
-
     // Reset metadata debounce timer before any agent execution
     metadataDebounceManager.onAgentStart(conversation.id);
 
     // Execute each target agent in parallel
-    const executionPromises = filteredAgents.map(async (targetAgent) => {
+    const executionPromises = targetAgents.map(async (targetAgent) => {
         const ralRegistry = RALRegistry.getInstance();
         const activeRal = ralRegistry.getState(targetAgent.pubkey, conversation.id);
 
