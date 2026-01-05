@@ -4,6 +4,7 @@ import {
     registerDefaultHeuristics,
     updateKnownAgentSlugs,
     type PostCompletionContext,
+    type PreToolContext,
 } from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
@@ -343,6 +344,140 @@ export class AgentExecutor {
     }
 
     /**
+     * Wrap tools with pre-tool supervision checks
+     * This intercepts tool execution to run heuristics before the tool executes
+     */
+    private wrapToolsWithSupervision(
+        toolsObject: Record<string, CoreTool<unknown, unknown>>,
+        context: ExecutionContext & { ralNumber: number }
+    ): Record<string, CoreTool<unknown, unknown>> {
+        const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
+        const ralRegistry = RALRegistry.getInstance();
+
+        for (const [toolName, tool] of Object.entries(toolsObject)) {
+            // Preserve the original tool's properties
+            const originalExecute = tool.execute.bind(tool);
+
+            // Create wrapped tool
+            wrappedTools[toolName] = {
+                ...tool,
+                execute: async (input: unknown) => {
+                    try {
+                        // Build PreToolContext for this tool
+                        const conversation = context.getConversation();
+                        if (!conversation) {
+                            throw new Error(`Conversation ${context.conversationId} not found`);
+                        }
+
+                        // Get todos for the agent to populate hasTodoList
+                        const todos = conversation.getTodos(context.agent.pubkey);
+                        const hasTodoList = todos.length > 0;
+
+                        // Get system prompt and conversation history
+                        const projectContext = getProjectContext();
+                        const systemPromptMessages = await buildSystemPromptMessages({
+                            agent: context.agent,
+                            project: projectContext.project,
+                            conversation,
+                            projectBasePath: context.projectBasePath,
+                            workingDirectory: context.workingDirectory,
+                            currentBranch: context.currentBranch,
+                            availableAgents: Array.from(projectContext.agents.values()),
+                            mcpManager: projectContext.mcpManager,
+                        });
+                        const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
+
+                        // Build conversation history from ConversationStore
+                        const conversationStore = context.conversationStore;
+                        const conversationMessages = conversationStore
+                            ? await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber)
+                            : [];
+
+                        // Get available tools
+                        const toolNames = context.agent.tools || [];
+                        const toolsForContext = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+
+                        // Build PreToolContext
+                        const preToolContext: PreToolContext = {
+                            agentSlug: context.agent.slug,
+                            agentPubkey: context.agent.pubkey,
+                            hasPhases: !!context.agent.phases,
+                            toolName,
+                            toolArgs: input,
+                            hasTodoList,
+                            systemPrompt,
+                            conversationHistory: conversationMessages,
+                            availableTools: toolsForContext,
+                        };
+
+                        // Run pre-tool supervision check
+                        logger.debug(`[AgentExecutor] Running pre-tool supervision for "${toolName}"`, {
+                            agent: context.agent.slug,
+                            hasTodoList,
+                            hasPhases: !!context.agent.phases,
+                        });
+
+                        const supervisionResult = await supervisorOrchestrator.checkPreTool(preToolContext);
+
+                        // If supervision detected a violation, block the tool
+                        if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
+                            logger.warn(
+                                `[AgentExecutor] Pre-tool supervision blocked "${toolName}" execution`,
+                                {
+                                    agent: context.agent.slug,
+                                    heuristic: supervisionResult.heuristicId,
+                                    actionType: supervisionResult.correctionAction.type,
+                                }
+                            );
+
+                            // If we have a message to inject, queue it
+                            if (
+                                supervisionResult.correctionAction.type === "inject-message" &&
+                                supervisionResult.correctionAction.message
+                            ) {
+                                ralRegistry.queueUserMessage(
+                                    context.agent.pubkey,
+                                    context.conversationId,
+                                    context.ralNumber,
+                                    supervisionResult.correctionAction.message
+                                );
+                            }
+
+                            // Return a blocked execution message
+                            return `Tool execution blocked: ${supervisionResult.correctionAction.message || "This tool cannot be executed at this time."}`;
+                        }
+
+                        // No violation - execute the original tool
+                        logger.debug(`[AgentExecutor] Pre-tool supervision passed for "${toolName}"`, {
+                            agent: context.agent.slug,
+                        });
+
+                        return await originalExecute(input);
+                    } catch (error) {
+                        logger.error(`[AgentExecutor] Error during pre-tool supervision check`, {
+                            tool: toolName,
+                            error: formatAnyError(error),
+                        });
+                        // On supervision error, allow tool to execute (fail-safe)
+                        return await originalExecute(input);
+                    }
+                },
+            };
+
+            // Preserve non-enumerable properties like getHumanReadableContent
+            const toolWithCustomProps = tool as any;
+            if (toolWithCustomProps.getHumanReadableContent) {
+                Object.defineProperty(wrappedTools[toolName], "getHumanReadableContent", {
+                    value: toolWithCustomProps.getHumanReadableContent,
+                    enumerable: false,
+                });
+            }
+        }
+
+        return wrappedTools;
+    }
+
+    /**
      * Execute streaming and publish result
      */
     private async executeOnce(
@@ -576,7 +711,10 @@ export class AgentExecutor {
         ralNumber: number
     ): Promise<StreamExecutionResult> {
         const toolNames = context.agent.tools || [];
-        const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+        let toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+
+        // Wrap tools with pre-tool supervision checks
+        toolsObject = this.wrapToolsWithSupervision(toolsObject, context);
 
         // Store reference to active tools in context for dynamic tool injection
         // This allows create_dynamic_tool to add new tools mid-stream
