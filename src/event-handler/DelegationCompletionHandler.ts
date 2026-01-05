@@ -70,12 +70,8 @@ export async function handleDelegationCompletion(
             return { recorded: false };
         }
 
-        // Wake up the waiting RAL to process the completion
-        ralRegistry.wakeUp(
-            location.agentPubkey,
-            location.conversationId,
-            location.ralNumber
-        );
+        // Note: We don't spawn an execution here - the normal event routing in reply.ts
+        // handles that via delegationTarget detection. This handler just records the completion.
 
         // Get counts from conversation storage
         const pendingDelegations = ralRegistry.getConversationPendingDelegations(

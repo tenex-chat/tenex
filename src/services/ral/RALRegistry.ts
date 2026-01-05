@@ -47,12 +47,6 @@ export class RALRegistry {
 
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
-  /** Wake-up promises for RALs waiting on delegations/events. Keyed by "agentPubkey:conversationId:ralNumber" */
-  private wakeUpPromises: Map<string, {
-    promise: Promise<void>;
-    resolver: () => void;
-  }> = new Map();
-
   /** Maximum age for RAL states before cleanup (default: 24 hours) */
   private static readonly STATE_TTL_MS = 24 * 60 * 60 * 1000;
   /** Cleanup interval (default: 1 hour) */
@@ -689,22 +683,30 @@ export class RALRegistry {
     const pubkeyService = getPubkeyService();
     const lines: string[] = [];
 
-    // Format completed delegations as conversation transcripts
+    // Clear header indicating this is a completion event
+    lines.push("# DELEGATION COMPLETED");
+    lines.push("");
+
+    // Format each completed delegation with clear completion context
     for (const c of completions) {
-      lines.push(`# Delegation ID: ${c.delegationConversationId}`);
+      const recipientName = await pubkeyService.getName(c.recipientPubkey);
+      lines.push(`**@${recipientName} has finished and returned their final response.**`);
       lines.push("");
+      lines.push(`## Delegation ID: ${c.delegationConversationId}`);
+      lines.push("");
+      lines.push("### Transcript:");
 
       for (const msg of c.transcript) {
         const senderName = await pubkeyService.getName(msg.senderPubkey);
-        const recipientName = await pubkeyService.getName(msg.recipientPubkey);
-        lines.push(`[@${senderName} -> @${recipientName}]: ${msg.content}`);
+        const msgRecipientName = await pubkeyService.getName(msg.recipientPubkey);
+        lines.push(`[@${senderName} -> @${msgRecipientName}]: ${msg.content}`);
       }
       lines.push("");
     }
 
-    // Only show pending section if there are any
+    // Show pending delegations if any remain
     if (pending.length > 0) {
-      lines.push("# Pending Delegations");
+      lines.push("## Still Pending");
       for (const p of pending) {
         const recipientName = await pubkeyService.getName(p.recipientPubkey);
         lines.push(`- @${recipientName} (${p.delegationConversationId})`);
@@ -750,64 +752,6 @@ export class RALRegistry {
     // RAL exists but not streaming and no delegations - it's finished
     // This shouldn't happen often (RAL should be cleared), but wake up to start fresh
     return true;
-  }
-
-  /**
-   * Wait until this RAL is woken up by new message or delegation completion.
-   * Blocks execution until wakeUp() is called.
-   */
-  async waitForWakeUp(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number
-  ): Promise<void> {
-    const key = `${this.makeKey(agentPubkey, conversationId)}:${ralNumber}`;
-
-    // Create promise if doesn't exist
-    if (!this.wakeUpPromises.has(key)) {
-      let resolver: () => void;
-      const promise = new Promise<void>(resolve => {
-        resolver = resolve;
-      });
-      this.wakeUpPromises.set(key, {
-        promise,
-        resolver: resolver!
-      });
-    }
-
-    trace.getActiveSpan()?.addEvent("ral.waiting_for_wakeup", {
-      "ral.number": ralNumber,
-      "agent.pubkey": agentPubkey.slice(0, 8),
-    });
-
-    await this.wakeUpPromises.get(key)!.promise;
-
-    // Clean up after wake
-    this.wakeUpPromises.delete(key);
-
-    trace.getActiveSpan()?.addEvent("ral.woken_up", {
-      "ral.number": ralNumber,
-    });
-  }
-
-  /**
-   * Wake up a waiting RAL (called when new message or delegation completes)
-   */
-  wakeUp(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number
-  ): void {
-    const key = `${this.makeKey(agentPubkey, conversationId)}:${ralNumber}`;
-    const entry = this.wakeUpPromises.get(key);
-
-    if (entry) {
-      entry.resolver();
-      trace.getActiveSpan()?.addEvent("ral.wake_triggered", {
-        "ral.number": ralNumber,
-        "agent.pubkey": agentPubkey.slice(0, 8),
-      });
-    }
   }
 
   /**
@@ -878,6 +822,5 @@ export class RALRegistry {
     this.ralIdToLocation.clear();
     this.abortControllers.clear();
     this.conversationDelegations.clear();
-    this.wakeUpPromises.clear();
   }
 }
