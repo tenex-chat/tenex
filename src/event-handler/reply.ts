@@ -115,6 +115,24 @@ async function handleReplyLogic(
         await ConversationStore.addEvent(conversation.id, event);
     }
 
+    // Immediately generate metadata for new conversations (before agent execution)
+    // This ensures the UI shows a proper title right away, not raw content
+    if (isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
+        // Mark first publish as done so post-execution metadata will debounce
+        metadataDebounceManager.markFirstPublishDone(conversation.id);
+
+        const summarizer = new ConversationSummarizer(projectCtx);
+        summarizer.summarizeAndPublish(conversation).catch((error) => {
+            logger.error("Failed to generate initial metadata for new conversation", {
+                conversationId: conversation.id,
+                error: formatAnyError(error),
+            });
+        });
+        trace.getActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
+            "conversation.id": conversation.id,
+        });
+    }
+
     // Check for delegation completion - if this is a response to a delegation,
     // route to the waiting agent in the ORIGINAL conversation (not this one)
     const delegationResult = await handleDelegationCompletion(event);
@@ -248,27 +266,30 @@ async function handleReplyLogic(
 
         // Check if we should inject into an active execution instead of starting a new one
         if (activeRal) {
-            const shouldWake = ralRegistry.shouldWakeUpExecution(
+            // RAL exists - inject message into active execution
+            ralRegistry.queueUserMessage(
                 targetAgent.pubkey,
-                conversation.id
+                conversation.id,
+                activeRal.ralNumber,
+                event.content
             );
 
-            if (!shouldWake) {
-                // Agent is actively running - inject message, it will see on next step
-                ralRegistry.queueUserMessage(
+            // If agent is waiting (not streaming), wake it up to process the message
+            if (!activeRal.isStreaming) {
+                ralRegistry.wakeUp(
                     targetAgent.pubkey,
                     conversation.id,
-                    activeRal.ralNumber,
-                    event.content
+                    activeRal.ralNumber
                 );
-
-                trace.getActiveSpan()?.addEvent("reply.message_injected", {
-                    "agent.slug": targetAgent.slug,
-                    "ral.number": activeRal.ralNumber,
-                    "message.length": event.content.length,
-                });
-                return; // Don't spawn new execution
             }
+
+            trace.getActiveSpan()?.addEvent("reply.message_injected", {
+                "agent.slug": targetAgent.slug,
+                "ral.number": activeRal.ralNumber,
+                "message.length": event.content.length,
+                "woke_up": !activeRal.isStreaming,
+            });
+            return; // Don't spawn new execution (RAL already exists)
         }
 
         // Check if this agent has a resumable RAL - if so, use the original triggering event
@@ -302,14 +323,13 @@ async function handleReplyLogic(
 
     await Promise.all(executionPromises);
 
-    // Schedule debounced metadata publishing (kind 513)
-    // - Root events (no e-tags) publish immediately
-    // - Subsequent messages debounce by 10s, max delay 5 minutes
+    // Schedule debounced metadata publishing (kind 513) after agent execution
+    // Always debounce: 10s delay if another message arrives, max 5 minutes
+    // (Immediate generation for NEW conversations is handled earlier, before execution)
     if (!AgentEventDecoder.isAgentInternalMessage(event)) {
-        const isRootEvent = event.getMatchingTags("e").length === 0;
         metadataDebounceManager.schedulePublish(
             conversation.id,
-            isRootEvent,
+            false, // Always debounce after execution
             async () => {
                 const summarizer = new ConversationSummarizer(projectCtx);
                 await summarizer.summarizeAndPublish(conversation);
@@ -317,7 +337,7 @@ async function handleReplyLogic(
         );
         trace.getActiveSpan()?.addEvent("reply.summarization_scheduled", {
             "conversation.id": conversation.id,
-            "is_root_event": isRootEvent,
+            "debounced": true,
         });
     }
 }
