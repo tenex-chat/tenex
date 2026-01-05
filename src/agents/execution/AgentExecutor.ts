@@ -369,8 +369,14 @@ export class AgentExecutor {
                             throw new Error(`Conversation ${context.conversationId} not found`);
                         }
 
+                        // Get conversation store for todos and message building
+                        const conversationStore = context.conversationStore;
+                        if (!conversationStore) {
+                            throw new Error("ConversationStore not available in pre-tool supervision");
+                        }
+
                         // Get todos for the agent to populate hasTodoList
-                        const todos = conversation.getTodos(context.agent.pubkey);
+                        const todos = conversationStore.getTodos(context.agent.pubkey);
                         const hasTodoList = todos.length > 0;
 
                         // Get system prompt and conversation history
@@ -388,10 +394,7 @@ export class AgentExecutor {
                         const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
                         // Build conversation history from ConversationStore
-                        const conversationStore = context.conversationStore;
-                        const conversationMessages = conversationStore
-                            ? await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber)
-                            : [];
+                        const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber);
 
                         // Get available tools
                         const toolNames = context.agent.tools || [];
