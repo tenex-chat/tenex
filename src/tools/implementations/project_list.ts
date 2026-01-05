@@ -1,7 +1,6 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AISdkTool } from "@/tools/types";
 import { getDaemon } from "@/daemon";
-import { getProjectContextManager } from "@/daemon/ProjectContextManager";
 import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
 import { NDKUser, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -12,11 +11,9 @@ const projectListSchema = z.object({});
 
 type ProjectAgent = {
     slug: string;
-    name: string;
     pubkey: string;
-    npub: string;
     role: string;
-    isPM: boolean;
+    isPM?: true;
 };
 
 type ProjectInfo = {
@@ -44,12 +41,11 @@ type ProjectListOutput = {
 async function executeProjectList(context: ExecutionContext): Promise<ProjectListOutput> {
     const daemon = getDaemon();
     const knownProjects = daemon.getKnownProjects();
-    const contextManager = getProjectContextManager();
-    const runningContexts = contextManager.getAllContexts();
+    const activeRuntimes = daemon.getActiveRuntimes();
 
     logger.info("📦 Listing all known projects", {
         knownCount: knownProjects.size,
-        runningCount: runningContexts.size,
+        runningCount: activeRuntimes.size,
         agent: context.agent.name,
     });
 
@@ -71,24 +67,24 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
         const naddr = project.encode();
 
         // Check if this project is running
-        const runningContext = runningContexts.get(projectId);
-        const isRunning = !!runningContext;
+        const runtime = activeRuntimes.get(projectId);
+        const isRunning = !!runtime;
 
         // Get agents - from running context if available, otherwise from storage
         const agents: ProjectAgent[] = [];
 
-        if (runningContext) {
-            // Running project - get agents from context
-            const pmPubkey = runningContext.projectManager?.pubkey;
-            for (const agent of runningContext.agents.values()) {
-                const user = new NDKUser({ pubkey: agent.pubkey });
+        if (runtime) {
+            // Running project - get agents from runtime context
+            const runtimeContext = runtime.getContext();
+            const pmPubkey = runtimeContext?.projectManager?.pubkey;
+            const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap() || new Map();
+            for (const agent of agentMap.values()) {
+                const isPM = agent.pubkey === pmPubkey;
                 agents.push({
                     slug: agent.slug,
-                    name: agent.name,
                     pubkey: agent.pubkey,
-                    npub: user.npub,
                     role: agent.role,
-                    isPM: agent.pubkey === pmPubkey,
+                    ...(isPM && { isPM: true }),
                 });
             }
         } else {
@@ -97,14 +93,10 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
             for (const storedAgent of storedAgents) {
                 const signer = new NDKPrivateKeySigner(storedAgent.nsec);
                 const pubkey = (await signer.user()).pubkey;
-                const user = new NDKUser({ pubkey });
                 agents.push({
                     slug: storedAgent.slug,
-                    name: storedAgent.name,
                     pubkey,
-                    npub: user.npub,
                     role: storedAgent.role,
-                    isPM: false, // Can't determine PM for non-running projects
                 });
             }
         }
@@ -149,7 +141,7 @@ export function createProjectListTool(context: ExecutionContext): AISdkTool {
         description:
             "List ALL known projects with their agents and running status. " +
             "For each project shows: id, naddr, title, description, repository, owner info, isRunning flag, and all agents. " +
-            "For each agent shows: slug, name, pubkey, npub, role, and whether they're the project manager. " +
+            "For each agent shows: slug, pubkey, role, and isPM (only if true). " +
             "Includes both running and non-running projects discovered by the daemon.",
         inputSchema: projectListSchema,
         execute: async () => {
