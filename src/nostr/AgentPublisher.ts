@@ -240,6 +240,12 @@ export class AgentPublisher {
         // Add ask marker
         event.tags.push(["ask", "true"]);
 
+        // Add TLDR tag
+        event.tags.push(["tldr", params.tldr]);
+
+        // Add context tag (full version)
+        event.tags.push(["context", params.context]);
+
         // Add suggestions
         if (params.suggestions) {
             for (const suggestion of params.suggestions) {
