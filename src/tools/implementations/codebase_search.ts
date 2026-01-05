@@ -299,13 +299,6 @@ async function recursiveFileSearch(
 }
 
 /**
- * Escape regex special characters for literal matching
- */
-function escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
  * Check if ripgrep is available
  */
 async function isRipgrepAvailable(): Promise<boolean> {
@@ -332,17 +325,16 @@ async function searchByContent(
     contextBefore?: number | null,
     contextAround?: number | null
 ): Promise<void> {
-    // Escape query for literal matching if not using regex
-    const searchPattern = regex ? query : escapeRegex(query);
-
-    // Check if ripgrep is available for regex searches
-    const useRipgrep = regex && (await isRipgrepAvailable());
+    // Check if ripgrep is available (prefer ripgrep for all searches - it's faster)
+    const useRipgrep = await isRipgrepAvailable();
 
     let searchCommand: string;
 
     if (useRipgrep) {
         // Build ripgrep command
-        searchCommand = `rg -n "${searchPattern}" .`;
+        // Use -F for fixed/literal string matching when not in regex mode
+        const rgFlags = regex ? "-n" : "-nF";
+        searchCommand = `rg ${rgFlags} "${query}" .`;
 
         // Add file type filter if specified
         if (fileType) {
@@ -372,9 +364,10 @@ async function searchByContent(
         searchCommand += " -g '!.next'";
         searchCommand += " -g '!coverage'";
     } else {
-        // Build grep command (with -E for regex support if needed)
-        const grepFlags = regex ? "rn -E" : "rn";
-        searchCommand = `grep ${grepFlags} "${searchPattern}" .`;
+        // Build grep command
+        // Use -F for fixed/literal string matching when not in regex mode (avoids escaping issues)
+        const grepFlags = regex ? "-rn -E" : "-rnF";
+        searchCommand = `grep ${grepFlags} "${query}" .`;
 
         // Add file type filter if specified
         if (fileType) {
