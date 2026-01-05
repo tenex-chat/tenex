@@ -8,29 +8,22 @@ import type {
   QueuedInjection,
 } from "./types";
 
-export interface RALSummary {
-  ralNumber: number;
-  ralId: string;
-  isStreaming: boolean;
-  currentTool?: string;
-  pendingDelegations: Array<{ recipientPubkey: string; delegationConversationId: string }>;
-  createdAt: number;
-  hasPendingDelegations: boolean;
-}
-
 /**
  * RAL = Reason-Act Loop
  *
- * Manages state for concurrent agent executions within conversations.
+ * Manages state for agent executions within conversations.
  * Each RAL represents one execution cycle where the agent reasons about
  * input and takes actions via tool calls.
+ *
+ * Simplified execution model: ONE active execution per agent at a time.
+ * New messages get injected into the active execution.
  */
 export class RALRegistry {
   private static instance: RALRegistry;
 
   /**
    * RAL states keyed by "agentPubkey:conversationId", value is Map of ralNumber -> RALState
-   * This allows multiple concurrent RALs per agent+conversation
+   * With simplified execution model, only one RAL is active per agent+conversation at a time.
    */
   private states: Map<string, Map<number, RALState>> = new Map();
 
@@ -210,31 +203,6 @@ export class RALRegistry {
     const rals = this.states.get(key);
     if (!rals) return [];
     return Array.from(rals.values());
-  }
-
-  /**
-   * Get summaries of other active RALs (excluding the specified one)
-   * Used for concurrent RAL coordination (pausing/resuming)
-   */
-  getOtherRALSummaries(agentPubkey: string, conversationId: string, excludeRalNumber: number): RALSummary[] {
-    const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals
-      .filter(r => r.ralNumber !== excludeRalNumber)
-      .map(r => {
-        const pending = this.getConversationPendingDelegations(agentPubkey, conversationId, r.ralNumber);
-        return {
-          ralNumber: r.ralNumber,
-          ralId: r.id,
-          isStreaming: r.isStreaming,
-          currentTool: r.currentTool,
-          pendingDelegations: pending.map(d => ({
-            recipientPubkey: d.recipientPubkey,
-            delegationConversationId: d.delegationConversationId,
-          })),
-          createdAt: r.createdAt,
-          hasPendingDelegations: pending.length > 0,
-        };
-      });
   }
 
   /**
@@ -446,89 +414,6 @@ export class RALRegistry {
     convDelegations.pending.delete(completion.delegationConversationId);
 
     return { agentPubkey, conversationId, ralNumber: location.ralNumber };
-  }
-
-  /**
-   * Inject a system message into a specific RAL
-   * Returns true if successful, false if RAL not found
-   */
-  injectToRAL(
-    agentPubkey: string,
-    conversationId: string,
-    targetRalNumber: number,
-    message: string
-  ): boolean {
-    const ral = this.getRAL(agentPubkey, conversationId, targetRalNumber);
-    if (!ral) {
-      logger.warn("[RALRegistry] Cannot inject - RAL not found", {
-        agentPubkey: agentPubkey.substring(0, 8),
-        conversationId: conversationId.substring(0, 8),
-        targetRalNumber,
-      });
-      return false;
-    }
-
-    // Enforce queue size limit
-    if (ral.queuedInjections.length >= RALRegistry.MAX_QUEUE_SIZE) {
-      ral.queuedInjections.shift();
-      logger.warn("[RALRegistry] Queue full, dropping oldest message", {
-        agentPubkey: agentPubkey.substring(0, 8),
-      });
-    }
-
-    ral.queuedInjections.push({
-      role: "system",
-      content: message,
-      queuedAt: Date.now(),
-    });
-
-    trace.getActiveSpan()?.addEvent("ral.message_injected", {
-      "ral.number": targetRalNumber,
-      "message.length": message.length,
-    });
-
-    return true;
-  }
-
-  /**
-   * Abort a specific RAL
-   * Returns { success: true } or { success: false, reason: string }
-   */
-  abortRAL(
-    agentPubkey: string,
-    conversationId: string,
-    targetRalNumber: number
-  ): { success: boolean; reason?: string } {
-    const ral = this.getRAL(agentPubkey, conversationId, targetRalNumber);
-    if (!ral) {
-      return { success: false, reason: "RAL not found" };
-    }
-
-    const pendingCount = this.getConversationPendingDelegations(agentPubkey, conversationId, targetRalNumber).length;
-    if (pendingCount > 0) {
-      return {
-        success: false,
-        reason: `RAL has ${pendingCount} pending delegation(s). Use delegate_followup to communicate with them first.`,
-      };
-    }
-
-    // Abort any running tool
-    const key = this.makeKey(agentPubkey, conversationId);
-    const abortKey = this.makeAbortKey(key, targetRalNumber);
-    const controller = this.abortControllers.get(abortKey);
-    if (controller) {
-      controller.abort();
-      this.abortControllers.delete(abortKey);
-    }
-
-    // Clear the RAL
-    this.clearRAL(agentPubkey, conversationId, targetRalNumber);
-
-    trace.getActiveSpan()?.addEvent("ral.aborted", {
-      "ral.number": targetRalNumber,
-    });
-
-    return { success: true };
   }
 
   /**
@@ -821,104 +706,41 @@ export class RALRegistry {
     return lines.join("\n");
   }
 
-  // === RAL Pause/Resume for concurrent execution coordination ===
-
   /**
-   * Pause all other RALs in this conversation so the new RAL can analyze and decide.
-   * Returns the number of RALs that were paused.
+   * Determine if a new message should wake up an execution.
+   *
+   * This is the KEY decision point in the simplified model:
+   * - If agent is actively streaming: Don't wake up, message is injected
+   * - If agent is waiting on delegations: Wake up to process
+   * - If no RAL exists: Wake up (start new execution)
+   *
+   * @returns true if execution should be started/resumed, false if injection is sufficient
    */
-  pauseOtherRALs(agentPubkey: string, conversationId: string, pausingRalNumber: number): number {
-    const rals = this.getActiveRALs(agentPubkey, conversationId);
-    let pausedCount = 0;
-    const skippedSelf: number[] = [];
-    const skippedAlreadyPaused: { ralNumber: number; pausedBy: number }[] = [];
-    const paused: number[] = [];
+  shouldWakeUpExecution(agentPubkey: string, conversationId: string): boolean {
+    const ral = this.getState(agentPubkey, conversationId);
 
-    const span = trace.getActiveSpan();
+    // No RAL = start new execution
+    if (!ral) return true;
 
-    for (const ral of rals) {
-      if (ral.ralNumber === pausingRalNumber) {
-        skippedSelf.push(ral.ralNumber);
-        continue;
-      }
-      if (ral.pausedByRalNumber) {
-        skippedAlreadyPaused.push({
-          ralNumber: ral.ralNumber,
-          pausedBy: ral.pausedByRalNumber,
-        });
-        continue;
-      }
+    // If currently streaming (actively processing), don't wake up
+    // The prepareStep callback will pick up the injected message
+    if (ral.isStreaming) return false;
 
-      let resolver: () => void = () => {};
-      const promise = new Promise<void>((r) => {
-        resolver = r;
-      });
-      ral.pausedByRalNumber = pausingRalNumber;
-      ral.pausePromise = promise;
-      ral.pauseResolver = resolver;
-      pausedCount++;
-      paused.push(ral.ralNumber);
-    }
+    // If there are completed delegations waiting, wake up
+    const completed = this.getConversationCompletedDelegations(
+      agentPubkey, conversationId, ral.ralNumber
+    );
+    if (completed.length > 0) return true;
 
-    if (span) {
-      span.addEvent("ral.others_paused", {
-        pausing_ral: pausingRalNumber,
-        total_active_rals: rals.length,
-        active_ral_numbers: rals.map(r => r.ralNumber).join(","),
-        skipped_self: skippedSelf.join(","),
-        skipped_already_paused: skippedAlreadyPaused.map(s => `${s.ralNumber}(by:${s.pausedBy})`).join(","),
-        paused_rals: paused.join(","),
-        paused_count: pausedCount,
-      });
-    }
+    // If there are pending delegations, we're waiting - wake up to process new message
+    const pending = this.getConversationPendingDelegations(
+      agentPubkey, conversationId, ral.ralNumber
+    );
+    if (pending.length > 0) return true;
 
-    return pausedCount;
-  }
-
-  /**
-   * Release all RALs that were paused by this RAL.
-   * Returns the number of RALs that were released.
-   */
-  releaseOtherRALs(agentPubkey: string, conversationId: string, releasingRalNumber: number): number {
-    const rals = this.getActiveRALs(agentPubkey, conversationId);
-    let releasedCount = 0;
-
-    for (const ral of rals) {
-      if (ral.pausedByRalNumber !== releasingRalNumber) continue;
-
-      // Resolve the promise to unblock the waiting RAL
-      ral.pauseResolver?.();
-      ral.pausedByRalNumber = undefined;
-      ral.pausePromise = undefined;
-      ral.pauseResolver = undefined;
-      releasedCount++;
-    }
-
-    if (releasedCount > 0) {
-      trace.getActiveSpan()?.addEvent("ral.others_released", {
-        "ral.releasing_number": releasingRalNumber,
-        "ral.released_count": releasedCount,
-      });
-    }
-
-    return releasedCount;
-  }
-
-  /**
-   * Check if a RAL is paused and return the promise to await if so.
-   * Returns undefined if not paused.
-   */
-  getPausePromise(agentPubkey: string, conversationId: string, ralNumber: number): Promise<void> | undefined {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return ral?.pausePromise;
-  }
-
-  /**
-   * Check if a RAL is currently paused.
-   */
-  isPaused(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    return ral?.pausedByRalNumber !== undefined;
+    // RAL exists but not streaming and no delegations - it's finished
+    // This shouldn't happen often (RAL should be cleared), but wake up to start fresh
+    return true;
   }
 
   /**

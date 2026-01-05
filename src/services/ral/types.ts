@@ -104,12 +104,6 @@ export interface RALState {
   lastActivityAt: number;
   /** The original event that triggered this RAL - used for proper tagging on resumption */
   originalTriggeringEventId?: string;
-  /** If set, this RAL is paused by the RAL with this number */
-  pausedByRalNumber?: number;
-  /** Promise that resolves when this RAL is unpaused */
-  pausePromise?: Promise<void>;
-  /** Resolver function to unpause this RAL */
-  pauseResolver?: () => void;
   /** OTEL trace ID for correlating stop events with the agent execution */
   traceId?: string;
   /** OTEL span ID of the agent execution span - used as parent for stop spans */

@@ -23,8 +23,6 @@ export type ToolName =
     | "discover_capabilities"
     | "delegate"
     | "delegate_followup"
-    | "ral_inject"
-    | "ral_abort"
     | "ask"
     | "project_list"
     | "create_project"

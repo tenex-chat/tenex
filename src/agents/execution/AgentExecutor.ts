@@ -6,9 +6,7 @@ import {
     type PostCompletionContext,
 } from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { buildRalSummary } from "@/conversations/RalSummaryFormatter";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { addConcurrentRALContext } from "@/conversations/utils/context-enhancers";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
 import type {
     ChunkTypeChangeEvent,
@@ -27,7 +25,6 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
-import type { RALSummary } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
@@ -43,7 +40,6 @@ import type {
     TypedToolResult,
 } from "ai";
 import chalk from "chalk";
-import { shouldReleasePausedRALs } from "./ConcurrentRALCoordinator";
 import { MessageSyncer } from "./MessageSyncer";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -198,61 +194,15 @@ export class AgentExecutor {
                     );
                 }
 
-                // Check for other active RALs in this conversation
-                const existingRALs = ralRegistry.getActiveRALs(
-                    context.agent.pubkey,
-                    context.conversationId
-                );
-
                 span.setAttributes({
                     "ral.number": ralNumber,
                     "ral.is_resumption": isResumption,
-                    "ral.other_active_count": existingRALs.length - 1, // Exclude self
                 });
-
-                // Get summaries of other RALs to inject as context
-                const otherRALSummaries = ralRegistry.getOtherRALSummaries(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                if (otherRALSummaries.length > 0) {
-                    span.addEvent("executor.concurrent_rals", {
-                        "ral.count": otherRALSummaries.length,
-                        "ral.numbers": otherRALSummaries.map((r) => r.ralNumber).join(","),
-                    });
-
-                    // Pause other RALs to give this new RAL time to analyze and decide
-                    const activeRalsBeforePause = ralRegistry.getActiveRALs(
-                        context.agent.pubkey,
-                        context.conversationId
-                    );
-
-                    span.addEvent("rals_pause_attempt", {
-                        pausing_ral: ralNumber,
-                        active_ral_count: activeRalsBeforePause.length,
-                        active_ral_numbers: activeRalsBeforePause.map((r) => r.ralNumber).join(","),
-                        other_ral_summary_count: otherRALSummaries.length,
-                    });
-
-                    const pausedCount = ralRegistry.pauseOtherRALs(
-                        context.agent.pubkey,
-                        context.conversationId,
-                        ralNumber
-                    );
-
-                    span.addEvent("executor.rals_paused", {
-                        "ral.pausing_number": ralNumber,
-                        "ral.paused_count": pausedCount,
-                    });
-                }
 
                 // Store ralNumber in context for use throughout execution
                 const contextWithRal = {
                     ...context,
                     ralNumber,
-                    otherRALSummaries,
                 };
 
                 // Prepare execution context with all necessary components
@@ -273,7 +223,6 @@ export class AgentExecutor {
                     ral_number: ralNumber,
                     is_resumption: isResumption,
                     has_phases: !!context.agent.phases,
-                    concurrent_rals: existingRALs.length - 1,
                 });
 
                 try {
@@ -349,9 +298,9 @@ export class AgentExecutor {
      * Prepare execution context with all necessary components
      */
     private prepareExecution(
-        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] }
+        context: ExecutionContext & { ralNumber: number }
     ): {
-        fullContext: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] };
+        fullContext: ExecutionContext & { ralNumber: number };
         toolTracker: ToolExecutionTracker;
         agentPublisher: AgentPublisher;
         cleanup: () => Promise<void>;
@@ -374,7 +323,6 @@ export class AgentExecutor {
             ...context,
             agentPublisher,
             conversationStore,
-            hasConcurrentRALs: context.otherRALSummaries.length > 0,
             hasActivePairings,
         };
 
@@ -397,7 +345,7 @@ export class AgentExecutor {
      * Execute streaming and publish result
      */
     private async executeOnce(
-        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
+        context: ExecutionContext & { ralNumber: number },
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentPublisher,
         ralNumber: number
@@ -622,7 +570,7 @@ export class AgentExecutor {
      * Uses discriminated union: 'complete' for success, 'error-handled' when error already published.
      */
     private async executeStreaming(
-        context: ExecutionContext & { ralNumber: number; otherRALSummaries: RALSummary[] },
+        context: ExecutionContext & { ralNumber: number },
         toolTracker: ToolExecutionTracker,
         ralNumber: number
     ): Promise<StreamExecutionResult> {
@@ -676,38 +624,6 @@ export class AgentExecutor {
             ...systemPromptMessages.map((sm) => sm.message),
             ...conversationMessages,
         ];
-
-        // Add concurrent RAL context if there are other active RALs
-        if (context.otherRALSummaries.length > 0) {
-            // Build action history for each other active RAL
-            const actionHistory = new Map<number, string>();
-            for (const ralSummary of context.otherRALSummaries) {
-                const storeMessages = conversationStore.getAllMessages();
-                // buildRalSummary returns the full summary with header, we just want the action lines
-                const summary = buildRalSummary(
-                    storeMessages,
-                    context.agent.pubkey,
-                    ralSummary.ralNumber
-                );
-                // Extract just the action lines (skip the header "You have another reason-act-loop..." line)
-                const lines = summary
-                    .split("\n")
-                    .slice(2)
-                    .filter((l) => l.trim());
-                if (lines.length > 0) {
-                    actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
-                }
-            }
-
-            addConcurrentRALContext(
-                messages,
-                context.otherRALSummaries,
-                ralNumber,
-                actionHistory,
-                context.triggeringEvent.content,
-                context.agent.name
-            );
-        }
 
         // Append todo list as a late system message (after conversation history)
         // This ensures the agent sees its current todos near the end of the context
@@ -872,9 +788,6 @@ export class AgentExecutor {
 
         const executionSpan = trace.getActiveSpan();
 
-        // Track whether we've released paused RALs (happens after first step)
-        let hasReleasedPausedRALs = false;
-
         // Track accumulated messages from prepareStep - this is updated before each step
         // and includes all messages up to (but not including) the current step
         let latestAccumulatedMessages: ModelMessage[] = messages;
@@ -906,40 +819,6 @@ export class AgentExecutor {
                     ralNumber
                 );
                 syncer.syncFromSDK(step.messages);
-
-                // Check if we should release paused RALs based on completed steps
-                // Only release after a step with actual tool calls (agent made a decision)
-                if (!hasReleasedPausedRALs && step.steps.length > 0) {
-                    const stepsInfo = step.steps.map((s, i) => ({
-                        stepNumber: i,
-                        toolCalls: s.toolCalls || [],
-                        text: s.text || "",
-                        reasoningText: s.reasoningText,
-                    }));
-
-                    if (shouldReleasePausedRALs(stepsInfo)) {
-                        hasReleasedPausedRALs = true;
-
-                        const triggeringToolCalls = stepsInfo
-                            .flatMap((s) => s.toolCalls.map((tc) => tc.toolName))
-                            .join(", ");
-
-                        const releasedCount = ralRegistry.releaseOtherRALs(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber
-                        );
-
-                        if (releasedCount > 0 && executionSpan) {
-                            executionSpan.addEvent("executor.rals_released", {
-                                "ral.releasing_number": ralNumber,
-                                "ral.released_count": releasedCount,
-                                "step.completed_count": step.steps.length,
-                                "step.triggering_tools": triggeringToolCalls,
-                            });
-                        }
-                    }
-                }
 
                 // Process any new injections - persist them to ConversationStore
                 const newInjections = ralRegistry.getAndConsumeInjections(
@@ -981,43 +860,6 @@ export class AgentExecutor {
                     ...conversationMessages,
                 ];
 
-                // Re-check for concurrent RALs and add context if any exist
-                // Must re-check every step since RALs can start/complete during execution
-                const currentOtherRALs = ralRegistry.getOtherRALSummaries(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                if (currentOtherRALs.length > 0) {
-                    // Build action history for each other active RAL
-                    const actionHistory = new Map<number, string>();
-                    for (const ralSummary of currentOtherRALs) {
-                        const storeMessages = conversationStore.getAllMessages();
-                        const summary = buildRalSummary(
-                            storeMessages,
-                            context.agent.pubkey,
-                            ralSummary.ralNumber
-                        );
-                        const lines = summary
-                            .split("\n")
-                            .slice(2)
-                            .filter((l) => l.trim());
-                        if (lines.length > 0) {
-                            actionHistory.set(ralSummary.ralNumber, lines.join("\n"));
-                        }
-                    }
-
-                    addConcurrentRALContext(
-                        rebuiltMessages,
-                        currentOtherRALs,
-                        ralNumber,
-                        actionHistory,
-                        context.triggeringEvent.content,
-                        context.agent.name
-                    );
-                }
-
                 // Re-add todo list (tools may have modified it)
                 const todoContent = await agentTodosFragment.template({
                     conversation,
@@ -1034,34 +876,6 @@ export class AgentExecutor {
             };
 
             const onStopCheck = async (steps: any[]): Promise<boolean> => {
-                // Check if this RAL is paused by another RAL (e.g., a new RAL started)
-                // Awaiting here (in async onStopCheck) allows us to pause between steps
-                const pausePromise = ralRegistry.getPausePromise(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                if (pausePromise) {
-                    const pausedBy = ralRegistry.getRAL(
-                        context.agent.pubkey,
-                        context.conversationId,
-                        ralNumber
-                    )?.pausedByRalNumber;
-
-                    executionSpan?.addEvent("executor.ral_paused_waiting", {
-                        "ral.number": ralNumber,
-                        "ral.paused_by": pausedBy,
-                    });
-
-                    // Wait for the pause to be released
-                    await pausePromise;
-
-                    executionSpan?.addEvent("executor.ral_resumed", {
-                        "ral.number": ralNumber,
-                    });
-                }
-
                 if (steps.length === 0) return false;
 
                 const lastStep = steps[steps.length - 1];
@@ -1198,22 +1012,6 @@ export class AgentExecutor {
                 ralNumber,
                 false
             );
-
-            // Safety release: ensure any RALs we paused are released on cleanup
-            if (!hasReleasedPausedRALs) {
-                const releasedCount = ralRegistry.releaseOtherRALs(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                if (releasedCount > 0) {
-                    executionSpan?.addEvent("executor.rals_released_cleanup", {
-                        "ral.releasing_number": ralNumber,
-                        "ral.released_count": releasedCount,
-                    });
-                }
-            }
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
