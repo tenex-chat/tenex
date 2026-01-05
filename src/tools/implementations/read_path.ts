@@ -12,8 +12,9 @@ const readPathSchema = z.object({
         .describe("The file or directory path to read (absolute or relative to project root)"),
     offset: z
         .number()
+        .min(0)
         .optional()
-        .describe("Line number to start reading from (1-indexed). If omitted, starts from beginning."),
+        .describe("Line number to start reading from (0-indexed). If omitted, starts from beginning."),
     limit: z
         .number()
         .optional()
@@ -52,7 +53,7 @@ async function executeReadPath(
             const totalLines = lines.length;
 
             // Validate offset
-            const startIndex = offset !== undefined ? offset - 1 : 0;
+            const startIndex = offset ?? 0;
             if (startIndex >= totalLines) {
                 return `File has only ${totalLines} line(s), but offset ${offset} was requested.`;
             }
