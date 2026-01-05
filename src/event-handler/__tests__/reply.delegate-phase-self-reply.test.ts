@@ -2,9 +2,27 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { handleChatMessage } from "../reply";
 import { projectContextStore } from "@/services/projects";
+import { ConversationStore } from "@/conversations/ConversationStore";
+
+// Mock ConfigService
+mock.module("@/services/ConfigService", () => ({
+    config: {
+        getConfig: mock(() => ({
+            whitelistedPubkeys: [],
+        })),
+    },
+}));
+
+// Mock OpenTelemetry
+mock.module("@opentelemetry/api", () => ({
+    trace: {
+        getActiveSpan: mock(() => ({
+            addEvent: mock(() => {}),
+        })),
+    },
+}));
 
 describe("Agent Phase Self-Reply", () => {
-    let mockConversationCoordinator: any;
     let mockAgentExecutor: any;
     let mockProjectContext: any;
 
@@ -12,15 +30,9 @@ describe("Agent Phase Self-Reply", () => {
         // Reset all mocks
         mock.restore();
 
-        // Create mock conversation coordinator
-        mockConversationCoordinator = {
-            getConversationByEvent: mock(() => undefined),
-            getConversation: mock(() => undefined),
-            getTaskMapping: mock(() => undefined),
-            createConversation: mock(() => Promise.resolve(undefined)),
-            addEvent: mock(() => Promise.resolve()),
-            updateAgentState: mock(() => Promise.resolve()),
-        } as any;
+        // Initialize ConversationStore for tests
+        ConversationStore.reset();
+        ConversationStore.initialize("/test/project", ["pm-phases-pubkey", "regular-agent-pubkey"]);
 
         // Create mock agent executor
         mockAgentExecutor = {
@@ -98,22 +110,9 @@ describe("Agent Phase Self-Reply", () => {
             },
         } as any;
 
-        // Create a mock conversation
-        const mockConversation = {
-            id: "conv-root",
-            history: [],
-            phase: "planning",
-            agentStates: new Map(),
-            agentTodos: new Map(),
-        };
-
-        // Update mock to return conversation
-        mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
-
         // Handle the event within project context
         await projectContextStore.run(mockProjectContext as any, async () => {
             await handleChatMessage(selfReplyEvent, {
-                conversationCoordinator: mockConversationCoordinator,
                 agentExecutor: mockAgentExecutor,
             });
         });
@@ -151,22 +150,9 @@ describe("Agent Phase Self-Reply", () => {
             },
         } as any;
 
-        // Create a mock conversation
-        const mockConversation = {
-            id: "conv-root",
-            history: [],
-            phase: "chat",
-            agentStates: new Map(),
-            agentTodos: new Map(),
-        };
-
-        // Update mock to return conversation
-        mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
-
         // Handle the event within project context
         await projectContextStore.run(mockProjectContext as any, async () => {
             await handleChatMessage(selfReplyEvent, {
-                conversationCoordinator: mockConversationCoordinator,
                 agentExecutor: mockAgentExecutor,
             });
         });
@@ -205,22 +191,9 @@ describe("Agent Phase Self-Reply", () => {
             },
         } as any;
 
-        // Create a mock conversation
-        const mockConversation = {
-            id: "conv-root",
-            history: [],
-            phase: "planning",
-            agentStates: new Map(),
-            agentTodos: new Map(),
-        };
-
-        // Update mock to return conversation
-        mockConversationCoordinator.getConversationByEvent = mock(() => mockConversation);
-
         // Handle the event within project context
         await projectContextStore.run(mockProjectContext as any, async () => {
             await handleChatMessage(mixedEvent, {
-                conversationCoordinator: mockConversationCoordinator,
                 agentExecutor: mockAgentExecutor,
             });
         });
