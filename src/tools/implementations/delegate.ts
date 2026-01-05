@@ -68,9 +68,11 @@ async function executeDelegate(
   // unrelated previous RAL still has pending delegations.
   const ralRegistry = RALRegistry.getInstance();
   if (context.ralNumber !== undefined) {
-    const currentRal = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, context.ralNumber);
-    if (currentRal && currentRal.pendingDelegations.length > 0) {
-      const pendingRecipients = currentRal.pendingDelegations
+    const pendingDelegationsForRal = ralRegistry.getConversationPendingDelegations(
+      context.agent.pubkey, context.conversationId, context.ralNumber
+    );
+    if (pendingDelegationsForRal.length > 0) {
+      const pendingRecipients = pendingDelegationsForRal
         .map(d => d.recipientPubkey.substring(0, 8))
         .join(", ");
       throw new Error(
@@ -151,6 +153,7 @@ async function executeDelegate(
       recipientPubkey: pubkey,
       senderPubkey: context.agent.pubkey,
       prompt: delegation.prompt,
+      ralNumber: context.ralNumber!,
     });
 
     // Start pairing supervision if requested

@@ -56,14 +56,75 @@ function buildRALDescriptions(rals: RALContextSummary[], actionHistory: Map<numb
 }
 
 /**
+ * Build coordination guidance based on what the paused RALs are doing
+ */
+function buildCoordinationGuidance(otherRALs: RALContextSummary[]): string {
+    const ralsWithDelegations = otherRALs.filter(r => r.pendingDelegations.length > 0);
+    const ralsWithoutDelegations = otherRALs.filter(r => r.pendingDelegations.length === 0);
+
+    let guidance = "CRITICAL: You must coordinate with paused RALs before proceeding:\n";
+
+    // If there are RALs with delegations, that's the primary case to address
+    if (ralsWithDelegations.length > 0) {
+        const delegationExamples = ralsWithDelegations.flatMap(r =>
+            r.pendingDelegations.map(d => ({
+                ralNumber: r.ralNumber,
+                recipientSlug: d.recipientSlug || "agent",
+                conversationId: d.delegationConversationId
+            }))
+        );
+        const example = delegationExamples[0];
+
+        guidance += `
+1. If the user's request CHANGES what a delegated agent is doing:
+   → Use delegate_followup to send instructions DIRECTLY to the delegated agent
+   → Example: delegate_followup("${example.conversationId.substring(0, 8)}...", "User changed request: ...")
+   → This sends your message immediately to ${example.recipientSlug}
+
+2. If the user wants to cancel the delegation entirely:
+   → Use ral_abort if available, OR ral_inject to tell RAL #${example.ralNumber} to stop`;
+    }
+
+    // If there are RALs without delegations (doing direct work)
+    if (ralsWithoutDelegations.length > 0) {
+        const example = ralsWithoutDelegations[0];
+        const itemNum = ralsWithDelegations.length > 0 ? 3 : 1;
+
+        guidance += `
+${itemNum}. If the user's request CHANGES what RAL #${example.ralNumber} is doing directly:
+   → Use ral_inject to send the new instruction
+   → Example: ral_inject(${example.ralNumber}, "STOP. User changed request: ...")`;
+    }
+
+    // Always add the unrelated case
+    const lastItemNum = (ralsWithDelegations.length > 0 ? 2 : 0) + (ralsWithoutDelegations.length > 0 ? 1 : 0) + 1;
+    guidance += `
+
+${lastItemNum}. If the user's request is UNRELATED to the paused RALs:
+   → Proceed with your own work (the paused RALs will resume automatically)`;
+
+    return guidance;
+}
+
+/**
  * Build the tool instructions section based on availability
  */
-function buildToolInstructions(toolAvailability: RALToolAvailability[]): string {
+function buildToolInstructions(
+    toolAvailability: RALToolAvailability[],
+    otherRALs: RALContextSummary[]
+): string {
     const abortableRALs = toolAvailability.filter(t => t.canAbort);
     const nonAbortableRALs = toolAvailability.filter(t => !t.canAbort);
+    const ralsWithDelegations = otherRALs.filter(r => r.pendingDelegations.length > 0);
 
     let toolInstructions = `Available tools for coordination:
-- ral_inject(ral_number, message): Send an instruction to that RAL (it will see it when it next processes)`;
+- ral_inject(ral_number, message): Send an instruction to that RAL (it will see it ONLY when it resumes - NOT during active delegations)`;
+
+    // If any RAL has pending delegations, explain delegate_followup
+    if (ralsWithDelegations.length > 0) {
+        toolInstructions += `
+- delegate_followup(delegation_conversation_id, message): Send a message DIRECTLY to an active delegation (use this to communicate with delegated agents!)`;
+    }
 
     if (abortableRALs.length > 0) {
         toolInstructions += `
@@ -76,6 +137,15 @@ function buildToolInstructions(toolAvailability: RALToolAvailability[]): string 
 
 Note: Some RALs cannot be aborted directly:
   ${reasons}`;
+    }
+
+    // Add important clarification about ral_inject vs delegate_followup
+    if (ralsWithDelegations.length > 0) {
+        toolInstructions += `
+
+IMPORTANT - ral_inject vs delegate_followup:
+- ral_inject sends to the PAUSED RAL in this conversation - it won't see your message until AFTER its delegations complete
+- delegate_followup sends DIRECTLY to the delegated agent - use this to modify ongoing delegation work`;
     }
 
     return toolInstructions;
@@ -92,7 +162,7 @@ export const concurrentRALContextFragment: PromptFragment<ConcurrentRALContextAr
         if (otherRALs.length === 0) return "";
 
         const ralDescriptions = buildRALDescriptions(otherRALs, actionHistory);
-        const toolInstructions = buildToolInstructions(toolAvailability);
+        const toolInstructions = buildToolInstructions(toolAvailability, otherRALs);
 
         return `
 CONCURRENT EXECUTION CONTEXT:
@@ -109,19 +179,7 @@ ${ralDescriptions}
 
 ${toolInstructions}
 
-CRITICAL: You must coordinate with paused RALs before proceeding:
-
-1. If the user's NEW request CONFLICTS with or CHANGES what a paused RAL is doing:
-   → Use ral_inject to tell that RAL about the NEW user instruction only
-   → Do NOT repeat instructions or constraints that were in the original conversation - they already have those
-   → Example: User says "write jokes instead" while RAL #1 is writing poems
-   → Call: ral_inject(1, "STOP. User changed request: write jokes instead of poems.")
-
-2. If the user wants to CANCEL a paused RAL entirely:
-   → Use ral_abort if available, OR ral_inject with stop instruction if it has delegations
-
-3. If the user's request is UNRELATED to the paused RALs:
-   → Proceed with your own work (the paused RALs will resume automatically)
+${buildCoordinationGuidance(otherRALs)}
 
 The paused RALs will resume after you make your first tool call. Decide NOW.
 `;

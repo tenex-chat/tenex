@@ -1,6 +1,7 @@
 import type { Context } from "@opentelemetry/api";
 import type { ReadableSpan, SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { Span } from "@opentelemetry/sdk-trace-base";
+import { setLLMSpanId } from "./LLMSpanRegistry";
 
 /**
  * Span processor that enriches tool call span names with the actual tool name.
@@ -45,6 +46,13 @@ export class ToolCallSpanProcessor implements SpanProcessor {
             const phase = span.attributes?.["conversation.phase"];
             const phaseStr = phase ? `.${phase}` : "";
             (span as ReadableSpan & { name: string }).name = `[${agentPrefix}] agent.execute${phaseStr}`;
+        }
+
+        // Capture ai.streamText.doStream span IDs for event linking
+        // This allows published events to reference the LLM span that generated their content
+        if (span.name === "ai.streamText.doStream") {
+            const spanContext = span.spanContext();
+            setLLMSpanId(spanContext.traceId, spanContext.spanId);
         }
     }
 

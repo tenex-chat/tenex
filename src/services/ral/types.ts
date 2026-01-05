@@ -35,6 +35,8 @@ interface BasePendingDelegation {
   recipientPubkey: string;
   senderPubkey: string;
   prompt: string;
+  /** Which RAL created this delegation (for provenance tracking) */
+  ralNumber: number;
 }
 
 interface StandardDelegation extends BasePendingDelegation {
@@ -76,6 +78,8 @@ export interface CompletedDelegation {
   senderPubkey: string;
   transcript: DelegationMessage[];
   completedAt: number;
+  /** Which RAL created this delegation (for provenance tracking) */
+  ralNumber: number;
 }
 
 export interface QueuedInjection {
@@ -91,8 +95,6 @@ export interface RALState {
   agentPubkey: string;
   /** The conversation this RAL belongs to - RAL is scoped per agent+conversation */
   conversationId: string;
-  pendingDelegations: PendingDelegation[];
-  completedDelegations: CompletedDelegation[];
   queuedInjections: QueuedInjection[];
   /** Whether the agent is currently streaming a response */
   isStreaming: boolean;

@@ -3,7 +3,7 @@ import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
-import { trace, SpanStatusCode } from "@opentelemetry/api";
+import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.delegation");
 
@@ -36,7 +36,7 @@ export async function handleDelegationCompletion(
             "event.pubkey": event.pubkey,
             "event.kind": event.kind || 0,
         },
-    });
+    }, otelContext.active());
 
     try {
         const ralRegistry = RALRegistry.getInstance();
@@ -55,14 +55,14 @@ export async function handleDelegationCompletion(
         const projectCtx = getProjectContext();
 
         // Record the completion (looks up RAL internally via delegation conversation ID)
-        const state = ralRegistry.recordCompletion({
+        const location = ralRegistry.recordCompletion({
             delegationConversationId: delegationEventId,
             recipientPubkey: event.pubkey,
             response: event.content,
             completedAt: Date.now(),
         });
 
-        if (!state) {
+        if (!location) {
             span.addEvent("no_waiting_ral", {
                 "delegation.event_id": delegationEventId,
             });
@@ -70,15 +70,23 @@ export async function handleDelegationCompletion(
             return { recorded: false };
         }
 
-        const targetAgent = projectCtx.getAgentByPubkey(state.agentPubkey);
+        // Get counts from conversation storage
+        const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+            location.agentPubkey, location.conversationId, location.ralNumber
+        );
+        const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+            location.agentPubkey, location.conversationId, location.ralNumber
+        );
+
+        const targetAgent = projectCtx.getAgentByPubkey(location.agentPubkey);
         const agentSlug = targetAgent?.slug;
 
         span.setAttributes({
-            "agent.pubkey": state.agentPubkey,
+            "agent.pubkey": location.agentPubkey,
             "agent.slug": agentSlug || "unknown",
-            "conversation.id": state.conversationId,
-            "delegation.pending_count": state.pendingDelegations.length,
-            "delegation.completed_count": state.completedDelegations.length,
+            "conversation.id": location.conversationId,
+            "delegation.pending_count": pendingDelegations.length,
+            "delegation.completed_count": completedDelegations.length,
         });
 
         span.addEvent("completion_recorded", {
@@ -91,17 +99,17 @@ export async function handleDelegationCompletion(
         logger.info("[handleDelegationCompletion] Recorded delegation completion", {
             delegationEventId: delegationEventId.substring(0, 8),
             agentSlug,
-            conversationId: state.conversationId.substring(0, 8),
+            conversationId: location.conversationId.substring(0, 8),
             completionEventId: event.id?.substring(0, 8),
-            completedCount: state.completedDelegations.length,
-            pendingCount: state.pendingDelegations.length,
+            completedCount: completedDelegations.length,
+            pendingCount: pendingDelegations.length,
         });
 
         return {
             recorded: true,
             agentSlug,
-            conversationId: state.conversationId,
-            pendingCount: state.pendingDelegations.length,
+            conversationId: location.conversationId,
+            pendingCount: pendingDelegations.length,
         };
     } catch (error) {
         span.recordException(error as Error);

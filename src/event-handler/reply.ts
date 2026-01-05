@@ -5,6 +5,7 @@ import { createExecutionContext } from "../agents/execution/ExecutionContextFact
 import { ConversationStore } from "../conversations/ConversationStore";
 import { ConversationResolver } from "../conversations/services/ConversationResolver";
 import { ConversationSummarizer } from "../conversations/services/ConversationSummarizer";
+import { metadataDebounceManager } from "../conversations/services/MetadataDebounceManager";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
@@ -159,10 +160,38 @@ async function handleReplyLogic(
             hasPendingDelegations,
         });
 
+        // Reset metadata debounce timer before execution
+        metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
+
         // Execute - AgentExecutor will find the resumable RAL via findResumableRAL
         await agentExecutor.execute(executionContext);
+
+        // Schedule debounced metadata publish for the ORIGINAL conversation
+        // Delegation completions are never root events (they reply to a delegation)
+        metadataDebounceManager.schedulePublish(
+            delegationTarget.conversationId,
+            false, // not a root event
+            async () => {
+                const summarizer = new ConversationSummarizer(projectCtx);
+                const originalConversation = ConversationStore.get(delegationTarget.conversationId);
+                if (originalConversation) {
+                    await summarizer.summarizeAndPublish(originalConversation);
+                }
+            }
+        );
         return;
     }
+
+    // If this is a completion event but no delegation target was found, drop it.
+    // This prevents orphan completions from triggering new RALs and causing ping-pong loops.
+    if (AgentEventDecoder.isDelegationCompletion(event)) {
+        trace.getActiveSpan()?.addEvent("reply.completion_dropped_no_waiting_ral", {
+            "event.id": event.id ?? "",
+            "event.pubkey": event.pubkey.substring(0, 8),
+        });
+        return;
+    }
+
     trace.getActiveSpan()?.addEvent("reply.delegation_completion_handled");
 
     // If sender is whitelisted, they can unblock any blocked agents they're messaging
@@ -209,6 +238,9 @@ async function handleReplyLogic(
         return;
     }
 
+    // Reset metadata debounce timer before any agent execution
+    metadataDebounceManager.onAgentStart(conversation.id);
+
     // Execute each target agent in parallel
     const executionPromises = filteredAgents.map(async (targetAgent) => {
         // Check if this agent has a resumable RAL - if so, use the original triggering event
@@ -243,22 +275,22 @@ async function handleReplyLogic(
 
     await Promise.all(executionPromises);
 
-    // Trigger conversation summarization (with recursion prevention via event type check)
-    // This is placed AFTER agent execution to avoid triggering summarization during execution
-    // The summarizer will publish metadata events (kind 513), not text events (kind 1),
-    // so metadata events won't trigger this chat message handler again
+    // Schedule debounced metadata publishing (kind 513)
+    // - Root events (no e-tags) publish immediately
+    // - Subsequent messages debounce by 10s, max delay 5 minutes
     if (!AgentEventDecoder.isAgentInternalMessage(event)) {
-        try {
-            const summarizer = new ConversationSummarizer(projectCtx);
-            await summarizer.summarizeAndPublish(conversation);
-            trace.getActiveSpan()?.addEvent("reply.summarization_triggered", {
-                "conversation.id": conversation.id,
-            });
-        } catch (error) {
-            logger.error("Failed to trigger conversation summarization", {
-                conversationId: conversation.id,
-                error: formatAnyError(error),
-            });
-        }
+        const isRootEvent = event.getMatchingTags("e").length === 0;
+        metadataDebounceManager.schedulePublish(
+            conversation.id,
+            isRootEvent,
+            async () => {
+                const summarizer = new ConversationSummarizer(projectCtx);
+                await summarizer.summarizeAndPublish(conversation);
+            }
+        );
+        trace.getActiveSpan()?.addEvent("reply.summarization_scheduled", {
+            "conversation.id": conversation.id,
+            "is_root_event": isRootEvent,
+        });
     }
 }

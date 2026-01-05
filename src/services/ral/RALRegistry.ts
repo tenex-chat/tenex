@@ -46,6 +46,12 @@ export class RALRegistry {
   /** Abort controllers keyed by "key:ralNumber" */
   private abortControllers: Map<string, AbortController> = new Map();
 
+  /** Delegations keyed by "agentPubkey:conversationId" - persists beyond RAL lifetime */
+  private conversationDelegations: Map<string, {
+    pending: Map<string, PendingDelegation>;
+    completed: Map<string, CompletedDelegation>;
+  }> = new Map();
+
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   /** Maximum age for RAL states before cleanup (default: 24 hours) */
@@ -65,6 +71,37 @@ export class RALRegistry {
 
   private makeAbortKey(key: string, ralNumber: number): string {
     return `${key}:${ralNumber}`;
+  }
+
+  private getOrCreateConversationDelegations(key: string) {
+    let delegations = this.conversationDelegations.get(key);
+    if (!delegations) {
+      delegations = { pending: new Map(), completed: new Map() };
+      this.conversationDelegations.set(key, delegations);
+    }
+    return delegations;
+  }
+
+  /**
+   * Get pending delegations for a conversation, optionally filtered by RAL number
+   */
+  getConversationPendingDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): PendingDelegation[] {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const delegations = this.conversationDelegations.get(key);
+    if (!delegations) return [];
+    const pending = Array.from(delegations.pending.values());
+    return ralNumber !== undefined ? pending.filter(d => d.ralNumber === ralNumber) : pending;
+  }
+
+  /**
+   * Get completed delegations for a conversation, optionally filtered by RAL number
+   */
+  getConversationCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): CompletedDelegation[] {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const delegations = this.conversationDelegations.get(key);
+    if (!delegations) return [];
+    const completed = Array.from(delegations.completed.values());
+    return ralNumber !== undefined ? completed.filter(d => d.ralNumber === ralNumber) : completed;
   }
 
   private startCleanupInterval(): void {
@@ -135,8 +172,6 @@ export class RALRegistry {
       ralNumber,
       agentPubkey,
       conversationId,
-      pendingDelegations: [],
-      completedDelegations: [],
       queuedInjections: [],
       isStreaming: false,
       createdAt: now,
@@ -185,18 +220,21 @@ export class RALRegistry {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
     return rals
       .filter(r => r.ralNumber !== excludeRalNumber)
-      .map(r => ({
-        ralNumber: r.ralNumber,
-        ralId: r.id,
-        isStreaming: r.isStreaming,
-        currentTool: r.currentTool,
-        pendingDelegations: r.pendingDelegations.map(d => ({
-          recipientPubkey: d.recipientPubkey,
-          delegationConversationId: d.delegationConversationId,
-        })),
-        createdAt: r.createdAt,
-        hasPendingDelegations: r.pendingDelegations.length > 0,
-      }));
+      .map(r => {
+        const pending = this.getConversationPendingDelegations(agentPubkey, conversationId, r.ralNumber);
+        return {
+          ralNumber: r.ralNumber,
+          ralId: r.id,
+          isStreaming: r.isStreaming,
+          currentTool: r.currentTool,
+          pendingDelegations: pending.map(d => ({
+            recipientPubkey: d.recipientPubkey,
+            delegationConversationId: d.delegationConversationId,
+          })),
+          createdAt: r.createdAt,
+          hasPendingDelegations: pending.length > 0,
+        };
+      });
   }
 
   /**
@@ -266,11 +304,24 @@ export class RALRegistry {
     }
 
     const key = this.makeKey(agentPubkey, conversationId);
-    ral.pendingDelegations = pendingDelegations;
+    const convDelegations = this.getOrCreateConversationDelegations(key);
     ral.lastActivityAt = Date.now();
 
-    // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
+    // Clear existing pending for this RAL, then add new ones
+    for (const [id, d] of convDelegations.pending) {
+      if (d.ralNumber === ralNumber) {
+        convDelegations.pending.delete(id);
+        this.delegationToRal.delete(id);
+      }
+    }
+
+    // Add new pending delegations to conversation storage
     for (const d of pendingDelegations) {
+      // Ensure ralNumber is set
+      const delegation = { ...d, ralNumber };
+      convDelegations.pending.set(d.delegationConversationId, delegation);
+
+      // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
       this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
 
       // For followup delegations, also map the followup event ID
@@ -291,26 +342,22 @@ export class RALRegistry {
    * Record a delegation completion (looks up RAL from delegation event ID).
    * Builds a transcript from the pending delegation's prompt and the response.
    * For followups, appends both the followup prompt and response to the transcript.
+   * Returns location info for the caller to use for resumption.
    */
   recordCompletion(completion: {
     delegationConversationId: string;
     recipientPubkey: string;
     response: string;
     completedAt: number;
-  }): RALState | undefined {
+  }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
     const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
 
-    const ral = this.states.get(location.key)?.get(location.ralNumber);
-    if (!ral) return undefined;
+    const [agentPubkey, conversationId] = location.key.split(":");
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) return undefined;
 
-    ral.lastActivityAt = Date.now();
-
-    // Find the pending delegation to get the prompt and sender info
-    const pendingDelegation = ral.pendingDelegations.find(
-      p => p.delegationConversationId === completion.delegationConversationId
-    );
-
+    const pendingDelegation = convDelegations.pending.get(completion.delegationConversationId);
     if (!pendingDelegation) {
       logger.warn("[RALRegistry] No pending delegation found for completion", {
         delegationConversationId: completion.delegationConversationId.substring(0, 8),
@@ -318,10 +365,25 @@ export class RALRegistry {
       return undefined;
     }
 
+    // Only record completion if the response is from the delegatee, not the delegator
+    // A message from the delegator (e.g., delegate_followup) is not a completion response
+    if (completion.recipientPubkey !== pendingDelegation.recipientPubkey) {
+      logger.debug("[RALRegistry] Ignoring completion - sender is not the delegatee", {
+        delegationConversationId: completion.delegationConversationId.substring(0, 8),
+        expectedRecipient: pendingDelegation.recipientPubkey.substring(0, 8),
+        actualSender: completion.recipientPubkey.substring(0, 8),
+      });
+      return undefined;
+    }
+
+    // Update RAL activity if it still exists
+    const ral = this.states.get(location.key)?.get(location.ralNumber);
+    if (ral) {
+      ral.lastActivityAt = Date.now();
+    }
+
     // Check if this delegation already has a completed entry (followup case)
-    const existingCompletion = ral.completedDelegations.find(
-      c => c.delegationConversationId === completion.delegationConversationId
-    );
+    const existingCompletion = convDelegations.completed.get(completion.delegationConversationId);
 
     if (existingCompletion) {
       // Append the followup prompt and response to the transcript
@@ -338,18 +400,22 @@ export class RALRegistry {
         timestamp: completion.completedAt,
       });
 
+      // Update ralNumber to the followup's RAL so findResumableRAL finds the correct RAL
+      existingCompletion.ralNumber = pendingDelegation.ralNumber;
+
       trace.getActiveSpan()?.addEvent("ral.followup_response_appended", {
-        "ral.id": ral.id,
-        "ral.number": ral.ralNumber,
+        "ral.id": ral?.id,
+        "ral.number": location.ralNumber,
         "delegation.completed_conversation_id": completion.delegationConversationId,
         "delegation.transcript_length": existingCompletion.transcript.length,
       });
     } else {
       // Create new completed delegation with initial transcript
-      ral.completedDelegations.push({
+      convDelegations.completed.set(completion.delegationConversationId, {
         delegationConversationId: completion.delegationConversationId,
         recipientPubkey: completion.recipientPubkey,
         senderPubkey: pendingDelegation.senderPubkey,
+        ralNumber: pendingDelegation.ralNumber,
         transcript: [
           {
             senderPubkey: pendingDelegation.senderPubkey,
@@ -367,20 +433,19 @@ export class RALRegistry {
         completedAt: completion.completedAt,
       });
 
+      const remainingPending = this.getConversationPendingDelegations(agentPubkey, conversationId, location.ralNumber).length - 1;
       trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
-        "ral.id": ral.id,
-        "ral.number": ral.ralNumber,
+        "ral.id": ral?.id,
+        "ral.number": location.ralNumber,
         "delegation.completed_conversation_id": completion.delegationConversationId,
-        "delegation.remaining_pending": ral.pendingDelegations.length - 1,
+        "delegation.remaining_pending": remainingPending,
       });
     }
 
     // Remove from pending
-    ral.pendingDelegations = ral.pendingDelegations.filter(
-      (p) => p.delegationConversationId !== completion.delegationConversationId
-    );
+    convDelegations.pending.delete(completion.delegationConversationId);
 
-    return ral;
+    return { agentPubkey, conversationId, ralNumber: location.ralNumber };
   }
 
   /**
@@ -439,10 +504,11 @@ export class RALRegistry {
       return { success: false, reason: "RAL not found" };
     }
 
-    if (ral.pendingDelegations.length > 0) {
+    const pendingCount = this.getConversationPendingDelegations(agentPubkey, conversationId, targetRalNumber).length;
+    if (pendingCount > 0) {
       return {
         success: false,
-        reason: `RAL has ${ral.pendingDelegations.length} pending delegation(s). Use delegate_followup to communicate with them first.`,
+        reason: `RAL has ${pendingCount} pending delegation(s). Use delegate_followup to communicate with them first.`,
       };
     }
 
@@ -568,7 +634,9 @@ export class RALRegistry {
   }
 
   /**
-   * Clear a specific RAL
+   * Clear a specific RAL.
+   * NOTE: Delegations persist in conversation storage - only clears RAL state.
+   * The delegationToRal routing map stays intact for followup routing.
    */
   clearRAL(agentPubkey: string, conversationId: string, ralNumber: number): void {
     const key = this.makeKey(agentPubkey, conversationId);
@@ -577,17 +645,6 @@ export class RALRegistry {
 
     const ral = rals.get(ralNumber);
     if (ral) {
-      // Clean up delegation mappings
-      for (const d of ral.pendingDelegations) {
-        this.delegationToRal.delete(d.delegationConversationId);
-        // Also clean up followup event ID mapping
-        if (d.type === "followup" && d.followupEventId) {
-          this.delegationToRal.delete(d.followupEventId);
-        }
-      }
-      for (const d of ral.completedDelegations) {
-        this.delegationToRal.delete(d.delegationConversationId);
-      }
       // Clean up reverse lookup
       this.ralIdToLocation.delete(ral.id);
     }
@@ -606,7 +663,8 @@ export class RALRegistry {
   }
 
   /**
-   * Clear all RALs for an agent+conversation
+   * Clear all RALs for an agent+conversation.
+   * Also cleans up conversation-level delegation storage.
    */
   clear(agentPubkey: string, conversationId: string): void {
     const key = this.makeKey(agentPubkey, conversationId);
@@ -617,12 +675,51 @@ export class RALRegistry {
       }
     }
 
+    // Clean up conversation-level delegation storage and routing
+    const convDelegations = this.conversationDelegations.get(key);
+    if (convDelegations) {
+      for (const id of convDelegations.pending.keys()) {
+        this.delegationToRal.delete(id);
+      }
+      for (const id of convDelegations.completed.keys()) {
+        this.delegationToRal.delete(id);
+      }
+      this.conversationDelegations.delete(key);
+    }
+
     // Reset the RAL number counter for this conversation
     this.nextRalNumber.delete(key);
   }
 
   /**
-   * Find the RAL that has a pending delegation
+   * Find delegation in conversation storage (doesn't require RAL to exist).
+   * Used by delegate_followup to look up delegations even after RAL is cleared.
+   */
+  findDelegation(delegationEventId: string): {
+    pending?: PendingDelegation;
+    completed?: CompletedDelegation;
+    agentPubkey: string;
+    conversationId: string;
+    ralNumber: number;
+  } | undefined {
+    const location = this.delegationToRal.get(delegationEventId);
+    if (!location) return undefined;
+
+    const [agentPubkey, conversationId] = location.key.split(":");
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) return undefined;
+
+    return {
+      pending: convDelegations.pending.get(delegationEventId),
+      completed: convDelegations.completed.get(delegationEventId),
+      agentPubkey,
+      conversationId,
+      ralNumber: location.ralNumber,
+    };
+  }
+
+  /**
+   * Find the RAL that has a pending delegation (for routing responses)
    */
   findStateWaitingForDelegation(delegationEventId: string): RALState | undefined {
     const location = this.delegationToRal.get(delegationEventId);
@@ -631,9 +728,9 @@ export class RALRegistry {
     const ral = this.states.get(location.key)?.get(location.ralNumber);
     if (!ral) return undefined;
 
-    const hasPending = ral.pendingDelegations.some(
-      (d) => d.delegationConversationId === delegationEventId
-    );
+    // Check if delegation exists in conversation storage
+    const convDelegations = this.conversationDelegations.get(location.key);
+    const hasPending = convDelegations?.pending.has(delegationEventId) ?? false;
     return hasPending ? ral : undefined;
   }
 
@@ -641,12 +738,15 @@ export class RALRegistry {
    * Clear completed delegations for a specific RAL
    */
   clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber: number): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (ral) {
-      for (const d of ral.completedDelegations) {
-        this.delegationToRal.delete(d.delegationConversationId);
+    const key = this.makeKey(agentPubkey, conversationId);
+    const convDelegations = this.conversationDelegations.get(key);
+    if (convDelegations) {
+      for (const [id, d] of convDelegations.completed) {
+        if (d.ralNumber === ralNumber) {
+          this.delegationToRal.delete(id);
+          convDelegations.completed.delete(id);
+        }
       }
-      ral.completedDelegations = [];
     }
   }
 
@@ -665,7 +765,10 @@ export class RALRegistry {
    */
   findResumableRAL(agentPubkey: string, conversationId: string): RALState | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
-    return rals.find(ral => ral.completedDelegations.length > 0);
+    return rals.find(ral => {
+      const completed = this.getConversationCompletedDelegations(agentPubkey, conversationId, ral.ralNumber);
+      return completed.length > 0;
+    });
   }
 
   /**
@@ -885,5 +988,6 @@ export class RALRegistry {
     this.delegationToRal.clear();
     this.ralIdToLocation.clear();
     this.abortControllers.clear();
+    this.conversationDelegations.clear();
   }
 }

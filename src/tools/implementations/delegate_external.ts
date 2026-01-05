@@ -73,6 +73,7 @@ async function executeDelegateExternal(
         senderPubkey: context.agent.pubkey,
         prompt: content,
         projectId: cleanProjectId,
+        ralNumber: context.ralNumber!,
       },
     ],
   };
