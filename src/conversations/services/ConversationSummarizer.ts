@@ -4,6 +4,7 @@ import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
+import { getPubkeyService } from "@/services/PubkeyService";
 import type { ProjectContext } from "@/services/projects";
 import { ROOT_CONTEXT, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { z } from "zod";
@@ -46,16 +47,17 @@ export class ConversationSummarizer {
 
                 // Prepare conversation content from stored messages
                 const messages = conversation.getAllMessages();
-                const conversationContent = messages
-                    // Only include text messages (skip tool-call and tool-result)
-                    .filter((entry) => entry.messageType === "text")
-                    .map((entry) => {
-                        // Determine display role based on pubkey
-                        const isFromAgent = entry.ral !== undefined;
-                        const role = isFromAgent ? "Agent" : "User";
-                        return `${role}: ${entry.content}`;
+                const pubkeyService = getPubkeyService();
+
+                // Resolve pubkeys to names for all participants
+                const textMessages = messages.filter((entry) => entry.messageType === "text");
+                const formattedMessages = await Promise.all(
+                    textMessages.map(async (entry) => {
+                        const name = await pubkeyService.getName(entry.pubkey);
+                        return `${name}: ${entry.content}`;
                     })
-                    .join("\n\n");
+                );
+                const conversationContent = formattedMessages.join("\n\n");
 
                 if (!conversationContent.trim()) {
                     console.log("No content to summarize for conversation", conversation.id);
@@ -68,14 +70,21 @@ export class ConversationSummarizer {
                         {
                             role: "system",
                             content: `You are a helpful assistant that generates concise titles, summaries, and status information for technical conversations.
+
+CRITICAL: Base your summary ONLY on what is explicitly stated in the conversation. Do NOT:
+- Hallucinate success when errors, failures, or problems are mentioned
+- Assume tasks were completed if the conversation shows they failed or are still in progress
+- Invent outcomes that are not clearly stated in the transcript
+
 Generate a title (~5 words) that captures the main topic or goal.
-Generate a summary (2-3 sentences) highlighting key decisions, progress, and current status.
-Generate a status_label that concisely describes the overall status (e.g., "Researching", "In Progress", "Blocked", "Completed", "Planning"). You are not limited to these examples—choose the most appropriate label.
+Generate a summary (2-3 sentences) highlighting key decisions, progress, and current status. If errors occurred, mention them.
+Generate a status_label that concisely describes the overall status (e.g., "Researching", "In Progress", "Blocked", "Completed", "Failed", "Planning"). You are not limited to these examples—choose the most appropriate label.
 Generate a status_current_activity that is consistent with status_label:
 - If completed: describe the outcome (e.g., "All files created", "Bug fixed")
+- If failed: describe what failed (e.g., "Build failed with errors", "Tests not passing")
 - If in progress: describe the current action (e.g., "Implementing feature X", "Debugging issue")
 - If blocked/waiting: describe what's needed (e.g., "Waiting for user input", "Awaiting approval")
-Focus on what was accomplished or discussed, not on the process.`,
+Focus on what was accomplished or discussed, not on the process. Be truthful about failures and errors.`,
                         },
                         {
                             role: "user",
