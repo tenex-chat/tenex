@@ -8,23 +8,26 @@ TENEX agents can work in isolated git worktrees, enabling parallel development o
 
 ### Creating a Worktree
 
-When delegating work to a phase, specify the `branch` parameter:
+When delegating work, specify the `branch` parameter on a delegation:
 
 ```typescript
-delegate_phase({
-    phase: "implementation",
-    recipients: ["developer"],
-    prompt: "Implement the new feature",
-    branch: "feature/new-thing"  // Creates worktree
+delegate({
+    delegations: [
+        {
+            recipient: "developer",
+            prompt: "Implement the new feature",
+            branch: "feature/new-thing", // Creates worktree
+            phase: "implementation",     // Optional, if the agent defines phases
+        }
+    ]
 })
 ```
 
 This will:
-1. Create a new worktree at `~/tenex/{project}/.worktrees/feature_new-thing/`
-2. Create branch from your current branch
-3. Track metadata (creator, conversation, timestamps)
-4. Execute delegated agent in the new worktree
-5. Prompt for cleanup when agent completes
+1. Add a `branch` tag to the delegation event
+2. Create a new worktree at `<projectBasePath>/.worktrees/feature_new-thing/` if needed
+3. Execute the delegated agent in the worktree
+4. Leave cleanup to standard git workflows (merge/remove)
 
 ### Branch Name Sanitization
 
@@ -35,20 +38,19 @@ Branch names with slashes are sanitized for directory names:
 ### Worktree Lifecycle
 
 **Creation:**
-- Automatic via delegate_phase with branch parameter
+- Automatic via `delegate` with a `branch` parameter
 - Worktrees are created in `.worktrees/` subdirectory (gitignored)
-- Metadata stored in `~/tenex/{project}/worktrees.json`
+- Metadata helpers exist for `~/.tenex/projects/<dTag>/worktrees.json`, but runtime tracking is not wired by default
 
 **Cleanup:**
 - Manual via git commands or merge tools
-- Metadata tracks merged/deleted state
+- Metadata helpers can record merged/deleted state if you wire them into tooling
 
 ### Architecture
 
 **Directory Structure:**
 ```
-~/tenex/
-  my-project/                    # Normal git repository (default branch checked out)
+<projectsBase>/<dTag>/            # Normal git repository (default branch checked out)
     .git/                        # Standard git directory
     .worktrees/                  # All worktrees (gitignored)
       feature_new-thing/         # feature/new-thing → feature_new-thing
@@ -62,7 +64,6 @@ Branch names with slashes are sanitized for directory names:
     .gitignore                   # Includes .worktrees automatically
     src/
     ...
-    worktrees.json               # Metadata
 ```
 
 This is a standard git repository with worktrees in a dedicated subdirectory:
@@ -73,19 +74,19 @@ This is a standard git repository with worktrees in a dedicated subdirectory:
 - Agents don't need to know implementation details - they just work in their worktree
 
 **Event Flow:**
-1. delegate_phase adds ["branch", "name"] tag to delegation event
-2. Event handler extracts branch tag
-3. ExecutionContextFactory resolves workingDirectory:
+1. `delegate` publishes a delegation event with a `branch` tag (if provided)
+2. `ExecutionContextFactory` resolves workingDirectory:
    - No branch tag → use project root
    - With branch tag → use `.worktrees/{sanitized_branch}/`
+3. If the worktree does not exist, it is created on demand
 4. ExecutionContext includes both projectBasePath (root) and workingDirectory (worktree)
 5. Agent operates in worktree
 
-**Metadata:**
+**Metadata format (if you wire tracking helpers):**
 ```typescript
 {
   "feature/new-thing": {
-    "path": "/Users/you/tenex/my-project/.worktrees/feature_new-thing",
+    "path": "<projectsBase>/<dTag>/.worktrees/feature_new-thing",
     "branch": "feature/new-thing",
     "createdBy": "agent-pubkey",
     "conversationId": "conversation-id",
@@ -103,5 +104,5 @@ See:
 - `src/utils/git/worktree.ts` - Git worktree operations, sanitizeBranchName()
 - `src/utils/git/initializeGitRepo.ts` - Repository initialization
 - `src/utils/git/gitignore.ts` - Automatic .gitignore management
-- `src/tools/implementations/delegate_phase.ts` - Worktree creation
+- `src/tools/implementations/delegate.ts` - Delegation branch tagging
 - `src/agents/execution/ExecutionContextFactory.ts` - Working directory resolution

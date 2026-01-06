@@ -19,8 +19,8 @@ This directory contains reusable test utilities for the TENEX backend.
 - ❌ Assertion helpers - Not yet implemented
 
 **Documentation:**
-- See `E2E_TESTING_ARCHITECTURE.md` in project root for the complete architecture design
-- See `E2E_TESTING_STATUS.md` for current status and what was fixed
+- See `E2E_TESTING_ARCHITECTURE.md` in project root for the design notes
+- See `docs/TESTING_STATUS.md` for the current testing status
 
 ## Mock Setup Helpers
 
@@ -75,6 +75,10 @@ The `mock-llm/` directory provides a comprehensive mock LLM service for determin
 - Predefined scenarios for common workflows
 - Support for custom response patterns
 - Deterministic behavior for E2E testing
+
+## NDK Test Helpers
+
+`ndk-test-helpers.ts` wraps `@nostr-dev-kit/ndk/test` utilities with TENEX-specific helpers.
 
 ## Test Assertions
 
