@@ -87,7 +87,7 @@ class ProjectContextStore {
                 projectId: context.project.id,
                 projectTitle: context.project.tagValue("title"),
                 agentCount: context.agents.size,
-                hasSigner: !!context.signer,
+                hasSigner: !!context.projectManager?.signer,
             });
         } else {
             logger.debug("No ProjectContext in current async context");

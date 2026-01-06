@@ -204,9 +204,9 @@ export class OperationsStatusService {
         // A-tag for the project
         event.tag(projectCtx.project.tagReference());
 
-        // Sign with project signer and publish if available
-        if (projectCtx.signer) {
-            await event.sign(projectCtx.signer, { pTags: false });
+        // Sign with project manager signer and publish if available
+        if (projectCtx.projectManager?.signer) {
+            await event.sign(projectCtx.projectManager.signer, { pTags: false });
             await event.publish();
         } else {
             logger.warn("No project signer available, cannot publish operations status event");

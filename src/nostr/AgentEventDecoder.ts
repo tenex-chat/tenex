@@ -25,10 +25,10 @@ export class AgentEventDecoder {
 
         const systemPubkeys = new Set([...Array.from(systemAgents.values()).map((a) => a.pubkey)]);
 
-        // Add project pubkey if available
+        // Add project manager pubkey if available
         const projectCtx = getProjectContext();
-        if (projectCtx.pubkey) {
-            systemPubkeys.add(projectCtx.pubkey);
+        if (projectCtx.projectManager?.pubkey) {
+            systemPubkeys.add(projectCtx.projectManager.pubkey);
         }
 
         return mentionedPubkeys.some((pubkey) => systemPubkeys.has(pubkey));
