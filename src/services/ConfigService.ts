@@ -302,6 +302,14 @@ export class ConfigService {
     }
 
     /**
+     * Get the TENEX backend signer for publishing system-level events
+     */
+    async getBackendSigner(): Promise<NDKPrivateKeySigner> {
+        const privateKey = await this.ensureBackendPrivateKey();
+        return new NDKPrivateKeySigner(privateKey);
+    }
+
+    /**
      * Get whitelisted pubkeys with CLI override support
      * If CLI option is provided, it ONLY uses those pubkeys (doesn't merge with config)
      * Otherwise, returns pubkeys from the configuration

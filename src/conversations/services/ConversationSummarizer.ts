@@ -118,16 +118,13 @@ Focus on what was accomplished or discussed, not on the process.`,
                 event.tags.push(["a", this.context.project.tagId()]); // Project reference
                 event.tags.push(["model", summarizationConfig.model]);
 
-                // Sign and publish
-                if (this.context.projectManager?.signer) {
-                    await event.sign(this.context.projectManager.signer);
-                    await event.publish();
-                    console.log(
-                        `Published metadata for conversation ${conversation.id}: ${result.title}`
-                    );
-                } else {
-                    console.warn("No signer available to publish metadata event");
-                }
+                // Sign and publish with backend signer
+                const backendSigner = await config.getBackendSigner();
+                await event.sign(backendSigner);
+                await event.publish();
+                console.log(
+                    `Published metadata for conversation ${conversation.id}: ${result.title}`
+                );
 
                 span.setStatus({ code: SpanStatusCode.OK });
             } catch (error) {
