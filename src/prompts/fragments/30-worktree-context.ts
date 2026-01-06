@@ -84,29 +84,12 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
     }
 
     // Add worktree commands guidance for agents with shell access or phases
-    if (context.agent.tools?.includes("shell") || context.agent.phases) {
-      parts.push("### Worktree Commands:");
-      parts.push("- Create: `git worktree add -b feature/name .worktrees/feature_name`");
-      parts.push("- List: `git worktree list`");
-      parts.push("- Remove: `git worktree remove .worktrees/feature_name`");
-      parts.push("- Switch to: `cd .worktrees/feature_name`");
-      parts.push("Note: Branch names with slashes (e.g., `feature/foo`) become underscores in paths (e.g., `.worktrees/feature_foo`).");
+    if (context.agent.phases) {
+      parts.push("### Delegation with Worktrees:");
+      parts.push("When using `delegate`, you can specify `branch: \"<name>\"` to create and work in an isolated worktree.");
+      parts.push("The worktree will be created from your current branch in `.worktrees/`, and the delegated agent will work in that isolation.");
+      parts.push("You are responsible for merging or cleaning up worktrees you create.");
       parts.push("");
-
-      if (context.agent.phases) {
-        parts.push("### Delegation with Worktrees:");
-        parts.push("When using `delegate`, you can specify `branch: \"<name>\"` to create and work in an isolated worktree.");
-        parts.push("The worktree will be created from your current branch in `.worktrees/`, and the delegated agent will work in that isolation.");
-        parts.push("You are responsible for merging or cleaning up worktrees you create.");
-        parts.push("");
-      }
-
-      parts.push("### Merge and Cleanup:");
-      parts.push("When your work in a worktree is complete:");
-      parts.push("1. Ensure all changes are committed");
-      parts.push("2. Switch to the project root: `cd ${context.projectBasePath}`");
-      parts.push("3. Merge your work: `git merge <your-branch>`");
-      parts.push("4. Remove the worktree: `git worktree remove .worktrees/<sanitized-branch-name>`");
     }
 
     return parts.join("\n");

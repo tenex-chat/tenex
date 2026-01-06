@@ -26,7 +26,7 @@ export type ToolName =
     | "ask"
     | "project_list"
     | "create_project"
-    | "delegate_external"
+    | "delegate_crossproject"
     | "report_write"
     | "report_read"
     | "reports_list"

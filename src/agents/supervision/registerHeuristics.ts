@@ -8,6 +8,7 @@ import {
     SilentAgentHeuristic,
     DelegationClaimHeuristic,
     PhaseAgentTodoHeuristic,
+    ConsecutiveToolsWithoutTodoHeuristic,
 } from "./heuristics";
 
 let registered = false;
@@ -26,6 +27,7 @@ export function registerDefaultHeuristics(): void {
     // Register post-completion heuristics
     registry.register(new SilentAgentHeuristic());
     registry.register(new DelegationClaimHeuristic());
+    registry.register(new ConsecutiveToolsWithoutTodoHeuristic());
 
     // Register pre-tool heuristics
     registry.register(new PhaseAgentTodoHeuristic());

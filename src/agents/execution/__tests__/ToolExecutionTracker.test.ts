@@ -506,11 +506,11 @@ describe("ToolExecutionTracker", () => {
             expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
         });
 
-        it("should return null for delegate_external tool", async () => {
+        it("should return null for delegate_crossproject tool", async () => {
             const result = await tracker.trackExecution({
-                toolCallId: "external-call",
-                toolName: "delegate_external",
-                args: { content: "External task", recipient: "external-pubkey" },
+                toolCallId: "crossproject-call",
+                toolName: "delegate_crossproject",
+                args: { content: "Cross-project task", projectId: "test-project", agentSlug: "target-agent" },
                 toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,

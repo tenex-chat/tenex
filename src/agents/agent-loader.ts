@@ -55,7 +55,7 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
                     tools: options?.tools ?? {},
                     agentName: storedAgent.name,
                     sessionId: options?.sessionId,
-                    workingDirectory: registry.getBasePath(),
+                    workingDirectory: options?.workingDirectory ?? registry.getBasePath(),
                 }
             );
         },

@@ -3,22 +3,12 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
-import { createDelegateExternalTool } from "@/tools/implementations/delegate_external";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
 
 // Mock the resolution function to return pubkeys for our test agents
 import * as agentResolution from "@/services/agents";
 const mockResolve = spyOn(agentResolution, "resolveRecipientToPubkey");
 mockResolve.mockImplementation((recipient: string) => {
-    if (recipient === "self-agent") return "agent-pubkey-123";
-    if (recipient === "other-agent") return "other-pubkey-456";
-    return recipient.startsWith("agent-pubkey-") ? recipient : null;
-});
-
-// Mock parseNostrUser for delegate_external tests
-import * as nostrParser from "@/utils/nostr-entity-parser";
-const mockParse = spyOn(nostrParser, "parseNostrUser");
-mockParse.mockImplementation((recipient: string) => {
     if (recipient === "self-agent") return "agent-pubkey-123";
     if (recipient === "other-agent") return "other-pubkey-456";
     return recipient.startsWith("agent-pubkey-") ? recipient : null;
@@ -169,45 +159,8 @@ describe("Delegation tools - Self-delegation validation", () => {
         });
     });
 
-    describe("delegate_external tool", () => {
-        it("should reject self-delegation without projectId", async () => {
-            const context = createMockContext();
-            const externalTool = createDelegateExternalTool(context);
-
-            const input = {
-                content: "External message",
-                recipient: "agent-pubkey-123",
-            };
-
-            try {
-                await externalTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                // Error message updated - self-delegation requires projectId
-                expect(error.message).toContain("Self-delegation requires a projectId");
-            }
-        });
-
-        it("should allow self-delegation when projectId is provided", async () => {
-            const context = createMockContext();
-            const externalTool = createDelegateExternalTool(context);
-
-            const input = {
-                content: "Cross-project delegation",
-                recipient: "agent-pubkey-123",
-                projectId: "naddr1differentproject",
-            };
-
-            // This should not throw - it will fail later due to missing mocks
-            // but the validation should pass
-            try {
-                await externalTool.execute(input);
-            } catch (error: any) {
-                // Should fail for a different reason (NDK mocking), not self-delegation
-                expect(error.message).not.toContain("Self-delegation is not permitted");
-            }
-        });
-    });
+    // delegate_crossproject tool tests require daemon mocking
+    // and are covered in integration tests
 });
 
 describe("Delegation tools - RAL isolation", () => {
@@ -343,5 +296,4 @@ describe("Delegation tools - RAL isolation", () => {
 // Restore mocks
 afterAll(() => {
     mockResolve.mockRestore();
-    mockParse.mockRestore();
 });

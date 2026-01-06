@@ -100,7 +100,7 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
                     tools: options?.tools ?? {},
                     agentName: "test-agent",
                     sessionId: options?.sessionId,
-                    workingDirectory: projectPath,
+                    workingDirectory: options?.workingDirectory ?? projectPath,
                 });
             },
             sign: async (event: NDKEvent) => {

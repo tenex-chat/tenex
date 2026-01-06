@@ -36,6 +36,7 @@ export interface AgentInstance {
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;
         sessionId?: string;
+        workingDirectory?: string;
     }): LLMService;
     sign(event: NDKEvent): Promise<void>;
 }

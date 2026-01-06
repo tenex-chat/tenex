@@ -237,7 +237,7 @@ describe("kind:1 Event Handler with ConversationStore", () => {
     });
 
     describe("Message Building After Hydration", () => {
-        it("should build correct messages for RAL execution", () => {
+        it("should build correct messages for RAL execution", async () => {
             const conversationId = "conv-build";
             store.load(PROJECT_ID, conversationId);
 
@@ -267,7 +267,7 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             const ral2 = store.createRal(AGENT_PUBKEY);
 
             // Build messages for new RAL
-            const messages = store.buildMessagesForRal(AGENT_PUBKEY, ral2);
+            const messages = await store.buildMessagesForRal(AGENT_PUBKEY, ral2);
 
             // Should include all messages from completed RAL + new user message
             expect(messages).toHaveLength(3);

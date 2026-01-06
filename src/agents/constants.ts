@@ -33,7 +33,7 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
 export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
     // Default tools for all agents
     // Specific tools should be configured via agent definition events
-    // NOTE: delegate, delegate_external, and delegate_followup are NOT included here
+    // NOTE: delegate, delegate_crossproject, and delegate_followup are NOT included here
     // They are added via getDelegateToolsForAgent based on PM status
     const tools: ToolName[] = [
         "read_path",
@@ -55,7 +55,7 @@ export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
 export const DELEGATE_TOOLS: ToolName[] = [
     "ask",
     "delegate",
-    "delegate_external",
+    "delegate_crossproject",
     "delegate_followup",
 ] as const;
 
@@ -92,8 +92,8 @@ export function getDelegateToolsForAgent(): ToolName[] {
     // All agents get the unified delegate tool
     tools.push("delegate");
 
-    // All agents get delegate_external and delegate_followup
-    tools.push("delegate_external");
+    // All agents get delegate_crossproject and delegate_followup
+    tools.push("delegate_crossproject");
     tools.push("delegate_followup");
 
     return tools;

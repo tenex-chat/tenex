@@ -12,8 +12,8 @@ import { z } from "zod";
 const pairConfigSchema = z.object({
   interval: z
     .number()
-    .min(1)
-    .describe("Number of tool executions between checkpoints (e.g., 5 means checkpoint every 5 tools)"),
+    .min(10)
+    .describe("Number of tool executions between checkpoints (e.g., 10 means checkpoint every 10 tools)"),
 });
 
 const baseDelegationItemSchema = z.object({

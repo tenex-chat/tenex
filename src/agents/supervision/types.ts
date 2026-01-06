@@ -93,6 +93,10 @@ export interface PostCompletionContext {
     conversationHistory: ModelMessage[];
     /** Tools available to the agent */
     availableTools: ToolSet;
+    /** Whether the agent has an active todo list */
+    hasTodoList: boolean;
+    /** Whether the agent has already been nudged about todo usage in this conversation */
+    hasBeenNudgedAboutTodos: boolean;
 }
 
 /**
@@ -131,6 +135,8 @@ export interface Heuristic<TContext> {
     timing: HeuristicTiming;
     /** Optional filter to only run for specific tools (pre-tool-execution only) */
     toolFilter?: string[];
+    /** Skip LLM verification and apply correction directly on detection (for low-stakes nudges) */
+    skipVerification?: boolean;
     /**
      * Detect if the heuristic condition is met
      * @param context - The context to check

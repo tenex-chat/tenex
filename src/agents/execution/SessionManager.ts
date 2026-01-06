@@ -16,28 +16,45 @@ export interface SessionData {
 export class SessionManager {
     private sessionId?: string;
     private lastSentEventId?: string;
+    private storedWorkingDirectory?: string;
 
     constructor(
         private agent: AgentInstance,
-        private conversationId: string
+        private conversationId: string,
+        private workingDirectory: string
     ) {
         this.loadSession();
     }
 
     /**
-     * Load session data from metadata store
+     * Load session data from metadata store.
+     * Only loads sessionId if the stored workingDirectory matches current one.
+     * This prevents resuming sessions created in a different worktree/branch.
      */
     private loadSession(): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
-        this.sessionId = metadataStore.get<string>("sessionId");
+        const storedSessionId = metadataStore.get<string>("sessionId");
+        this.storedWorkingDirectory = metadataStore.get<string>("workingDirectory");
         this.lastSentEventId = metadataStore.get<string>("lastSentEventId");
 
-        if (this.sessionId) {
+        // Only resume session if workingDirectory matches
+        if (storedSessionId && this.storedWorkingDirectory === this.workingDirectory) {
+            this.sessionId = storedSessionId;
             logger.info("[SessionManager] ✅ Found existing session to resume", {
                 sessionId: this.sessionId,
                 agent: this.agent.name,
                 conversationId: this.conversationId.substring(0, 8),
                 lastSentEventId: this.lastSentEventId || "NONE",
+                workingDirectory: this.workingDirectory,
+            });
+        } else if (storedSessionId) {
+            // Session exists but workingDirectory changed - don't resume
+            logger.info("[SessionManager] ⚠️ Session exists but workingDirectory changed, starting fresh", {
+                storedSessionId,
+                storedWorkingDirectory: this.storedWorkingDirectory,
+                currentWorkingDirectory: this.workingDirectory,
+                agent: this.agent.name,
+                conversationId: this.conversationId.substring(0, 8),
             });
         }
     }
@@ -53,12 +70,13 @@ export class SessionManager {
     }
 
     /**
-     * Store session ID and last sent event ID
+     * Store session ID, last sent event ID, and working directory
      */
     saveSession(sessionId: string, lastSentEventId: string): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
         metadataStore.set("sessionId", sessionId);
         metadataStore.set("lastSentEventId", lastSentEventId);
+        metadataStore.set("workingDirectory", this.workingDirectory);
 
         // Update local state
         this.sessionId = sessionId;
@@ -69,6 +87,7 @@ export class SessionManager {
             lastSentEventId: lastSentEventId.substring(0, 8),
             agent: this.agent.name,
             conversationId: this.conversationId.substring(0, 8),
+            workingDirectory: this.workingDirectory,
         });
     }
 

@@ -106,6 +106,11 @@ async function addCoreAgentFragments(
         }
     }
 
+    // Add todo usage guidance if agent has todo tools
+    if (agent.tools.includes("todo_add")) {
+        builder.add("todo-usage-guidance", {});
+    }
+
     // Add retrieved lessons
     builder.add("retrieved-lessons", {
         agent,
