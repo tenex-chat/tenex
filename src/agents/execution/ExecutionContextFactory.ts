@@ -2,6 +2,7 @@ import type { AgentInstance } from "@/agents/types";
 import { isAlphaMode } from "@/commands/daemon";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
 import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
@@ -31,6 +32,11 @@ export async function createExecutionContext(params: {
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
     debug?: boolean;
+    /**
+     * MCP manager for this project's MCP tool access.
+     * Required for agents to use MCP tools at execution time.
+     */
+    mcpManager?: MCPManager;
 }): Promise<ExecutionContext> {
     // Extract branch tag from event
     const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
@@ -102,6 +108,7 @@ export async function createExecutionContext(params: {
         hasPendingDelegations: params.hasPendingDelegations,
         debug: params.debug,
         alphaMode: isAlphaMode(),
+        mcpManager: params.mcpManager,
         getConversation: () => ConversationStore.get(params.conversationId),
     };
 }

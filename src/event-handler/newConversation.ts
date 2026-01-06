@@ -67,6 +67,7 @@ export const handleNewConversation = async (
             conversationId: conversation.id,
             projectBasePath: context.projectBasePath,
             triggeringEvent: event,
+            mcpManager: projectCtx.mcpManager,
         });
 
         // Execute with the appropriate agent

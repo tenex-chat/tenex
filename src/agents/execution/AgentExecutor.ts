@@ -327,6 +327,7 @@ export class AgentExecutor {
             agentPublisher,
             conversationStore,
             hasActivePairings,
+            mcpManager: projectContext.mcpManager,
         };
 
         const conversation = fullContext.getConversation();
