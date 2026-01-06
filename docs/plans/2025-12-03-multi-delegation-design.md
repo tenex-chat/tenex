@@ -1,5 +1,7 @@
 # Multi-Delegation Design
 
+> Status: Implemented via the `delegate` tool supporting `delegations[]`. The proposed `delegate_multi` tool name is not used. See `docs/DELEGATION-AND-RAL-PROCESSING.md` for current behavior.
+
 ## Overview
 
 Add capability for agents to delegate different tasks to multiple agents in parallel, each with their own prompt, phase, and git worktree. The delegator waits for all agents to complete and receives aggregated responses.

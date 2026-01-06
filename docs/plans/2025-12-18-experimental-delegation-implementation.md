@@ -1,5 +1,7 @@
 # Experimental Delegation Implementation Plan
 
+> Status: Superseded by the current RALRegistry-based implementation. Use `docs/DELEGATION-AND-RAL-PROCESSING.md` and `src/services/ral/RALRegistry.ts` as the source of truth.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Transform delegation from blocking/synchronous to event-driven/async with RAL state persistence.

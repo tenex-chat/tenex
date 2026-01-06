@@ -1,5 +1,7 @@
 # Pairing: Real-Time Delegation Supervision
 
+> Status: Core pairing is implemented via `src/services/pairing/PairingManager.ts` and the `delegate` tool. The current API uses `delegate({ delegations: [...] })` with optional `pair` config per delegation, and pairing listens to kind `1` tool/output events tagged with `tool`/`tool-args` and `e=<delegation_id>`. See `docs/DELEGATION-AND-RAL-PROCESSING.md` for current behavior.
+
 ## Overview
 
 Pairing enables an agent to supervise another agent's work in real-time during delegation. Instead of fire-and-forget delegation where the delegator waits blindly for completion, pairing provides periodic checkpoints where the supervisor can observe progress and provide guidance.

@@ -1,5 +1,7 @@
 # Trace Viewer v2 Design
 
+> Status: Not implemented. The current trace viewer still uses a trace-first tree view under `tools/trace-viewer/`. Treat this as a design proposal.
+
 ## Problem
 
 The current trace-viewer shows a flat list of traces from Jaeger. It's hard to:
