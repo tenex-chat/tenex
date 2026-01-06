@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { PhaseAgentTodoHeuristic } from "../heuristics/PhaseAgentTodoHeuristic";
-import type { PreToolContext } from "../types";
+import type { PreExecutionEnvironment } from "../types";
 
 describe("PhaseAgentTodoHeuristic", () => {
     const heuristic = new PhaseAgentTodoHeuristic();
 
     const createContext = (
-        overrides: Partial<PreToolContext> = {}
-    ): PreToolContext => ({
+        overrides: Partial<PreExecutionEnvironment> = {}
+    ): PreExecutionEnvironment => ({
         agentSlug: "pm",
         agentPubkey: "abc123",
         hasPhases: true,

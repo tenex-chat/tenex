@@ -5,7 +5,7 @@
  * Todos are stored on the Conversation object and persisted with it.
  */
 
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { TodoItem, TodoStatus } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
@@ -151,7 +151,7 @@ interface TodoAddOutput {
 
 async function executeTodoAdd(
     input: TodoAddInput,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<TodoAddOutput> {
     const conversation = context.getConversation();
     if (!conversation) {
@@ -192,7 +192,7 @@ async function executeTodoAdd(
     };
 }
 
-export function createTodoAddTool(context: ToolContext): AISdkTool {
+export function createTodoAddTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Add one or more todo items to track tasks. Each item requires an id (unique identifier), " +
@@ -254,7 +254,7 @@ interface TodoUpdateOutput {
 
 async function executeTodoUpdate(
     input: TodoUpdateInput,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<TodoUpdateOutput> {
     const conversation = context.getConversation();
     if (!conversation) {
@@ -290,7 +290,7 @@ async function executeTodoUpdate(
     };
 }
 
-export function createTodoUpdateTool(context: ToolContext): AISdkTool {
+export function createTodoUpdateTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Update the status of todo items. Use 'in_progress' when starting work, 'done' when complete, " +

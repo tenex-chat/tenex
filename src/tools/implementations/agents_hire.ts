@@ -1,4 +1,4 @@
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { getNDK } from "@/nostr";
 import { getProjectContext } from "@/services/projects";
@@ -35,7 +35,7 @@ type AgentsHireOutput = {
  */
 async function executeAgentsHire(
     input: AgentsHireInput,
-    _context: ToolContext
+    _context: ToolExecutionContext
 ): Promise<AgentsHireOutput> {
     const { eventId: rawEventId, slug } = input;
 
@@ -107,7 +107,7 @@ async function executeAgentsHire(
  * Create an AI SDK tool for hiring agents
  * This is the primary implementation
  */
-export function createAgentsHireTool(context: ToolContext): AISdkTool {
+export function createAgentsHireTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Hire (add) a new agent from the Nostr network to the current project using its event ID",

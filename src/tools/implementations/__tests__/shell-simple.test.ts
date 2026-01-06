@@ -1,47 +1,42 @@
 import { describe, expect, it } from "bun:test";
-import { shellTool } from "../shell";
+import { createShellTool } from "../shell";
+import { createMockExecutionEnvironment } from "@/test-utils";
+import { tmpdir } from "os";
 
 describe("shellTool - simple test", () => {
+    // Create tool instance using factory with mock context
+    // Use real tmpdir so shell commands can actually execute
+    const mockContext = createMockExecutionEnvironment({
+        workingDirectory: tmpdir(),
+        projectBasePath: tmpdir(),
+    });
+    const shellTool = createShellTool(mockContext);
+
     it("should have correct metadata", () => {
-        expect(shellTool.name).toBe("shell");
-        expect(shellTool.description).toBe("Execute shell commands in the project directory");
+        expect(shellTool.description).toContain("Execute shell commands");
     });
 
-    it("should have parameters schema", () => {
-        expect(shellTool.parameters).toBeDefined();
-        expect(shellTool.parameters.validate).toBeDefined();
+    it("should have execute function", () => {
+        expect(typeof shellTool.execute).toBe("function");
     });
 
-    it("should validate correct input", () => {
-        const result = shellTool.parameters.validate({
+    it("should execute simple command", async () => {
+        const result = await shellTool.execute({
             command: "echo test",
+            cwd: null,
+            timeout: null,
         });
 
-        expect(result.ok).toBe(true);
-        if (result.ok) {
-            expect(result.value.value.command).toBe("echo test");
-        }
+        expect(result).toContain("test");
     });
 
-    it("should reject invalid input", () => {
-        const result = shellTool.parameters.validate({
-            // Missing required command
-        });
-
-        expect(result.ok).toBe(false);
-    });
-
-    it("should accept optional parameters", () => {
-        const result = shellTool.parameters.validate({
-            command: "npm test",
-            cwd: "./src",
+    it("should handle command with timeout parameter", async () => {
+        const result = await shellTool.execute({
+            command: "echo hello",
+            cwd: null,
             timeout: 60000,
         });
 
-        expect(result.ok).toBe(true);
-        if (result.ok) {
-            expect(result.value.value.cwd).toBe("./src");
-            expect(result.value.value.timeout).toBe(60000);
-        }
+        expect(result).toContain("hello");
     });
 });

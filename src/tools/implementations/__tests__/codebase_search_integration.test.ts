@@ -4,12 +4,12 @@
  */
 
 import { resolve } from "node:path";
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { beforeEach, describe, expect, it } from "@jest/globals";
 import { createCodebaseSearchTool } from "../codebase_search";
 
 describe("codebase_search integration", () => {
-    let context: ToolContext;
+    let context: ToolExecutionContext;
     let tool: ReturnType<typeof createCodebaseSearchTool>;
 
     beforeEach(() => {
@@ -27,7 +27,7 @@ describe("codebase_search integration", () => {
                 conversation: async () => {},
             },
             triggeringEvent: undefined,
-        } as unknown as ToolContext;
+        } as unknown as ToolExecutionContext;
 
         tool = createCodebaseSearchTool(context);
     });
@@ -46,13 +46,13 @@ describe("codebase_search integration", () => {
 
         it("should find TypeScript files with specific content", async () => {
             const result = await tool.execute({
-                query: "ToolContext",
+                query: "ToolExecutionContext",
                 searchType: "content",
                 fileType: ".ts",
                 maxResults: 5,
             });
 
-            expect(result).toContain("ToolContext");
+            expect(result).toContain("ToolExecutionContext");
             expect(result).not.toContain("No results found");
         });
 

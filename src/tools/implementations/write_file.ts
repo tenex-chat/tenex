@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
@@ -19,7 +19,7 @@ const writeFileSchema = z.object({
 async function executeWriteFile(
     path: string,
     content: string,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<string> {
     // Resolve path and ensure it's within project
     const fullPath = resolveAndValidatePath(path, context.workingDirectory);
@@ -37,7 +37,7 @@ async function executeWriteFile(
 /**
  * Create an AI SDK tool for writing files
  */
-export function createWriteFileTool(context: ToolContext): AISdkTool {
+export function createWriteFileTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Write content to a file in the filesystem. Creates parent directories automatically if they don't exist. Overwrites existing files. Paths are relative to project root unless absolute. Safe and sandboxed to project directory.",

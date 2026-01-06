@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation, StopExecutionSignal, TodoItem } from "@/services/ral/types";
@@ -53,7 +53,7 @@ type DelegateOutput = StopExecutionSignal;
 
 async function executeDelegate(
   input: DelegateInput,
-  context: ToolContext
+  context: ToolExecutionContext
 ): Promise<DelegateOutput> {
   const { delegations } = input;
 
@@ -63,23 +63,18 @@ async function executeDelegate(
 
   // Check if there are already pending delegations in the CURRENT RAL execution
   // This prevents creating new delegations during checkpoint responses
-  // IMPORTANT: We must check the specific RAL number from context, not getState() which returns
-  // the highest-numbered RAL. Using getState() would block delegations in a new RAL when an
-  // unrelated previous RAL still has pending delegations.
   const ralRegistry = RALRegistry.getInstance();
-  if (context.ralNumber !== undefined) {
-    const pendingDelegationsForRal = ralRegistry.getConversationPendingDelegations(
-      context.agent.pubkey, context.conversationId, context.ralNumber
+  const pendingDelegationsForRal = ralRegistry.getConversationPendingDelegations(
+    context.agent.pubkey, context.conversationId, context.ralNumber
+  );
+  if (pendingDelegationsForRal.length > 0) {
+    const pendingRecipients = pendingDelegationsForRal
+      .map(d => d.recipientPubkey.substring(0, 8))
+      .join(", ");
+    throw new Error(
+      `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
+      "Use delegate_followup to send guidance, or wait for the delegation to complete."
     );
-    if (pendingDelegationsForRal.length > 0) {
-      const pendingRecipients = pendingDelegationsForRal
-        .map(d => d.recipientPubkey.substring(0, 8))
-        .join(", ");
-      throw new Error(
-        `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
-        "Use delegate_followup to send guidance, or wait for the delegation to complete."
-      );
-    }
   }
 
   const pendingDelegations: PendingDelegation[] = [];
@@ -120,25 +115,19 @@ async function executeDelegate(
     // If no explicit phase, check for in_progress todo with delegationInstructions
     if (!phaseInstructions) {
       const conversation = context.getConversation();
-      if (conversation) {
-        const todos = conversation.getTodos(context.agent.pubkey);
-        const inProgressTodos = todos.filter(
-          (t: TodoItem) => t.status === "in_progress" && t.delegationInstructions
-        );
+      const todos = conversation.getTodos(context.agent.pubkey);
+      const inProgressTodos = todos.filter(
+        (t: TodoItem) => t.status === "in_progress" && t.delegationInstructions
+      );
 
-        if (inProgressTodos.length > 0) {
-          // Use the first in_progress todo's delegation instructions
-          phaseInstructions = inProgressTodos[0].delegationInstructions;
-        }
+      if (inProgressTodos.length > 0) {
+        // Use the first in_progress todo's delegation instructions
+        phaseInstructions = inProgressTodos[0].delegationInstructions;
       }
     }
 
 
     // Publish delegation event
-    if (!context.agentPublisher) {
-      throw new Error("AgentPublisher not available");
-    }
-
     const eventContext = createEventContext(context);
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
@@ -153,7 +142,7 @@ async function executeDelegate(
       recipientPubkey: pubkey,
       senderPubkey: context.agent.pubkey,
       prompt: delegation.prompt,
-      ralNumber: context.ralNumber!,
+      ralNumber: context.ralNumber,
     });
 
     // Start pairing supervision if requested
@@ -167,7 +156,6 @@ async function executeDelegate(
         });
       } else {
         // Get current RAL number for this agent/conversation
-        const ralRegistry = RALRegistry.getInstance();
         const currentRal = ralRegistry.getState(context.agent.pubkey, context.conversationId);
 
         if (!currentRal) {
@@ -220,7 +208,7 @@ async function executeDelegate(
   return stopSignal;
 }
 
-export function createDelegateTool(context: ToolContext): AISdkTool {
+export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
   const hasPhases =
     context.agent.phases && Object.keys(context.agent.phases).length > 0;
 

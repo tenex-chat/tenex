@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 
 // Mock dependencies before imports
 mock.module("@/utils/logger", () => ({
@@ -32,7 +32,7 @@ describe("Learn Tool", () => {
     let mockLessonEvent: { encode: () => string };
     let mockAgentPublisher: { lesson: ReturnType<typeof mock> };
 
-    const createMockContext = (overrides: Partial<ToolContext> = {}): ToolContext => {
+    const createMockContext = (overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext => {
         mockLessonEvent = {
             encode: () => "mock-encoded-event",
         };
@@ -65,7 +65,7 @@ describe("Learn Tool", () => {
                 getRootEventId: () => "mock-root-event-id",
             }) as any,
             ...overrides,
-        } as ToolContext;
+        } as ToolExecutionContext;
     };
 
     beforeEach(() => {
@@ -118,25 +118,7 @@ describe("Learn Tool", () => {
             expect(result.title).toBe("Architecture Decision");
         });
 
-        it("should throw error when agentPublisher is not available", async () => {
-            const context = createMockContext({ agentPublisher: undefined as any });
-            const tool = createLessonLearnTool(context);
-
-            await expect(tool.execute({
-                title: "Test",
-                lesson: "Test lesson",
-            })).rejects.toThrow("AgentPublisher not available");
-        });
-
-        it("should throw error when ralNumber is missing", async () => {
-            const context = createMockContext({ ralNumber: undefined });
-            const tool = createLessonLearnTool(context);
-
-            await expect(tool.execute({
-                title: "Test",
-                lesson: "Test lesson",
-            })).rejects.toThrow("ralNumber is required");
-        });
+        // NOTE: Tests for missing agentPublisher/ralNumber removed - now enforced by ToolExecutionContext type
 
         it("should add lesson to RAG collection", async () => {
             const context = createMockContext();

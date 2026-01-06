@@ -1,4 +1,4 @@
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
@@ -20,7 +20,7 @@ type McpDiscoverOutput = {
 // Core implementation - extracted from existing execute function
 async function executeMcpDiscover(
     input: McpDiscoverInput,
-    _context: ToolContext
+    _context: ToolExecutionContext
 ): Promise<McpDiscoverOutput> {
     const { searchText, limit = 50 } = input;
     const ndk = getNDK();
@@ -106,7 +106,7 @@ async function executeMcpDiscover(
 }
 
 // AI SDK tool factory
-export function createMcpDiscoverTool(context: ToolContext): AISdkTool {
+export function createMcpDiscoverTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Discover MCP tool definitions from the Nostr network that can be installed and used to extend your capabilities",

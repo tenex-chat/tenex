@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { createUploadBlobTool } from "../implementations/upload_blob";
@@ -7,7 +7,7 @@ import { createUploadBlobTool } from "../implementations/upload_blob";
 global.fetch = jest.fn();
 
 describe("upload_blob URL support", () => {
-    let mockContext: ToolContext;
+    let mockContext: ToolExecutionContext;
     let mockAgent: Partial<AgentInstance>;
 
     beforeEach(() => {
@@ -29,7 +29,7 @@ describe("upload_blob URL support", () => {
             agentPublisher: {} as any,
             conversationCoordinator: {} as any,
             triggeringEvent: {} as any,
-        } as ToolContext;
+        } as ToolExecutionContext;
     });
 
     describe("URL detection", () => {

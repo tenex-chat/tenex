@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { type RAGQueryResult, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling, parseNumericInput } from "@/tools/utils";
@@ -63,7 +63,7 @@ function formatResults(
  */
 async function executeQuery(
     input: z.infer<typeof ragQuerySchema>,
-    _context: ToolContext
+    _context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { collection, query_text, include_metadata = true } = input;
 
@@ -85,7 +85,7 @@ async function executeQuery(
 /**
  * Query a RAG collection using semantic search
  */
-export function createRAGQueryTool(context: ToolContext): AISdkTool {
+export function createRAGQueryTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Perform semantic search on a RAG collection. Returns the most relevant documents based on vector similarity to the query.",

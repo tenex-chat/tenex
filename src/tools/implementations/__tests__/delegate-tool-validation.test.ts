@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, spyOn, mock } from "bun:test";
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 
 // Mock NDK before importing modules that use it
@@ -26,24 +26,25 @@ describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber?: number): ToolContext => ({
+    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        conversationCoordinator: {} as any,
         triggeringEvent: {
             tags: [],
         } as any,
         agentPublisher: {} as any,
-        phase: undefined,
         ralNumber,
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
-        getConversation: () => undefined,
+        getConversation: () => ({
+            getRootEventId: () => conversationId,
+            getTodos: () => [],
+        }) as any,
     });
 
     beforeEach(() => {
@@ -154,26 +155,27 @@ describe("Delegation tools - RAL isolation", () => {
     const conversationId = "test-conversation-id";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber: number): ToolContext => ({
+    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        conversationCoordinator: {} as any,
         triggeringEvent: {
             tags: [],
         } as any,
         agentPublisher: {
             delegate: async () => "mock-delegation-id",
         } as any,
-        phase: undefined,
         ralNumber,
         projectBasePath: "/tmp/test",
         workingDirectory: "/tmp/test",
         currentBranch: "main",
-        getConversation: () => undefined,
+        getConversation: () => ({
+            getRootEventId: () => conversationId,
+            getTodos: () => [],
+        }) as any,
     });
 
     beforeEach(() => {
@@ -262,51 +264,7 @@ describe("Delegation tools - RAL isolation", () => {
             }
         });
 
-        it("should require ralNumber in context", async () => {
-            // Create RAL with pending delegations
-            const ralNumber = registry.create("agent-pubkey-123", conversationId);
-            registry.setPendingDelegations("agent-pubkey-123", conversationId, ralNumber, [
-                {
-                    delegationConversationId: "pending-delegation-id",
-                    recipientPubkey: "some-other-agent",
-                    recipientSlug: "other-agent",
-                },
-            ]);
-
-            // Context WITHOUT ralNumber should throw error
-            const context = {
-                agent: {
-                    slug: "self-agent",
-                    name: "Self Agent",
-                    pubkey: "agent-pubkey-123",
-                } as AgentInstance,
-                conversationId,
-                conversationCoordinator: {} as any,
-                triggeringEvent: { tags: [] } as any,
-                agentPublisher: { delegate: async () => "mock-delegation-id" } as any,
-                phase: undefined,
-                ralNumber: undefined, // Explicitly undefined
-                projectBasePath: "/tmp/test",
-                workingDirectory: "/tmp/test",
-                currentBranch: "main",
-                getConversation: () => undefined,
-            } as ToolContext;
-            const delegateTool = createDelegateTool(context);
-
-            const input = {
-                delegations: [
-                    { recipient: "other-agent", prompt: "Task" }
-                ],
-            };
-
-            // Should throw because ralNumber is required
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("ralNumber is required");
-            }
-        });
+        // NOTE: Test "should require ralNumber in context" removed - ralNumber is now required by ToolExecutionContext type
     });
 });
 

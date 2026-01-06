@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -48,7 +48,7 @@ function summarizeConversation(conversation: ConversationStore): ConversationSum
 
 async function executeConversationSearch(
     input: ConversationSearchInput,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<ConversationSearchOutput> {
     const { query, limit = 20 } = input;
 
@@ -78,7 +78,7 @@ async function executeConversationSearch(
     };
 }
 
-export function createConversationSearchTool(context: ToolContext): AISdkTool {
+export function createConversationSearchTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Search conversations by title. Returns matching conversations with summary information including ID, title, phase, message count, and timestamps.",
