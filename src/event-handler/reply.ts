@@ -14,9 +14,91 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
 import { handleDelegationCompletion } from "./DelegationCompletionHandler";
+import type { AgentInstance } from "@/agents/types";
+import type { ProjectContext } from "@/services/projects";
 
 interface EventHandlerContext {
     agentExecutor: AgentExecutor;
+}
+
+interface DelegationTarget {
+    agent: AgentInstance;
+    conversationId: string;
+}
+
+/**
+ * Handle a delegation response (including ask responses).
+ * This is called when an event is identified as a completion for a pending delegation.
+ * The routing is done via RALRegistry's delegationToRal map, not conversation resolution.
+ */
+async function handleDelegationResponse(
+    event: NDKEvent,
+    delegationTarget: DelegationTarget,
+    agentExecutor: AgentExecutor,
+    projectCtx: ProjectContext
+): Promise<void> {
+    const ralRegistry = RALRegistry.getInstance();
+    const resumableRal = ralRegistry.findResumableRAL(
+        delegationTarget.agent.pubkey,
+        delegationTarget.conversationId
+    );
+
+    // Get the original triggering event for delegation resumption
+    let triggeringEventForContext = event; // fallback to completion event
+
+    if (resumableRal?.originalTriggeringEventId) {
+        const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
+        if (originalEvent) {
+            triggeringEventForContext = originalEvent;
+            trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
+                "original.event_id": resumableRal.originalTriggeringEventId,
+                "completion.event_id": event.id || "",
+            });
+        }
+    }
+
+    trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
+        "delegation.agent_slug": delegationTarget.agent.slug,
+        "delegation.original_conversation_id": delegationTarget.conversationId,
+    });
+
+    // Get pending count from the RAL for the execution context
+    const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+        delegationTarget.agent.pubkey,
+        delegationTarget.conversationId,
+        resumableRal?.ralNumber
+    );
+    const hasPendingDelegations = pendingDelegations.length > 0;
+
+    // Create execution context for the ORIGINAL conversation where the RAL is waiting
+    const executionContext = await createExecutionContext({
+        agent: delegationTarget.agent,
+        conversationId: delegationTarget.conversationId,
+        projectBasePath: projectCtx.agentRegistry.getBasePath(),
+        triggeringEvent: triggeringEventForContext,
+        isDelegationCompletion: true,
+        hasPendingDelegations,
+    });
+
+    // Reset metadata debounce timer before execution
+    metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
+
+    // Execute - AgentExecutor will find the resumable RAL via findResumableRAL
+    await agentExecutor.execute(executionContext);
+
+    // Schedule debounced metadata publish for the ORIGINAL conversation
+    // Delegation completions are never root events (they reply to a delegation)
+    metadataDebounceManager.schedulePublish(
+        delegationTarget.conversationId,
+        false, // not a root event
+        async () => {
+            const summarizer = new ConversationSummarizer(projectCtx);
+            const originalConversation = ConversationStore.get(delegationTarget.conversationId);
+            if (originalConversation) {
+                await summarizer.summarizeAndPublish(originalConversation);
+            }
+        }
+    );
 }
 
 /**
@@ -84,6 +166,31 @@ async function handleReplyLogic(
 ): Promise<void> {
     const projectCtx = getProjectContext();
 
+    // IMPORTANT: Check for delegation completion FIRST, before conversation resolution.
+    // Ask delegations create events with no e-tag (starting new conversations), but the user's
+    // reply e-tags the ask event. The ask event may not be in ConversationStore (it was only
+    // published to Nostr), so conversation resolution may fail. However, the RALRegistry has
+    // the mapping from ask event ID -> waiting RAL, so we can still route the response.
+    const delegationResult = await handleDelegationCompletion(event);
+    const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
+
+    // If this is a delegation completion (including ask responses), handle it directly
+    // without requiring conversation resolution to succeed first
+    if (delegationTarget) {
+        await handleDelegationResponse(event, delegationTarget, agentExecutor, projectCtx);
+        return;
+    }
+
+    // If this is a completion event but no delegation target was found, drop it.
+    // This prevents orphan completions from triggering new RALs and causing ping-pong loops.
+    if (AgentEventDecoder.isDelegationCompletion(event)) {
+        trace.getActiveSpan()?.addEvent("reply.completion_dropped_no_waiting_ral", {
+            "event.id": event.id ?? "",
+            "event.pubkey": event.pubkey.substring(0, 8),
+        });
+        return;
+    }
+
     // Resolve conversation for this event
     const conversationResolver = new ConversationResolver();
     const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(event);
@@ -132,85 +239,6 @@ async function handleReplyLogic(
             "conversation.id": conversation.id,
         });
     }
-
-    // Check for delegation completion - if this is a response to a delegation,
-    // route to the waiting agent in the ORIGINAL conversation (not this one)
-    const delegationResult = await handleDelegationCompletion(event);
-    const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
-
-    if (delegationTarget) {
-        // Look up the original triggering event from the RAL
-        // This ensures we p-tag the original requester, not the delegatee
-        const ralRegistry = RALRegistry.getInstance();
-        const resumableRal = ralRegistry.findResumableRAL(
-            delegationTarget.agent.pubkey,
-            delegationTarget.conversationId
-        );
-
-        // Get the original triggering event for delegation resumption
-        let triggeringEventForContext = event; // fallback to completion event
-
-        if (resumableRal?.originalTriggeringEventId) {
-            const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
-            if (originalEvent) {
-                triggeringEventForContext = originalEvent;
-                trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
-                    "original.event_id": resumableRal.originalTriggeringEventId,
-                    "completion.event_id": event.id || "",
-                });
-            }
-        }
-
-        trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
-            "delegation.agent_slug": delegationTarget.agent.slug,
-            "delegation.original_conversation_id": delegationTarget.conversationId,
-            "delegation.current_conversation_id": conversation.id,
-        });
-
-        // Create execution context for the ORIGINAL conversation where the RAL is waiting
-        const hasPendingDelegations = (delegationResult.pendingCount ?? 0) > 0;
-        const executionContext = await createExecutionContext({
-            agent: delegationTarget.agent,
-            conversationId: delegationTarget.conversationId,
-            projectBasePath: projectCtx.agentRegistry.getBasePath(),
-            triggeringEvent: triggeringEventForContext,
-            isDelegationCompletion: true,
-            hasPendingDelegations,
-        });
-
-        // Reset metadata debounce timer before execution
-        metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
-
-        // Execute - AgentExecutor will find the resumable RAL via findResumableRAL
-        await agentExecutor.execute(executionContext);
-
-        // Schedule debounced metadata publish for the ORIGINAL conversation
-        // Delegation completions are never root events (they reply to a delegation)
-        metadataDebounceManager.schedulePublish(
-            delegationTarget.conversationId,
-            false, // not a root event
-            async () => {
-                const summarizer = new ConversationSummarizer(projectCtx);
-                const originalConversation = ConversationStore.get(delegationTarget.conversationId);
-                if (originalConversation) {
-                    await summarizer.summarizeAndPublish(originalConversation);
-                }
-            }
-        );
-        return;
-    }
-
-    // If this is a completion event but no delegation target was found, drop it.
-    // This prevents orphan completions from triggering new RALs and causing ping-pong loops.
-    if (AgentEventDecoder.isDelegationCompletion(event)) {
-        trace.getActiveSpan()?.addEvent("reply.completion_dropped_no_waiting_ral", {
-            "event.id": event.id ?? "",
-            "event.pubkey": event.pubkey.substring(0, 8),
-        });
-        return;
-    }
-
-    trace.getActiveSpan()?.addEvent("reply.delegation_completion_handled");
 
     // If sender is whitelisted, they can unblock any blocked agents they're messaging
     const whitelistedPubkeys = config.getConfig().whitelistedPubkeys ?? [];

@@ -10,7 +10,7 @@
  * Static methods provide the global registry for all conversation stores.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
 import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -77,6 +77,7 @@ interface ConversationState {
     messages: ConversationEntry[];
     metadata: ConversationMetadata;
     agentTodos: Record<string, TodoItem[]>;
+    todoNudgedAgents: string[]; // Agents who have been nudged about todo usage
     blockedAgents: string[];
     executionTime: ExecutionTime;
 }
@@ -335,6 +336,50 @@ export class ConversationStore {
     }
 
     /**
+     * Get the current project ID.
+     * Returns null if not initialized.
+     */
+    static getProjectId(): string | null {
+        return ConversationStore.projectId;
+    }
+
+    /**
+     * Get the base path for conversation storage.
+     */
+    static getBasePath(): string {
+        return ConversationStore.basePath;
+    }
+
+    /**
+     * Get the conversations directory path for the current project.
+     * Returns null if not initialized.
+     */
+    static getConversationsDir(): string | null {
+        if (!ConversationStore.projectId) return null;
+        return join(ConversationStore.basePath, "projects", ConversationStore.projectId, "conversations");
+    }
+
+    /**
+     * List all conversation IDs from disk for the current project.
+     * This scans the file system and returns all conversation IDs without loading full stores.
+     */
+    static listConversationIdsFromDisk(): string[] {
+        const conversationsDir = ConversationStore.getConversationsDir();
+        if (!conversationsDir) return [];
+
+        try {
+            if (!existsSync(conversationsDir)) return [];
+
+            const files = readdirSync(conversationsDir);
+            return files
+                .filter(file => file.endsWith(".json"))
+                .map(file => file.replace(".json", ""));
+        } catch {
+            return [];
+        }
+    }
+
+    /**
      * Check if a pubkey belongs to an agent.
      */
     static isAgentPubkey(pubkey: string): boolean {
@@ -363,6 +408,7 @@ export class ConversationStore {
         messages: [],
         metadata: {},
         agentTodos: {},
+        todoNudgedAgents: [],
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
     };
@@ -414,6 +460,7 @@ export class ConversationStore {
                 messages: loaded.messages ?? [],
                 metadata: loaded.metadata ?? {},
                 agentTodos: loaded.agentTodos ?? {},
+                todoNudgedAgents: loaded.todoNudgedAgents ?? [],
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
@@ -433,6 +480,7 @@ export class ConversationStore {
                 messages: [],
                 metadata: {},
                 agentTodos: {},
+                todoNudgedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
@@ -803,6 +851,18 @@ export class ConversationStore {
 
     setTodos(agentPubkey: string, todos: TodoItem[]): void {
         this.state.agentTodos[agentPubkey] = todos;
+    }
+
+    // Todo Nudge Operations
+
+    hasBeenNudgedAboutTodos(agentPubkey: string): boolean {
+        return this.state.todoNudgedAgents.includes(agentPubkey);
+    }
+
+    setNudgedAboutTodos(agentPubkey: string): void {
+        if (!this.state.todoNudgedAgents.includes(agentPubkey)) {
+            this.state.todoNudgedAgents.push(agentPubkey);
+        }
     }
 
     // Blocked Agents Operations

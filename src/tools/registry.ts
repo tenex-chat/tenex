@@ -20,7 +20,7 @@ import { createConversationListTool } from "./implementations/conversation_list"
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateTool } from "./implementations/delegate";
-import { createDelegateExternalTool } from "./implementations/delegate_external";
+import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonGetTool } from "./implementations/lesson_get";
@@ -124,7 +124,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     project_list: createProjectListTool,
 
     // Delegation tools
-    delegate_external: createDelegateExternalTool,
+    delegate_crossproject: createDelegateCrossProjectTool,
     delegate_followup: createDelegateFollowupTool,
     delegate: createDelegateTool,
 

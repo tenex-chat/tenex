@@ -49,7 +49,7 @@ describe("Tool assignment", () => {
             // Delegate tools are NOT in the default set
             // They're added separately via getDelegateToolsForAgent
             expect(tools).not.toContain("delegate");
-            expect(tools).not.toContain("delegate_external");
+            expect(tools).not.toContain("delegate_crossproject");
             expect(tools).not.toContain("delegate_followup");
         });
 

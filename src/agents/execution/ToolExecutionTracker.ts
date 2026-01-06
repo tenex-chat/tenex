@@ -66,7 +66,7 @@ import { trace } from "@opentelemetry/api";
  * Tools that publish delegation/ask events and need delayed tool use event publishing.
  * These tools return a StopExecutionSignal with pendingDelegations containing event IDs.
  */
-const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_external"];
+const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_crossproject"];
 
 function isDelegationTool(toolName: string): boolean {
     return DELEGATION_TOOLS.includes(toolName);
@@ -169,7 +169,7 @@ export class ToolExecutionTracker {
      * 2. Publishes a Nostr event announcing the tool execution (unless delegation tool)
      * 3. Stores the execution state for later correlation with results
      *
-     * For delegation tools (delegate, delegate_followup, ask, delegate_external),
+     * For delegation tools (delegate, delegate_followup, ask, delegate_crossproject),
      * publishing is delayed until completeExecution so the delegation event IDs can be included.
      *
      * @param options - Configuration for tracking the execution

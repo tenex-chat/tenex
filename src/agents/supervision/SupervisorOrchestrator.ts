@@ -135,6 +135,35 @@ export class SupervisorOrchestrator {
                     { reason: detection.reason }
                 );
 
+                // For heuristics that skip verification, treat detection as confirmed
+                if (heuristic.skipVerification) {
+                    logger.info(
+                        `[SupervisorOrchestrator] Heuristic "${heuristic.id}" skips verification, applying correction directly`
+                    );
+
+                    const syntheticVerification: VerificationResult = {
+                        verdict: "violation",
+                        explanation: "Heuristic configured to skip LLM verification",
+                    };
+
+                    const correctionAction = heuristic.getCorrectionAction(syntheticVerification);
+
+                    if (correctionAction.type === "inject-message" && !correctionAction.message) {
+                        correctionAction.message = heuristic.buildCorrectionMessage(
+                            context,
+                            syntheticVerification
+                        );
+                    }
+
+                    return {
+                        hasViolation: true,
+                        correctionAction,
+                        heuristicId: heuristic.id,
+                        detection,
+                        verification: syntheticVerification,
+                    };
+                }
+
                 // Build verification prompt and context
                 const verificationPrompt = heuristic.buildVerificationPrompt(context, detection);
                 const supervisionContext = this.buildSupervisionContext(

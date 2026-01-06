@@ -17,12 +17,10 @@ type ProjectAgent = {
 };
 
 type ProjectInfo = {
-    id: string; // Format: "31933:pubkey:dTag"
-    naddr: string; // NIP-19 naddr encoding
+    id: string; // The project's dTag (unique identifier)
     title?: string;
     description?: string;
     repository?: string;
-    dTag: string;
     ownerPubkey: string;
     ownerNpub: string;
     isRunning: boolean;
@@ -53,9 +51,10 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
     let totalAgents = 0;
 
     for (const [projectId, project] of knownProjects) {
-        const dTag = project.tagValue("d");
-        if (!dTag) {
-            logger.warn("⚠️ Project missing d tag, skipping", { projectId });
+        // projectId format is "31933:pubkey:id"
+        const id = projectId.split(":")[2];
+        if (!id) {
+            logger.warn("⚠️ Project missing id, skipping", { projectId });
             continue;
         }
 
@@ -64,7 +63,6 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
         const repository = project.tagValue("repository");
         const ownerPubkey = project.pubkey;
         const ownerUser = new NDKUser({ pubkey: ownerPubkey });
-        const naddr = project.encode();
 
         // Check if this project is running
         const runtime = activeRuntimes.get(projectId);
@@ -89,7 +87,7 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
             }
         } else {
             // Not running - get agents from storage
-            const storedAgents = await agentStorage.getProjectAgents(dTag);
+            const storedAgents = await agentStorage.getProjectAgents(id);
             for (const storedAgent of storedAgents) {
                 const signer = new NDKPrivateKeySigner(storedAgent.nsec);
                 const pubkey = (await signer.user()).pubkey;
@@ -104,12 +102,10 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
         totalAgents += agents.length;
 
         projects.push({
-            id: projectId,
-            naddr,
+            id,
             title,
             description,
             repository,
-            dTag,
             ownerPubkey,
             ownerNpub: ownerUser.npub,
             isRunning,
