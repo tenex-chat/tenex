@@ -9,6 +9,10 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
+const MAX_BLOB_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 60_000;
+
 const uploadBlobSchema = z.object({
     input: z
         .string()
@@ -39,6 +43,14 @@ interface UploadBlobOutput {
 
 interface BlossomConfig {
     serverUrl: string;
+}
+
+function enforceSizeLimit(bytes: number): void {
+    if (bytes > MAX_BLOB_SIZE_BYTES) {
+        throw new Error(
+            `Blob size ${bytes} bytes exceeds limit of ${MAX_BLOB_SIZE_BYTES} bytes. Please provide a smaller file.`
+        );
+    }
 }
 
 /**
@@ -138,50 +150,77 @@ async function downloadFromURL(
 ): Promise<{ data: Buffer; mimeType?: string; filename?: string }> {
     logger.info("[upload_blob] Downloading from URL", { url });
 
-    const response = await fetch(url, {
-        headers: {
-            "User-Agent": "TENEX/1.0 (Blossom Upload Tool)",
-        },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
-    if (!response.ok) {
-        throw new Error(`Failed to download from URL: ${response.status} ${response.statusText}`);
-    }
+    try {
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "TENEX/1.0 (Blossom Upload Tool)",
+            },
+            signal: controller.signal,
+        });
 
-    // Get content type from headers
-    const contentType = response.headers.get("content-type");
-    const mimeType = contentType?.split(";")[0].trim();
-
-    // Try to extract filename from Content-Disposition header or URL
-    let filename: string | undefined;
-    const contentDisposition = response.headers.get("content-disposition");
-    if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (filenameMatch) {
-            filename = filenameMatch[1].replace(/['"]/g, "");
+        if (!response.ok) {
+            throw new Error(
+                `Failed to download from URL: ${response.status} ${response.statusText}`
+            );
         }
-    }
 
-    if (!filename) {
-        // Try to extract filename from URL
-        const urlPath = new URL(url).pathname;
-        const pathSegments = urlPath.split("/");
-        const lastSegment = pathSegments[pathSegments.length - 1];
-        if (lastSegment?.includes(".")) {
-            filename = lastSegment;
+        // Check declared size before downloading body
+        const declaredSize = response.headers.get("content-length");
+        if (declaredSize) {
+            const parsed = Number.parseInt(declaredSize, 10);
+            if (Number.isFinite(parsed)) {
+                enforceSizeLimit(parsed);
+            }
         }
+
+        // Get content type from headers
+        const contentType = response.headers.get("content-type");
+        const mimeType = contentType?.split(";")[0].trim();
+
+        // Try to extract filename from Content-Disposition header or URL
+        let filename: string | undefined;
+        const contentDisposition = response.headers.get("content-disposition");
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+            if (filenameMatch) {
+                filename = filenameMatch[1].replace(/['"]/g, "");
+            }
+        }
+
+        if (!filename) {
+            // Try to extract filename from URL
+            const urlPath = new URL(url).pathname;
+            const pathSegments = urlPath.split("/");
+            const lastSegment = pathSegments[pathSegments.length - 1];
+            if (lastSegment?.includes(".")) {
+                filename = lastSegment;
+            }
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const data = Buffer.from(arrayBuffer);
+        enforceSizeLimit(data.length);
+
+        logger.info("[upload_blob] Downloaded from URL", {
+            size: data.length,
+            mimeType,
+            filename,
+        });
+
+        return { data, mimeType, filename };
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(
+                `Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms while fetching ${url}`
+            );
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
     }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const data = Buffer.from(arrayBuffer);
-
-    logger.info("[upload_blob] Downloaded from URL", {
-        size: data.length,
-        mimeType,
-        filename,
-    });
-
-    return { data, mimeType, filename };
 }
 
 /**
@@ -229,40 +268,53 @@ async function uploadToBlossomServer(
     // Encode the auth event as base64 for the header
     const authHeader = `Nostr ${Buffer.from(JSON.stringify(authEvent.rawEvent())).toString("base64")}`;
 
-    const response = await fetch(`${serverUrl}/upload`, {
-        method: "PUT",
-        headers: {
-            Authorization: authHeader,
-            "Content-Type": mimeType,
-            "Content-Length": String(data.length),
-        },
-        body: data,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
-    if (!response.ok) {
-        let errorMessage = `Upload failed with status ${response.status}`;
-        try {
-            const errorData = await response.json() as { message?: string };
-            if (errorData.message) {
-                errorMessage = `Upload failed: ${errorData.message}`;
+    try {
+        const response = await fetch(`${serverUrl}/upload`, {
+            method: "PUT",
+            headers: {
+                Authorization: authHeader,
+                "Content-Type": mimeType,
+                "Content-Length": String(data.length),
+            },
+            body: data,
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            let errorMessage = `Upload failed with status ${response.status}`;
+            try {
+                const errorData = await response.json() as { message?: string };
+                if (errorData.message) {
+                    errorMessage = `Upload failed: ${errorData.message}`;
+                }
+            } catch {
+                // If parsing JSON fails, use the default error message
             }
-        } catch {
-            // If parsing JSON fails, use the default error message
+            throw new Error(errorMessage);
         }
-        throw new Error(errorMessage);
-    }
 
-    const result = await response.json() as UploadBlobOutput;
+        const result = await response.json() as UploadBlobOutput;
 
-    // Add extension to URL if not present and we can determine it
-    if (result.url && !path.extname(result.url)) {
-        const ext = getExtensionFromMimeType(mimeType);
-        if (ext) {
-            result.url = result.url + ext;
+        // Add extension to URL if not present and we can determine it
+        if (result.url && !path.extname(result.url)) {
+            const ext = getExtensionFromMimeType(mimeType);
+            if (ext) {
+                result.url = result.url + ext;
+            }
         }
-    }
 
-    return result;
+        return result;
+    } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+            throw new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS}ms`);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 /**
@@ -326,6 +378,7 @@ async function executeUploadBlob(
         }
 
         data = Buffer.from(base64Data, "base64");
+        enforceSizeLimit(data.length);
         uploadDescription = description || "Upload blob data";
     } else {
         // Handle file path
@@ -337,6 +390,9 @@ async function executeUploadBlob(
         } catch {
             throw new Error(`File not found: ${filePath}`);
         }
+
+        const stats = await fs.stat(filePath);
+        enforceSizeLimit(stats.size);
 
         data = await fs.readFile(filePath);
         mimeType = providedMimeType || detectMimeType(filePath, data);

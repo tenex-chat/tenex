@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
 import { writeFile } from "fs/promises";
 import { homedir } from "os";
-import { join } from "path";
+import { basename, dirname, join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
@@ -87,7 +87,7 @@ export class ConversationStore {
     // Global registry of all conversation stores
     private static stores: Map<string, ConversationStore> = new Map();
     private static eventCache: Map<string, NDKEvent> = new Map();
-    private static basePath: string = join(homedir(), ".tenex");
+    private static basePath: string = join(homedir(), ".tenex", "projects");
     private static projectId: string | null = null;
     private static agentPubkeys: Set<string> = new Set();
 
@@ -95,10 +95,10 @@ export class ConversationStore {
      * Initialize the global conversation store registry.
      * Must be called once at startup before using any stores.
      */
-    static initialize(projectPath: string, agentPubkeys?: Iterable<string>): void {
-        // Extract project ID from path (last segment)
-        const segments = projectPath.split("/").filter(Boolean);
-        ConversationStore.projectId = segments[segments.length - 1] || "unknown";
+    static initialize(metadataPath: string, agentPubkeys?: Iterable<string>): void {
+        // metadataPath points to ~/.tenex/projects/<dTag>
+        ConversationStore.basePath = dirname(metadataPath);
+        ConversationStore.projectId = basename(metadataPath);
 
         // Build set of agent pubkeys
         ConversationStore.agentPubkeys = new Set(agentPubkeys ?? []);
@@ -356,7 +356,7 @@ export class ConversationStore {
      */
     static getConversationsDir(): string | null {
         if (!ConversationStore.projectId) return null;
-        return join(ConversationStore.basePath, "projects", ConversationStore.projectId, "conversations");
+        return join(ConversationStore.basePath, ConversationStore.projectId, "conversations");
     }
 
     /**
@@ -392,6 +392,7 @@ export class ConversationStore {
     static reset(): void {
         ConversationStore.stores.clear();
         ConversationStore.eventCache.clear();
+        ConversationStore.basePath = join(homedir(), ".tenex", "projects");
         ConversationStore.projectId = null;
         ConversationStore.agentPubkeys.clear();
     }
@@ -423,22 +424,11 @@ export class ConversationStore {
         if (!this.projectId || !this.conversationId) {
             throw new Error("Must call load() before accessing file");
         }
-        return join(
-            this.basePath,
-            "projects",
-            this.projectId,
-            "conversations",
-            `${this.conversationId}.json`
-        );
+        return join(this.basePath, this.projectId, "conversations", `${this.conversationId}.json`);
     }
 
     private ensureDirectory(): void {
-        const dir = join(
-            this.basePath,
-            "projects",
-            this.projectId!,
-            "conversations"
-        );
+        const dir = join(this.basePath, this.projectId!, "conversations");
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
         }
