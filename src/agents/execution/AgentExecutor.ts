@@ -46,7 +46,7 @@ import chalk from "chalk";
 import { MessageSyncer } from "./MessageSyncer";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
-import type { ExecutionContext, StandaloneAgentContext, StreamExecutionResult } from "./types";
+import type { ExecutionContext, RALExecutionContext, StandaloneAgentContext, StreamExecutionResult } from "./types";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
@@ -970,9 +970,10 @@ export class AgentExecutor {
 
         const executionSpan = trace.getActiveSpan();
 
-        // Track accumulated messages from prepareStep - this is updated before each step
-        // and includes all messages up to (but not including) the current step
-        let latestAccumulatedMessages: ModelMessage[] = messages;
+        // Explicit execution context for callback coordination
+        const execContext: RALExecutionContext = {
+            accumulatedMessages: messages,
+        };
 
         try {
             // Mark this RAL as streaming
@@ -989,8 +990,8 @@ export class AgentExecutor {
                     reasoningText?: string;
                 }>;
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
-                // Update accumulated messages tracker
-                latestAccumulatedMessages = step.messages;
+                // Update execution context with latest messages
+                execContext.accumulatedMessages = step.messages;
 
                 // Sync any tool calls/results from AI SDK to ConversationStore
                 // This ensures we never lose data (e.g., tool errors that didn't emit events)
@@ -1108,11 +1109,11 @@ export class AgentExecutor {
                         });
 
                         // Build complete messages including the current step's tool calls and results.
-                        // latestAccumulatedMessages has messages up to but not including this step.
+                        // execContext.accumulatedMessages has messages up to but not including this step.
                         // We need to add the assistant's tool calls and the tool results.
                         const toolCalls = lastStep.toolCalls ?? [];
                         const messagesWithToolCalls: ModelMessage[] = [
-                            ...latestAccumulatedMessages,
+                            ...execContext.accumulatedMessages,
                         ];
 
                         // Add assistant message with tool calls (if any)
