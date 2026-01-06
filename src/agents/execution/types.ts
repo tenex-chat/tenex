@@ -1,4 +1,4 @@
-import type { Tool as CoreTool } from "ai";
+import type { Tool as CoreTool, ModelMessage } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -73,3 +73,18 @@ export interface StandaloneAgentContext {
 export type StreamExecutionResult =
     | { kind: "complete"; event: CompleteEvent; aborted?: boolean }
     | { kind: "error-handled" };
+
+/**
+ * Mutable context for RAL execution state during streaming.
+ *
+ * Makes explicit the state that coordinates between prepareStep and onStopCheck
+ * callbacks. Previously this was implicit closure variables.
+ */
+export interface RALExecutionContext {
+    /**
+     * Messages accumulated from prepareStep callbacks.
+     * Updated in prepareStep (before each LLM step), read in onStopCheck.
+     * Contains messages up to but not including the current step.
+     */
+    accumulatedMessages: ModelMessage[];
+}
