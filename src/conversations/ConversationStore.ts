@@ -126,24 +126,78 @@ export class ConversationStore {
     /**
      * Get a conversation store if it exists in memory or on disk.
      * Returns undefined if conversation doesn't exist.
+     *
+     * This method first checks the current project, then searches across
+     * all projects if not found locally (for cross-project conversation access).
      */
     static get(conversationId: string): ConversationStore | undefined {
         const cached = ConversationStore.stores.get(conversationId);
         if (cached) return cached;
 
-        // Try to load from disk
-        if (!ConversationStore.projectId) return undefined;
+        // Try to load from current project first (fast path)
+        if (ConversationStore.projectId) {
+            const store = new ConversationStore(ConversationStore.basePath);
+            try {
+                store.load(ConversationStore.projectId, conversationId);
+                // Check if it actually has data
+                if (store.getAllMessages().length > 0) {
+                    ConversationStore.stores.set(conversationId, store);
+                    return store;
+                }
+            } catch {
+                // Store doesn't exist in current project
+            }
+        }
 
-        const store = new ConversationStore(ConversationStore.basePath);
+        // Fall back to searching across all projects
+        const otherProjectId = ConversationStore.findProjectForConversation(conversationId);
+        if (otherProjectId) {
+            const store = new ConversationStore(ConversationStore.basePath);
+            try {
+                store.load(otherProjectId, conversationId);
+                if (store.getAllMessages().length > 0) {
+                    ConversationStore.stores.set(conversationId, store);
+                    logger.debug(`[ConversationStore] Found conversation ${conversationId.substring(0, 8)} in project ${otherProjectId}`);
+                    return store;
+                }
+            } catch {
+                // Store doesn't exist
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Find which project contains a conversation by searching across all project directories.
+     * Returns the project ID if found, undefined otherwise.
+     *
+     * This is used for cross-project conversation access when a conversation ID
+     * is not found in the current project.
+     */
+    private static findProjectForConversation(conversationId: string): string | undefined {
         try {
-            store.load(ConversationStore.projectId, conversationId);
-            // Check if it actually has data
-            if (store.getAllMessages().length > 0) {
-                ConversationStore.stores.set(conversationId, store);
-                return store;
+            if (!existsSync(ConversationStore.basePath)) return undefined;
+
+            const projectDirs = readdirSync(ConversationStore.basePath);
+            for (const projectDir of projectDirs) {
+                // Skip the current project (already checked) and non-directories
+                if (projectDir === ConversationStore.projectId) continue;
+                if (projectDir === "metadata") continue; // Skip metadata directory
+
+                const conversationFile = join(
+                    ConversationStore.basePath,
+                    projectDir,
+                    "conversations",
+                    `${conversationId}.json`
+                );
+
+                if (existsSync(conversationFile)) {
+                    return projectDir;
+                }
             }
         } catch {
-            // Store doesn't exist
+            // Error reading directories
         }
         return undefined;
     }
