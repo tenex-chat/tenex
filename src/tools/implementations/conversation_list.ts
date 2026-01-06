@@ -130,7 +130,7 @@ async function executeConversationList(
             const projectConversations = loadConversationsForProject(pid, isCurrentProject);
             allConversations.push(...projectConversations);
         }
-    } else {
+    } else if (effectiveProjectId) {
         // Load from specific project
         const isCurrentProject = effectiveProjectId === currentProjectId;
         allConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
