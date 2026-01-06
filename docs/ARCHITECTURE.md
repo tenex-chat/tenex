@@ -41,7 +41,6 @@ The `lib/` layer contains **zero TENEX-specific code**. These are pure, reusable
 ### 3. **TENEX-Specific Utilities in utils/**
 The `utils/` layer contains helpers specific to TENEX's domain:
 - Nostr entity parsing
-- Agent resolution
 - Phase management
 - Git operations
 - Conversation utilities
@@ -53,7 +52,8 @@ The `services/` layer contains stateful business logic and domain services:
 - Configuration management
 - RAG operations
 - Scheduling
-- Delegation
+- Delegation/RAL state tracking
+- Pairing supervision
 - MCP integration
 
 **Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from `commands/`, `daemon/`, or `event-handler/`.
@@ -67,11 +67,10 @@ The `services/` layer contains stateful business logic and domain services:
 
 **Contains:**
 - `lib/fs/` - Filesystem operations
-- `lib/shell.ts` - Shell execution
 - `lib/string.ts` - String utilities
-- `lib/validation.ts` - Validation helpers
 - `lib/error-formatter.ts` - Error formatting
 - `lib/time.ts` - Time utilities
+- `lib/json-parser.ts` - JSON parsing helpers
 
 **Dependencies:** Node.js built-ins, npm packages only
 
@@ -92,9 +91,8 @@ import { config } from "@/services/ConfigService";
 **Purpose:** Domain-specific helpers
 
 **Contains:**
-- `utils/nostr/` - Nostr parsing utilities
+- `utils/nostr-entity-parser.ts` - Nostr parsing utilities
 - `utils/git/` - Git operations (including worktree management)
-- `utils/agent-resolution.ts` - Agent lookup helpers
 - `utils/phase-utils.ts` - Phase management
 - `utils/conversation-utils.ts` - Conversation helpers
 - `utils/logger.ts` - Logging (can depend on services/config)
@@ -148,16 +146,21 @@ Services should be organized by domain, with related code grouped together:
 
 ```
 services/
-├── delegation/           # Delegation domain
-│   ├── DelegationService.ts
-│   ├── DelegationRegistry.ts
+├── ral/                  # Delegation/RAL state
+│   ├── RALRegistry.ts
+│   ├── types.ts
+│   └── index.ts
+├── pairing/              # Delegation supervision
+│   ├── PairingManager.ts
 │   ├── types.ts
 │   └── index.ts
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
-│   ├── SubscriptionService.ts
+│   ├── RAGDatabaseService.ts
+│   ├── RagSubscriptionService.ts
 │   ├── ...
 │   └── index.ts
+├── projects/
 ├── scheduling/
 ├── reports/
 ├── mcp/
@@ -183,14 +186,14 @@ services/
 ConfigService
 RAGService
 SchedulerService
-DelegationService
+ProjectStatusService
 
-// ✅ All services now use the "Service" suffix.
+// ✅ Most business-logic classes use the "Service" suffix.
 ```
 
 **Goal:** Consistent "Service" suffix for all business logic classes.
 
-**Exception:** Low-level infrastructure managers (e.g., `DatabaseManager`) can keep "Manager" if they're purely technical, not business logic.
+**Exceptions:** Registries and infrastructure managers (e.g., `RALRegistry`, `PairingManager`) keep their names when they are not business-logic services.
 
 ---
 
@@ -209,11 +212,11 @@ DelegationService
 
 ```typescript
 // ✅ Good - direct import
-import { DelegationService } from "@/services/delegation";
+import { RALRegistry } from "@/services/ral";
 import { RAGService } from "@/services/rag";
 
 // ❌ Bad - barrel import
-import { DelegationService, RAGService } from "@/services";
+import { RALRegistry, RAGService } from "@/services";
 ```
 
 **Why:**
@@ -226,10 +229,9 @@ import { DelegationService, RAGService } from "@/services";
 Each service subdirectory has an `index.ts` that controls what's public:
 
 ```typescript
-// services/delegation/index.ts
-export { DelegationService } from "./DelegationService";
-export type { DelegationRecord } from "./types";
-// DelegationRegistry is internal, not exported
+// services/ral/index.ts
+export { RALRegistry } from "./RALRegistry";
+export type { PendingDelegation, CompletedDelegation } from "./types";
 ```
 
 ### Rule 3: Use @/ Alias
@@ -262,11 +264,7 @@ export function chunk<T>(array: T[], size: number): T[][] {
 }
 ```
 
-**3. Export from directory index if needed:**
-```typescript
-// lib/index.ts
-export * from "./array-utils";
-```
+**3. Prefer direct imports.** Add an `index.ts` only when a subdirectory needs an explicit public surface.
 
 ---
 
@@ -279,10 +277,13 @@ export * from "./array-utils";
 **2. Create the service:**
 ```typescript
 // services/notifications/NotificationService.ts
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
+
 export class NotificationService {
     constructor(
-        private readonly config: ConfigService,
-        private readonly logger: Logger
+        private readonly config: typeof config,
+        private readonly logger: typeof logger
     ) {}
 
     // Methods...
@@ -365,15 +366,7 @@ export class UserManager {
 ---
 
 ### ❌ Inconsistent Naming
-```typescript
-// ❌ Mixed naming styles
-ConfigService
-ReportManager
-SchedulerService
-PubkeyNameRepository
-```
-
-**Solution:** Standardize on "Service" suffix.
+Avoid mixing naming styles for the same layer. Use `Service` for business logic, and reserve `Registry`/`Manager` for registries or infrastructure helpers.
 
 ---
 
@@ -386,21 +379,21 @@ PubkeyNameRepository
 export class SomethingService {
     // Declare dependencies in constructor
     constructor(
-        private readonly config: ConfigService,
-        private readonly logger: Logger,
+        private readonly config: typeof config,
+        private readonly logger: typeof logger,
         private readonly someOtherService: SomeOtherService
     ) {}
 
     doSomething(): void {
         // Use injected dependencies
-        const value = this.config.get("key");
+        const value = this.config.getConfigPath();
         this.logger.info("Doing something", { value });
     }
 }
 
 // Export default instance for convenience
-import { config } from "@/infrastructure/config";
-import { logger } from "@/infrastructure/logger";
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 import { someOtherService } from "@/services/some-other";
 
 export const somethingService = new SomethingService(

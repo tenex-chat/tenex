@@ -23,10 +23,10 @@ The following are **NEVER acceptable**:
 - Don't wrap libraries unnecessarily
 - Three similar lines > premature abstraction
 
-### USE NDK DIRECTLY
-- Import NDK types directly from `@nostr-dev-kit/ndk`
-- No wrapper types around NDK
-- No intermediate services that just call NDK methods
+### NDK USAGE
+- Import NDK types directly from `@nostr-dev-kit/ndk` for typing
+- Use `src/nostr` wrappers (`AgentPublisher`, `AgentEventEncoder/Decoder`, `ndkClient`) for publishing and decoding
+- Avoid ad-hoc NDK access outside `nostr/` unless tests need mocks
 
 ---
 
@@ -59,9 +59,10 @@ Layer 0: lib/  ← ZERO TENEX imports
 ### Services Organization
 ```
 services/
-├── delegation/     ← Related files grouped
-│   ├── DelegationService.ts
-│   └── DelegationRegistryService.ts
+├── ral/           ← Delegation/RAL state
+│   ├── RALRegistry.ts
+│   └── types.ts
+├── pairing/       ← Delegation supervision
 ├── rag/
 ├── mcp/
 ├── ConfigService.ts  ← Small services at root
@@ -76,8 +77,8 @@ services/
 
 | Type | Convention | Example |
 |------|------------|---------|
-| Services | `*Service` suffix | `DelegationService` |
-| Files (services) | PascalCase | `DelegationService.ts` |
+| Services | `*Service` suffix | `ProjectStatusService` |
+| Files (services) | PascalCase | `ProjectStatusService.ts` |
 | Files (utils) | kebab-case | `error-formatter.ts` |
 | Types | `types.ts` or inline | `types.ts` |
 | Tests | `*.test.ts` in `__tests__/` | `__tests__/Foo.test.ts` |
@@ -88,12 +89,12 @@ services/
 
 ```typescript
 // CORRECT: Direct imports with @/ alias
-import { DelegationService } from "@/services/delegation";
+import { RALRegistry } from "@/services/ral";
 import { formatAnyError } from "@/lib/error-formatter";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // WRONG: Barrel imports
-import { DelegationService } from "@/services";
+import { RALRegistry } from "@/services";
 
 // WRONG: Relative cross-module imports
 import { config } from "../../../services/ConfigService";
@@ -205,5 +206,5 @@ export const rag_query = tool({
 2. **No backwards compatibility** - Clean breaks only
 3. **No over-engineering** - Minimal changes for the task
 4. **Respect layer boundaries** - Dependencies flow down
-5. **Use NDK directly** - No unnecessary wrappers
+5. **Use `nostr/` wrappers** - Keep NDK publishing/decoding inside `src/nostr`
 6. **Delete unused code** - Don't comment or underscore it

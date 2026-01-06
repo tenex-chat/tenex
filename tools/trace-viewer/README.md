@@ -67,7 +67,7 @@ The trace viewer connects to Jaeger and immediately displays the most recent tra
 The viewer shows:
 - **Agent Executions**: Which agent executed (e.g., "ProjectManager executes [chat]")
 - **LLM Calls**: Model used (e.g., "LLM: anthropic/claude-3.5-sonnet")
-- **Tool Calls**: Tool name and arguments (e.g., "Tool: delegate_phase(phase="code_analysis")")
+- **Tool Calls**: Tool name and arguments (e.g., "Tool: delegate(recipient=..., prompt=...)")
 - **Event Processing**: Event content preview
 - **Message Building**: Strategy used for building LLM messages
 - **Durations**: Time each operation took in milliseconds
