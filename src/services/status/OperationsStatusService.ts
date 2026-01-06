@@ -204,14 +204,10 @@ export class OperationsStatusService {
         // A-tag for the project
         event.tag(projectCtx.project.tagReference());
 
-        // Sign with project manager signer and publish if available
-        if (projectCtx.projectManager?.signer) {
-            await event.sign(projectCtx.projectManager.signer, { pTags: false });
-            await event.publish();
-        } else {
-            logger.warn("No project signer available, cannot publish operations status event");
-            return;
-        }
+        // Sign with backend signer and publish
+        const backendSigner = await config.getBackendSigner();
+        await event.sign(backendSigner, { pTags: false });
+        await event.publish();
 
         const isCleanup = operations.length === 0;
         logger.debug("[OperationsStatusPublisher] Published event status", {
