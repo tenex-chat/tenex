@@ -2,8 +2,7 @@ import { exec } from "node:child_process";
 import { readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { promisify } from "node:util";
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -62,7 +61,7 @@ type SearchResult = {
  */
 async function executeCodebaseSearch(
     input: z.infer<typeof codebaseSearchSchema>,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<string> {
     const {
         query,
@@ -463,7 +462,7 @@ async function searchByContent(
 /**
  * Create the codebase_search tool for AI SDK
  */
-export function createCodebaseSearchTool(context: ExecutionContext): AISdkTool {
+export function createCodebaseSearchTool(context: ToolContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Searches the project codebase for files, directories, or content matching specified criteria. Supports searching by file name patterns, content keywords (literal or regex), or file types. When regex is enabled, uses ripgrep (rg) for fast pattern matching with full regex syntax support (e.g., 'log.*Error', 'function\\s+\\w+'). Context lines can be shown around matches. Returns a list of matching paths with optional snippets. Paths are relative to project root. Safe and sandboxed to project directory.",

@@ -39,6 +39,8 @@ export interface ReportSummary {
     hashtags?: string[];
 }
 
+type ReportAuthor = Pick<AgentInstance, "pubkey" | "signer" | "sign">;
+
 /**
  * Centralized service for managing NDKArticle reports
  * Handles creation, reading, listing, and deletion of reports
@@ -57,7 +59,7 @@ export class ReportService {
     /**
      * Write or update a report
      */
-    async writeReport(data: ReportData, agent: AgentInstance): Promise<string> {
+    async writeReport(data: ReportData, agent: ReportAuthor): Promise<string> {
         const projectCtx = getProjectContext();
         if (!projectCtx?.project) {
             throw new Error("No project context available");
@@ -259,7 +261,7 @@ export class ReportService {
     /**
      * Delete a report by marking it as deleted
      */
-    async deleteReport(slug: string, agent: AgentInstance): Promise<string> {
+    async deleteReport(slug: string, agent: ReportAuthor): Promise<string> {
         const projectCtx = getProjectContext();
         if (!projectCtx?.project) {
             throw new Error("No project context available");

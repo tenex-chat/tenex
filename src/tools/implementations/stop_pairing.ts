@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -25,7 +25,7 @@ interface StopPairingOutput {
 
 async function executeStopPairing(
   input: StopPairingInput,
-  context: ExecutionContext
+  context: ToolContext
 ): Promise<StopPairingOutput> {
   const { delegation_event_id } = input;
 
@@ -67,7 +67,7 @@ async function executeStopPairing(
   };
 }
 
-export function createStopPairingTool(context: ExecutionContext): AISdkTool {
+export function createStopPairingTool(context: ToolContext): AISdkTool {
   const aiTool = tool({
     description:
       "Stop real-time pairing supervision for a delegation. Use when you no longer need checkpoint updates and want to let the delegated agent work autonomously until completion.",

@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { ReportService } from "@/services/reports";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -23,7 +22,7 @@ interface ReportDeleteOutput {
  */
 async function executeReportDelete(
     input: ReportDeleteInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ReportDeleteOutput> {
     const { slug } = input;
 
@@ -53,7 +52,7 @@ async function executeReportDelete(
 /**
  * Create an AI SDK tool for deleting reports
  */
-export function createReportDeleteTool(context: ExecutionContext): AISdkTool {
+export function createReportDeleteTool(context: ToolContext): AISdkTool {
     return tool({
         description: "Mark an NDKArticle report as deleted",
 

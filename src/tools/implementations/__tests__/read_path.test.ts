@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { createReadPathTool } from "../read_path";
 
 // Mock conversation manager
@@ -14,7 +14,7 @@ const mockConversationCoordinator = {
 
 describe("readPath tool", () => {
     let testDir: string;
-    let context: ExecutionContext;
+    let context: ToolContext;
     let readPathTool: ReturnType<typeof createReadPathTool>;
 
     beforeEach(async () => {
@@ -36,7 +36,7 @@ describe("readPath tool", () => {
             agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
             conversationCoordinator: mockConversationCoordinator as any,
             getConversation: () => mockConversationCoordinator.getConversation() as any,
-        } as ExecutionContext;
+        } as ToolContext;
 
         // Create tool instance
         readPathTool = createReadPathTool(context);

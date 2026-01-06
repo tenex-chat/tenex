@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
@@ -36,7 +35,7 @@ type LessonLearnOutput = {
 // Core implementation - extracted from existing execute function
 async function executeLessonLearn(
     input: LessonLearnInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<LessonLearnOutput> {
     const { title, lesson, detailed, category, hashtags } = input;
 
@@ -132,7 +131,7 @@ async function executeLessonLearn(
 }
 
 // AI SDK tool factory
-export function createLessonLearnTool(context: ExecutionContext): AISdkTool {
+export function createLessonLearnTool(context: ToolContext): AISdkTool {
     return tool({
         description:
             "Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.",

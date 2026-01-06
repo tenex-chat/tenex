@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
@@ -25,7 +25,7 @@ const askSchema = z.object({
 type AskInput = z.infer<typeof askSchema>;
 type AskOutput = StopExecutionSignal;
 
-async function executeAsk(input: AskInput, context: ExecutionContext): Promise<AskOutput> {
+async function executeAsk(input: AskInput, context: ToolContext): Promise<AskOutput> {
   const { tldr, context: askContext, suggestions } = input;
 
   const projectCtx = getProjectContext();
@@ -71,7 +71,7 @@ async function executeAsk(input: AskInput, context: ExecutionContext): Promise<A
   };
 }
 
-export function createAskTool(context: ExecutionContext): AISdkTool {
+export function createAskTool(context: ToolContext): AISdkTool {
   const aiTool = tool({
     description:
       "Ask a question to the project owner and wait for their response. " +

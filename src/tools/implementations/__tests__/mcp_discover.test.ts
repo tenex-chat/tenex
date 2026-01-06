@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
 import { getNDK } from "@/nostr";
+import { createMockToolContext } from "@/test-utils";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
 import { mcpDiscover } from "../mcp_discover";
 
 // Mock dependencies
@@ -72,10 +72,9 @@ describe("mcpDiscover tool", () => {
         mockFetchEvents.mockResolvedValue(mockEventsSet);
 
         const input = { value: { limit: 10 } };
-        const context: ExecutionContext = {
-            agentId: "test-agent",
+        const context = createMockToolContext({
             conversationId: "test-conv",
-        };
+        });
 
         const result = await mcpDiscover.execute(input, context);
 
@@ -148,10 +147,9 @@ describe("mcpDiscover tool", () => {
         mockFetchEvents.mockResolvedValue(mockEventsSet);
 
         const input = { value: { searchText: "git" } };
-        const context: ExecutionContext = {
-            agentId: "test-agent",
+        const context = createMockToolContext({
             conversationId: "test-conv",
-        };
+        });
 
         const result = await mcpDiscover.execute(input, context);
 
@@ -168,10 +166,9 @@ describe("mcpDiscover tool", () => {
         mockFetchEvents.mockRejectedValue(new Error("Network error"));
 
         const input = { value: {} };
-        const context: ExecutionContext = {
-            agentId: "test-agent",
+        const context = createMockToolContext({
             conversationId: "test-conv",
-        };
+        });
 
         const result = await mcpDiscover.execute(input, context);
 
@@ -204,10 +201,9 @@ describe("mcpDiscover tool", () => {
         mockFetchEvents.mockResolvedValue(mockEventsSet);
 
         const input = { value: { limit: 5 } };
-        const context: ExecutionContext = {
-            agentId: "test-agent",
+        const context = createMockToolContext({
             conversationId: "test-conv",
-        };
+        });
 
         const result = await mcpDiscover.execute(input, context);
 

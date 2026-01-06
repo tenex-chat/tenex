@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ReportService } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -33,7 +33,7 @@ type ReportWriteOutput = {
 // Core implementation - extracted from existing execute function
 async function executeReportWrite(
     input: ReportWriteInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ReportWriteOutput> {
     const { slug, title, summary, content, hashtags, memorize } = input;
 
@@ -78,7 +78,7 @@ async function executeReportWrite(
 }
 
 // AI SDK tool factory
-export function createReportWriteTool(context: ExecutionContext): AISdkTool {
+export function createReportWriteTool(context: ToolContext): AISdkTool {
     return tool({
         description: `Write reports and documentation as NDKArticle events. Use for creating persistent documentation like architecture docs, implementation plans, or project summaries. Reports are stored on Nostr network and accessible via slug. Updates existing reports with same slug. Supports markdown format and hashtags for categorization. Reports can be read back with report_read or listed with reports_list.
 

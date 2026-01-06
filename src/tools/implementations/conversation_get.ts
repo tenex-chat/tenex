@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
@@ -153,7 +153,7 @@ function serializeConversation(conversation: ConversationStore): Record<string, 
  */
 async function executeConversationGet(
     input: ConversationGetInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ConversationGetOutput> {
     const targetConversationId = input.conversationId || context.conversationId;
 
@@ -198,7 +198,7 @@ async function executeConversationGet(
 /**
  * Create an AI SDK tool for retrieving conversations
  */
-export function createConversationGetTool(context: ExecutionContext): AISdkTool {
+export function createConversationGetTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation metadata, execution state, and full message history. If conversationId is omitted, returns the current conversation. Useful for reviewing conversation context, analyzing message history, or accessing conversation metadata like phase, summary, requirements, and plan.",

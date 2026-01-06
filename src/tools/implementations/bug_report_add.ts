@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ALPHA_BUG_HASHTAG, TENEX_BACKEND_PROJECT_ATAG } from "@/constants";
 import { getNDK } from "@/nostr";
 import type { AISdkTool } from "@/tools/types";
@@ -26,7 +26,7 @@ interface BugReportAddOutput {
 
 async function executeBugReportAdd(
     input: BugReportAddInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<BugReportAddOutput> {
     const ndk = getNDK();
     if (!ndk) {
@@ -91,7 +91,7 @@ async function executeBugReportAdd(
     };
 }
 
-export function createBugReportAddTool(context: ExecutionContext): AISdkTool {
+export function createBugReportAddTool(context: ToolContext): AISdkTool {
     const coreTool = tool({
         description:
             "Add additional information to an existing bug report. Use this to provide reproduction steps, observations, potential fixes, workarounds, or status updates to a bug that has already been reported.",

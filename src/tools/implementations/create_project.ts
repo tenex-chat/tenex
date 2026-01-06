@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
@@ -34,7 +33,7 @@ type CreateProjectOutput = {
  */
 async function executeCreateProject(
     input: CreateProjectInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<CreateProjectOutput> {
     const { title, description, repository, image, tags, agents, mcpServers } = input;
 
@@ -132,7 +131,7 @@ async function executeCreateProject(
  * Create an AI SDK tool for creating projects
  * This is the primary implementation
  */
-export function createCreateProjectTool(context: ExecutionContext): AISdkTool {
+export function createCreateProjectTool(context: ToolContext): AISdkTool {
     return tool({
         description: "Create and publish a new NDKProject event to Nostr",
         inputSchema: createProjectSchema,

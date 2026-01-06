@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
@@ -10,7 +10,7 @@ import { z } from "zod";
 /**
  * Creates a tool for scheduling tasks using cron notation
  */
-export function createScheduleTaskTool(context: ExecutionContext): AISdkTool {
+export function createScheduleTaskTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Schedule a task using cron notation (e.g., '0 9 * * *' for daily at 9am, '*/5 * * * *' for every 5 minutes)",

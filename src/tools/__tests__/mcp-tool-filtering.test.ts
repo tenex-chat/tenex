@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createMockExecutionContext } from "@/test-utils";
+import { createMockToolContext } from "@/test-utils";
 import { getToolsObject } from "../registry";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { Tool as CoreTool } from "ai";
@@ -30,7 +30,7 @@ describe("MCP Tool Filtering in getToolsObject", () => {
     } as unknown as MCPManager;
 
     // Create context with mock MCPManager
-    const mockContext = createMockExecutionContext({
+    const mockContext = createMockToolContext({
         mcpManager: mockMcpManager,
     });
 
@@ -83,7 +83,7 @@ describe("MCP Tool Filtering in getToolsObject", () => {
 
     it("should handle context without mcpManager gracefully", () => {
         // Create context without mcpManager
-        const contextWithoutMcp = createMockExecutionContext();
+        const contextWithoutMcp = createMockToolContext();
 
         const requestedTools = ["read_path", "mcp__server1__tool_a"];
         const tools = getToolsObject(requestedTools, contextWithoutMcp);

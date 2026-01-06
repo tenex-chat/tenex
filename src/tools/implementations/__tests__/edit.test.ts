@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { createEditTool } from "../edit";
 
 describe("edit tool", () => {
     let testDir: string;
-    let context: ExecutionContext;
+    let context: ToolContext;
     let editTool: ReturnType<typeof createEditTool>;
 
     beforeEach(async () => {
@@ -19,7 +19,7 @@ describe("edit tool", () => {
             conversationId: "test-conv-123",
             phase: "EXECUTE",
             agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-        } as ExecutionContext;
+        } as ToolContext;
 
         // Create tool instance
         editTool = createEditTool(context);

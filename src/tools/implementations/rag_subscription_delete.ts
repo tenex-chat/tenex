@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -17,7 +17,7 @@ const ragSubscriptionDeleteSchema = z.object({
  */
 async function executeDeleteSubscription(
     input: z.infer<typeof ragSubscriptionDeleteSchema>,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ToolResponse> {
     const { subscriptionId } = input;
 
@@ -63,7 +63,7 @@ async function executeDeleteSubscription(
  *
  * You can only delete subscriptions that belong to your agent.
  */
-export function createRAGSubscriptionDeleteTool(context: ExecutionContext): AISdkTool {
+export function createRAGSubscriptionDeleteTool(context: ToolContext): AISdkTool {
     return tool({
         description:
             "Delete a RAG subscription to stop streaming data from an MCP resource. Previously ingested documents will remain in the RAG collection.",

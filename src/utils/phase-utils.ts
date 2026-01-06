@@ -1,10 +1,23 @@
-import type { ExecutionContext } from "@/agents/execution/types";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface PhaseContext {
     phase?: string;
     phaseInstructions?: string;
+}
+
+interface ConversationRootProvider {
+    getRootEventId(): string | undefined;
+}
+
+interface EventContextSource {
+    conversationId: string;
+    triggeringEvent: NDKEvent;
+    ralNumber?: number;
+    agent: {
+        llmConfig: string;
+    };
+    getConversation: () => ConversationRootProvider | undefined;
 }
 
 /**
@@ -39,7 +52,7 @@ export function extractPhaseContext(triggeringEvent: NDKEvent): PhaseContext | u
 /**
  * Create EventContext for publishing events
  */
-export function createEventContext(context: ExecutionContext, model?: string): EventContext {
+export function createEventContext(context: EventContextSource, model?: string): EventContext {
     const conversation = context.getConversation();
     // Extract phase directly from triggering event if it's a phase delegation
     const phaseContext = extractPhaseContext(context.triggeringEvent);

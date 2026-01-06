@@ -1,9 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExecutionContext } from "@/agents/execution/types";
 import { getProjectContext } from "@/services/projects";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -37,7 +36,7 @@ type CreateDynamicToolInput = z.infer<typeof createDynamicToolSchema>;
 /**
  * Create a tool for dynamically creating new tools
  */
-export function createCreateDynamicToolTool(context: ExecutionContext): AISdkTool {
+export function createCreateDynamicToolTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Create a new dynamic tool that can be used immediately by agents. The tool will be saved as a TypeScript file and automatically loaded.",
@@ -50,8 +49,7 @@ export function createCreateDynamicToolTool(context: ExecutionContext): AISdkToo
             // Generate the tool code
             const toolCode = `import { tool, type CoreTool } from 'ai';
 import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
+import type { ToolContext, AISdkTool } from '@/tools/types';
 
 /**
  * Dynamic Tool: ${name}
@@ -70,7 +68,7 @@ type ${name.charAt(0).toUpperCase() + name.slice(1)}Input = z.infer<typeof ${nam
 /**
  * Factory function to create the ${name} tool
  */
-const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: ExecutionContext): AISdkTool => {
+const create${name.charAt(0).toUpperCase() + name.slice(1)}Tool = (context: ToolContext): AISdkTool => {
     const aiTool = tool({
         description: '${description.replace(/'/g, "\\'")}',
         

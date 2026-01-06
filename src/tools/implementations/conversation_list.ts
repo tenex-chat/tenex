@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -61,7 +61,7 @@ function summarizeConversation(conversation: ConversationStore): ConversationSum
 
 async function executeConversationList(
     input: ConversationListInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ConversationListOutput> {
     const limit = input.limit ?? 50;
     const { fromTime, toTime } = input;
@@ -125,7 +125,7 @@ async function executeConversationList(
     };
 }
 
-export function createConversationListTool(context: ExecutionContext): AISdkTool {
+export function createConversationListTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "List conversations for this project with summary information including ID, title, summary, phase, status, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use this to discover available conversations before retrieving specific ones with conversation_get.",
