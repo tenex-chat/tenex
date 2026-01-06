@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ExecutionEnvironment } from "@/tools/types";
 import { logger } from "@/utils/logger";
 
 // Simple debounce implementation to avoid lodash type issues
@@ -21,7 +21,7 @@ function debounce<TArgs extends unknown[]>(
 /**
  * Type for dynamic tool factory functions
  */
-export type DynamicToolFactory = (context: ToolContext) => AISdkTool<unknown, unknown>;
+export type DynamicToolFactory = (context: ExecutionEnvironment) => AISdkTool<unknown, unknown>;
 
 /**
  * Service for managing dynamically created tools
@@ -183,12 +183,12 @@ export class DynamicToolService {
 
             // Test that the factory function works
             // We'll need a minimal context to validate it returns a valid tool
-            const testContext: ToolContext = {
+            const testContext: ExecutionEnvironment = {
                 agent: {
                     name: "test",
                     pubkey: "test",
                     slug: "test",
-                    signer: {} as ToolContext["agent"]["signer"],
+                    signer: {} as ExecutionEnvironment["agent"]["signer"],
                     sign: async () => {},
                     llmConfig: "default",
                     tools: [],
@@ -198,7 +198,7 @@ export class DynamicToolService {
                 workingDirectory: process.cwd(),
                 currentBranch: "main",
                 conversationId: "test",
-                triggeringEvent: {} as ToolContext["triggeringEvent"],
+                triggeringEvent: {} as ExecutionEnvironment["triggeringEvent"],
                 getConversation: () => undefined,
             };
 
@@ -272,7 +272,7 @@ export class DynamicToolService {
      * Get dynamic tools as an object for a specific context
      */
     public getDynamicToolsObject(
-        context: ToolContext
+        context: ExecutionEnvironment
     ): Record<string, AISdkTool<unknown, unknown>> {
         const tools: Record<string, AISdkTool<unknown, unknown>> = {};
 

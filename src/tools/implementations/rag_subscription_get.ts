@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -38,7 +38,7 @@ function calculateUptime(createdAt: number, status: string): string {
  */
 async function executeGetSubscription(
     input: z.infer<typeof ragSubscriptionGetSchema>,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { subscriptionId } = input;
 
@@ -106,7 +106,7 @@ async function executeGetSubscription(
  *
  * Use this to monitor the health and progress of a specific subscription.
  */
-export function createRAGSubscriptionGetTool(context: ToolContext): AISdkTool {
+export function createRAGSubscriptionGetTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Get detailed status and metrics for a specific RAG subscription, including processing statistics and the last ingested document snippet.",

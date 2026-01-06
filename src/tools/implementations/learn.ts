@@ -1,4 +1,4 @@
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
@@ -35,15 +35,11 @@ type LessonLearnOutput = {
 // Core implementation - extracted from existing execute function
 async function executeLessonLearn(
     input: LessonLearnInput,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<LessonLearnOutput> {
     const { title, lesson, detailed, category, hashtags } = input;
 
-    if (!context.agentPublisher) {
-        throw new Error("AgentPublisher not available in execution context");
-    }
-
-    logger.info("🎓 Agent recording new lesson", {
+    logger.info("Agent recording new lesson", {
         agent: context.agent.name,
         agentPubkey: context.agent.pubkey,
         title,
@@ -63,14 +59,10 @@ async function executeLessonLearn(
     // Get conversation for the event context
     const conversation = context.getConversation();
 
-    if (context.ralNumber === undefined) {
-        throw new Error("ralNumber is required for learn tool but was undefined");
-    }
-
     // Create event context
     const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
+        rootEvent: { id: conversation.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: context.agent.llmConfig,
         ralNumber: context.ralNumber,
@@ -110,7 +102,7 @@ async function executeLessonLearn(
             },
         ]);
 
-        logger.info("✅ Lesson added to RAG collection", {
+        logger.info("Lesson added to RAG collection", {
             title,
             eventId: lessonEvent.encode(),
             agentName: context.agent.name,
@@ -120,7 +112,7 @@ async function executeLessonLearn(
         logger.warn("Failed to add lesson to RAG collection", { error, title });
     }
 
-    const message = `✅ Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
+    const message = `Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 
     return {
         message,
@@ -131,7 +123,7 @@ async function executeLessonLearn(
 }
 
 // AI SDK tool factory
-export function createLessonLearnTool(context: ToolContext): AISdkTool {
+export function createLessonLearnTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.",
@@ -140,4 +132,4 @@ export function createLessonLearnTool(context: ToolContext): AISdkTool {
             return await executeLessonLearn(input, context);
         },
     }) as AISdkTool;
-} 
+}

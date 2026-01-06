@@ -5,7 +5,7 @@
  * Supports various ID formats: nevent, note, naddr, hex, with or without "nostr:" prefix.
  */
 
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
@@ -101,7 +101,7 @@ async function executeNostrFetch(input: NostrFetchInput): Promise<string> {
 /**
  * Create the nostr_fetch AI SDK tool
  */
-export function createNostrFetchTool(_context: ToolContext): AISdkTool {
+export function createNostrFetchTool(_context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Fetches any nostr event by ID. Supports nevent, note, naddr, hex format, " +

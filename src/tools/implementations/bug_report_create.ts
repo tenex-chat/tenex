@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { ALPHA_BUG_HASHTAG, TENEX_BACKEND_PROJECT_ATAG } from "@/constants";
 import { getNDK } from "@/nostr";
 import type { AISdkTool } from "@/tools/types";
@@ -26,7 +26,7 @@ interface BugReportCreateOutput {
 
 async function executeBugReportCreate(
     input: BugReportCreateInput,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<BugReportCreateOutput> {
     const ndk = getNDK();
     if (!ndk) {
@@ -72,7 +72,7 @@ async function executeBugReportCreate(
     };
 }
 
-export function createBugReportCreateTool(context: ToolContext): AISdkTool {
+export function createBugReportCreateTool(context: ToolExecutionContext): AISdkTool {
     const coreTool = tool({
         description:
             "Create a new bug report for TENEX alpha issues. Use this when you encounter bugs, errors, or unexpected behavior that hasn't been reported yet. Always check bug_list first to avoid duplicates.",

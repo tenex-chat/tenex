@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
@@ -27,7 +27,7 @@ interface DelegateFollowupOutput {
 
 async function executeDelegateFollowup(
   input: DelegateFollowupInput,
-  context: ToolContext
+  context: ToolExecutionContext
 ): Promise<DelegateFollowupOutput> {
   const { delegation_conversation_id, message } = input;
 
@@ -59,11 +59,7 @@ async function executeDelegateFollowup(
   }
 
   // Use the original delegation's ralNumber if available, otherwise use current context
-  const effectiveRalNumber = ralNumber ?? context.ralNumber!;
-
-  if (!context.agentPublisher) {
-    throw new Error("AgentPublisher not available");
-  }
+  const effectiveRalNumber = ralNumber ?? context.ralNumber;
 
   logger.info("[delegate_followup] Publishing follow-up", {
     fromAgent: context.agent.slug,
@@ -118,7 +114,7 @@ async function executeDelegateFollowup(
   };
 }
 
-export function createDelegateFollowupTool(context: ToolContext): AISdkTool {
+export function createDelegateFollowupTool(context: ToolExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
       "Send a follow-up question to an agent you previously delegated to. Use after delegate to ask clarifying questions about their response.",

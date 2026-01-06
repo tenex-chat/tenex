@@ -53,6 +53,18 @@ import type { ExecutionContext, RALExecutionContext, StandaloneAgentContext, Str
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
+/**
+ * Full runtime context for executor methods.
+ * Extends ToolRegistryContext with:
+ * - agent: AgentInstance (full agent type, not just ToolAgentInfo)
+ * - Execution-specific flags from ExecutionContext
+ */
+type FullRuntimeContext = Omit<ToolRegistryContext, "agent"> & {
+    agent: AgentInstance;
+    isDelegationCompletion?: boolean;
+    hasPendingDelegations?: boolean;
+};
+
 export interface LLMCompletionRequest {
     messages: ModelMessage[];
     tools?: Record<string, CoreTool>;
@@ -66,6 +78,7 @@ export class AgentExecutor {
 
     /**
      * Prepare an LLM request without executing it.
+     * Creates stub context for tool schema extraction - runtime deps are never called.
      */
     async prepareLLMRequest(
         agent: AgentInstance,
@@ -74,6 +87,8 @@ export class AgentExecutor {
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
+        // Stub context for tool schema extraction only.
+        // Runtime dependencies are typed but never actually invoked.
         const context: ToolRegistryContext = {
             agent,
             triggeringEvent: originalEvent,
@@ -81,7 +96,11 @@ export class AgentExecutor {
             projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             currentBranch: "main",
-            getConversation: () => undefined,
+            // Stubs for required runtime fields (never called during schema extraction)
+            agentPublisher: {} as AgentPublisher,
+            ralNumber: 0,
+            conversationStore: {} as ConversationStore,
+            getConversation: () => ({} as ConversationStore),
         };
 
         let messages: ModelMessage[] = [];
@@ -301,12 +320,13 @@ export class AgentExecutor {
     }
 
     /**
-     * Prepare execution context with all necessary components
+     * Prepare execution context with all necessary components.
+     * Returns a FullRuntimeContext with all required runtime dependencies.
      */
     private prepareExecution(
         context: ExecutionContext & { ralNumber: number }
     ): {
-        fullContext: ExecutionContext & { ralNumber: number };
+        fullContext: FullRuntimeContext;
         toolTracker: ToolExecutionTracker;
         agentPublisher: AgentPublisher;
         cleanup: () => Promise<void>;
@@ -325,23 +345,33 @@ export class AgentExecutor {
                   .length > 0
             : false;
 
-        const fullContext = {
-            ...context,
+        // Build fullContext with all required runtime dependencies
+        // Override getConversation to return non-nullable (we've verified the store exists)
+        const fullContext: FullRuntimeContext = {
+            agent: context.agent,
+            conversationId: context.conversationId,
+            projectBasePath: context.projectBasePath,
+            workingDirectory: context.workingDirectory,
+            currentBranch: context.currentBranch,
+            triggeringEvent: context.triggeringEvent,
             agentPublisher,
+            ralNumber: context.ralNumber,
             conversationStore,
+            getConversation: () => conversationStore,
+            alphaMode: context.alphaMode,
             hasActivePairings,
             mcpManager: projectContext.mcpManager,
+            activeToolsObject: context.activeToolsObject,
+            // Execution-specific flags
+            isDelegationCompletion: context.isDelegationCompletion,
+            hasPendingDelegations: context.hasPendingDelegations,
         };
 
         const conversation = fullContext.getConversation();
-        if (!conversation) {
-            throw new Error(`Conversation ${context.conversationId} not found`);
-        }
-
         startExecutionTime(conversation);
 
         const cleanup = async (): Promise<void> => {
-            if (conversation) stopExecutionTime(conversation);
+            stopExecutionTime(conversation);
             toolTracker.clear();
         };
 
@@ -354,7 +384,7 @@ export class AgentExecutor {
      */
     private wrapToolsWithSupervision(
         toolsObject: Record<string, CoreTool<unknown, unknown>>,
-        context: ExecutionContext & { ralNumber: number }
+        context: FullRuntimeContext
     ): Record<string, CoreTool<unknown, unknown>> {
         const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
         const ralRegistry = RALRegistry.getInstance();
@@ -376,15 +406,7 @@ export class AgentExecutor {
                     try {
                         // Build PreToolContext for this tool
                         const conversation = context.getConversation();
-                        if (!conversation) {
-                            throw new Error(`Conversation ${context.conversationId} not found`);
-                        }
-
-                        // Get conversation store for todos and message building
                         const conversationStore = context.conversationStore;
-                        if (!conversationStore) {
-                            throw new Error("ConversationStore not available in pre-tool supervision");
-                        }
 
                         // Get todos for the agent to populate hasTodoList
                         const todos = conversationStore.getTodos(context.agent.pubkey);
@@ -504,7 +526,7 @@ export class AgentExecutor {
      * Execute streaming and publish result
      */
     private async executeOnce(
-        context: ExecutionContext & { ralNumber: number },
+        context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentPublisher,
         ralNumber: number
@@ -528,10 +550,6 @@ export class AgentExecutor {
 
         // Execution was aborted by stop signal - publish stopped message, skip supervision
         if (result.aborted) {
-            const agentPublisher = context.agentPublisher;
-            if (!agentPublisher) {
-                throw new Error("AgentPublisher not found in execution context");
-            }
             const eventContext = createEventContext(context);
             const responseEvent = await agentPublisher.complete(
                 { content: "Manually stopped by user" },
@@ -763,7 +781,7 @@ export class AgentExecutor {
      * Uses discriminated union: 'complete' for success, 'error-handled' when error already published.
      */
     private async executeStreaming(
-        context: ExecutionContext & { ralNumber: number },
+        context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
         ralNumber: number
     ): Promise<StreamExecutionResult> {
@@ -782,11 +800,6 @@ export class AgentExecutor {
 
         const ralRegistry = RALRegistry.getInstance();
         const conversationStore = context.conversationStore;
-        if (!conversationStore) {
-            throw new Error(
-                "ConversationStore not available - execution requires ConversationStore"
-            );
-        }
 
         // Register RAL in ConversationStore
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
@@ -884,9 +897,6 @@ export class AgentExecutor {
         });
 
         const agentPublisher = context.agentPublisher;
-        if (!agentPublisher) {
-            throw new Error("AgentPublisher not found in execution context");
-        }
         const eventContext = createEventContext(context, llmService.model);
 
         let contentBuffer = "";

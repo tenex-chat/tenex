@@ -180,6 +180,8 @@ export function createMockToolContext(
         currentBranch: "main",
         triggeringEvent: mockEvent,
         agentPublisher: mockPublisher as AgentPublisher,
+        ralNumber: 1,
+        conversationStore: mockConversation,
         getConversation: () => mockConversation,
         conversationCoordinator: mockConversationCoordinator as ConversationCoordinator,
         ...overrides,
@@ -195,3 +197,9 @@ export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
         ...overrides,
     };
 }
+
+/**
+ * Alias for createMockToolContext - provides ToolRegistryContext
+ * which satisfies ExecutionEnvironment requirements
+ */
+export const createMockExecutionEnvironment = createMockToolContext;

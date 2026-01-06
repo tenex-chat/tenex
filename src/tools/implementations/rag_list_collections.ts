@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -18,7 +18,7 @@ const ragListCollectionsSchema = z.object({
  */
 async function executeListCollections(
     input: z.infer<typeof ragListCollectionsSchema>,
-    _context: ToolContext
+    _context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { include_stats = false } = input;
 
@@ -43,7 +43,7 @@ async function executeListCollections(
 /**
  * List all available RAG collections
  */
-export function createRAGListCollectionsTool(context: ToolContext): AISdkTool {
+export function createRAGListCollectionsTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description: "List all available RAG collections in the system",
         inputSchema: ragListCollectionsSchema,

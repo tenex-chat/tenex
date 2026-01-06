@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -78,7 +78,7 @@ async function executeAgentsList(input: AgentsListInput): Promise<AgentsListOutp
  * Create an AI SDK tool for listing agents
  * This is the primary implementation
  */
-export function createAgentsListTool(_context: ToolContext): AISdkTool {
+export function createAgentsListTool(_context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "List all available agents in the project, including their system prompts and configurations",
