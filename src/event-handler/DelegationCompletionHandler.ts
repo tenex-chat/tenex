@@ -4,6 +4,8 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import type { DelegationMessage } from "@/services/ral/types";
 
 const tracer = trace.getTracer("tenex.delegation");
 
@@ -63,12 +65,54 @@ export async function handleDelegationCompletion(
                 "etag.index": i,
             });
 
+            // Attempt to build a real transcript from the conversation history
+            // This captures user interventions and multi-turn exchanges
+            let fullTranscript: DelegationMessage[] | undefined;
+            try {
+                const store = ConversationStore.get(eTag);
+                if (store) {
+                    const allMessages = store.getAllMessages();
+                    // Filter for meaningful communication (not internal noise):
+                    // - Must be text messages
+                    // - Must have p-tags (targeted to specific recipients)
+                    fullTranscript = allMessages
+                        .filter(
+                            (msg) =>
+                                msg.messageType === "text" &&
+                                msg.targetedPubkeys &&
+                                msg.targetedPubkeys.length > 0
+                        )
+                        .map((msg) => ({
+                            senderPubkey: msg.pubkey,
+                            recipientPubkey: msg.targetedPubkeys![0], // Primary recipient
+                            content: msg.content,
+                            timestamp: msg.timestamp ?? Date.now(),
+                        }));
+
+                    span.addEvent("loaded_delegation_transcript", {
+                        "delegation.event_id": eTag,
+                        "transcript.message_count": fullTranscript.length,
+                    });
+                }
+            } catch (err) {
+                // If we fail to load the conversation history, fall back to default behavior
+                logger.warn("[handleDelegationCompletion] Failed to load conversation history for transcript", {
+                    delegationEventId: eTag.substring(0, 8),
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                span.addEvent("transcript_load_failed", {
+                    "delegation.event_id": eTag,
+                    error: err instanceof Error ? err.message : String(err),
+                });
+            }
+
             // Record the completion (looks up RAL internally via delegation conversation ID)
             const result = ralRegistry.recordCompletion({
                 delegationConversationId: eTag,
                 recipientPubkey: event.pubkey,
                 response: event.content,
                 completedAt: Date.now(),
+                fullTranscript: fullTranscript && fullTranscript.length > 0 ? fullTranscript : undefined,
             });
 
             if (result) {
