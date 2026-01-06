@@ -1,5 +1,7 @@
 # E2E Testing Architecture - The Original Design
 
+> Status: Design document. The mock LLM service exists under `src/test-utils/mock-llm`, but the end-to-end harness and trace assertions described here are not implemented in this repo.
+
 ## Core Philosophy
 
 **The e2e testing infrastructure was designed to test TENEX's multi-agent conversation workflows end-to-end with deterministic, predictable LLM responses.**

@@ -68,9 +68,6 @@ services/
 // ✅ Good
 class NotificationService { }
 class EmailService { }
-
-// ⚠️ Acceptable (legacy)
-class ReportManager { }  // Rename when convenient
 ```
 
 **Files:** Match the class name
@@ -81,8 +78,8 @@ export class NotificationService { }
 
 **Utilities:** Use descriptive names
 ```typescript
-// agent-resolution.ts
-export function resolveAgent() { }
+// nostr-entity-parser.ts
+export function parseNostrEntity() { }
 ```
 
 ---
@@ -103,10 +100,10 @@ import { config } from "../../../services/ConfigService";
 ```typescript
 // ✅ Good
 import { RAGService } from "@/services/rag";
-import { DelegationService } from "@/services/delegation";
+import { RALRegistry } from "@/services/ral";
 
 // ❌ Bad (avoid barrel imports)
-import { RAGService, DelegationService } from "@/services";
+import { RAGService, RALRegistry } from "@/services";
 ```
 
 ---
@@ -117,8 +114,8 @@ import { RAGService, DelegationService } from "@/services";
 ```typescript
 export class MyService {
     constructor(
-        private readonly config: ConfigService,
-        private readonly logger: Logger
+        private readonly config: typeof config,
+        private readonly logger: typeof logger
     ) {}
 }
 
@@ -186,7 +183,7 @@ Follow conventional commits:
 ```
 feat: add notification service
 fix: resolve circular dependency in lib/fs
-refactor: rename ReportManager to ReportService
+refactor: simplify worktree metadata handling
 docs: update architecture guide
 test: add tests for RAG service
 ```
@@ -254,13 +251,13 @@ mkdir -p src/services/my-feature
 **2. Create service file:**
 ```typescript
 // src/services/my-feature/MyFeatureService.ts
-import { config } from "@/infrastructure/config";
-import { logger } from "@/infrastructure/logger";
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 
 export class MyFeatureService {
     constructor(
-        private readonly config: ConfigService,
-        private readonly logger: Logger
+        private readonly config: typeof config,
+        private readonly logger: typeof logger
     ) {}
 
     doSomething(): void {

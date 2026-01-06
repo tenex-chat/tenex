@@ -24,13 +24,7 @@ Unlike traditional AI assistants where you interact with a single entity, TENEX 
 - **Custom Agents**: Extensible system allowing you to define domain-specific experts
 
 ### 🔄 **Phase-Based Workflow**
-Every interaction follows a structured lifecycle ensuring quality and completeness:
-1. **Chat** → Initial conversation and understanding
-2. **Plan** → Structured approach definition
-3. **Execute** → Implementation and tool usage
-4. **Verification** → Quality assurance and testing
-5. **Chores** → Documentation and maintenance
-6. **Reflection** → Learning capture and improvement
+Agents can define phases (for example: planning, execution, review) to structure their own todo lists and to pass phase instructions when delegating. Phases are optional and vary per agent.
 
 ### 🧠 **Continuous Learning System**
 - Agents capture and apply lessons from every interaction
@@ -60,7 +54,7 @@ Every interaction follows a structured lifecycle ensuring quality and completene
 
 ### Prerequisites
 
-- **Node.js** 18+ or **Bun** runtime
+- **Node.js** 20+ or **Bun** runtime (recommended for development)
 - **Git** for version control integration
 - An API key for at least one LLM provider (OpenAI, Anthropic, etc.)
 
@@ -77,13 +71,14 @@ bun install
 
 ### Configuration
 
-Before you can start using TENEX, you need to set up your LLM provider credentials. Run the following command for an interactive setup:
+Before you can start using TENEX, you need to set up your LLM provider credentials.
+From the repo, run:
 
 ```bash
-bunx tenex setup
+bun run start -- setup
 ```
 
-This will guide you through adding API keys for providers like OpenAI, Anthropic, etc.
+If you install the CLI binary, the equivalent command is `tenex setup`.
 
 ### Quick Start
 
