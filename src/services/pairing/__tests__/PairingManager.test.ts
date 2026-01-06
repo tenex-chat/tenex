@@ -16,15 +16,42 @@ mock.module("@/nostr/ndkClient", () => ({
   getNDK: () => mockNDK,
 }));
 
-// Mock RALRegistry
+// Mock RALRegistry - comprehensive mock
 const mockQueueSystemMessage = mock(() => {});
 const mockQueueUserMessage = mock(() => {});
 mock.module("@/services/ral", () => ({
-  RALRegistry: {
-    getInstance: () => ({
-      queueSystemMessage: mockQueueSystemMessage,
-      queueUserMessage: mockQueueUserMessage,
-    }),
+  RALRegistry: class MockRALRegistry {
+    static instance: MockRALRegistry | undefined;
+    static getInstance() {
+      if (!MockRALRegistry.instance) {
+        MockRALRegistry.instance = new MockRALRegistry();
+      }
+      return MockRALRegistry.instance;
+    }
+    create(_agentPubkey: string, _conversationId: string) { return 1; }
+    clear(_agentPubkey: string, _conversationId: string) {}
+    clearAll() {}
+    findResumableRAL() { return null; }
+    getState() { return null; }
+    getRAL() { return undefined; }
+    queueUserMessage = mockQueueUserMessage;
+    queueSystemMessage = mockQueueSystemMessage;
+    setPendingDelegations() {}
+    setCompletedDelegations() {}
+    setStreaming() {}
+    setCurrentTool() {}
+    recordCompletion() {}
+    findDelegation() { return undefined; }
+    getConversationPendingDelegations() { return []; }
+    getConversationCompletedDelegations() { return []; }
+    shouldWakeUpExecution() { return true; }
+    registerAbortController() {}
+    getAndConsumeInjections() { return []; }
+    getRalKeyForDelegation() { return undefined; }
+    abortCurrentTool() {}
+    getActiveRALs() { return []; }
+    findStateWaitingForDelegation() { return undefined; }
+    clearRAL() {}
   },
 }));
 

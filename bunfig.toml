@@ -7,7 +7,7 @@ coverageDirectory = "./coverage"
 coverageReporter = ["text", "lcov"]
 
 # Test file patterns
-# Include all test files
+# Include all test files in src
 root = "./src"
 
 # Timeout for tests (in milliseconds)

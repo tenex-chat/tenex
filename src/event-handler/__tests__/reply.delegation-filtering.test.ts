@@ -67,10 +67,47 @@ mock.module("../../conversations/services/ConversationResolver", () => ({
 }));
 
 mock.module("../../conversations/ConversationStore", () => ({
-    ConversationStore: {
-        addEvent: mock(() => Promise.resolve()),
-        get: mock(() => null),
-        getCachedEvent: mock(() => null),
+    ConversationStore: class MockConversationStore {
+        static addEvent = mock(() => Promise.resolve());
+        static get = mock(() => null);
+        static getCachedEvent = mock(() => null);
+        static initialize = mock(() => {});
+        static projectId = "test-project";
+        static systemAgentPubkeys: string[] = [];
+
+        projectId?: string;
+        conversationId?: string;
+
+        constructor(_basePath: string) {}
+        load(_projectId: string, _conversationId: string) {
+            this.projectId = _projectId;
+            this.conversationId = _conversationId;
+        }
+        addMessage(_entry: any) {}
+        createRal(_agentPubkey: string) { return 1; }
+        ensureRalActive(_agentPubkey: string, _ral: number) {}
+        completeRal(_agentPubkey: string, _ral: number) {}
+        getAllMessages() { return []; }
+        getMessages(_agentPubkey: string, _ral: number) { return []; }
+        getRalState(_agentPubkey: string) { return undefined; }
+        addInjection(_injection: any) {}
+        consumeInjections(_targetRal: any) { return []; }
+        hasEventId(_eventId: string) { return false; }
+        setEventId(_index: number, _eventId: string) {}
+        getMetadata() { return {}; }
+        setMetadata(_key: string, _value: any) {}
+        updateMetadata(_updates: any) {}
+        save() { return Promise.resolve(); }
+        getActiveRals(_agentPubkey: string) { return []; }
+        isRalActive(_agentPubkey: string, _ral: number) { return false; }
+        buildMessagesForRal(_agentPubkey: string, _ral: number) { return []; }
+        setTodos(_agentPubkey: string, _todos: any[]) {}
+        getTodos(_agentPubkey: string) { return []; }
+        getPendingInjections(_agentPubkey: string, _ral: number) { return []; }
+        static reset() {}
+        static getOrLoad(_conversationId: string) { return null; }
+        get executionTime() { return { isActive: false, totalSeconds: 0, lastUpdated: Date.now() }; }
+        set executionTime(_value: any) {}
     },
 }));
 
@@ -98,14 +135,40 @@ mock.module("../../event-handler/AgentRouter", () => ({
     },
 }));
 
-// Mock RALRegistry
+// Mock RALRegistry - comprehensive mock to avoid polluting other tests
 mock.module("../../services/ral", () => ({
-    RALRegistry: {
-        getInstance: mock(() => ({
-            findResumableRAL: mock(() => null),
-            getState: mock(() => null),
-            queueUserMessage: mock(() => {}),
-        })),
+    RALRegistry: class MockRALRegistry {
+        static instance: MockRALRegistry | undefined;
+        static getInstance() {
+            if (!MockRALRegistry.instance) {
+                MockRALRegistry.instance = new MockRALRegistry();
+            }
+            return MockRALRegistry.instance;
+        }
+        create(_agentPubkey: string, _conversationId: string) { return 1; }
+        clear(_agentPubkey: string, _conversationId: string) {}
+        clearAll() {}
+        findResumableRAL() { return null; }
+        getState() { return null; }
+        getRAL() { return undefined; }
+        queueUserMessage() {}
+        queueSystemMessage() {}
+        setPendingDelegations() {}
+        setCompletedDelegations() {}
+        setStreaming() {}
+        setCurrentTool() {}
+        recordCompletion() {}
+        findDelegation() { return undefined; }
+        getConversationPendingDelegations() { return []; }
+        getConversationCompletedDelegations() { return []; }
+        shouldWakeUpExecution() { return true; }
+        registerAbortController() {}
+        getAndConsumeInjections() { return []; }
+        getRalKeyForDelegation() { return undefined; }
+        abortCurrentTool() {}
+        getActiveRALs() { return []; }
+        findStateWaitingForDelegation() { return undefined; }
+        clearRAL() {}
     },
 }));
 

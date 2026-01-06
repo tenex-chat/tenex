@@ -10,12 +10,10 @@ describe("RALRegistry", () => {
   const conversationId2 = "conv-456";
 
   beforeEach(() => {
+    // Reset singleton to ensure clean state between tests
+    // @ts-expect-error - accessing private static for testing
+    RALRegistry.instance = undefined;
     registry = RALRegistry.getInstance();
-    // Clear any existing state
-    registry.clear(agentPubkey, conversationId);
-    registry.clear(agentPubkey, conversationId2);
-    registry.clear(agentPubkey2, conversationId);
-    registry.clear(agentPubkey2, conversationId2);
   });
 
   describe("singleton pattern", () => {

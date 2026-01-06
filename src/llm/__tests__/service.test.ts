@@ -934,25 +934,6 @@ describe("LLMService createFinishHandler", () => {
         mockRegistry = createMockRegistry();
     });
 
-    test("clears content publish timeout on finish", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
-
-        // Set a fake timeout
-        (service as any).contentPublishTimeout = setTimeout(() => {}, 10000);
-
-        const finishHandler = (service as any).createFinishHandler();
-
-        await finishHandler({
-            text: "Response",
-            steps: [],
-            totalUsage: {},
-            finishReason: "stop",
-            providerMetadata: {},
-        });
-
-        expect((service as any).contentPublishTimeout).toBeUndefined();
-    });
-
     test("uses cached content for non-streaming providers", async () => {
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
 

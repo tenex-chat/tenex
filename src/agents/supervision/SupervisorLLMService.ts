@@ -67,6 +67,8 @@ export class SupervisorLLMService {
             return "(No conversation history)";
         }
 
+        const toolResultMaxLength = 5000;
+
         return history
             .map((msg, index) => {
                 const role = msg.role.toUpperCase();
@@ -75,12 +77,40 @@ export class SupervisorLLMService {
                 if (typeof msg.content === "string") {
                     content = msg.content;
                 } else if (Array.isArray(msg.content)) {
-                    // Handle multimodal content
+                    // Handle multimodal content with detailed tool interactions
                     content = msg.content
                         .map((part) => {
                             if (typeof part === "string") return part;
                             if ("text" in part) return part.text;
-                            if ("type" in part) return `[${part.type}]`;
+                            if ("type" in part) {
+                                // Handle tool-call parts
+                                if (part.type === "tool-call") {
+                                    const toolCall = part as unknown as {
+                                        type: "tool-call";
+                                        toolName: string;
+                                        args: unknown;
+                                    };
+                                    const argsStr = JSON.stringify(toolCall.args);
+                                    return `[Tool Call] ${toolCall.toolName}(${argsStr})`;
+                                }
+                                // Handle tool-result parts
+                                if (part.type === "tool-result") {
+                                    const toolResult = part as unknown as {
+                                        type: "tool-result";
+                                        toolName: string;
+                                        result: unknown;
+                                    };
+                                    let resultStr = typeof toolResult.result === "string"
+                                        ? toolResult.result
+                                        : JSON.stringify(toolResult.result);
+                                    // Truncate individual tool results if they exceed limit
+                                    if (resultStr.length > toolResultMaxLength) {
+                                        resultStr = resultStr.slice(0, toolResultMaxLength) + "... [truncated]";
+                                    }
+                                    return `[Tool Result] ${toolResult.toolName}: ${resultStr}`;
+                                }
+                                return `[${part.type}]`;
+                            }
                             return "[complex content]";
                         })
                         .join("\n");
@@ -89,7 +119,7 @@ export class SupervisorLLMService {
                 }
 
                 // Truncate very long messages for the prompt
-                const maxLength = 2000;
+                const maxLength = 25000;
                 if (content.length > maxLength) {
                     content = content.slice(0, maxLength) + "... [truncated]";
                 }
@@ -124,6 +154,12 @@ export class SupervisorLLMService {
 
         return `You are a supervisor reviewing an AI agent's behavior to determine if it violates any guidelines.
 
+## Heuristic Detection
+Heuristic ID: ${context.triggeringHeuristic}
+Triggered: ${context.detection.triggered}
+Reason: ${context.detection.reason || "(No reason provided)"}
+Evidence: ${context.detection.evidence ? JSON.stringify(context.detection.evidence, null, 2) : "(No evidence provided)"}
+
 ## Agent Information
 - Agent Slug: ${context.agentSlug}
 - Agent Pubkey: ${context.agentPubkey}
@@ -136,12 +172,6 @@ ${toolsList}
 
 ## Conversation History
 ${conversationFormatted}
-
-## Heuristic Detection
-Heuristic ID: ${context.triggeringHeuristic}
-Triggered: ${context.detection.triggered}
-Reason: ${context.detection.reason || "(No reason provided)"}
-Evidence: ${context.detection.evidence ? JSON.stringify(context.detection.evidence, null, 2) : "(No evidence provided)"}
 
 ## Your Task
 ${heuristicPrompt}

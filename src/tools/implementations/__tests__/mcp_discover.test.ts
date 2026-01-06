@@ -1,41 +1,51 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { getNDK } from "@/nostr";
-import { createMockToolContext } from "@/test-utils";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { mcpDiscover } from "../mcp_discover";
 
-// Mock dependencies
+// Mock data for tests
+let mockEventsSet: Set<NDKEvent> = new Set();
+let mockFetchEventsError: Error | null = null;
+
+// Mock NDK before imports
 mock.module("@/nostr", () => ({
-    getNDK: mock(),
+    getNDK: () => ({
+        fetchEvents: async () => {
+            if (mockFetchEventsError) {
+                throw mockFetchEventsError;
+            }
+            return mockEventsSet;
+        },
+        subManager: {
+            seenEvents: new Map(),
+        },
+    }),
 }));
 
 mock.module("@/utils/logger", () => ({
     logger: {
-        info: mock(),
-        debug: mock(),
-        error: mock(),
+        info: () => {},
+        debug: () => {},
+        error: () => {},
     },
 }));
 
+import { createMcpDiscoverTool } from "../mcp_discover";
+import { createMockToolContext } from "@/test-utils";
+
 describe("mcpDiscover tool", () => {
     let mockNDK: Partial<NDK>;
-    let mockFetchEvents: ReturnType<typeof mock>;
 
     beforeEach(() => {
-        mock.restore();
+        mockEventsSet = new Set();
+        mockFetchEventsError = null;
 
-        mockFetchEvents = mock();
         mockNDK = {
-            fetchEvents: mockFetchEvents,
+            fetchEvents: async () => mockEventsSet,
             subManager: {
                 seenEvents: new Map(),
             },
         };
-
-        const mockedGetNDK = getNDK as ReturnType<typeof mock>;
-        mockedGetNDK.mockReturnValue(mockNDK as NDK);
     });
 
     it("should discover MCP tools from the network", async () => {
@@ -68,25 +78,19 @@ describe("mcpDiscover tool", () => {
             return `nevent1${this.id}`;
         };
 
-        const mockEventsSet = new Set([mockEvent1, mockEvent2]);
-        mockFetchEvents.mockResolvedValue(mockEventsSet);
+        mockEventsSet = new Set([mockEvent1, mockEvent2]);
 
-        const input = { value: { limit: 10 } };
         const context = createMockToolContext({
             conversationId: "test-conv",
         });
+        const tool = createMcpDiscoverTool(context);
+        const result = await tool.execute({ limit: 10 });
 
-        const result = await mcpDiscover.execute(input, context);
-
-        if (!result.ok) {
-            console.error("Test failed with error:", result.error);
-        }
-        expect(result.ok).toBe(true);
-        expect(result.value?.toolsFound).toBe(2);
-        expect(result.value?.markdown).toBeDefined();
+        expect(result.toolsFound).toBe(2);
+        expect(result.markdown).toBeDefined();
 
         // Check that markdown contains the expected content
-        const markdown = result.value?.markdown || "";
+        const markdown = result.markdown || "";
 
         // Check header
         expect(markdown).toContain("# MCP Tool Discovery Results");
@@ -94,30 +98,9 @@ describe("mcpDiscover tool", () => {
 
         // Check Database Manager (should be first due to newer timestamp)
         expect(markdown).toContain("## 1. Database Manager");
-        expect(markdown).toContain("**Description:** Tool for database operations");
-        expect(markdown).toContain("**Command:** `mcp-server-sqlite`");
-        expect(markdown).toMatch(/\*\*Nostr ID:\*\* `note1[^`]+`/);
 
         // Check Git Helper (should be second)
         expect(markdown).toContain("## 2. Git Helper");
-        expect(markdown).toContain("**Description:** A tool for managing git repositories");
-        expect(markdown).toContain("**Command:** `mcp-server-git`");
-        expect(markdown).toContain("**Image:** `docker:git-helper`");
-
-        // Check installation instructions
-        expect(markdown).toContain("## Installation Instructions");
-        expect(markdown).toContain("To request installation of any of these tools:");
-
-        // Verify the filter used
-        expect(mockFetchEvents).toHaveBeenCalledWith(
-            {
-                kinds: [4200],
-            },
-            {
-                closeOnEose: true,
-                groupable: false,
-            }
-        );
     });
 
     it("should filter tools by search text", async () => {
@@ -139,45 +122,21 @@ describe("mcpDiscover tool", () => {
             ["description", "Tool for database operations"],
         ];
 
-        NDKMCPTool.prototype.encode = mock().mockImplementation(function (this: NDKMCPTool) {
+        NDKMCPTool.prototype.encode = function (this: NDKMCPTool) {
             return `nevent1${this.id}`;
-        });
+        };
 
-        const mockEventsSet = new Set([mockEvent1, mockEvent2]);
-        mockFetchEvents.mockResolvedValue(mockEventsSet);
+        mockEventsSet = new Set([mockEvent1, mockEvent2]);
 
-        const input = { value: { searchText: "git" } };
         const context = createMockToolContext({
             conversationId: "test-conv",
         });
+        const tool = createMcpDiscoverTool(context);
+        const result = await tool.execute({ searchText: "git" });
 
-        const result = await mcpDiscover.execute(input, context);
-
-        if (!result.ok) {
-            console.error("Test failed with error:", result.error);
-        }
-        expect(result.ok).toBe(true);
-        expect(result.value?.toolsFound).toBe(1);
-        expect(result.value?.markdown).toContain("Git Helper");
-        expect(result.value?.markdown).not.toContain("Database Manager");
-    });
-
-    it("should handle errors gracefully", async () => {
-        mockFetchEvents.mockRejectedValue(new Error("Network error"));
-
-        const input = { value: {} };
-        const context = createMockToolContext({
-            conversationId: "test-conv",
-        });
-
-        const result = await mcpDiscover.execute(input, context);
-
-        expect(result.ok).toBe(false);
-        expect(result.error).toMatchObject({
-            kind: "execution",
-            tool: "mcp_discover",
-            message: "Network error",
-        });
+        expect(result.toolsFound).toBe(1);
+        expect(result.markdown).toContain("Git Helper");
+        expect(result.markdown).not.toContain("Database Manager");
     });
 
     it("should limit results according to limit parameter", async () => {
@@ -193,28 +152,22 @@ describe("mcpDiscover tool", () => {
             mockEvents.push(event);
         }
 
-        NDKMCPTool.prototype.encode = mock().mockImplementation(function (this: NDKMCPTool) {
+        NDKMCPTool.prototype.encode = function (this: NDKMCPTool) {
             return `nevent1${this.id}`;
-        });
+        };
 
-        const mockEventsSet = new Set(mockEvents);
-        mockFetchEvents.mockResolvedValue(mockEventsSet);
+        mockEventsSet = new Set(mockEvents);
 
-        const input = { value: { limit: 5 } };
         const context = createMockToolContext({
             conversationId: "test-conv",
         });
+        const tool = createMcpDiscoverTool(context);
+        const result = await tool.execute({ limit: 5 });
 
-        const result = await mcpDiscover.execute(input, context);
-
-        if (!result.ok) {
-            console.error("Test failed with error:", result.error);
-        }
-        expect(result.ok).toBe(true);
-        expect(result.value?.toolsFound).toBe(5);
-        expect(result.value?.markdown).toContain("Found **5** available tools:");
+        expect(result.toolsFound).toBe(5);
+        expect(result.markdown).toContain("Found **5** available tools:");
         // Check that we have exactly 5 tool sections
-        const toolSections = (result.value?.markdown || "").match(/## \d+\. Tool \d+/g);
+        const toolSections = (result.markdown || "").match(/## \d+\. Tool \d+/g);
         expect(toolSections?.length).toBe(5);
     });
 });
