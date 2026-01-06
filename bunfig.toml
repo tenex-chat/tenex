@@ -13,6 +13,9 @@ root = "./src"
 # Timeout for tests (in milliseconds)
 timeout = 30000
 
+# Preload test setup to reset singletons between test files
+preload = ["./src/test-utils/test-setup.ts"]
+
 # Run tests in watch mode by default in development
 # watchMode = true
 

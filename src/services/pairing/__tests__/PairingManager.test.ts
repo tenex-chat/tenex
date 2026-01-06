@@ -16,44 +16,15 @@ mock.module("@/nostr/ndkClient", () => ({
   getNDK: () => mockNDK,
 }));
 
-// Mock RALRegistry - comprehensive mock
-const mockQueueSystemMessage = mock(() => {});
-const mockQueueUserMessage = mock(() => {});
-mock.module("@/services/ral", () => ({
-  RALRegistry: class MockRALRegistry {
-    static instance: MockRALRegistry | undefined;
-    static getInstance() {
-      if (!MockRALRegistry.instance) {
-        MockRALRegistry.instance = new MockRALRegistry();
-      }
-      return MockRALRegistry.instance;
-    }
-    create(_agentPubkey: string, _conversationId: string) { return 1; }
-    clear(_agentPubkey: string, _conversationId: string) {}
-    clearAll() {}
-    findResumableRAL() { return null; }
-    getState() { return null; }
-    getRAL() { return undefined; }
-    queueUserMessage = mockQueueUserMessage;
-    queueSystemMessage = mockQueueSystemMessage;
-    setPendingDelegations() {}
-    setCompletedDelegations() {}
-    setStreaming() {}
-    setCurrentTool() {}
-    recordCompletion() {}
-    findDelegation() { return undefined; }
-    getConversationPendingDelegations() { return []; }
-    getConversationCompletedDelegations() { return []; }
-    shouldWakeUpExecution() { return true; }
-    registerAbortController() {}
-    getAndConsumeInjections() { return []; }
-    getRalKeyForDelegation() { return undefined; }
-    abortCurrentTool() {}
-    getActiveRALs() { return []; }
-    findStateWaitingForDelegation() { return undefined; }
-    clearRAL() {}
-  },
-}));
+// Import RALRegistry to spy on it instead of mocking the module
+import { RALRegistry } from "@/services/ral";
+import { spyOn, beforeEach as bunBeforeEach } from "bun:test";
+
+// Use spyOn instead of mock.module to avoid polluting other tests
+let mockQueueSystemMessage: ReturnType<typeof mock>;
+let mockQueueUserMessage: ReturnType<typeof mock>;
+
+// Reset mocks in beforeEach will be set up in the describe block
 
 describe("PairingManager", () => {
   let pairingManager: PairingManager;
@@ -67,8 +38,15 @@ describe("PairingManager", () => {
     mockSubscription.on.mockClear();
     mockSubscription.stop.mockClear();
     mockNDK.subscribe.mockClear();
-    mockQueueSystemMessage.mockClear();
-    mockQueueUserMessage.mockClear();
+
+    // Reset RALRegistry singleton and set up spies
+    // @ts-expect-error - accessing private static for testing
+    RALRegistry.instance = undefined;
+    const registry = RALRegistry.getInstance();
+    mockQueueSystemMessage = mock(() => {});
+    mockQueueUserMessage = mock(() => {});
+    spyOn(registry, "queueSystemMessage").mockImplementation(mockQueueSystemMessage);
+    spyOn(registry, "queueUserMessage").mockImplementation(mockQueueUserMessage);
 
     // Create fresh PairingManager with mock callback
     resumeCallback = mock(() => Promise.resolve());
