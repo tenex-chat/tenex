@@ -38,7 +38,6 @@ interface ConversationListOutput {
     success: boolean;
     conversations: ConversationSummary[];
     total: number;
-    projectId?: string;
 }
 
 function summarizeConversation(conversation: ConversationStore): ConversationSummary {
@@ -123,7 +122,6 @@ async function executeConversationList(
         success: true,
         conversations: summaries,
         total: filtered.length,
-        projectId: projectId ?? undefined,
     };
 }
 

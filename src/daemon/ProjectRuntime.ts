@@ -364,6 +364,7 @@ export class ProjectRuntime {
                 conversationId,
                 projectBasePath: this.projectBasePath,
                 triggeringEvent: rootEvent,
+                mcpManager: this.mcpManager,
             });
 
             const agentExecutor = new AgentExecutor();

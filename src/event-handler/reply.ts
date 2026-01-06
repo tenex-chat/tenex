@@ -78,6 +78,7 @@ async function handleDelegationResponse(
         triggeringEvent: triggeringEventForContext,
         isDelegationCompletion: true,
         hasPendingDelegations,
+        mcpManager: projectCtx.mcpManager,
     });
 
     // Reset metadata debounce timer before execution
@@ -340,6 +341,7 @@ async function handleReplyLogic(
             conversationId: conversation.id,
             projectBasePath: projectCtx.agentRegistry.getBasePath(),
             triggeringEvent: triggeringEventForContext,
+            mcpManager: projectCtx.mcpManager,
         });
 
         // Execute agent (error handling is now in AgentExecutor)
