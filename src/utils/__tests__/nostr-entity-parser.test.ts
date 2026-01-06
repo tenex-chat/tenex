@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import NDK, { NDKEvent } from "@nostr-dev-kit/ndk";
-import { extractNostrEntities, normalizeNostrIdentifier, parseNostrEvent, parseNostrUser, resolveNostrEntitiesToSystemMessages } from "../nostr-entity-parser";
+import { normalizeNostrIdentifier, parseNostrEvent, parseNostrUser } from "../nostr-entity-parser";
 
 describe("nostr-entity-parser", () => {
     let ndk: NDK;
@@ -12,26 +12,26 @@ describe("nostr-entity-parser", () => {
     describe("parseNostrUser", () => {
         it("should parse hex pubkey", () => {
             const pubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser(pubkey, ndk)).toBe(pubkey);
+            expect(parseNostrUser(pubkey)).toBe(pubkey);
         });
 
         it("should parse hex pubkey with nostr: prefix", () => {
             const pubkey = "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser(`nostr:${pubkey}`, ndk)).toBe(pubkey);
+            expect(parseNostrUser(`nostr:${pubkey}`)).toBe(pubkey);
         });
 
         it("should parse npub", () => {
             const npub = "npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m";
             const expectedPubkey =
                 "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser(npub, ndk)).toBe(expectedPubkey);
+            expect(parseNostrUser(npub)).toBe(expectedPubkey);
         });
 
         it("should parse npub with nostr: prefix", () => {
             const npub = "npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m";
             const expectedPubkey =
                 "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2";
-            expect(parseNostrUser(`nostr:${npub}`, ndk)).toBe(expectedPubkey);
+            expect(parseNostrUser(`nostr:${npub}`)).toBe(expectedPubkey);
         });
 
         it("should parse nprofile", () => {
@@ -39,18 +39,18 @@ describe("nostr-entity-parser", () => {
                 "nprofile1qqs0awzzutnzfj6cudj03a7txc7qxsrma9ge44yrym6337tkkd23qkg32nsh9";
             const expectedPubkey =
                 "feb842e2e624cb58e364f8f7cb363c03407be9519ad48326f518f976b3551059";
-            expect(parseNostrUser(nprofile, ndk)).toBe(expectedPubkey);
+            expect(parseNostrUser(nprofile)).toBe(expectedPubkey);
         });
 
         it("should return null for invalid input", () => {
-            expect(parseNostrUser("invalid", ndk)).toBe(null);
-            expect(parseNostrUser("", ndk)).toBe(null);
-            expect(parseNostrUser(undefined, ndk)).toBe(null);
+            expect(parseNostrUser("invalid")).toBe(null);
+            expect(parseNostrUser("")).toBe(null);
+            expect(parseNostrUser(undefined)).toBe(null);
         });
 
         it("should handle uppercase hex", () => {
             const pubkey = "82341F882B6EABCD2BA7F1EF90AAD961CF074AF15B9EF44A09F9D2A8FBFBE6A2";
-            expect(parseNostrUser(pubkey, ndk)).toBe(pubkey.toLowerCase());
+            expect(parseNostrUser(pubkey)).toBe(pubkey.toLowerCase());
         });
     });
 
@@ -128,76 +128,6 @@ describe("nostr-entity-parser", () => {
 
             const result = await parseNostrEvent("invalid", mockNdk);
             expect(result).toBe(null);
-        });
-    });
-
-    describe("extractNostrEntities", () => {
-        it("should extract valid nostr entities from content", () => {
-            const content = "Check out nostr:npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m and nostr:note1gmx7hm39cywty8tgjx24utj44z7spqlpdnc5jr2u4j5m6z96ua9qfgv8v9";
-            const entities = extractNostrEntities(content);
-            expect(entities).toHaveLength(2);
-            expect(entities[0]).toContain("npub1");
-            expect(entities[1]).toContain("note1");
-        });
-
-        it("should extract truncated entities (even if invalid)", () => {
-            // Regex will extract truncated entities - validation happens later
-            const content = "Broken entity: nostr:naddr1qvzqqqruh5 in text";
-            const entities = extractNostrEntities(content);
-            expect(entities).toHaveLength(1);
-            expect(entities[0]).toBe("nostr:naddr1qvzqqqruh5");
-        });
-    });
-
-    describe("resolveNostrEntitiesToSystemMessages", () => {
-        it("should skip truncated/invalid entities without crashing", async () => {
-            const content = "Broken entity: nostr:naddr1qvzqqqruh5 should be ignored";
-
-            let fetchEventCalled = false;
-            const mockNdk = {
-                fetchEvent: async (id: string) => {
-                    fetchEventCalled = true;
-                    // Should never be called with truncated entity
-                    if (id.length < 60) {
-                        throw new Error("Should not call fetchEvent with short entity");
-                    }
-                    return null;
-                },
-            } as any;
-
-            const messages = await resolveNostrEntitiesToSystemMessages(content, mockNdk);
-
-            // Should return empty array, not crash
-            expect(messages).toEqual([]);
-            // Should not call fetchEvent with invalid entity
-            expect(fetchEventCalled).toBe(false);
-        });
-
-        it("should process valid entities normally", async () => {
-            const validNpub = "npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m";
-            const content = `Valid entity: nostr:${validNpub}`;
-
-            const mockNdk = {
-                fetchEvent: async (id: string) => {
-                    if (id === validNpub) {
-                        return new NDKEvent(ndk, {
-                            id: "test-id",
-                            pubkey: "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2",
-                            content: "Test content",
-                            created_at: 1234567890,
-                            kind: 1,
-                            tags: [],
-                            sig: "test-sig"
-                        });
-                    }
-                    return null;
-                },
-            } as any;
-
-            const messages = await resolveNostrEntitiesToSystemMessages(content, mockNdk);
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0]).toContain("Test content");
         });
     });
 });

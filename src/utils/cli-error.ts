@@ -27,15 +27,3 @@ export function handleCliError(error: unknown, context?: string, exitCode = 1): 
     process.exit(exitCode);
 }
 
-/**
- * Handle CLI warnings without exiting
- * @param message - The warning message
- * @param context - Optional context for the warning
- */
-export function handleCliWarning(message: string, context?: string): void {
-    if (context) {
-        logger.warn(`${context}: ${message}`);
-    } else {
-        logger.warn(message);
-    }
-}

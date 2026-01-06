@@ -1,9 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-    createPhaseTag,
-    extractPhaseFromTags,
-    filterDefinitionsByPhase,
-    getPhaseCacheKey,
     isValidPhase,
     normalizePhase,
     phasesMatch,
@@ -64,83 +60,6 @@ describe("phaseUtils", () => {
         });
     });
 
-    describe("extractPhaseFromTags", () => {
-        it("should extract phase from tags array", () => {
-            const tags = [
-                ["p", "pubkey123"],
-                ["phase", "development"],
-                ["tool", "delegate"],
-            ];
-            expect(extractPhaseFromTags(tags)).toBe("development");
-        });
-
-        it("should return undefined if no phase tag exists", () => {
-            const tags = [
-                ["p", "pubkey123"],
-                ["tool", "delegate"],
-            ];
-            expect(extractPhaseFromTags(tags)).toBeUndefined();
-        });
-
-        it("should return first phase tag if multiple exist", () => {
-            const tags = [
-                ["phase", "development"],
-                ["phase", "testing"], // Should be ignored
-            ];
-            expect(extractPhaseFromTags(tags)).toBe("development");
-        });
-    });
-
-    describe("createPhaseTag", () => {
-        it("should create phase tag for valid phase", () => {
-            expect(createPhaseTag("development")).toEqual(["phase", "development"]);
-            expect(createPhaseTag("  testing  ")).toEqual(["phase", "testing"]);
-        });
-
-        it("should return undefined for invalid phase", () => {
-            expect(createPhaseTag(null)).toBeUndefined();
-            expect(createPhaseTag(undefined)).toBeUndefined();
-            expect(createPhaseTag("")).toBeUndefined();
-            expect(createPhaseTag("phase<script>")).toBeUndefined();
-        });
-    });
-
-    describe("filterDefinitionsByPhase", () => {
-        const definitions = [
-            { name: "Agent1", phase: "development" },
-            { name: "Agent2", phase: "testing" },
-            { name: "Agent3", phase: "production" },
-            { name: "Agent4" }, // No phase (universal)
-            { name: "Agent5", phase: "development" },
-        ];
-
-        it("should filter definitions by specific phase", () => {
-            const result = filterDefinitionsByPhase(definitions, "development");
-            expect(result).toHaveLength(3); // Agent1, Agent4 (universal), Agent5
-            expect(result.map((d) => d.name)).toContain("Agent1");
-            expect(result.map((d) => d.name)).toContain("Agent4");
-            expect(result.map((d) => d.name)).toContain("Agent5");
-        });
-
-        it("should return only universal definitions when phase is undefined", () => {
-            const result = filterDefinitionsByPhase(definitions, undefined);
-            expect(result).toHaveLength(1); // Only Agent4
-            expect(result[0].name).toBe("Agent4");
-        });
-
-        it("should handle case-insensitive phase matching", () => {
-            const result = filterDefinitionsByPhase(definitions, "DEVELOPMENT");
-            expect(result).toHaveLength(3);
-            expect(result.map((d) => d.name)).toContain("Agent1");
-            expect(result.map((d) => d.name)).toContain("Agent5");
-        });
-
-        it("should return empty array for invalid phase", () => {
-            const result = filterDefinitionsByPhase(definitions, "phase<script>");
-            expect(result).toHaveLength(0);
-        });
-    });
-
     describe("shouldUseDefinitionForPhase", () => {
         it("should use universal definitions (no phase) for any request", () => {
             expect(shouldUseDefinitionForPhase(undefined, "development")).toBe(true);
@@ -161,33 +80,6 @@ describe("phaseUtils", () => {
         it("should not use definitions when phases don't match", () => {
             expect(shouldUseDefinitionForPhase("development", "testing")).toBe(false);
             expect(shouldUseDefinitionForPhase("production", "staging")).toBe(false);
-        });
-    });
-
-    describe("getPhaseCacheKey", () => {
-        it("should include phase in cache key when phase is provided", () => {
-            expect(getPhaseCacheKey("agent:123", "development")).toBe(
-                "agent:123:phase:development"
-            );
-            expect(getPhaseCacheKey("definition:456", "TESTING")).toBe(
-                "definition:456:phase:testing"
-            );
-        });
-
-        it("should return base key when phase is not provided", () => {
-            expect(getPhaseCacheKey("agent:123", undefined)).toBe("agent:123");
-            expect(getPhaseCacheKey("definition:456", null)).toBe("definition:456");
-        });
-
-        it("should return base key for invalid phase", () => {
-            expect(getPhaseCacheKey("agent:123", "")).toBe("agent:123");
-            expect(getPhaseCacheKey("agent:123", "phase<script>")).toBe("agent:123");
-        });
-
-        it("should normalize phase in cache key", () => {
-            expect(getPhaseCacheKey("agent:123", "  DEVELOPMENT  ")).toBe(
-                "agent:123:phase:development"
-            );
         });
     });
 });

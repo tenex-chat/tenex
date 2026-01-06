@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import { handleCliError, handleCliWarning } from "../cli-error";
+import { handleCliError } from "../cli-error";
 import { logger } from "../logger";
 
 describe("CLI Error Handler", () => {
@@ -65,28 +65,6 @@ describe("CLI Error Handler", () => {
 
             mockExit.mockRestore();
             mockLogError.mockRestore();
-        });
-    });
-
-    describe("handleCliWarning", () => {
-        it("should log warning message without exiting", () => {
-            const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
-
-            handleCliWarning("Test warning");
-
-            expect(mockLogWarn).toHaveBeenCalledWith("Test warning");
-
-            mockLogWarn.mockRestore();
-        });
-
-        it("should log warning with context when provided", () => {
-            const mockLogWarn = spyOn(logger, "warn").mockImplementation(() => {});
-
-            handleCliWarning("Test warning", "Command");
-
-            expect(mockLogWarn).toHaveBeenCalledWith("Command: Test warning");
-
-            mockLogWarn.mockRestore();
         });
     });
 });
