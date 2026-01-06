@@ -5,7 +5,7 @@
  * HTML is converted to markdown, other content types returned as-is.
  */
 
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NodeHtmlMarkdown } from "node-html-markdown";
@@ -105,7 +105,7 @@ async function executeWebFetch(input: WebFetchInput): Promise<string> {
 /**
  * Create the web_fetch AI SDK tool
  */
-export function createWebFetchTool(_context: ToolContext): AISdkTool {
+export function createWebFetchTool(_context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Fetches content from a URL. HTML is converted to markdown, " +

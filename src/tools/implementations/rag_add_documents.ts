@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import * as path from "node:path";
 import { URL } from "node:url";
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { type RAGDocument, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import {
@@ -412,7 +412,7 @@ async function processDocuments(
  */
 async function executeAddDocuments(
     input: z.infer<typeof ragAddDocumentsSchema>,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { collection, documents } = input;
 
@@ -454,7 +454,7 @@ async function executeAddDocuments(
  * - URI validation provides early error detection
  * - Content validation ensures meaningful documents
  */
-export function createRAGAddDocumentsTool(context: ToolContext): AISdkTool {
+export function createRAGAddDocumentsTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Add documents to a RAG collection. Documents can be provided as text content, file paths, or URIs (file://, https://, etc.). Each document will be automatically embedded for semantic search. Enforces file size limits (100MB) and HTTP timeouts (30s).",

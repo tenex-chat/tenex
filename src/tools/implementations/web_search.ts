@@ -5,7 +5,7 @@
  * Returns search results with titles, URLs, and descriptions.
  */
 
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { search, SafeSearchType, SearchTimeType } from "duck-duck-scrape";
@@ -102,7 +102,7 @@ async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput>
     };
 }
 
-export function createWebSearchTool(_context: ToolContext): AISdkTool {
+export function createWebSearchTool(_context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Search the web using DuckDuckGo. Returns search results with titles, URLs, and descriptions. " +

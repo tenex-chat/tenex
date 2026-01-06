@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
@@ -26,7 +26,7 @@ const readPathSchema = z.object({
  */
 async function executeReadPath(
     path: string,
-    context: ToolContext,
+    context: ToolExecutionContext,
     offset?: number,
     limit?: number,
 ): Promise<string> {
@@ -84,7 +84,7 @@ async function executeReadPath(
  * Create an AI SDK tool for reading paths
  * This is the primary implementation
  */
-export function createReadPathTool(context: ToolContext): AISdkTool {
+export function createReadPathTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. By default, reads the entire file. You can optionally specify offset and limit for large files. Results include line numbers when using offset/limit. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Safe and sandboxed to project directory.",

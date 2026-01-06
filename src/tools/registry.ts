@@ -6,7 +6,7 @@
 
 import { dynamicToolService } from "@/services/DynamicToolService";
 import type { Tool as CoreTool } from "ai";
-import type { AISdkTool, ToolContext, ToolFactory, ToolName, ToolRegistryContext } from "./types";
+import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext } from "./types";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
@@ -98,7 +98,9 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
 };
 
 /**
- * Registry of tool factories
+ * Registry of tool factories.
+ * All tools receive ToolExecutionContext - tools that don't need
+ * agentPublisher/ralNumber simply ignore those fields.
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
     // Agent tools
@@ -195,12 +197,12 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 /**
  * Get a single tool by name
  * @param name - The tool name
- * @param context - Tool context for the tool
+ * @param context - Tool execution context
  * @returns The instantiated AI SDK tool or undefined if not found
  */
 export function getTool(
     name: ToolName,
-    context: ToolContext
+    context: ToolExecutionContext
 ): AISdkTool<unknown, unknown> | undefined {
     const factory = toolFactories[name];
     const ret = factory ? factory(context) : undefined;
@@ -210,12 +212,12 @@ export function getTool(
 /**
  * Get multiple tools by name
  * @param names - Array of tool names
- * @param context - Tool context for the tools
+ * @param context - Tool execution context
  * @returns Array of instantiated AI SDK tools
  */
 export function getTools(
     names: ToolName[],
-    context: ToolContext
+    context: ToolExecutionContext
 ): AISdkTool<unknown, unknown>[] {
     return names
         .map((name) => getTool(name, context))
@@ -224,10 +226,10 @@ export function getTools(
 
 /**
  * Get all available tools
- * @param context - Tool context for the tools
+ * @param context - Tool execution context
  * @returns Array of all instantiated AI SDK tools
  */
-export function getAllTools(context: ToolContext): AISdkTool<unknown, unknown>[] {
+export function getAllTools(context: ToolExecutionContext): AISdkTool<unknown, unknown>[] {
     const toolNames = Object.keys(toolFactories) as ToolName[];
     return toolNames
         .map((name) => getTool(name, context))
@@ -254,7 +256,7 @@ const FILE_EDIT_TOOLS: ToolName[] = ["edit"];
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
- * @param context - Tool context for the tools
+ * @param context - Full registry context for the tools
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
@@ -345,11 +347,11 @@ export function getToolsObject(
 
 /**
  * Get all tools as a keyed object
- * @param context - Tool context for the tools
+ * @param context - Tool execution context
  * @returns Object with all tools keyed by name (returns the underlying CoreTool)
  */
 export function getAllToolsObject(
-    context: ToolContext
+    context: ToolExecutionContext
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 

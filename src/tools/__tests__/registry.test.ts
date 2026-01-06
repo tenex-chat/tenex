@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { createMockToolContext } from "@/test-utils";
+import { createMockExecutionEnvironment } from "@/test-utils";
 import type { ToolName } from "../types";
 import { getAllTools, getTool, getTools } from "../registry";
 
 describe("Tool Registry", () => {
-    const mockContext = createMockToolContext();
+    const mockContext = createMockExecutionEnvironment();
 
     describe("getTool", () => {
         it("should return tool when exists", () => {
