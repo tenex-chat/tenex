@@ -21,6 +21,36 @@ import {
 } from "./AgentEventEncoder";
 
 /**
+ * Configuration for delegation events.
+ */
+export interface DelegateConfig {
+    /** The pubkey of the agent to delegate to */
+    recipient: string;
+    /** The content/instructions for the delegation */
+    content: string;
+    /** Optional phase name for phase-aware delegations */
+    phase?: string;
+    /** Optional phase-specific instructions */
+    phaseInstructions?: string;
+    /** Optional branch for worktree support */
+    branch?: string;
+}
+
+/**
+ * Configuration for ask events.
+ */
+export interface AskConfig {
+    /** The pubkey of the recipient (usually project owner/human) */
+    recipient: string;
+    /** Short summary of the question */
+    tldr: string;
+    /** Full context for the question */
+    context: string;
+    /** Optional suggested answers/actions */
+    suggestions?: string[];
+}
+
+/**
  * Inject W3C trace context into an event's tags.
  * This allows the daemon to link incoming events back to their parent span.
  * Also adds trace_context_llm which links to the LLM execution span for better debugging.
@@ -130,6 +160,22 @@ export class AgentPublisher {
     }
 
     /**
+     * Add delegation tag to an event, linking it to the parent conversation.
+     * This method is used by delegate() and ask() to establish the parent-child
+     * relationship between conversations.
+     *
+     * @param event - The event to add the delegation tag to
+     * @param context - The event context containing the conversationId
+     * @throws Error if context.conversationId is missing
+     */
+    private addDelegationTag(event: NDKEvent, context: EventContext): void {
+        if (!context.conversationId) {
+            throw new Error("Cannot add delegation tag: conversationId is required in context for delegation events");
+        }
+        event.tags.push(["delegation", context.conversationId]);
+    }
+
+    /**
      * Publish a completion event.
      * Creates and publishes a properly tagged completion event with p-tag.
      */
@@ -162,46 +208,40 @@ export class AgentPublisher {
     /**
      * Publish a delegation event
      */
-    async delegate(
-        params: {
-            recipient: string;
-            content: string;
-            phase?: string;
-            phaseInstructions?: string;
-            branch?: string;
-        },
-        context: EventContext
-    ): Promise<string> {
+    async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
         // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
-        event.content = params.content;
+        event.content = config.content;
 
         // Add recipient p-tag
-        event.tags.push(["p", params.recipient]);
+        event.tags.push(["p", config.recipient]);
 
         // No e-tag: delegation events start separate conversations
 
         // Add phase tags if present
-        if (params.phase) {
-            event.tags.push(["phase", params.phase]);
+        if (config.phase) {
+            event.tags.push(["phase", config.phase]);
         }
-        if (params.phaseInstructions) {
-            event.tags.push(["phase-instructions", params.phaseInstructions]);
+        if (config.phaseInstructions) {
+            event.tags.push(["phase-instructions", config.phaseInstructions]);
         }
-        if (params.branch) {
-            event.tags.push(["branch", params.branch]);
+        if (config.branch) {
+            event.tags.push(["branch", config.branch]);
         }
 
         // Add standard metadata (project tag, model, cost, execution time, etc)
         this.encoder.addStandardTags(event, context);
 
         // Forward branch tag from triggering event if not explicitly set
-        if (!params.branch) {
+        if (!config.branch) {
             this.encoder.forwardBranchTag(event, context);
         }
+
+        // Add delegation tag linking to parent conversation
+        this.addDelegationTag(event, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -213,24 +253,16 @@ export class AgentPublisher {
     /**
      * Publish an ask event
      */
-    async ask(
-        params: {
-            recipient: string;
-            tldr: string;
-            context: string;
-            suggestions?: string[];
-        },
-        _eventContext: EventContext
-    ): Promise<string> {
+    async ask(config: AskConfig, context: EventContext): Promise<string> {
         // Capture context before async operations that may lose it
         const parentContext = otelContext.active();
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
-        event.content = `${params.tldr}\n\n---\n\n${params.context}`;
+        event.content = `${config.tldr}\n\n---\n\n${config.context}`;
 
         // Add recipient p-tag
-        event.tags.push(["p", params.recipient]);
+        event.tags.push(["p", config.recipient]);
 
         // No e-tag: ask events start separate conversations (like delegate)
 
@@ -241,17 +273,20 @@ export class AgentPublisher {
         event.tags.push(["ask", "true"]);
 
         // Add TLDR tag
-        event.tags.push(["tldr", params.tldr]);
+        event.tags.push(["tldr", config.tldr]);
 
         // Add context tag (full version)
-        event.tags.push(["context", params.context]);
+        event.tags.push(["context", config.context]);
 
         // Add suggestions
-        if (params.suggestions) {
-            for (const suggestion of params.suggestions) {
+        if (config.suggestions) {
+            for (const suggestion of config.suggestions) {
                 event.tags.push(["suggestion", suggestion]);
             }
         }
+
+        // Add delegation tag linking to parent conversation
+        this.addDelegationTag(event, context);
 
         injectTraceContext(event);
         await this.agent.sign(event);
