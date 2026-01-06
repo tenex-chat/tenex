@@ -51,6 +51,7 @@ export interface BuildSystemPromptOptions {
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
     mcpManager?: MCPManager; // MCP manager for this project
+    nudgeContent?: string; // Concatenated content from kind:4201 nudge events
 }
 
 export interface BuildStandalonePromptOptions {
@@ -222,6 +223,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         agentLessons,
         alphaMode,
         mcpManager,
+        nudgeContent,
     } = options;
 
     const systemPromptBuilder = new PromptBuilder();
@@ -239,6 +241,11 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     // Add agent phases awareness if agent has phases defined
     systemPromptBuilder.add("agent-phases", { agent });
+
+    // Add nudge content if present (from kind:4201 events referenced by the triggering event)
+    if (nudgeContent && nudgeContent.trim().length > 0) {
+        systemPromptBuilder.add("nudges", { nudgeContent });
+    }
 
     // NOTE: agent-todos is NOT included here - it's injected as a late system message
     // in AgentExecutor.executeStreaming() to ensure it appears at the end of messages

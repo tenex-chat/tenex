@@ -16,6 +16,7 @@ import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
+import { nudgesFragment } from "./11-nudges";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
@@ -47,6 +48,7 @@ export function registerAllFragments(): void {
 
     // Behavioral guidance
     // voice-mode and referenced-article are registered via side effects
+    fragmentRegistry.register(nudgesFragment);
 
     // Scheduled tasks context
     fragmentRegistry.register(scheduledTasksFragment);

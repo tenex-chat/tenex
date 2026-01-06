@@ -21,8 +21,10 @@ import type {
     ToolWillExecuteEvent,
 } from "@/llm/service";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { NudgeService } from "@/services/nudge";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { getProjectContext } from "@/services/projects";
@@ -389,6 +391,13 @@ export class AgentExecutor {
 
                         // Get system prompt and conversation history
                         const projectContext = getProjectContext();
+
+                        // Fetch nudge content if triggering event has nudge tags
+                        const preToolNudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+                        const preToolNudgeContent = preToolNudgeEventIds.length > 0
+                            ? await NudgeService.getInstance().fetchNudges(preToolNudgeEventIds)
+                            : "";
+
                         const systemPromptMessages = await buildSystemPromptMessages({
                             agent: context.agent,
                             project: projectContext.project,
@@ -399,6 +408,7 @@ export class AgentExecutor {
                             availableAgents: Array.from(projectContext.agents.values()),
                             mcpManager: projectContext.mcpManager,
                             agentLessons: projectContext.agentLessons,
+                            nudgeContent: preToolNudgeContent,
                         });
                         const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
@@ -603,6 +613,13 @@ export class AgentExecutor {
 
             // Build the system prompt for context
             const conversation = context.getConversation();
+
+            // Fetch nudge content if triggering event has nudge tags
+            const postCompletionNudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+            const postCompletionNudgeContent = postCompletionNudgeEventIds.length > 0
+                ? await NudgeService.getInstance().fetchNudges(postCompletionNudgeEventIds)
+                : "";
+
             const systemPromptMessages = conversation ? await buildSystemPromptMessages({
                 agent: context.agent,
                 project: projectContext.project,
@@ -613,6 +630,7 @@ export class AgentExecutor {
                 availableAgents: Array.from(projectContext.agents.values()),
                 mcpManager: projectContext.mcpManager,
                 agentLessons: projectContext.agentLessons,
+                nudgeContent: postCompletionNudgeContent,
             }) : [];
             const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
@@ -785,6 +803,12 @@ export class AgentExecutor {
             throw new Error(`Conversation ${context.conversationId} not found`);
         }
 
+        // Fetch nudge content if triggering event has nudge tags
+        const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+        const nudgeContent = nudgeEventIds.length > 0
+            ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
+            : "";
+
         const systemPromptMessages = await buildSystemPromptMessages({
             agent: context.agent,
             project: projectContext.project,
@@ -795,6 +819,7 @@ export class AgentExecutor {
             availableAgents: Array.from(projectContext.agents.values()),
             mcpManager: projectContext.mcpManager,
             agentLessons: projectContext.agentLessons,
+            nudgeContent,
         });
 
         // Combine system prompt with conversation messages
