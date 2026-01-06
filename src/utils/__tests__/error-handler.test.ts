@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import { handleError, withErrorHandling } from "../error-handler";
+import { handleError } from "../error-handler";
 
 const mockLogger = {
     error: mock(() => {}),
@@ -82,50 +82,6 @@ describe("error-handler", () => {
 
             expect(mockExit).toHaveBeenCalledWith(1);
             process.exit = originalExit;
-        });
-    });
-
-    describe("withErrorHandling", () => {
-        it("should return result on success", async () => {
-            const fn = mock(() => Promise.resolve("success"));
-            const result = await withErrorHandling(fn, "Context");
-
-            expect(result).toBe("success");
-            expect(mockLogger.error).not.toHaveBeenCalled();
-        });
-
-        it("should handle errors and return undefined by default", async () => {
-            const fn = mock(() => Promise.reject(new Error("Async error")));
-            const result = await withErrorHandling(fn, "Async context");
-
-            expect(result).toBeUndefined();
-            expect(mockLogger.error).toHaveBeenCalledWith("Async context: Async error");
-        });
-
-        it("should return fallback value on error", async () => {
-            const fn = mock(() => Promise.reject(new Error("Fallback test")));
-            const result = await withErrorHandling(fn, "Context", { fallback: "default" });
-
-            expect(result).toBe("default");
-            expect(mockLogger.error).toHaveBeenCalledWith("Context: Fallback test");
-        });
-
-        it("should use specified log level", async () => {
-            const fn = mock(() => Promise.reject(new Error("Warn test")));
-            await withErrorHandling(fn, "Context", { logLevel: "warn" });
-
-            expect(mockLogger.warn).toHaveBeenCalledWith("Context: Warn test");
-            expect(mockLogger.error).not.toHaveBeenCalled();
-        });
-
-        it("should rethrow errors when specified", async () => {
-            const fn = mock(() => Promise.reject(new Error("Rethrow async")));
-
-            await expect(withErrorHandling(fn, "Context", { rethrow: true })).rejects.toThrow(
-                "Rethrow async"
-            );
-
-            expect(mockLogger.error).toHaveBeenCalledWith("Context: Rethrow async");
         });
     });
 });

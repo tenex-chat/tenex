@@ -188,18 +188,3 @@ export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
     };
 }
 
-/**
- * Create a builder for complex mock objects
- */
-export class MockBuilder<T> {
-    private obj: Partial<T> = {};
-
-    with<K extends keyof T>(key: K, value: T[K]): this {
-        this.obj[key] = value;
-        return this;
-    }
-
-    build(defaults: T): T {
-        return { ...defaults, ...this.obj };
-    }
-}

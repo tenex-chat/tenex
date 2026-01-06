@@ -1,15 +1,11 @@
 /**
- * Unit tests for content utilities - thinking block handling and image extraction
+ * Unit tests for content utilities - thinking block handling
  */
 
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { describe, expect, it } from "bun:test";
 import {
-    countThinkingBlocks,
-    extractImageUrls,
-    getMimeTypeFromUrl,
     hasReasoningTag,
-    hasThinkingBlocks,
     isOnlyThinkingBlocks,
     stripThinkingBlocks,
 } from "../content-utils";
@@ -49,7 +45,7 @@ describe("Content Utils - Thinking Block Handling", () => {
         it("should handle multi-line thinking blocks", () => {
             const input = `Hello world
 <thinking>
-This is a 
+This is a
 multi-line
 thinking block
 </thinking>
@@ -146,50 +142,9 @@ Line 3`;
 
         it("should handle multiple thinking blocks with only whitespace between", () => {
             const input = `<thinking>first</thinking>
-            
+
             <thinking>second</thinking>`;
             expect(isOnlyThinkingBlocks(input)).toBe(true);
-        });
-    });
-
-    describe("hasThinkingBlocks", () => {
-        it("should detect presence of thinking blocks", () => {
-            expect(hasThinkingBlocks("Text <thinking>thoughts</thinking>")).toBe(true);
-            expect(hasThinkingBlocks("<thinking>thoughts</thinking>")).toBe(true);
-            expect(hasThinkingBlocks("No thinking here")).toBe(false);
-        });
-
-        it("should detect case-insensitive thinking blocks", () => {
-            expect(hasThinkingBlocks("<THINKING>test</THINKING>")).toBe(true);
-            expect(hasThinkingBlocks("<Thinking>test</Thinking>")).toBe(true);
-        });
-
-        it("should handle empty input", () => {
-            expect(hasThinkingBlocks("")).toBe(false);
-        });
-    });
-
-    describe("countThinkingBlocks", () => {
-        it("should count thinking blocks correctly", () => {
-            expect(countThinkingBlocks("No blocks here")).toBe(0);
-            expect(countThinkingBlocks("<thinking>one</thinking>")).toBe(1);
-            expect(
-                countThinkingBlocks("<thinking>one</thinking> text <thinking>two</thinking>")
-            ).toBe(2);
-            expect(
-                countThinkingBlocks(
-                    "<thinking>1</thinking><thinking>2</thinking><thinking>3</thinking>"
-                )
-            ).toBe(3);
-        });
-
-        it("should count case-insensitive blocks", () => {
-            const input = "<thinking>1</thinking> <THINKING>2</THINKING> <Thinking>3</Thinking>";
-            expect(countThinkingBlocks(input)).toBe(3);
-        });
-
-        it("should handle empty input", () => {
-            expect(countThinkingBlocks("")).toBe(0);
         });
     });
 
@@ -309,144 +264,6 @@ Remember to monitor performance metrics after making changes.`;
 
             expect(stripThinkingBlocks(agentResponse)).toBe(expected);
             expect(isOnlyThinkingBlocks(agentResponse)).toBe(false);
-            expect(hasThinkingBlocks(agentResponse)).toBe(true);
-            expect(countThinkingBlocks(agentResponse)).toBe(2);
-        });
-    });
-});
-
-describe("Content Utils - Image Extraction", () => {
-    describe("extractImageUrls", () => {
-        it("should extract simple image URLs", () => {
-            const content = "Check out this image: https://example.com/photo.jpg";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(1);
-            expect(urls[0].url).toBe("https://example.com/photo.jpg");
-            expect(urls[0].startIndex).toBe(22); // "Check out this image: " is 22 chars
-        });
-
-        it("should extract multiple image URLs", () => {
-            const content =
-                "Image 1: https://example.com/a.png and image 2: https://example.com/b.jpeg";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(2);
-            expect(urls[0].url).toBe("https://example.com/a.png");
-            expect(urls[1].url).toBe("https://example.com/b.jpeg");
-        });
-
-        it("should extract various image extensions", () => {
-            const content = `
-                https://example.com/a.jpg
-                https://example.com/b.jpeg
-                https://example.com/c.png
-                https://example.com/d.gif
-                https://example.com/e.webp
-                https://example.com/f.svg
-                https://example.com/g.bmp
-            `;
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(7);
-        });
-
-        it("should extract image URLs with query parameters", () => {
-            const content = "https://example.com/image.png?width=100&height=200";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(1);
-            expect(urls[0].url).toBe("https://example.com/image.png?width=100&height=200");
-        });
-
-        it("should extract nostr.build URLs", () => {
-            const content = "Check this: https://image.nostr.build/abc123";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(1);
-            expect(urls[0].url).toBe("https://image.nostr.build/abc123");
-        });
-
-        it("should extract blossom URLs", () => {
-            const content = "Image at https://blossom.example.com/abc123.jpg";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(1);
-        });
-
-        it("should return empty array for content without images", () => {
-            const content = "This is just text with no images";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(0);
-        });
-
-        it("should handle empty content", () => {
-            expect(extractImageUrls("")).toHaveLength(0);
-        });
-
-        it("should deduplicate same URL appearing multiple times", () => {
-            const content =
-                "Same image twice: https://example.com/photo.jpg and https://example.com/photo.jpg";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(1);
-        });
-
-        it("should sort URLs by position in content", () => {
-            const content =
-                "First https://example.com/a.png then https://example.com/b.jpg";
-            const urls = extractImageUrls(content);
-
-            expect(urls).toHaveLength(2);
-            expect(urls[0].url).toContain("a.png");
-            expect(urls[1].url).toContain("b.jpg");
-            expect(urls[0].startIndex).toBeLessThan(urls[1].startIndex);
-        });
-    });
-
-    describe("getMimeTypeFromUrl", () => {
-        it("should return correct MIME type for jpg", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.jpg")).toBe("image/jpeg");
-        });
-
-        it("should return correct MIME type for jpeg", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.jpeg")).toBe("image/jpeg");
-        });
-
-        it("should return correct MIME type for png", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.png")).toBe("image/png");
-        });
-
-        it("should return correct MIME type for gif", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.gif")).toBe("image/gif");
-        });
-
-        it("should return correct MIME type for webp", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.webp")).toBe("image/webp");
-        });
-
-        it("should return correct MIME type for svg", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.svg")).toBe("image/svg+xml");
-        });
-
-        it("should handle URLs with query parameters", () => {
-            expect(getMimeTypeFromUrl("https://example.com/image.png?size=large")).toBe(
-                "image/png"
-            );
-        });
-
-        it("should return undefined for unknown extensions", () => {
-            expect(getMimeTypeFromUrl("https://example.com/file.txt")).toBeUndefined();
-        });
-
-        it("should return undefined for invalid URLs", () => {
-            expect(getMimeTypeFromUrl("not-a-valid-url")).toBeUndefined();
-        });
-
-        it("should handle case-insensitive extensions", () => {
-            expect(getMimeTypeFromUrl("https://example.com/IMAGE.PNG")).toBe("image/png");
-            expect(getMimeTypeFromUrl("https://example.com/photo.JPG")).toBe("image/jpeg");
         });
     });
 });

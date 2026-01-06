@@ -40,22 +40,3 @@ export function handleError(
     return message;
 }
 
-/**
- * Async wrapper for error handling
- */
-export async function withErrorHandling<T>(
-    fn: () => Promise<T>,
-    context: string,
-    options?: {
-        fallback?: T;
-        logLevel?: "error" | "warn" | "debug";
-        rethrow?: boolean;
-    }
-): Promise<T | undefined> {
-    try {
-        return await fn();
-    } catch (error) {
-        handleError(error, context, options);
-        return options?.fallback;
-    }
-}
