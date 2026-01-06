@@ -1,5 +1,7 @@
 # Git Worktree Integration Implementation Plan
 
+> Status: Implemented. Worktree creation lives in `src/utils/git/worktree.ts`, and branch tags flow through `delegate` and `ExecutionContextFactory`. This plan uses older names (`delegate_phase`) and should be treated as historical.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Complete git worktree functionality to enable agents to work in isolated branch environments

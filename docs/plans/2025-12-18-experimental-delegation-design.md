@@ -1,5 +1,7 @@
 # Experimental Delegation Architecture
 
+> Status: Superseded. The current implementation uses `RALRegistry` with queued injections and ConversationStore-backed messages. The proposed `TimeoutResponder` does not exist. See `docs/DELEGATION-AND-RAL-PROCESSING.md` for the up-to-date flow.
+
 ## Overview
 
 This design transforms agent delegation from a blocking synchronous model to an event-driven asynchronous model with RAL (Request-Agent Loop) state persistence.
