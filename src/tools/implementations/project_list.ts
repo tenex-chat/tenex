@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { getDaemon } from "@/daemon";
 import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
@@ -36,7 +35,7 @@ type ProjectListOutput = {
     };
 };
 
-async function executeProjectList(context: ExecutionContext): Promise<ProjectListOutput> {
+async function executeProjectList(context: ToolContext): Promise<ProjectListOutput> {
     const daemon = getDaemon();
     const knownProjects = daemon.getKnownProjects();
     const activeRuntimes = daemon.getActiveRuntimes();
@@ -132,7 +131,7 @@ async function executeProjectList(context: ExecutionContext): Promise<ProjectLis
     };
 }
 
-export function createProjectListTool(context: ExecutionContext): AISdkTool {
+export function createProjectListTool(context: ToolContext): AISdkTool {
     const coreTool = tool({
         description:
             "List ALL known projects with their agents and running status. " +

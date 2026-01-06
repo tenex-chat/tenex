@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
@@ -23,7 +23,7 @@ type LessonGetOutput = {
 // Core implementation - extracted from existing execute function
 async function executeLessonGet(
     input: LessonGetInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<LessonGetOutput> {
     const { title } = input;
 
@@ -123,7 +123,7 @@ async function executeLessonGet(
 }
 
 // AI SDK tool factory
-export function createLessonGetTool(context: ExecutionContext): AISdkTool {
+export function createLessonGetTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",

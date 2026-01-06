@@ -6,6 +6,7 @@ import type { ToolCall } from "@/llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
+import type { ToolRegistryContext } from "@/tools/types";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -85,6 +86,7 @@ export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstan
             get: () => undefined,
             set: () => {},
         }),
+        sign: async () => {},
         ...overrides,
     } as AgentInstance;
 }
@@ -139,8 +141,14 @@ export function createMockConversationStore(overrides?: {
 export function createMockExecutionContext(
     overrides?: Partial<ExecutionContext>
 ): ExecutionContext {
+    return createMockToolContext(overrides) as ExecutionContext;
+}
+
+export function createMockToolContext(
+    overrides?: Partial<ToolRegistryContext>
+): ToolRegistryContext {
     const agent = overrides?.agent || createMockAgent();
-    const mockEvent = createMockNDKEvent();
+    const mockEvent = overrides?.triggeringEvent || createMockNDKEvent();
     const conversationId =
         overrides?.conversationId || `mock-conv-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -167,15 +175,15 @@ export function createMockExecutionContext(
     return {
         agent,
         conversationId,
-        projectPath: "/mock/project",
+        projectBasePath: "/mock/project",
         workingDirectory: "/mock/project",
         currentBranch: "main",
         triggeringEvent: mockEvent,
-        conversationCoordinator: mockConversationCoordinator as ConversationCoordinator,
         agentPublisher: mockPublisher as AgentPublisher,
         getConversation: () => mockConversation,
+        conversationCoordinator: mockConversationCoordinator as ConversationCoordinator,
         ...overrides,
-    } as ExecutionContext;
+    } as ToolRegistryContext;
 }
 
 export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
@@ -187,4 +195,3 @@ export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
         ...overrides,
     };
 }
-

@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -20,7 +20,7 @@ const ragCreateCollectionSchema = z.object({
  */
 async function executeCreateCollection(
     input: z.infer<typeof ragCreateCollectionSchema>,
-    _context: ExecutionContext
+    _context: ToolContext
 ): Promise<ToolResponse> {
     const { name, schema } = input;
 
@@ -41,7 +41,7 @@ async function executeCreateCollection(
 /**
  * Create a new RAG collection for storing and retrieving vector embeddings
  */
-export function createRAGCreateCollectionTool(context: ExecutionContext): AISdkTool {
+export function createRAGCreateCollectionTool(context: ToolContext): AISdkTool {
     return tool({
         description:
             "Create a new RAG collection (vector database) for storing documents with semantic search capabilities",

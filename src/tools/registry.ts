@@ -4,10 +4,9 @@
  * Central registry for all AI SDK tools in the TENEX system.
  */
 
-import type { ExecutionContext } from "@/agents/execution/types";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import type { Tool as CoreTool } from "ai";
-import type { AISdkTool, ToolFactory, ToolName } from "./types";
+import type { AISdkTool, ToolContext, ToolFactory, ToolName, ToolRegistryContext } from "./types";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
@@ -196,12 +195,12 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 /**
  * Get a single tool by name
  * @param name - The tool name
- * @param context - Execution context for the tool
+ * @param context - Tool context for the tool
  * @returns The instantiated AI SDK tool or undefined if not found
  */
 export function getTool(
     name: ToolName,
-    context: ExecutionContext
+    context: ToolContext
 ): AISdkTool<unknown, unknown> | undefined {
     const factory = toolFactories[name];
     const ret = factory ? factory(context) : undefined;
@@ -211,12 +210,12 @@ export function getTool(
 /**
  * Get multiple tools by name
  * @param names - Array of tool names
- * @param context - Execution context for the tools
+ * @param context - Tool context for the tools
  * @returns Array of instantiated AI SDK tools
  */
 export function getTools(
     names: ToolName[],
-    context: ExecutionContext
+    context: ToolContext
 ): AISdkTool<unknown, unknown>[] {
     return names
         .map((name) => getTool(name, context))
@@ -225,10 +224,10 @@ export function getTools(
 
 /**
  * Get all available tools
- * @param context - Execution context for the tools
+ * @param context - Tool context for the tools
  * @returns Array of all instantiated AI SDK tools
  */
-export function getAllTools(context: ExecutionContext): AISdkTool<unknown, unknown>[] {
+export function getAllTools(context: ToolContext): AISdkTool<unknown, unknown>[] {
     const toolNames = Object.keys(toolFactories) as ToolName[];
     return toolNames
         .map((name) => getTool(name, context))
@@ -255,12 +254,12 @@ const FILE_EDIT_TOOLS: ToolName[] = ["edit"];
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
- * @param context - Execution context for the tools
+ * @param context - Tool context for the tools
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
     names: string[],
-    context: ExecutionContext
+    context: ToolRegistryContext
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
@@ -346,11 +345,11 @@ export function getToolsObject(
 
 /**
  * Get all tools as a keyed object
- * @param context - Execution context for the tools
+ * @param context - Tool context for the tools
  * @returns Object with all tools keyed by name (returns the underlying CoreTool)
  */
 export function getAllToolsObject(
-    context: ExecutionContext
+    context: ToolContext
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 

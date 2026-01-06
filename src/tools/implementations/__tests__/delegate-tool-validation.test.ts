@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
@@ -18,7 +18,7 @@ describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber?: number): ExecutionContext => ({
+    const createMockContext = (ralNumber?: number): ToolContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -26,7 +26,9 @@ describe("Delegation tools - Self-delegation validation", () => {
         } as AgentInstance,
         conversationId,
         conversationCoordinator: {} as any,
-        triggeringEvent: {} as any,
+        triggeringEvent: {
+            tags: [],
+        } as any,
         agentPublisher: {} as any,
         phase: undefined,
         ralNumber,
@@ -46,7 +48,7 @@ describe("Delegation tools - Self-delegation validation", () => {
     describe("delegate tool", () => {
         it("should allow self-delegation without phase by slug", async () => {
             const context = {
-                ...createMockContext(),
+                ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
                     delegate: async () => "mock-delegation-id",
                 } as any,
@@ -67,7 +69,7 @@ describe("Delegation tools - Self-delegation validation", () => {
 
         it("should allow self-delegation without phase by pubkey", async () => {
             const context = {
-                ...createMockContext(),
+                ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
                     delegate: async () => "mock-delegation-id",
                 } as any,
@@ -88,7 +90,7 @@ describe("Delegation tools - Self-delegation validation", () => {
 
         it("should allow self in multiple recipients without phase", async () => {
             const context = {
-                ...createMockContext(),
+                ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
                     delegate: async () => "mock-delegation-id",
                 } as any,
@@ -112,11 +114,11 @@ describe("Delegation tools - Self-delegation validation", () => {
 
     describe("delegate_followup tool", () => {
         it("should reject self-delegation when delegation points to self", async () => {
-            const context = createMockContext();
+            // Create RAL first, then pass its number to context
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+            const context = createMockContext(ralNumber);
             const followupTool = createDelegateFollowupTool(context);
-
-            // Set up a delegation in the RAL that points to self
-            const ralNumber = registry.create(context.agent.pubkey, conversationId);
             registry.saveState(context.agent.pubkey, conversationId, ralNumber, [], [
                 {
                     eventId: "self-delegation-event",
@@ -139,11 +141,11 @@ describe("Delegation tools - Self-delegation validation", () => {
         });
 
         it("should error when delegation event ID not found", async () => {
-            const context = createMockContext();
+            // Create RAL first, then pass its number to context
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+            const context = createMockContext(ralNumber);
             const followupTool = createDelegateFollowupTool(context);
-
-            // Don't set up any delegations
-            registry.create(context.agent.pubkey, conversationId);
 
             const input = {
                 delegation_event_id: "non-existent-event",
@@ -167,7 +169,7 @@ describe("Delegation tools - RAL isolation", () => {
     const conversationId = "test-conversation-id";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber?: number): ExecutionContext => ({
+    const createMockContext = (ralNumber: number): ToolContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -175,7 +177,9 @@ describe("Delegation tools - RAL isolation", () => {
         } as AgentInstance,
         conversationId,
         conversationCoordinator: {} as any,
-        triggeringEvent: {} as any,
+        triggeringEvent: {
+            tags: [],
+        } as any,
         agentPublisher: {
             delegate: async () => "mock-delegation-id",
         } as any,
@@ -264,7 +268,7 @@ describe("Delegation tools - RAL isolation", () => {
             }
         });
 
-        it("should allow delegation when context has no ralNumber (backwards compatibility)", async () => {
+        it("should require ralNumber in context", async () => {
             // Create RAL with pending delegations
             const ralNumber = registry.create("agent-pubkey-123", conversationId);
             registry.setPendingDelegations("agent-pubkey-123", conversationId, ralNumber, [
@@ -275,8 +279,24 @@ describe("Delegation tools - RAL isolation", () => {
                 },
             ]);
 
-            // Context WITHOUT ralNumber (undefined) should skip the check
-            const context = createMockContext(undefined);
+            // Context WITHOUT ralNumber should throw error
+            const context = {
+                agent: {
+                    slug: "self-agent",
+                    name: "Self Agent",
+                    pubkey: "agent-pubkey-123",
+                } as AgentInstance,
+                conversationId,
+                conversationCoordinator: {} as any,
+                triggeringEvent: { tags: [] } as any,
+                agentPublisher: { delegate: async () => "mock-delegation-id" } as any,
+                phase: undefined,
+                ralNumber: undefined, // Explicitly undefined
+                projectBasePath: "/tmp/test",
+                workingDirectory: "/tmp/test",
+                currentBranch: "main",
+                getConversation: () => undefined,
+            } as ToolContext;
             const delegateTool = createDelegateTool(context);
 
             const input = {
@@ -285,10 +305,13 @@ describe("Delegation tools - RAL isolation", () => {
                 ],
             };
 
-            // Should succeed because ralNumber is undefined, so check is skipped
-            const result = await delegateTool.execute(input);
-            expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
+            // Should throw because ralNumber is required
+            try {
+                await delegateTool.execute(input);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error: any) {
+                expect(error.message).toContain("ralNumber is required");
+            }
         });
     });
 });

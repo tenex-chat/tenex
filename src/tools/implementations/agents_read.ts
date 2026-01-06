@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -41,7 +40,7 @@ interface AgentsReadOutput {
  */
 async function executeAgentsRead(
     input: AgentsReadInput,
-    _context: ExecutionContext
+    _context: ToolContext
 ): Promise<AgentsReadOutput> {
     const { slug } = input;
 
@@ -83,7 +82,7 @@ async function executeAgentsRead(
  * Create an AI SDK tool for reading agents
  * This is the primary implementation
  */
-export function createAgentsReadTool(context: ExecutionContext): AISdkTool {
+export function createAgentsReadTool(context: ToolContext): AISdkTool {
     return tool({
         description: "Read a local agent definition from its JSON file",
         inputSchema: agentsReadSchema,

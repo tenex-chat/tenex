@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ALPHA_BUG_HASHTAG, TENEX_BACKEND_PROJECT_ATAG } from "@/constants";
 import { llmServiceFactory } from "@/llm";
 import { getNDK } from "@/nostr";
@@ -101,7 +101,7 @@ Base your status determination on the conversation content. If there's no clear 
     }
 }
 
-async function executeBugList(_context: ExecutionContext): Promise<BugListOutput> {
+async function executeBugList(_context: ToolContext): Promise<BugListOutput> {
     const ndk = getNDK();
     if (!ndk) {
         throw new Error("NDK instance not available");
@@ -158,7 +158,7 @@ async function executeBugList(_context: ExecutionContext): Promise<BugListOutput
     return { bugs, count: bugs.length };
 }
 
-export function createBugListTool(context: ExecutionContext): AISdkTool {
+export function createBugListTool(context: ToolContext): AISdkTool {
     const coreTool = tool({
         description:
             "List all alpha bug reports for TENEX. Returns bug IDs, titles, AI-generated summaries, and current status. Use this to check if a bug has already been reported before creating a new one.",

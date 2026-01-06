@@ -1,8 +1,7 @@
 import { exec, type ExecException } from "node:child_process";
 import { promisify } from "node:util";
 import { ExecutionConfig } from "@/agents/execution/constants";
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { tool } from "ai";
@@ -109,7 +108,7 @@ type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult;
  * 2. Expected non-zero exit (e.g., grep with no matches): Returns structured result, NOT an error
  * 3. Genuine failure: Returns structured error result for LLM recovery
  */
-async function executeShell(input: ShellInput, context: ExecutionContext): Promise<ShellOutput> {
+async function executeShell(input: ShellInput, context: ToolContext): Promise<ShellOutput> {
     const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input;
 
     // Resolve cwd: if provided and relative, resolve against context.workingDirectory
@@ -267,7 +266,7 @@ async function executeShell(input: ShellInput, context: ExecutionContext): Promi
 /**
  * Create an AI SDK tool for executing shell commands
  */
-export function createShellTool(context: ExecutionContext): AISdkTool {
+export function createShellTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description: `Execute shell commands in the project directory.
 

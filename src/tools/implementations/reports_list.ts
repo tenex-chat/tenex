@@ -1,5 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
-import type { AISdkTool } from "@/tools/types";
+import type { AISdkTool, ToolContext } from "@/tools/types";
 import { ReportService } from "@/services/reports";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -40,7 +39,7 @@ type ReportsListOutput = {
 // Core implementation - extracted from existing execute function
 async function executeReportsList(
     input: ReportsListInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ReportsListOutput> {
     const { allAgents = false } = input;
 
@@ -89,7 +88,7 @@ async function executeReportsList(
 }
 
 // AI SDK tool factory
-export function createReportsListTool(context: ExecutionContext): AISdkTool {
+export function createReportsListTool(context: ToolContext): AISdkTool {
     return tool({
         description: "List NDKArticle reports from agents in the project",
         inputSchema: reportsListSchema,

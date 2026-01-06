@@ -1,7 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { config } from "@/services/ConfigService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -236,7 +236,7 @@ function calculateSHA256(data: Buffer): string {
 async function createAuthEvent(
     sha256Hash: string,
     description: string,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<NDKEvent> {
     const { NDKEvent } = await import("@nostr-dev-kit/ndk");
 
@@ -322,7 +322,7 @@ async function uploadToBlossomServer(
  */
 async function executeUploadBlob(
     input: UploadBlobInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<UploadBlobOutput> {
     const { input: dataInput, mimeType: providedMimeType, description } = input;
 
@@ -436,7 +436,7 @@ async function executeUploadBlob(
 /**
  * Create the upload_blob tool for AI SDK
  */
-export function createUploadBlobTool(context: ExecutionContext): AISdkTool {
+export function createUploadBlobTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description: `Upload files, URLs, or base64 blobs to a Blossom server.
 

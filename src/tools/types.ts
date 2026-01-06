@@ -1,4 +1,8 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { AgentInstance } from "@/agents/types";
+import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
 /**
@@ -70,9 +74,55 @@ export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TO
 };
 
 /**
+ * Minimal agent surface needed by tools.
+ */
+export type ToolAgentInfo = Pick<
+    AgentInstance,
+    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools" | "phases"
+>;
+
+/**
  * Execution context exposed to tools/tests.
  */
-export type ToolContext = ExecutionContext;
+export interface ToolContext {
+    agent: ToolAgentInfo;
+    conversationId: string;
+    /**
+     * Project directory (normal git repository root).
+     * Example: ~/tenex/{dTag}
+     */
+    projectBasePath: string;
+    /**
+     * Working directory for code execution.
+     * - Default branch: same as projectBasePath (~/tenex/{dTag})
+     * - Feature branch: ~/tenex/{dTag}/.worktrees/feature_branch/
+     */
+    workingDirectory: string;
+    /**
+     * Current git branch name.
+     * Example: "master", "feature/branch-name", "research/foo"
+     */
+    currentBranch: string;
+    triggeringEvent: NDKEvent;
+    agentPublisher?: AgentPublisher;
+    ralNumber?: number;
+    getConversation: () => ConversationStore | undefined;
+    /**
+     * Mutable reference to the active tools object used by the LLM service.
+     * Tools created via create_dynamic_tool can inject themselves here
+     * to become immediately available in the current streaming session.
+     */
+    activeToolsObject?: Record<string, CoreTool<unknown, unknown>>;
+}
+
+/**
+ * Context used by the tool registry for selection/injection logic.
+ */
+export interface ToolRegistryContext extends ToolContext {
+    alphaMode?: boolean;
+    hasActivePairings?: boolean;
+    mcpManager?: MCPManager;
+}
 
 export interface ToolError {
     kind: "validation" | "execution" | "system";
@@ -93,4 +143,4 @@ export interface ToolExecutionResult {
 /**
  * Tool factory signature used when registering tools.
  */
-export type ToolFactory = (context: ExecutionContext) => AISdkTool<unknown, unknown>;
+export type ToolFactory = (context: ToolContext) => AISdkTool<unknown, unknown>;

@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -8,7 +8,7 @@ import { z } from "zod";
 /**
  * Creates a tool for listing scheduled tasks
  */
-export function createListScheduledTasksTool(_context: ExecutionContext): AISdkTool {
+export function createListScheduledTasksTool(_context: ToolContext): AISdkTool {
     const aiTool = tool({
         description: "List all currently scheduled tasks",
         inputSchema: z.object({

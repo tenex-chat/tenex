@@ -4,7 +4,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKSigner } from "@nostr-dev-kit/ndk";
-import type { ExecutionContext } from "../../types";
+import type { ToolContext } from "../../types";
 import { lessonLearnTool } from "../learn";
 
 // Mock dependencies
@@ -59,7 +59,7 @@ type MockLesson = {
 };
 
 describe("Learn Tool", () => {
-    let mockContext: ExecutionContext;
+    let mockContext: ToolContext;
     let mockAgent: AgentInstance;
     let mockConversation: ConversationStore;
     let mockNDK: NDK;
@@ -95,7 +95,7 @@ describe("Learn Tool", () => {
             phase: "reflection",
             conversationId: "mock-conversation-id",
             conversation: mockConversation,
-        } as ExecutionContext;
+        } as ToolContext;
 
         // Setup NDK mock
         mockNDK = {

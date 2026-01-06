@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -10,7 +10,7 @@ import { z } from "zod";
  */
 async function executeListSubscriptions(
     _input: unknown,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ToolResponse> {
     // Mandate agent identity - no compromises
     if (!context.agent?.pubkey) {
@@ -111,7 +111,7 @@ async function executeListSubscriptions(
  */
 const ragSubscriptionListSchema = z.object({});
 
-export function createRAGSubscriptionListTool(context: ExecutionContext): AISdkTool {
+export function createRAGSubscriptionListTool(context: ToolContext): AISdkTool {
     return tool({
         description:
             "List all active RAG subscriptions for the current agent, showing their status, configuration, and statistics.",

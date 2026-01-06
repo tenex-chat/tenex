@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -78,8 +78,8 @@ export class ToolExecutionError extends Error {
 export async function executeToolWithErrorHandling<TInput>(
     toolName: string,
     input: TInput,
-    context: ExecutionContext,
-    executeFn: (input: TInput, context: ExecutionContext) => Promise<ToolResponse>
+    context: ToolContext,
+    executeFn: (input: TInput, context: ToolContext) => Promise<ToolResponse>
 ): Promise<string> {
     logger.debug(`Executing tool: ${toolName}`, { input });
 

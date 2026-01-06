@@ -36,8 +36,7 @@ const uniqueToolName = () => `test_tool_${Date.now()}_${Math.random().toString(3
 // Sample dynamic tool code that would be written by create_dynamic_tool
 const createSampleToolCode = (toolName: string) => `import { tool, type CoreTool } from 'ai';
 import { z } from 'zod';
-import type { ExecutionContext } from '@/agents/execution/types';
-import type { AISdkTool } from '@/tools/registry';
+import type { ToolContext, AISdkTool } from '@/tools/types';
 
 const ${toolName}Schema = z.object({
     input: z.string().describe("Input parameter")
@@ -45,7 +44,7 @@ const ${toolName}Schema = z.object({
 
 type ${toolName.charAt(0).toUpperCase() + toolName.slice(1)}Input = z.infer<typeof ${toolName}Schema>;
 
-const create${toolName.charAt(0).toUpperCase() + toolName.slice(1)}Tool = (context: ExecutionContext): AISdkTool => {
+const create${toolName.charAt(0).toUpperCase() + toolName.slice(1)}Tool = (context: ToolContext): AISdkTool => {
     const aiTool = tool({
         description: 'Test dynamic tool',
         inputSchema: ${toolName}Schema,

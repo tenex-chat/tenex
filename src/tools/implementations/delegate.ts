@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation, StopExecutionSignal, TodoItem } from "@/services/ral/types";
@@ -53,7 +53,7 @@ type DelegateOutput = StopExecutionSignal;
 
 async function executeDelegate(
   input: DelegateInput,
-  context: ExecutionContext
+  context: ToolContext
 ): Promise<DelegateOutput> {
   const { delegations } = input;
 
@@ -220,7 +220,7 @@ async function executeDelegate(
   return stopSignal;
 }
 
-export function createDelegateTool(context: ExecutionContext): AISdkTool {
+export function createDelegateTool(context: ToolContext): AISdkTool {
   const hasPhases =
     context.agent.phases && Object.keys(context.agent.phases).length > 0;
 

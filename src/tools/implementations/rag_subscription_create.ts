@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { RagSubscriptionService } from "@/services/rag/RagSubscriptionService";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -33,7 +33,7 @@ const ragSubscriptionCreateSchema = z.object({
  */
 async function executeCreateSubscription(
     input: z.infer<typeof ragSubscriptionCreateSchema>,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ToolResponse> {
     const { subscriptionId, mcpServerId, resourceUri, ragCollection, description } = input;
 
@@ -88,7 +88,7 @@ async function executeCreateSubscription(
  *
  * The subscription will remain active until explicitly deleted.
  */
-export function createRAGSubscriptionCreateTool(context: ExecutionContext): AISdkTool {
+export function createRAGSubscriptionCreateTool(context: ToolContext): AISdkTool {
     return tool({
         description:
             "Create a persistent subscription to stream data from an MCP resource into a RAG collection. The subscription will automatically pipe all updates from the specified resource to the RAG collection and persist across restarts.",

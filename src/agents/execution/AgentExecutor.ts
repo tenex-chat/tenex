@@ -31,6 +31,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
+import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/phase-utils";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -73,13 +74,14 @@ export class AgentExecutor {
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
-        const context: Partial<ExecutionContext> = {
+        const context: ToolRegistryContext = {
             agent,
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id,
             projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             currentBranch: "main",
+            getConversation: () => undefined,
         };
 
         let messages: ModelMessage[] = [];
@@ -96,8 +98,7 @@ export class AgentExecutor {
         }
 
         const toolNames = agent.tools || [];
-        const tools =
-            toolNames.length > 0 ? getToolsObject(toolNames, context as ExecutionContext) : {};
+        const tools = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
         return { messages, tools };
     }
@@ -789,6 +790,32 @@ export class AgentExecutor {
 
         // Register RAL in ConversationStore
         conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
+
+        // Consume any pending injections BEFORE building messages
+        // This ensures supervision correction messages are included in the initial LLM context
+        // (not delayed until prepareStep, which would miss the first LLM turn)
+        const initialInjections = ralRegistry.getAndConsumeInjections(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
+        if (initialInjections.length > 0) {
+            for (const injection of initialInjections) {
+                conversationStore.addMessage({
+                    pubkey: context.triggeringEvent.pubkey,
+                    ral: ralNumber,
+                    content: injection.content,
+                    messageType: "text",
+                    targetedPubkeys: [context.agent.pubkey],
+                });
+            }
+
+            trace.getActiveSpan()?.addEvent("executor.initial_injections_consumed", {
+                "ral.number": ralNumber,
+                "injection.count": initialInjections.length,
+            });
+        }
 
         // Build conversation messages from ConversationStore (single source of truth)
         const conversationMessages = await conversationStore.buildMessagesForRal(

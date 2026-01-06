@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { ReportService } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -106,7 +106,7 @@ function formatArticleContent(article: ReportReadOutput["article"]): string {
  */
 async function executeReportRead(
     input: ReportReadInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<ReportReadOutput> {
     const { identifier } = input;
 
@@ -176,7 +176,7 @@ async function executeReportRead(
 /**
  * Create an AI SDK tool for reading reports
  */
-export function createReportReadTool(context: ExecutionContext): AISdkTool {
+export function createReportReadTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description: "Read a report by slug or naddr identifier",
 

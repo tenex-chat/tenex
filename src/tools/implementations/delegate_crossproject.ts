@@ -1,4 +1,4 @@
-import type { ExecutionContext } from "@/agents/execution/types";
+import type { ToolContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
@@ -28,7 +28,7 @@ type DelegateCrossProjectOutput = StopExecutionSignal;
 
 async function executeDelegateCrossProject(
     input: DelegateCrossProjectInput,
-    context: ExecutionContext
+    context: ToolContext
 ): Promise<DelegateCrossProjectOutput> {
     const { content, projectId, agentSlug } = input;
 
@@ -132,7 +132,7 @@ async function executeDelegateCrossProject(
     };
 }
 
-export function createDelegateCrossProjectTool(context: ExecutionContext): AISdkTool {
+export function createDelegateCrossProjectTool(context: ToolContext): AISdkTool {
     const aiTool = tool({
         description: `Delegate a task to an agent in another project. Use project_list first to discover available projects and their agents.
 
