@@ -44,9 +44,9 @@ The NDK (Nostr Development Kit) provides comprehensive testing infrastructure th
 ## Migration Strategy
 
 ### Current State
-- Custom mocks in `/src/agents/execution/strategies/__tests__/test-mocks.ts`
-- Simple NDKEvent mock that avoids network initialization
-- Custom PubkeyNameRepository mock
+- TENEX wraps NDK helpers in `src/test-utils/ndk-test-helpers.ts`
+- `src/__tests__/verify-ndk-test-import.test.ts` validates the test import path
+- Some tests still use local mocks; migrate gradually
 
 ### Recommended Approach
 
@@ -90,6 +90,8 @@ describe("Example Test", () => {
 });
 ```
 
+For TENEX-specific helpers (fixture, relay wrappers, and convenience builders), see `src/test-utils/ndk-test-helpers.ts`.
+
 ## Benefits
 
 1. **Consistency**: Uses the same infrastructure as NDK's own tests
@@ -100,18 +102,8 @@ describe("Example Test", () => {
 
 ## Files Created for Reference
 
-1. `/src/__tests__/ndk-test-example.test.ts` - Basic examples with comments
-2. `/src/__tests__/verify-ndk-test-import.test.ts` - Verifies utilities can be imported
-3. `/src/__tests__/using-ndk-test-utils.test.ts` - Practical usage examples
-
-## Current Test Status
-
-After our test suite improvements:
-- **562 passing tests** (up from 538)
-- **81 failing tests** (down from 179)
-- Successfully migrated from Vitest to Bun test
-- Fixed major API mismatches and missing exports
-- Cleaned up obsolete tests
+1. `src/test-utils/ndk-test-helpers.ts` - TENEX-specific helper wrapper
+2. `src/__tests__/verify-ndk-test-import.test.ts` - Import validation
 
 ## Next Steps
 
