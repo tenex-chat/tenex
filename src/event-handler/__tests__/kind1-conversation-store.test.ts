@@ -8,10 +8,23 @@
  * 4. User messages stored with correct pubkey
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+
+// Mock PubkeyService for attribution tests
+mock.module("@/services/PubkeyService", () => ({
+    getPubkeyService: () => ({
+        getName: async (pubkey: string) => {
+            const names: Record<string, string> = {
+                "user-pubkey-123": "User",
+                "agent-pubkey-456": "Agent",
+            };
+            return names[pubkey] ?? "Unknown";
+        },
+    }),
+}));
 
 describe("kind:1 Event Handler with ConversationStore", () => {
     const TEST_DIR = "/tmp/tenex-kind1-handler-test";
@@ -61,41 +74,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
         } as unknown as NDKEvent;
     }
 
-    describe("Conversation ID Determination", () => {
-        it("should use event ID as conversation ID when no e-tags", () => {
-            const event = createMockEvent({
-                id: "event-1",
-                pubkey: USER_PUBKEY,
-                content: "Hello",
-            });
-
-            // No e-tags means this event IS the root
-            const conversationId = event.getMatchingTags("e").length === 0
-                ? event.id
-                : event.getMatchingTags("e")[0][1];
-
-            expect(conversationId).toBe("event-1");
-        });
-
-        it("should use first e-tag as conversation ID when e-tags present", () => {
-            const event = createMockEvent({
-                id: "event-2",
-                pubkey: USER_PUBKEY,
-                content: "Reply",
-                eTags: ["root-event-id", "some-other-tag"],
-            });
-
-            const eTags = event.getMatchingTags("e");
-            const conversationId = eTags.length === 0
-                ? event.id
-                : eTags[0][1];
-
-            expect(conversationId).toBe("root-event-id");
-        });
-    });
-
-    describe("Event Hydration to ConversationStore", () => {
-        it("should hydrate user message into store", () => {
+    describe("Event Hydration", () => {
+        it("should hydrate kind:1 event into ConversationStore", () => {
             const conversationId = "conv-1";
             store.load(PROJECT_ID, conversationId);
 
@@ -108,15 +88,16 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             // Hydrate event into store
             store.addMessage({
                 pubkey: event.pubkey,
-                message: { role: "user", content: event.content },
+                content: event.content,
+                messageType: "text",
                 eventId: event.id,
             });
 
             const messages = store.getAllMessages();
             expect(messages).toHaveLength(1);
             expect(messages[0].pubkey).toBe(USER_PUBKEY);
-            expect(messages[0].message.role).toBe("user");
-            expect(messages[0].message.content).toBe("Hello, help me with a task");
+            expect(messages[0].messageType).toBe("text");
+            expect(messages[0].content).toBe("Hello, help me with a task");
             expect(messages[0].eventId).toBe("event-1");
         });
 
@@ -127,7 +108,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             // First, add user message
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "Hello" },
+                content: "Hello",
+                messageType: "text",
                 eventId: "user-event-1",
             });
 
@@ -138,7 +120,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT_PUBKEY,
                 ral: ralNumber,
-                message: { role: "assistant", content: "Hi there!" },
+                content: "Hi there!",
+                messageType: "text",
                 eventId: "agent-event-1",
             });
 
@@ -158,7 +141,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             // Add first message
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "Hello" },
+                content: "Hello",
+                messageType: "text",
                 eventId: "event-1",
             });
 
@@ -181,7 +165,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             if (!store.hasEventId(event.id)) {
                 store.addMessage({
                     pubkey: event.pubkey,
-                    message: { role: "user", content: event.content },
+                    content: event.content,
+                    messageType: "text",
                     eventId: event.id,
                 });
             }
@@ -190,7 +175,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             if (!store.hasEventId(event.id)) {
                 store.addMessage({
                     pubkey: event.pubkey,
-                    message: { role: "user", content: event.content },
+                    content: event.content,
+                    messageType: "text",
                     eventId: event.id,
                 });
             }
@@ -208,7 +194,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             // Add messages
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "Hello" },
+                content: "Hello",
+                messageType: "text",
                 eventId: "event-1",
             });
 
@@ -216,7 +203,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT_PUBKEY,
                 ral: ralNumber,
-                message: { role: "assistant", content: "Hi there!" },
+                content: "Hi there!",
+                messageType: "text",
                 eventId: "event-2",
             });
 
@@ -244,7 +232,8 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             // Hydrate a multi-turn conversation
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "Question 1" },
+                content: "Question 1",
+                messageType: "text",
                 eventId: "e1",
             });
 
@@ -252,14 +241,16 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             store.addMessage({
                 pubkey: AGENT_PUBKEY,
                 ral: ral1,
-                message: { role: "assistant", content: "Answer 1" },
+                content: "Answer 1",
+                messageType: "text",
                 eventId: "e2",
             });
             store.completeRal(AGENT_PUBKEY, ral1);
 
             store.addMessage({
                 pubkey: USER_PUBKEY,
-                message: { role: "user", content: "Question 2" },
+                content: "Question 2",
+                messageType: "text",
                 eventId: "e3",
             });
 
@@ -270,10 +261,11 @@ describe("kind:1 Event Handler with ConversationStore", () => {
             const messages = await store.buildMessagesForRal(AGENT_PUBKEY, ral2);
 
             // Should include all messages from completed RAL + new user message
+            // Messages now include [@sender] attribution prefix
             expect(messages).toHaveLength(3);
-            expect(messages[0].content).toBe("Question 1");
-            expect(messages[1].content).toBe("Answer 1");
-            expect(messages[2].content).toBe("Question 2");
+            expect(messages[0].content).toBe("[@User] Question 1");
+            expect(messages[1].content).toBe("[@Agent] Answer 1");
+            expect(messages[2].content).toBe("[@User] Question 2");
         });
     });
 });

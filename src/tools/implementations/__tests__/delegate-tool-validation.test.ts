@@ -1,6 +1,14 @@
-import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, spyOn, mock } from "bun:test";
 import type { ToolContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
+
+// Mock NDK before importing modules that use it
+mock.module("@/nostr", () => ({
+    getNDK: () => ({
+        fetchEvent: async () => null,
+    }),
+}));
+
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
@@ -113,34 +121,10 @@ describe("Delegation tools - Self-delegation validation", () => {
     });
 
     describe("delegate_followup tool", () => {
-        it("should reject self-delegation when delegation points to self", async () => {
-            // Create RAL first, then pass its number to context
-            const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
-            const context = createMockContext(ralNumber);
-            const followupTool = createDelegateFollowupTool(context);
-            registry.saveState(context.agent.pubkey, conversationId, ralNumber, [], [
-                {
-                    eventId: "self-delegation-event",
-                    recipientPubkey: "agent-pubkey-123", // Same as self
-                    prompt: "Original task",
-                },
-            ]);
+        // Note: Self-delegation validation was removed from delegate_followup
+        // Self-delegation is now allowed as the delegate tool handles the validation
 
-            const input = {
-                delegation_event_id: "self-delegation-event",
-                message: "Follow-up question",
-            };
-
-            try {
-                await followupTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Self-delegation is not permitted");
-            }
-        });
-
-        it("should error when delegation event ID not found", async () => {
+        it("should error when delegation conversation not found", async () => {
             // Create RAL first, then pass its number to context
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId);
@@ -148,7 +132,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             const followupTool = createDelegateFollowupTool(context);
 
             const input = {
-                delegation_event_id: "non-existent-event",
+                delegation_conversation_id: "non-existent-conv", // Correct parameter name
                 message: "Follow-up question",
             };
 
@@ -156,7 +140,8 @@ describe("Delegation tools - Self-delegation validation", () => {
                 await followupTool.execute(input);
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
-                expect(error.message).toContain("No delegation found with event ID");
+                // With NDK mocked to return null, should get "Could not fetch" error
+                expect(error.message).toContain("Could not fetch delegation conversation");
             }
         });
     });
@@ -200,26 +185,30 @@ describe("Delegation tools - RAL isolation", () => {
 
     describe("delegate tool", () => {
         it("should allow delegation when previous RAL has pending delegations but current RAL does not", async () => {
+            const agentPubkey = "agent-pubkey-123";
+
             // Create RAL 1 with pending delegations (simulating previous execution)
-            const ral1Number = registry.create("agent-pubkey-123", conversationId);
-            registry.setPendingDelegations("agent-pubkey-123", conversationId, ral1Number, [
+            const ral1Number = registry.create(agentPubkey, conversationId);
+            registry.setPendingDelegations(agentPubkey, conversationId, ral1Number, [
                 {
                     delegationConversationId: "old-delegation-id",
                     recipientPubkey: "some-other-agent",
-                    recipientSlug: "other-agent",
+                    senderPubkey: agentPubkey,
+                    prompt: "Old task",
+                    ralNumber: ral1Number,
                 },
             ]);
 
             // Create RAL 2 (current execution) with NO pending delegations
-            const ral2Number = registry.create("agent-pubkey-123", conversationId);
+            const ral2Number = registry.create(agentPubkey, conversationId);
 
-            // Verify RAL 1 still has pending delegations
-            const ral1 = registry.getRAL("agent-pubkey-123", conversationId, ral1Number);
-            expect(ral1?.pendingDelegations.length).toBe(1);
+            // Verify RAL 1 still has pending delegations (using conversation-level API)
+            const ral1Pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ral1Number);
+            expect(ral1Pending.length).toBe(1);
 
             // Verify RAL 2 has no pending delegations
-            const ral2 = registry.getRAL("agent-pubkey-123", conversationId, ral2Number);
-            expect(ral2?.pendingDelegations.length).toBe(0);
+            const ral2Pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ral2Number);
+            expect(ral2Pending.length).toBe(0);
 
             // Context with RAL 2 number should allow new delegation
             const context = createMockContext(ral2Number);
@@ -239,13 +228,17 @@ describe("Delegation tools - RAL isolation", () => {
         });
 
         it("should block delegation when current RAL has pending delegations", async () => {
+            const agentPubkey = "agent-pubkey-123";
+
             // Create a RAL with pending delegations
-            const ralNumber = registry.create("agent-pubkey-123", conversationId);
-            registry.setPendingDelegations("agent-pubkey-123", conversationId, ralNumber, [
+            const ralNumber = registry.create(agentPubkey, conversationId);
+            registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [
                 {
                     delegationConversationId: "pending-delegation-id",
                     recipientPubkey: "some-other-agent",
-                    recipientSlug: "other-agent",
+                    senderPubkey: agentPubkey,
+                    prompt: "Pending task",
+                    ralNumber,
                 },
             ]);
 
@@ -264,7 +257,8 @@ describe("Delegation tools - RAL isolation", () => {
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 expect(error.message).toContain("Cannot create new delegation while waiting for existing delegation");
-                expect(error.message).toContain("other-agent");
+                // The error shows truncated pubkey, so just check for the prefix
+                expect(error.message).toContain("some-oth");
             }
         });
 

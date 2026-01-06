@@ -8,9 +8,23 @@
  * 4. Injection handling
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import type { ToolCallPart, ToolResultPart } from "ai";
+
+// Mock PubkeyService for attribution tests
+mock.module("@/services/PubkeyService", () => ({
+    getPubkeyService: () => ({
+        getName: async (pubkey: string) => {
+            const names: Record<string, string> = {
+                "user-pubkey-456": "User",
+                "agent-pubkey-123": "Agent",
+            };
+            return names[pubkey] ?? "Unknown";
+        },
+    }),
+}));
+
 import { ConversationStore } from "@/conversations/ConversationStore";
 
 describe("ConversationStore Agent Execution Integration", () => {
