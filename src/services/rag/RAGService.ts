@@ -47,7 +47,9 @@ export class RAGService {
             logger.debug("Initializing RAGService components");
 
             this.dbManager = new RAGDatabaseService();
-            this.embeddingProvider = await EmbeddingProviderFactory.create();
+            this.embeddingProvider = await EmbeddingProviderFactory.create(undefined, {
+                scope: "global",
+            });
             this.operations = new RAGOperations(this.dbManager, this.embeddingProvider);
 
             logger.info("RAGService initialized successfully");

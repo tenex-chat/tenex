@@ -1,104 +1,12 @@
-import * as os from "node:os";
-import * as path from "node:path";
 import * as fileSystem from "@/lib/fs";
 import {
     type EmbeddingConfig,
     EmbeddingProviderFactory,
 } from "@/services/rag/EmbeddingProviderFactory";
+import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
 import inquirer from "inquirer";
-
-const EMBED_CONFIG_FILE = "embed.json";
-
-/**
- * Raw configuration as it may appear in JSON files
- * Supports both old format (string or partial object) and new format (full object)
- */
-type RawEmbedConfig =
-    | string // Old format: just model name
-    | { model: string; provider?: never } // Old format: object with just model
-    | { provider: "local" | "openai"; model: string; apiKey?: string }; // New format
-
-function isRawEmbedConfig(value: unknown): value is RawEmbedConfig {
-    if (typeof value === "string") {
-        return true;
-    }
-
-    if (typeof value !== "object" || value === null) {
-        return false;
-    }
-
-    const obj = value as Record<string, unknown>;
-
-    // Must have a model
-    if (!("model" in obj) || typeof obj.model !== "string") {
-        return false;
-    }
-
-    // If provider is present, must be valid
-    if ("provider" in obj) {
-        if (obj.provider !== "local" && obj.provider !== "openai") {
-            return false;
-        }
-    }
-
-    // If apiKey is present, must be string
-    if ("apiKey" in obj && typeof obj.apiKey !== "string") {
-        return false;
-    }
-
-    return true;
-}
-
-/**
- * Load existing embedding configuration
- */
-async function loadEmbedConfig(dir: string): Promise<EmbeddingConfig | null> {
-    const filePath = path.join(dir, EMBED_CONFIG_FILE);
-    if (await fileSystem.fileExists(filePath)) {
-        const config = await fileSystem.readJsonFile<unknown>(filePath);
-        if (!isRawEmbedConfig(config)) {
-            logger.warn(`Invalid embed config at ${filePath}, ignoring`);
-            return null;
-        }
-        return parseEmbedConfig(config);
-    }
-    return null;
-}
-
-/**
- * Parse raw config into EmbeddingConfig
- */
-function parseEmbedConfig(raw: RawEmbedConfig): EmbeddingConfig {
-    // Support both old format (just model string) and new format
-    if (typeof raw === "string") {
-        return {
-            provider: "local",
-            model: raw,
-        };
-    }
-
-    if (raw.model && !raw.provider) {
-        // Infer provider from model name
-        const model = raw.model;
-        if (model.includes("text-embedding")) {
-            return {
-                provider: "openai",
-                model: model,
-            };
-        }
-        return {
-            provider: "local",
-            model: model,
-        };
-    }
-
-    return {
-        provider: raw.provider || "local",
-        model: raw.model || "Xenova/all-MiniLM-L6-v2",
-    };
-}
 
 /**
  * Command for configuring embedding provider
@@ -110,34 +18,32 @@ export const embedCommand = new Command("embed")
     .option("--project", "Use project-specific configuration instead of global")
     .action(async (options) => {
         try {
-            let configDir: string;
-            let isGlobal: boolean;
+            const scope: "global" | "project" = options.project ? "project" : "global";
+            const projectPath = process.cwd();
+            const baseDir =
+                scope === "project"
+                    ? configService.getProjectPath(projectPath)
+                    : configService.getGlobalPath();
 
-            if (options.project) {
-                // Project-specific configuration
-                const projectPath = process.cwd();
-
+            if (scope === "project") {
                 // Check if we're in a TENEX project
-                if (!(await fileSystem.directoryExists(path.join(projectPath, ".tenex")))) {
+                if (!(await fileSystem.directoryExists(baseDir))) {
                     logger.error(
                         "No .tenex directory found. Make sure you're in a TENEX project directory."
                     );
-                    process.exit(1);
+                    process.exitCode = 1;
+                    return;
                 }
-
-                configDir = path.join(projectPath, ".tenex");
-                isGlobal = false;
             } else {
-                // Global configuration
-                configDir = path.join(os.homedir(), ".tenex");
-
                 // Ensure global config directory exists
-                await fileSystem.ensureDirectory(configDir);
-                isGlobal = true;
+                await fileSystem.ensureDirectory(baseDir);
             }
 
             // Load existing configuration
-            const existing = await loadEmbedConfig(configDir);
+            const existing = await EmbeddingProviderFactory.loadConfiguration({
+                scope,
+                projectPath: scope === "project" ? projectPath : undefined,
+            });
 
             // Prompt for provider selection
             const { provider } = await inquirer.prompt([
@@ -242,19 +148,18 @@ export const embedCommand = new Command("embed")
             }
 
             // Save configuration
-            const config: EmbeddingConfig = {
+            const embeddingConfig: EmbeddingConfig = {
                 provider: provider as "local" | "openai",
                 model,
                 apiKey,
             };
 
-            await EmbeddingProviderFactory.saveConfiguration(
-                config,
-                isGlobal ? "global" : "project"
-            );
+            await EmbeddingProviderFactory.saveConfiguration(embeddingConfig, scope, {
+                projectPath: scope === "project" ? projectPath : undefined,
+            });
 
             logger.info(
-                `✅ Embedding configuration saved to ${isGlobal ? "global" : "project"} config\n` +
+                `✅ Embedding configuration saved to ${scope} config\n` +
                     `   Provider: ${provider}\n` +
                     `   Model: ${model}`
             );
@@ -262,10 +167,10 @@ export const embedCommand = new Command("embed")
             // Handle SIGINT (Ctrl+C) gracefully
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {
-                process.exit(0);
+                return;
             }
 
             logger.error(`Failed to configure embedding model: ${error}`);
-            process.exit(1);
+            process.exitCode = 1;
         }
     });
