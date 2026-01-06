@@ -10,7 +10,7 @@
  * Static methods provide the global registry for all conversation stores.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "fs";
 import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
@@ -420,6 +420,49 @@ export class ConversationStore {
     static listConversationIdsFromDisk(): string[] {
         const conversationsDir = ConversationStore.getConversationsDir();
         if (!conversationsDir) return [];
+
+        try {
+            if (!existsSync(conversationsDir)) return [];
+
+            const files = readdirSync(conversationsDir);
+            return files
+                .filter(file => file.endsWith(".json"))
+                .map(file => file.replace(".json", ""));
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * List all project IDs from disk.
+     * Scans the base path (~/.tenex/projects) for subdirectories.
+     * Returns a list of project IDs (folder names).
+     */
+    static listProjectIdsFromDisk(): string[] {
+        try {
+            if (!existsSync(ConversationStore.basePath)) return [];
+
+            const entries = readdirSync(ConversationStore.basePath);
+            return entries.filter(entry => {
+                const entryPath = join(ConversationStore.basePath, entry);
+                try {
+                    return statSync(entryPath).isDirectory();
+                } catch {
+                    return false;
+                }
+            });
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * List all conversation IDs from disk for a specific project.
+     * Scans ${basePath}/${projectId}/conversations for .json files.
+     * Returns a list of conversation IDs (filenames without extension).
+     */
+    static listConversationIdsFromDiskForProject(projectId: string): string[] {
+        const conversationsDir = join(ConversationStore.basePath, projectId, "conversations");
 
         try {
             if (!existsSync(conversationsDir)) return [];

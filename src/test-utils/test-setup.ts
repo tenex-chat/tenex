@@ -20,11 +20,15 @@ function resetSingletons() {
     // @ts-expect-error - accessing private static for testing
     RALRegistry.instance = undefined;
 
-    // Reset ConversationStore static state
-    ConversationStore.reset();
+    // Reset ConversationStore static state (check exists for tests that mock ConversationStore)
+    if (typeof ConversationStore.reset === "function") {
+        ConversationStore.reset();
+    }
 
-    // Reset ProviderRegistry singleton
-    ProviderRegistry.resetInstance();
+    // Reset ProviderRegistry singleton (check exists for tests that mock ProviderRegistry)
+    if (typeof ProviderRegistry.resetInstance === "function") {
+        ProviderRegistry.resetInstance();
+    }
 }
 
 // Register global hooks
