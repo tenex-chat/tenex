@@ -799,7 +799,7 @@ export class ConversationStore {
                     // Current RAL - include
                     result.push(await this.entryToMessage(entry, agentPubkey));
                 } else if (activeRals.has(entry.ral)) {
-                    // Other active RAL - skip (context added separately via addConcurrentRALContext)
+                    // Other active RAL - skip to avoid message duplication
                     continue;
                 } else {
                     // Completed RAL - include all

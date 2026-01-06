@@ -19,7 +19,6 @@ import {
     type ConversationEntry,
     type Injection,
 } from "../ConversationStore";
-import { buildRalSummary } from "../RalSummaryFormatter";
 
 // Mock PubkeyService for attribution tests
 const mockGetName = mock(async (pubkey: string) => {
@@ -266,8 +265,7 @@ describe("ConversationStore", () => {
             const ral2 = store.createRal(AGENT1_PUBKEY);
             const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral2);
 
-            // Should NOT include RAL 1 messages - they're excluded entirely
-            // (concurrent RAL context is added separately by AgentExecutor via addConcurrentRALContext)
+            // Should NOT include RAL 1 messages - other active RALs are excluded
             expect(messages).toHaveLength(0);
         });
 
@@ -402,65 +400,6 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user"); // Changed: all non-self = user
-        });
-    });
-
-    describe("RAL Summary Generation", () => {
-        beforeEach(() => {
-            store.load(PROJECT_ID, CONVERSATION_ID);
-        });
-
-        it("should generate summary with text outputs and tool calls", () => {
-            store.createRal(AGENT1_PUBKEY);
-            store.addMessage({
-                pubkey: AGENT1_PUBKEY,
-                ral: 1,
-                content: "I will research this",
-                messageType: "text",
-            });
-            store.addMessage({
-                pubkey: AGENT1_PUBKEY,
-                ral: 1,
-                content: "",
-                messageType: "tool-call",
-                toolData: [{
-                    type: "tool-call",
-                    toolCallId: "call_1",
-                    toolName: "read_path",
-                    input: { path: "/tmp/test.txt" },
-                }] as ToolCallPart[],
-            });
-
-            const summary = buildRalSummary(store.getAllMessages(), AGENT1_PUBKEY, 1);
-
-            expect(summary).toContain("reason-act-loop (#1) executing");
-            expect(summary).toContain("[text-output] I will research this");
-            expect(summary).toContain('[tool read_path] path="/tmp/test.txt"');
-        });
-
-        it("should include tool args in summary", () => {
-            store.createRal(AGENT1_PUBKEY);
-            store.addMessage({
-                pubkey: AGENT1_PUBKEY,
-                ral: 1,
-                content: "",
-                messageType: "tool-call",
-                toolData: [{
-                    type: "tool-call",
-                    toolCallId: "call_1",
-                    toolName: "write_file",
-                    input: {
-                        path: "/tmp/out.txt",
-                        content: "hello world",
-                    },
-                }] as ToolCallPart[],
-            });
-
-            const summary = buildRalSummary(store.getAllMessages(), AGENT1_PUBKEY, 1);
-
-            expect(summary).toContain("[tool write_file]");
-            expect(summary).toContain('path="/tmp/out.txt"');
-            expect(summary).toContain('content="hello world"');
         });
     });
 
