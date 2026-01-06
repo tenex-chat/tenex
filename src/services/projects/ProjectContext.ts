@@ -6,8 +6,7 @@ import type { PairingManager } from "@/services/pairing";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import type { NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -18,21 +17,8 @@ export class ProjectContext {
      * Event that represents this project, note that this is SIGNED
      * by the USER, so this.project.pubkey is NOT the project's pubkey but the
      * USER OWNER'S pubkey.
-     *
-     * - projectCtx.pubkey = The project agent's pubkey (the bot/system)
-     * - projectCtx.project.pubkey = The user's pubkey (who created the project)
      */
     public project: NDKProject;
-
-    /**
-     * Signer the project uses (hardwired to project manager's signer)
-     */
-    public readonly signer?: NDKPrivateKeySigner;
-
-    /**
-     * Pubkey of the project (PM's pubkey)
-     */
-    public readonly pubkey?: Hexpubkey;
 
     /**
      * The project manager agent for this project
@@ -175,12 +161,6 @@ export class ProjectContext {
 
         if (projectManagerAgent) {
             logger.info(`Using "${projectManagerAgent.name}" as Project Manager`);
-        }
-
-        // Hardwire to project manager's signer and pubkey (if available)
-        if (projectManagerAgent) {
-            this.signer = projectManagerAgent.signer;
-            this.pubkey = projectManagerAgent.pubkey;
             this.projectManager = projectManagerAgent;
         }
 

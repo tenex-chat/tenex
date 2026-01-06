@@ -119,8 +119,8 @@ Focus on what was accomplished or discussed, not on the process.`,
                 event.tags.push(["model", summarizationConfig.model]);
 
                 // Sign and publish
-                if (this.context.signer) {
-                    await event.sign(this.context.signer);
+                if (this.context.projectManager?.signer) {
+                    await event.sign(this.context.projectManager.signer);
                     await event.publish();
                     console.log(
                         `Published metadata for conversation ${conversation.id}: ${result.title}`

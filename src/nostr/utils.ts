@@ -14,8 +14,8 @@ export function isEventFromAgent(event: NDKEvent): boolean {
 
     const projectCtx = getProjectContext();
 
-    // Check if it's from the project itself
-    if (projectCtx.pubkey && projectCtx.pubkey === event.pubkey) {
+    // Check if it's from the project manager
+    if (projectCtx.projectManager?.pubkey === event.pubkey) {
         return true;
     }
 

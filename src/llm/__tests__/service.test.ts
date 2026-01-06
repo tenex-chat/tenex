@@ -652,6 +652,7 @@ describe("LLMService telemetry configuration", () => {
             1000,
             undefined,
             undefined,
+            undefined,
             "test-agent"
         );
 

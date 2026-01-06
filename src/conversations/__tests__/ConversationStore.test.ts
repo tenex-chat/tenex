@@ -69,7 +69,6 @@ describe("ConversationStore", () => {
 
             const filePath = join(
                 TEST_DIR,
-                "projects",
                 PROJECT_ID,
                 "conversations",
                 `${CONVERSATION_ID}.json`
