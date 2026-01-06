@@ -397,6 +397,7 @@ export class AgentExecutor {
                             currentBranch: context.currentBranch,
                             availableAgents: Array.from(projectContext.agents.values()),
                             mcpManager: projectContext.mcpManager,
+                            agentLessons: projectContext.agentLessons,
                         });
                         const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
@@ -610,6 +611,7 @@ export class AgentExecutor {
                 currentBranch: context.currentBranch,
                 availableAgents: Array.from(projectContext.agents.values()),
                 mcpManager: projectContext.mcpManager,
+                agentLessons: projectContext.agentLessons,
             }) : [];
             const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
@@ -624,6 +626,14 @@ export class AgentExecutor {
             const toolNames = context.agent.tools || [];
             const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
+            // Check todo state for supervision context
+            const hasTodoList = conversationStore
+                ? conversationStore.getTodos(context.agent.pubkey).length > 0
+                : false;
+            const hasBeenNudgedAboutTodos = conversationStore
+                ? conversationStore.hasBeenNudgedAboutTodos(context.agent.pubkey)
+                : false;
+
             const supervisionContext: PostCompletionContext = {
                 agentSlug: context.agent.slug,
                 agentPubkey: context.agent.pubkey,
@@ -633,6 +643,8 @@ export class AgentExecutor {
                 systemPrompt,
                 conversationHistory: conversationMessages,
                 availableTools: toolsObject,
+                hasTodoList,
+                hasBeenNudgedAboutTodos,
             };
 
             const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext);
@@ -649,6 +661,12 @@ export class AgentExecutor {
                     heuristic: supervisionResult.heuristicId,
                     actionType: supervisionResult.correctionAction.type,
                 });
+
+                // Mark agent as nudged if this was the todo nudge heuristic
+                if (supervisionResult.heuristicId === "consecutive-tools-without-todo" && conversationStore) {
+                    conversationStore.setNudgedAboutTodos(context.agent.pubkey);
+                    await conversationStore.save();
+                }
 
                 if (supervisionResult.correctionAction.type === "suppress-publish" &&
                     supervisionResult.correctionAction.reEngage) {
@@ -667,6 +685,15 @@ export class AgentExecutor {
 
                     // Re-execute the agent
                     return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
+                } else if (supervisionResult.correctionAction.type === "inject-message" &&
+                    supervisionResult.correctionAction.message) {
+                    // Queue message for agent's next execution (no re-engage)
+                    ralRegistry.queueSystemMessage(
+                        context.agent.pubkey,
+                        context.conversationId,
+                        ralNumber,
+                        supervisionResult.correctionAction.message
+                    );
                 }
             } else {
                 logger.info("[AgentExecutor] Supervision check passed", {
@@ -730,7 +757,7 @@ export class AgentExecutor {
         // This allows create_dynamic_tool to add new tools mid-stream
         context.activeToolsObject = toolsObject;
 
-        const sessionManager = new SessionManager(context.agent, context.conversationId);
+        const sessionManager = new SessionManager(context.agent, context.conversationId, context.workingDirectory);
         const { sessionId } = sessionManager.getSession();
 
         const ralRegistry = RALRegistry.getInstance();
@@ -766,6 +793,7 @@ export class AgentExecutor {
             currentBranch: context.currentBranch,
             availableAgents: Array.from(projectContext.agents.values()),
             mcpManager: projectContext.mcpManager,
+            agentLessons: projectContext.agentLessons,
         });
 
         // Combine system prompt with conversation messages
@@ -796,7 +824,11 @@ export class AgentExecutor {
 
         const abortSignal = llmOpsRegistry.registerOperation(context);
 
-        const llmService = context.agent.createLLMService({ tools: toolsObject, sessionId });
+        const llmService = context.agent.createLLMService({
+            tools: toolsObject,
+            sessionId,
+            workingDirectory: context.workingDirectory,
+        });
 
         const agentPublisher = context.agentPublisher;
         if (!agentPublisher) {
