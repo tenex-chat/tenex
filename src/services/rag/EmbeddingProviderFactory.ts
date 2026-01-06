@@ -17,6 +17,23 @@ export interface EmbeddingConfig {
     apiKey?: string;
 }
 
+export interface EmbeddingConfigOptions {
+    /**
+     * Path to the project metadata directory (e.g., ~/.tenex/projects/<dTag>)
+     */
+    metadataPath?: string;
+    /**
+     * Path to the project repository root (used to derive project .tenex path)
+     */
+    projectPath?: string;
+    /**
+     * Scope for resolution. "auto" (default) tries project then global.
+     * "project" prioritizes project config but will still fall back to global defaults.
+     * "global" only reads the global config.
+     */
+    scope?: "auto" | "project" | "global";
+}
+
 /**
  * Raw configuration as it may appear in JSON files
  * Supports both old format (string or partial object) and new format (full object)
@@ -70,8 +87,11 @@ export class EmbeddingProviderFactory {
     /**
      * Create an embedding provider based on configuration
      */
-    static async create(customConfig?: EmbeddingConfig): Promise<EmbeddingProvider> {
-        const config = customConfig || (await EmbeddingProviderFactory.loadConfiguration());
+    static async create(
+        customConfig?: EmbeddingConfig,
+        options?: EmbeddingConfigOptions
+    ): Promise<EmbeddingProvider> {
+        const config = customConfig || (await EmbeddingProviderFactory.loadConfiguration(options));
 
         logger.debug(`Creating embedding provider: ${config.provider}/${config.model}`);
 
@@ -87,48 +107,28 @@ export class EmbeddingProviderFactory {
     }
 
     /**
-     * Load embedding configuration from ConfigService paths
+     * Load embedding configuration using configured paths.
+     * If a project path is provided, project config is tried first, then global.
+     * If no paths are provided, falls back to CWD project path (legacy) and then global.
      */
-    private static async loadConfiguration(): Promise<EmbeddingConfig> {
+    static async loadConfiguration(options?: EmbeddingConfigOptions): Promise<EmbeddingConfig> {
         try {
-            // Try project config first
-            const projectPath = process.cwd();
-            const projectConfigPath = path.join(
-                config.getProjectPath(projectPath),
-                EmbeddingProviderFactory.EMBED_CONFIG_FILE
-            );
+            const basePaths = EmbeddingProviderFactory.resolveConfigBases(options);
 
-            if (await fileExists(projectConfigPath)) {
-                const projectConfig = await readJsonFile<unknown>(projectConfigPath);
-                if (!isRawEmbeddingConfig(projectConfig)) {
-                    logger.warn(
-                        `Invalid project embedding config at ${projectConfigPath}, using defaults`
-                    );
+            for (const basePath of basePaths) {
+                const configPath = path.join(basePath, EmbeddingProviderFactory.EMBED_CONFIG_FILE);
+                if (!(await fileExists(configPath))) continue;
+
+                const rawConfig = await readJsonFile<unknown>(configPath);
+                if (!isRawEmbeddingConfig(rawConfig)) {
+                    logger.warn(`Invalid embedding config at ${configPath}, using defaults`);
                     return EmbeddingProviderFactory.DEFAULT_CONFIG;
                 }
-                logger.debug(`Loaded project embedding config from ${projectConfigPath}`);
-                return EmbeddingProviderFactory.parseConfig(projectConfig);
+
+                logger.debug(`Loaded embedding config from ${configPath}`);
+                return EmbeddingProviderFactory.parseConfig(rawConfig);
             }
 
-            // Fall back to global config
-            const globalConfigPath = path.join(
-                config.getGlobalPath(),
-                EmbeddingProviderFactory.EMBED_CONFIG_FILE
-            );
-
-            if (await fileExists(globalConfigPath)) {
-                const globalConfig = await readJsonFile<unknown>(globalConfigPath);
-                if (!isRawEmbeddingConfig(globalConfig)) {
-                    logger.warn(
-                        `Invalid global embedding config at ${globalConfigPath}, using defaults`
-                    );
-                    return EmbeddingProviderFactory.DEFAULT_CONFIG;
-                }
-                logger.debug(`Loaded global embedding config from ${globalConfigPath}`);
-                return EmbeddingProviderFactory.parseConfig(globalConfig);
-            }
-
-            // Use default if no config found
             logger.debug("No embedding configuration found, using defaults");
             return EmbeddingProviderFactory.DEFAULT_CONFIG;
         } catch (error) {
@@ -175,12 +175,14 @@ export class EmbeddingProviderFactory {
      */
     static async saveConfiguration(
         embeddingConfig: EmbeddingConfig,
-        scope: "global" | "project" = "global"
+        scope: "global" | "project" = "global",
+        options?: EmbeddingConfigOptions
     ): Promise<void> {
         const basePath =
             scope === "global"
                 ? config.getGlobalPath()
-                : config.getProjectPath(process.cwd());
+                : EmbeddingProviderFactory.resolveProjectBase(options) ||
+                  config.getProjectPath(process.cwd());
 
         const configPath = path.join(basePath, EmbeddingProviderFactory.EMBED_CONFIG_FILE);
 
@@ -197,5 +199,34 @@ export class EmbeddingProviderFactory {
         logger.info(
             `Embedding configuration saved to ${scope} config: ${embeddingConfig.provider}/${embeddingConfig.model}`
         );
+    }
+
+    private static resolveConfigBases(options?: EmbeddingConfigOptions): string[] {
+        const scope = options?.scope ?? "auto";
+        const bases: string[] = [];
+
+        if (scope !== "global") {
+            const projectBase = EmbeddingProviderFactory.resolveProjectBase(options);
+            if (projectBase) {
+                bases.push(projectBase);
+            } else if (!options) {
+                // Legacy fallback to current working directory
+                bases.push(config.getProjectPath(process.cwd()));
+            }
+        }
+
+        // Always append global as fallback/default
+        bases.push(config.getGlobalPath());
+        return bases;
+    }
+
+    private static resolveProjectBase(options?: EmbeddingConfigOptions): string | undefined {
+        if (options?.metadataPath) {
+            return options.metadataPath;
+        }
+        if (options?.projectPath) {
+            return config.getProjectPath(options.projectPath);
+        }
+        return undefined;
     }
 }

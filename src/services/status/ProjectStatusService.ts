@@ -15,6 +15,7 @@ import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { join } from "path";
 
 /**
  * StatusPublisher handles periodic publishing of status events to Nostr.
@@ -85,7 +86,7 @@ export class ProjectStatusService {
         }
 
         // Get the actual project base path from config
-        const projectBasePath = `${config.getConfig().projectsBase}/${projectPath}`;
+        const projectBasePath = join(config.getProjectsBase(), projectPath);
 
         await projectContextStore.run(this.projectContext, async () => {
             await this.publishStatusEvent(projectBasePath);

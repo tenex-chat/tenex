@@ -83,9 +83,9 @@ export class Daemon {
                 throw new Error("whitelistedPubkeys not configured");
             }
             this.whitelistedPubkeys = whitelistedPubkeys;
-            const projectsBase = loadedConfig.projectsBase;
-            if (!projectsBase) {
-                throw new Error("projectsBase not configured");
+            const projectsBase = config.getProjectsBase();
+            if (!loadedConfig.projectsBase) {
+                logger.warn(`projectsBase not configured, falling back to default: ${projectsBase}`);
             }
             this.projectsBase = projectsBase;
 

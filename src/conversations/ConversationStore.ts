@@ -356,7 +356,7 @@ export class ConversationStore {
      */
     static getConversationsDir(): string | null {
         if (!ConversationStore.projectId) return null;
-        return join(ConversationStore.basePath, "projects", ConversationStore.projectId, "conversations");
+        return join(ConversationStore.basePath, ConversationStore.projectId, "conversations");
     }
 
     /**
@@ -392,6 +392,7 @@ export class ConversationStore {
     static reset(): void {
         ConversationStore.stores.clear();
         ConversationStore.eventCache.clear();
+        ConversationStore.basePath = join(homedir(), ".tenex", "projects");
         ConversationStore.projectId = null;
         ConversationStore.agentPubkeys.clear();
     }
@@ -423,20 +424,11 @@ export class ConversationStore {
         if (!this.projectId || !this.conversationId) {
             throw new Error("Must call load() before accessing file");
         }
-        return join(
-            this.basePath,
-            this.projectId,
-            "conversations",
-            `${this.conversationId}.json`
-        );
+        return join(this.basePath, this.projectId, "conversations", `${this.conversationId}.json`);
     }
 
     private ensureDirectory(): void {
-        const dir = join(
-            this.basePath,
-            this.projectId!,
-            "conversations"
-        );
+        const dir = join(this.basePath, this.projectId!, "conversations");
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
         }
