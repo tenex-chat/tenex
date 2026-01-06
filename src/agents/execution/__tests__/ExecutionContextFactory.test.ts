@@ -1,27 +1,11 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
-
-// Mock git utilities
-const mockListWorktrees = mock(() => Promise.resolve([]));
-const mockCreateWorktree = mock((projectPath: string, branch: string) =>
-    Promise.resolve(`${projectPath}/.worktrees/${branch.replace(/\//g, "_")}`)
-);
-const mockGetCurrentBranchWithFallback = mock(() => Promise.resolve("main"));
-
-mock.module("@/utils/git/worktree", () => ({
-    listWorktrees: mockListWorktrees,
-    createWorktree: mockCreateWorktree,
-    sanitizeBranchName: (branch: string) => branch.replace(/\//g, "_"),
-    WORKTREES_DIR: ".worktrees",
-}));
-
-mock.module("@/utils/git/initializeGitRepo", () => ({
-    getCurrentBranchWithFallback: mockGetCurrentBranchWithFallback,
-}));
+import * as worktreeModule from "@/utils/git/worktree";
+import * as initializeGitRepoModule from "@/utils/git/initializeGitRepo";
 
 describe("ExecutionContextFactory", () => {
     const mockAgent: AgentInstance = {
@@ -41,12 +25,32 @@ describe("ExecutionContextFactory", () => {
 
     const projectBasePath = "/test/project";
 
+    // Store original functions for restoration
+    const originalListWorktrees = worktreeModule.listWorktrees;
+    const originalCreateWorktree = worktreeModule.createWorktree;
+    const originalGetCurrentBranch = initializeGitRepoModule.getCurrentBranchWithFallback;
+
+    // Spies that will be set up in beforeEach
+    let listWorktreesSpy: ReturnType<typeof spyOn>;
+    let createWorktreeSpy: ReturnType<typeof spyOn>;
+    let getCurrentBranchSpy: ReturnType<typeof spyOn>;
+
     beforeEach(() => {
-        mockListWorktrees.mockClear();
-        mockCreateWorktree.mockClear();
-        mockGetCurrentBranchWithFallback.mockClear();
-        mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+        // Set up spies instead of mock.module
+        listWorktreesSpy = spyOn(worktreeModule, "listWorktrees").mockResolvedValue([]);
+        createWorktreeSpy = spyOn(worktreeModule, "createWorktree").mockImplementation(
+            (projectPath: string, branch: string) =>
+                Promise.resolve(`${projectPath}/.worktrees/${branch.replace(/\//g, "_")}`)
+        );
+        getCurrentBranchSpy = spyOn(initializeGitRepoModule, "getCurrentBranchWithFallback").mockResolvedValue("main");
         mockCoordinator.getConversation = mock(() => undefined);
+    });
+
+    afterEach(() => {
+        // Restore original functions to prevent pollution of other tests
+        listWorktreesSpy.mockRestore();
+        createWorktreeSpy.mockRestore();
+        getCurrentBranchSpy.mockRestore();
     });
 
     describe("createExecutionContext", () => {
@@ -57,7 +61,7 @@ describe("ExecutionContextFactory", () => {
                 tags: [["branch", "feature-branch"]],
             };
 
-            mockListWorktrees.mockResolvedValue([
+            listWorktreesSpy.mockResolvedValue([
                 { branch: "main", path: "/test/project" },
                 { branch: "feature-branch", path: "/test/project/.worktrees/feature-branch" },
             ]);
@@ -76,7 +80,7 @@ describe("ExecutionContextFactory", () => {
             expect(context.currentBranch).toBe("feature-branch");
             expect(context.projectBasePath).toBe(projectBasePath);
             expect(context.agent).toBe(mockAgent);
-            expect(mockListWorktrees).toHaveBeenCalledWith(projectBasePath);
+            expect(listWorktreesSpy).toHaveBeenCalledWith(projectBasePath);
         });
 
         it("should create worktree when branch tag has no matching worktree", async () => {
@@ -86,7 +90,7 @@ describe("ExecutionContextFactory", () => {
                 tags: [["branch", "feature/nonexistent"]],
             };
 
-            mockListWorktrees.mockResolvedValue([
+            listWorktreesSpy.mockResolvedValue([
                 { branch: "main", path: "/test/project" },
             ]);
 
@@ -100,14 +104,14 @@ describe("ExecutionContextFactory", () => {
             });
 
             // Assert - should create worktree and use the returned path
-            expect(mockCreateWorktree).toHaveBeenCalledWith(projectBasePath, "feature/nonexistent", "main");
+            expect(createWorktreeSpy).toHaveBeenCalledWith(projectBasePath, "feature/nonexistent", "main");
             expect(context.workingDirectory).toBe("/test/project/.worktrees/feature_nonexistent");
             expect(context.currentBranch).toBe("feature/nonexistent");
         });
 
         it("should use project root when no branch tag", async () => {
             // Setup: Event has no branch tag
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            getCurrentBranchSpy.mockResolvedValue("main");
 
             // Execute
             const context = await createExecutionContext({
@@ -121,12 +125,12 @@ describe("ExecutionContextFactory", () => {
             // Assert - should use projectBasePath directly
             expect(context.workingDirectory).toBe("/test/project");
             expect(context.currentBranch).toBe("main");
-            expect(mockGetCurrentBranchWithFallback).toHaveBeenCalledWith(projectBasePath);
+            expect(getCurrentBranchSpy).toHaveBeenCalledWith(projectBasePath);
         });
 
         it("should pass through optional fields", async () => {
             // Setup
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            getCurrentBranchSpy.mockResolvedValue("main");
             const mockPublisher = { publish: mock() };
 
             // Execute
@@ -149,7 +153,7 @@ describe("ExecutionContextFactory", () => {
 
         it("should create getConversation function", async () => {
             // Setup
-            mockGetCurrentBranchWithFallback.mockResolvedValue("main");
+            getCurrentBranchSpy.mockResolvedValue("main");
             const mockConversation = { id: "test-conversation" };
             const originalGet = ConversationStore.get;
             ConversationStore.get = mock(() => mockConversation) as typeof ConversationStore.get;
@@ -175,7 +179,7 @@ describe("ExecutionContextFactory", () => {
 
         it("should use project root with fallback branch when no branch tag", async () => {
             // Setup: No branch tag
-            mockGetCurrentBranchWithFallback.mockResolvedValue("master");
+            getCurrentBranchSpy.mockResolvedValue("master");
 
             // Execute
             const context = await createExecutionContext({

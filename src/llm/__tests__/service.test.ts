@@ -45,16 +45,32 @@ mock.module("../middleware/flight-recorder", () => ({
     createFlightRecorderMiddleware: mock(() => ({})),
 }));
 
-// Mock OpenTelemetry
+// Mock OpenTelemetry - must be comprehensive to avoid polluting other tests
+const mockSpan = {
+    addEvent: mock(() => {}),
+    setAttribute: mock(() => {}),
+    setStatus: mock(() => {}),
+    end: mock(() => {}),
+    isRecording: () => true,
+    recordException: mock(() => {}),
+    updateName: mock(() => {}),
+    setAttributes: mock(() => {}),
+    spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
+};
+
 mock.module("@opentelemetry/api", () => ({
     trace: {
-        getActiveSpan: () => ({
-            addEvent: mock(() => {}),
-            setAttribute: mock(() => {}),
-            setStatus: mock(() => {}),
+        getActiveSpan: () => mockSpan,
+        getTracer: () => ({
+            startSpan: () => mockSpan,
+            startActiveSpan: (_name: string, fn: (span: typeof mockSpan) => any) => fn(mockSpan),
         }),
     },
     SpanStatusCode: { ERROR: 2, OK: 1 },
+    context: {
+        active: () => ({}),
+        with: (_ctx: any, fn: () => any) => fn(),
+    },
 }));
 
 // Mock logger

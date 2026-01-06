@@ -10,6 +10,7 @@ import { beforeEach, afterEach } from "bun:test";
 // Import singletons that need to be reset
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { ProviderRegistry } from "@/llm/providers/registry/ProviderRegistry";
 
 /**
  * Reset all singletons to ensure clean state between tests
@@ -21,6 +22,9 @@ function resetSingletons() {
 
     // Reset ConversationStore static state
     ConversationStore.reset();
+
+    // Reset ProviderRegistry singleton
+    ProviderRegistry.resetInstance();
 }
 
 // Register global hooks
