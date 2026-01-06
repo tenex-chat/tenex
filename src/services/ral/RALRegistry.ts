@@ -2,7 +2,7 @@ import { trace } from "@opentelemetry/api";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type {
-  RALState,
+  RALRegistryEntry,
   PendingDelegation,
   CompletedDelegation,
   QueuedInjection,
@@ -22,10 +22,10 @@ export class RALRegistry {
   private static instance: RALRegistry;
 
   /**
-   * RAL states keyed by "agentPubkey:conversationId", value is Map of ralNumber -> RALState
+   * RAL states keyed by "agentPubkey:conversationId", value is Map of ralNumber -> RALRegistryEntry
    * With simplified execution model, only one RAL is active per agent+conversation at a time.
    */
-  private states: Map<string, Map<number, RALState>> = new Map();
+  private states: Map<string, Map<number, RALRegistryEntry>> = new Map();
 
   /** Track next RAL number for each conversation */
   private nextRalNumber: Map<string, number> = new Map();
@@ -160,7 +160,7 @@ export class RALRegistry {
     const ralNumber = (this.nextRalNumber.get(key) || 0) + 1;
     this.nextRalNumber.set(key, ralNumber);
 
-    const state: RALState = {
+    const state: RALRegistryEntry = {
       id,
       ralNumber,
       agentPubkey,
@@ -198,7 +198,7 @@ export class RALRegistry {
   /**
    * Get all active RALs for an agent+conversation
    */
-  getActiveRALs(agentPubkey: string, conversationId: string): RALState[] {
+  getActiveRALs(agentPubkey: string, conversationId: string): RALRegistryEntry[] {
     const key = this.makeKey(agentPubkey, conversationId);
     const rals = this.states.get(key);
     if (!rals) return [];
@@ -208,7 +208,7 @@ export class RALRegistry {
   /**
    * Get a specific RAL by number
    */
-  getRAL(agentPubkey: string, conversationId: string, ralNumber: number): RALState | undefined {
+  getRAL(agentPubkey: string, conversationId: string, ralNumber: number): RALRegistryEntry | undefined {
     const key = this.makeKey(agentPubkey, conversationId);
     return this.states.get(key)?.get(ralNumber);
   }
@@ -216,7 +216,7 @@ export class RALRegistry {
   /**
    * Get RAL state by RAL ID
    */
-  getStateByRalId(ralId: string): RALState | undefined {
+  getStateByRalId(ralId: string): RALRegistryEntry | undefined {
     const location = this.ralIdToLocation.get(ralId);
     if (!location) return undefined;
     return this.states.get(location.key)?.get(location.ralNumber);
@@ -226,13 +226,13 @@ export class RALRegistry {
    * Get the current (most recent) RAL for an agent+conversation
    * This is for backwards compatibility with code that expects a single RAL
    */
-  getState(agentPubkey: string, conversationId: string): RALState | undefined {
+  getState(agentPubkey: string, conversationId: string): RALRegistryEntry | undefined {
     const key = this.makeKey(agentPubkey, conversationId);
     const rals = this.states.get(key);
     if (!rals || rals.size === 0) return undefined;
 
     // Return the RAL with the highest number (most recent)
-    let maxRal: RALState | undefined;
+    let maxRal: RALRegistryEntry | undefined;
     for (const ral of rals.values()) {
       if (!maxRal || ral.ralNumber > maxRal.ralNumber) {
         maxRal = ral;
@@ -606,7 +606,7 @@ export class RALRegistry {
   /**
    * Find the RAL that has a pending delegation (for routing responses)
    */
-  findStateWaitingForDelegation(delegationEventId: string): RALState | undefined {
+  findStateWaitingForDelegation(delegationEventId: string): RALRegistryEntry | undefined {
     const location = this.delegationToRal.get(delegationEventId);
     if (!location) return undefined;
 
@@ -648,7 +648,7 @@ export class RALRegistry {
    * The RAL is resumable regardless of pending delegation count - the agent
    * decides what to do (wait, acknowledge, follow-up, etc.)
    */
-  findResumableRAL(agentPubkey: string, conversationId: string): RALState | undefined {
+  findResumableRAL(agentPubkey: string, conversationId: string): RALRegistryEntry | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
     return rals.find(ral => {
       const completed = this.getConversationCompletedDelegations(agentPubkey, conversationId, ral.ralNumber);
@@ -661,7 +661,7 @@ export class RALRegistry {
    * Used for pairing checkpoint resumption - the supervisor has pending delegations
    * but received a checkpoint message that needs processing.
    */
-  findRALWithInjections(agentPubkey: string, conversationId: string): RALState | undefined {
+  findRALWithInjections(agentPubkey: string, conversationId: string): RALRegistryEntry | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);
     return rals.find(ral => ral.queuedInjections.length > 0);
   }

@@ -40,7 +40,7 @@ describe("RALRegistry", () => {
       expect(state?.conversationId).toBe(conversationId);
       expect(state?.isStreaming).toBe(false);
       expect(state?.queuedInjections).toEqual([]);
-      // Delegations are now stored at conversation level, not on RALState
+      // Delegations are now stored at conversation level, not on RALRegistryEntry
       expect(registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber)).toEqual([]);
       expect(registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber)).toEqual([]);
       expect(state?.createdAt).toBeDefined();
