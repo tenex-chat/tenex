@@ -9,13 +9,13 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  */
 export class TagExtractor {
     /**
-     * Extract all A-tags from an event (both uppercase and lowercase)
-     * @param event - The event to extract A-tags from
-     * @returns Array of A-tag values
+     * Extract all a-tags from an event
+     * @param event - The event to extract a-tags from
+     * @returns Array of a-tag values
      */
     static getATags(event: NDKEvent): string[] {
         return event.tags
-            .filter((tag) => tag[0] === "A" || tag[0] === "a")
+            .filter((tag) => tag[0] === "a")
             .map((tag) => tag[1])
             .filter((value): value is string => !!value);
     }
