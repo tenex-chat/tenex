@@ -6,6 +6,7 @@ import type {
   PendingDelegation,
   CompletedDelegation,
   QueuedInjection,
+  DelegationMessage,
 } from "./types";
 
 /**
@@ -311,12 +312,18 @@ export class RALRegistry {
    * Builds a transcript from the pending delegation's prompt and the response.
    * For followups, appends both the followup prompt and response to the transcript.
    * Returns location info for the caller to use for resumption.
+   *
+   * @param completion.fullTranscript - Optional rich transcript to use instead of
+   *   constructing a synthetic 2-message transcript. Useful for capturing user
+   *   interventions and multi-turn exchanges within a delegation.
    */
   recordCompletion(completion: {
     delegationConversationId: string;
     recipientPubkey: string;
     response: string;
     completedAt: number;
+    /** If provided, use this transcript instead of constructing from prompt + response */
+    fullTranscript?: DelegationMessage[];
   }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
     const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
@@ -354,19 +361,25 @@ export class RALRegistry {
     const existingCompletion = convDelegations.completed.get(completion.delegationConversationId);
 
     if (existingCompletion) {
-      // Append the followup prompt and response to the transcript
-      existingCompletion.transcript.push({
-        senderPubkey: pendingDelegation.senderPubkey,
-        recipientPubkey: pendingDelegation.recipientPubkey,
-        content: pendingDelegation.prompt,
-        timestamp: completion.completedAt - 1, // Just before the response
-      });
-      existingCompletion.transcript.push({
-        senderPubkey: completion.recipientPubkey,
-        recipientPubkey: pendingDelegation.senderPubkey,
-        content: completion.response,
-        timestamp: completion.completedAt,
-      });
+      // Append to existing transcript
+      if (completion.fullTranscript) {
+        // Use provided full transcript - replace entire transcript
+        existingCompletion.transcript = completion.fullTranscript;
+      } else {
+        // Fall back to appending the followup prompt and response
+        existingCompletion.transcript.push({
+          senderPubkey: pendingDelegation.senderPubkey,
+          recipientPubkey: pendingDelegation.recipientPubkey,
+          content: pendingDelegation.prompt,
+          timestamp: completion.completedAt - 1, // Just before the response
+        });
+        existingCompletion.transcript.push({
+          senderPubkey: completion.recipientPubkey,
+          recipientPubkey: pendingDelegation.senderPubkey,
+          content: completion.response,
+          timestamp: completion.completedAt,
+        });
+      }
 
       // Update ralNumber to the followup's RAL so findResumableRAL finds the correct RAL
       existingCompletion.ralNumber = pendingDelegation.ralNumber;
@@ -378,26 +391,29 @@ export class RALRegistry {
         "delegation.transcript_length": existingCompletion.transcript.length,
       });
     } else {
-      // Create new completed delegation with initial transcript
+      // Create new completed delegation with transcript
+      // Use provided fullTranscript if available, otherwise construct synthetic 2-message transcript
+      const transcript: DelegationMessage[] = completion.fullTranscript ?? [
+        {
+          senderPubkey: pendingDelegation.senderPubkey,
+          recipientPubkey: pendingDelegation.recipientPubkey,
+          content: pendingDelegation.prompt,
+          timestamp: completion.completedAt - 1,
+        },
+        {
+          senderPubkey: completion.recipientPubkey,
+          recipientPubkey: pendingDelegation.senderPubkey,
+          content: completion.response,
+          timestamp: completion.completedAt,
+        },
+      ];
+
       convDelegations.completed.set(completion.delegationConversationId, {
         delegationConversationId: completion.delegationConversationId,
         recipientPubkey: completion.recipientPubkey,
         senderPubkey: pendingDelegation.senderPubkey,
         ralNumber: pendingDelegation.ralNumber,
-        transcript: [
-          {
-            senderPubkey: pendingDelegation.senderPubkey,
-            recipientPubkey: pendingDelegation.recipientPubkey,
-            content: pendingDelegation.prompt,
-            timestamp: completion.completedAt - 1,
-          },
-          {
-            senderPubkey: completion.recipientPubkey,
-            recipientPubkey: pendingDelegation.senderPubkey,
-            content: completion.response,
-            timestamp: completion.completedAt,
-          },
-        ],
+        transcript,
         completedAt: completion.completedAt,
       });
 
