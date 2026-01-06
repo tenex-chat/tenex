@@ -82,9 +82,10 @@ export type ToolAgentInfo = Pick<
 >;
 
 /**
- * Execution context exposed to tools/tests.
+ * Base execution environment - available before RAL/publisher setup.
+ * This is the minimal context available at any lifecycle stage.
  */
-export interface ToolContext {
+export interface ExecutionEnvironment {
     agent: ToolAgentInfo;
     conversationId: string;
     /**
@@ -104,8 +105,9 @@ export interface ToolContext {
      */
     currentBranch: string;
     triggeringEvent: NDKEvent;
-    agentPublisher?: AgentPublisher;
-    ralNumber?: number;
+    /**
+     * Access to conversation state. May return undefined before full execution setup.
+     */
     getConversation: () => ConversationStore | undefined;
     /**
      * Mutable reference to the active tools object used by the LLM service.
@@ -116,12 +118,25 @@ export interface ToolContext {
 }
 
 /**
- * Context used by the tool registry for selection/injection logic.
+ * Runtime tool context - available after prepareExecution().
+ * Tools that publish events or need RAL state use this type.
+ * All runtime dependencies are REQUIRED, not optional.
  */
-export interface ToolRegistryContext extends ToolContext {
+export interface ToolExecutionContext extends ExecutionEnvironment {
+    agentPublisher: AgentPublisher;
+    ralNumber: number;
+    getConversation: () => ConversationStore;
+}
+
+/**
+ * Full registry context for tool selection/injection logic.
+ * Used by getToolsObject() during actual execution.
+ */
+export interface ToolRegistryContext extends ToolExecutionContext {
     alphaMode?: boolean;
     hasActivePairings?: boolean;
     mcpManager?: MCPManager;
+    conversationStore: ConversationStore;
 }
 
 export interface ToolError {
@@ -141,6 +156,7 @@ export interface ToolExecutionResult {
 }
 
 /**
- * Tool factory signature used when registering tools.
+ * Tool factory signature - all tools receive ToolExecutionContext.
+ * Tools that don't need agentPublisher/ralNumber can ignore those fields.
  */
-export type ToolFactory = (context: ToolContext) => AISdkTool<unknown, unknown>;
+export type ToolFactory = (context: ToolExecutionContext) => AISdkTool<unknown, unknown>;

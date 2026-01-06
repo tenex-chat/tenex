@@ -1,6 +1,6 @@
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -51,7 +51,7 @@ interface AgentsWriteOutput {
  */
 async function executeAgentsWrite(
     input: AgentsWriteInput,
-    context?: ToolContext
+    context?: ToolExecutionContext
 ): Promise<AgentsWriteOutput> {
     const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, phases } =
         input;
@@ -74,7 +74,7 @@ async function executeAgentsWrite(
     const projectContext = getProjectContext();
 
     if (!context?.workingDirectory) {
-        throw new Error("ToolContext with workingDirectory is required for agents_write tool");
+        throw new Error("ToolExecutionContext with workingDirectory is required for agents_write tool");
     }
 
     // Check if agent exists by slug
@@ -175,7 +175,7 @@ async function executeAgentsWrite(
  * Create an AI SDK tool for writing agents
  * This is the primary implementation
  */
-export function createAgentsWriteTool(context: ToolContext): AISdkTool {
+export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
             "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",

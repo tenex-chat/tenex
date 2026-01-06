@@ -31,7 +31,7 @@ mock.module("@/utils/logger", () => ({
 }));
 
 import { createMcpDiscoverTool } from "../mcp_discover";
-import { createMockToolContext } from "@/test-utils";
+import { createMockExecutionEnvironment } from "@/test-utils";
 
 describe("mcpDiscover tool", () => {
     let mockNDK: Partial<NDK>;
@@ -80,7 +80,7 @@ describe("mcpDiscover tool", () => {
 
         mockEventsSet = new Set([mockEvent1, mockEvent2]);
 
-        const context = createMockToolContext({
+        const context = createMockExecutionEnvironment({
             conversationId: "test-conv",
         });
         const tool = createMcpDiscoverTool(context);
@@ -128,7 +128,7 @@ describe("mcpDiscover tool", () => {
 
         mockEventsSet = new Set([mockEvent1, mockEvent2]);
 
-        const context = createMockToolContext({
+        const context = createMockExecutionEnvironment({
             conversationId: "test-conv",
         });
         const tool = createMcpDiscoverTool(context);
@@ -158,7 +158,7 @@ describe("mcpDiscover tool", () => {
 
         mockEventsSet = new Set(mockEvents);
 
-        const context = createMockToolContext({
+        const context = createMockExecutionEnvironment({
             conversationId: "test-conv",
         });
         const tool = createMcpDiscoverTool(context);

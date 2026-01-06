@@ -1,23 +1,10 @@
 import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { ToolExecutionContext } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 export interface PhaseContext {
     phase?: string;
     phaseInstructions?: string;
-}
-
-interface ConversationRootProvider {
-    getRootEventId(): string | undefined;
-}
-
-interface EventContextSource {
-    conversationId: string;
-    triggeringEvent: NDKEvent;
-    ralNumber?: number;
-    agent: {
-        llmConfig: string;
-    };
-    getConversation: () => ConversationRootProvider | undefined;
 }
 
 /**
@@ -50,20 +37,17 @@ export function extractPhaseContext(triggeringEvent: NDKEvent): PhaseContext | u
 }
 
 /**
- * Create EventContext for publishing events
+ * Create EventContext for publishing events.
+ * Requires ToolExecutionContext which guarantees ralNumber is available.
  */
-export function createEventContext(context: EventContextSource, model?: string): EventContext {
+export function createEventContext(context: ToolExecutionContext, model?: string): EventContext {
     const conversation = context.getConversation();
     // Extract phase directly from triggering event if it's a phase delegation
     const phaseContext = extractPhaseContext(context.triggeringEvent);
 
-    if (context.ralNumber === undefined) {
-        throw new Error("ralNumber is required for EventContext but was undefined");
-    }
-
     return {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: { id: conversation?.getRootEventId() ?? context.triggeringEvent.id },
+        rootEvent: { id: conversation.getRootEventId() ?? context.triggeringEvent.id },
         conversationId: context.conversationId,
         model: model ?? context.agent.llmConfig,
         phase: phaseContext?.phase,

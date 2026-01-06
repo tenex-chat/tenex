@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import type { AISdkTool, ToolContext } from "@/tools/types";
+import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
@@ -26,7 +26,7 @@ async function executeEdit(
     oldString: string,
     newString: string,
     replaceAll: boolean,
-    context: ToolContext
+    context: ToolExecutionContext
 ): Promise<string> {
     // Resolve path and ensure it's within project
     const fullPath = resolveAndValidatePath(path, context.workingDirectory);
@@ -74,7 +74,7 @@ async function executeEdit(
 /**
  * Create an AI SDK tool for editing files
  */
-export function createEditTool(context: ToolContext): AISdkTool {
+export function createEditTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Performs exact string replacements in files. The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance of old_string. Use replace_all for replacing and renaming strings across the file. This is useful for surgical edits without full file rewrites. Safe and sandboxed to project directory.",

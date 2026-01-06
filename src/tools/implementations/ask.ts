@@ -1,4 +1,4 @@
-import type { ToolContext } from "@/tools/types";
+import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
@@ -25,7 +25,7 @@ const askSchema = z.object({
 type AskInput = z.infer<typeof askSchema>;
 type AskOutput = StopExecutionSignal;
 
-async function executeAsk(input: AskInput, context: ToolContext): Promise<AskOutput> {
+async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
   const { tldr, context: askContext, suggestions } = input;
 
   const projectCtx = getProjectContext();
@@ -33,10 +33,6 @@ async function executeAsk(input: AskInput, context: ToolContext): Promise<AskOut
 
   if (!ownerPubkey) {
     throw new Error("No project owner configured - cannot determine who to ask");
-  }
-
-  if (!context.agentPublisher) {
-    throw new Error("AgentPublisher not available");
   }
 
   logger.info("[ask] Publishing ask event", {
@@ -65,13 +61,13 @@ async function executeAsk(input: AskInput, context: ToolContext): Promise<AskOut
         senderPubkey: context.agent.pubkey,
         prompt: `${tldr}\n\n${askContext}`,
         suggestions,
-        ralNumber: context.ralNumber!,
+        ralNumber: context.ralNumber,
       },
     ],
   };
 }
 
-export function createAskTool(context: ToolContext): AISdkTool {
+export function createAskTool(context: ToolExecutionContext): AISdkTool {
   const aiTool = tool({
     description:
       "Ask a question to the project owner and wait for their response. " +
