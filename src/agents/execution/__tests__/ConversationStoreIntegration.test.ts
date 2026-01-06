@@ -216,11 +216,10 @@ describe("ConversationStore Agent Execution Integration", () => {
         });
     });
 
-    describe("Concurrent RALs", () => {
+    describe("Multiple RALs", () => {
         it("should exclude other active RAL messages from buildMessagesForRal", async () => {
-            // Note: Concurrent RAL context (system summaries) is added by AgentExecutor's
-            // addConcurrentRALContext, not by ConversationStore.buildMessagesForRal.
-            // This test verifies that buildMessagesForRal excludes other active RAL messages.
+            // This test verifies that buildMessagesForRal excludes other active RAL messages
+            // to avoid message duplication in the context.
 
             store.addMessage({
                 pubkey: USER_PUBKEY,
@@ -259,7 +258,6 @@ describe("ConversationStore Agent Execution Integration", () => {
             expect(messages.some(m => m.role === "user")).toBe(true);
 
             // Should NOT include RAL 1's messages directly (they're from another active RAL)
-            // The concurrent RAL context is added separately by addConcurrentRALContext in AgentExecutor
             const hasRal1Content = messages.some(m =>
                 typeof m.content === "string" && m.content.includes("Working on task 1")
             );
