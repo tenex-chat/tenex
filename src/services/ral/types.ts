@@ -88,7 +88,7 @@ export interface QueuedInjection {
   queuedAt: number;
 }
 
-export interface RALState {
+export interface RALRegistryEntry {
   id: string;
   /** Sequential number for this RAL within the conversation (1, 2, 3...) */
   ralNumber: number;

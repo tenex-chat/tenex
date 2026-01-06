@@ -1,6 +1,6 @@
 /**
  * Configuration for pairing (real-time delegation supervision).
- * Stored in RALState when a delegation is made with pairing enabled.
+ * Stored in RALRegistryEntry when a delegation is made with pairing enabled.
  */
 export interface PairingConfig {
   /** The delegation event ID being observed */
