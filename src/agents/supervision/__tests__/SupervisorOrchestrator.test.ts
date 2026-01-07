@@ -39,12 +39,15 @@ describe("SupervisorOrchestrator", () => {
     ): PostCompletionContext => ({
         agentSlug: "test-agent",
         agentPubkey: "abc123",
-        hasPhases: false,
         messageContent: "Hello world",
         toolCallsMade: [],
         systemPrompt: "You are a helpful assistant.",
         conversationHistory: [],
         availableTools: {},
+        hasTodoList: false,
+        hasBeenNudgedAboutTodos: false,
+        hasBeenRemindedAboutTodos: false,
+        todos: [],
         ...overrides,
     });
 

@@ -20,8 +20,6 @@ export enum NostrTag {
     // Application-specific tags
     MODE = "mode",
     PARTICIPANT = "participant",
-    PHASE = "phase",
-    PHASE_INSTRUCTIONS = "phase-instructions",
     REASON = "reason",
     TOOL = "tool",
 }

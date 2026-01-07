@@ -51,7 +51,6 @@ export function createStoredAgent(config: {
     useCriteria?: string | null;
     llmConfig?: string;
     tools?: string[] | null;
-    phases?: Record<string, string> | null;
     eventId?: string;
     projects?: string[];
 }): StoredAgent {
@@ -66,7 +65,6 @@ export function createStoredAgent(config: {
         useCriteria: config.useCriteria ?? undefined,
         llmConfig: config.llmConfig,
         tools: config.tools ?? undefined,
-        phases: config.phases ?? undefined,
         projects: config.projects ?? [],
     };
 }

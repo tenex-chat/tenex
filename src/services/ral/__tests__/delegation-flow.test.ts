@@ -4,7 +4,6 @@ import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 import { handleDelegationCompletion } from "@/event-handler/DelegationCompletionHandler";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Conversation, ConversationCoordinator } from "@/conversations";
 
 // Mock getProjectContext
 const mockAgent = {
@@ -300,24 +299,8 @@ describe("RAL Delegation Flow", () => {
                 },
             } as unknown as NDKEvent;
 
-            // Create mock conversation
-            const mockConversation: Conversation = {
-                id: CONVERSATION_ID,
-                phase: "default",
-                history: [completionEvent],
-                rootEventId: "root-event",
-                createdAt: Date.now(),
-                lastActivityAt: Date.now(),
-            };
-
-            const mockCoordinator = {} as ConversationCoordinator;
-
             // Execute handler - now just records completion, routing is via p-tags
-            const result = await handleDelegationCompletion(
-                completionEvent,
-                mockConversation,
-                mockCoordinator
-            );
+            const result = await handleDelegationCompletion(completionEvent);
 
             // Verify completion was recorded
             expect(result.recorded).toBe(true);
@@ -356,20 +339,7 @@ describe("RAL Delegation Flow", () => {
                 tagValue: () => undefined,
             } as unknown as NDKEvent;
 
-            const mockConversation: Conversation = {
-                id: "conv-456",
-                phase: "default",
-                history: [],
-                rootEventId: "root",
-                createdAt: Date.now(),
-                lastActivityAt: Date.now(),
-            };
-
-            const result = await handleDelegationCompletion(
-                unrelatedEvent,
-                mockConversation,
-                {} as ConversationCoordinator
-            );
+            const result = await handleDelegationCompletion(unrelatedEvent);
 
             // Should not record anything for unrelated events
             expect(result.recorded).toBe(false);
@@ -425,20 +395,7 @@ describe("RAL Delegation Flow", () => {
                 },
             } as unknown as NDKEvent;
 
-            const mockConversation: Conversation = {
-                id: CONVERSATION_ID,
-                phase: "default",
-                history: [],
-                rootEventId: "root",
-                createdAt: Date.now(),
-                lastActivityAt: Date.now(),
-            };
-
-            const result1 = await handleDelegationCompletion(
-                firstCompletion,
-                mockConversation,
-                {} as ConversationCoordinator
-            );
+            const result1 = await handleDelegationCompletion(firstCompletion);
 
             // First completion should be recorded
             expect(result1.recorded).toBe(true);
@@ -471,11 +428,7 @@ describe("RAL Delegation Flow", () => {
                 },
             } as unknown as NDKEvent;
 
-            const result2 = await handleDelegationCompletion(
-                secondCompletion,
-                mockConversation,
-                {} as ConversationCoordinator
-            );
+            const result2 = await handleDelegationCompletion(secondCompletion);
 
             // Second completion should also be recorded
             expect(result2.recorded).toBe(true);
@@ -533,22 +486,9 @@ describe("RAL Delegation Flow", () => {
                 },
             } as unknown as NDKEvent;
 
-            const mockConversation: Conversation = {
-                id: CONVERSATION_ID,
-                phase: "default",
-                history: [completionEvent],
-                rootEventId: "original-request",
-                createdAt: Date.now(),
-                lastActivityAt: Date.now(),
-            };
-
             // 5. DelegationCompletionHandler records the completion
             // (routing happens via p-tags separately)
-            const result = await handleDelegationCompletion(
-                completionEvent,
-                mockConversation,
-                {} as ConversationCoordinator
-            );
+            const result = await handleDelegationCompletion(completionEvent);
 
             // 6. Verify completion was recorded
             expect(result.recorded).toBe(true);

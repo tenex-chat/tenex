@@ -1,11 +1,11 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { PendingDelegation, StopExecutionSignal, TodoItem } from "@/services/ral/types";
+import type { PendingDelegation, StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/phase-utils";
+import { createEventContext } from "@/utils/event-context";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -16,7 +16,7 @@ const pairConfigSchema = z.object({
     .describe("Number of tool executions between checkpoints (e.g., 10 means checkpoint every 10 tools)"),
 });
 
-const baseDelegationItemSchema = z.object({
+const delegationItemSchema = z.object({
   recipient: z
     .string()
     .describe(
@@ -32,18 +32,7 @@ const baseDelegationItemSchema = z.object({
     .describe("Enable real-time pairing supervision. You will receive periodic checkpoint updates about the delegated agent's progress."),
 });
 
-const phaseDelegationItemSchema = baseDelegationItemSchema.extend({
-  phase: z
-    .string()
-    .optional()
-    .describe(
-      "Phase to switch to for this delegation (must be defined in your phases configuration)"
-    ),
-});
-
-type BaseDelegationItem = z.infer<typeof baseDelegationItemSchema>;
-type PhaseDelegationItem = z.infer<typeof phaseDelegationItemSchema>;
-type DelegationItem = BaseDelegationItem | PhaseDelegationItem;
+type DelegationItem = z.infer<typeof delegationItemSchema>;
 
 interface DelegateInput {
   delegations: DelegationItem[];
@@ -87,53 +76,11 @@ async function executeDelegate(
       continue;
     }
 
-    const phase = "phase" in delegation ? delegation.phase : undefined;
-    let phaseInstructions: string | undefined;
-
-    if (phase) {
-      if (!context.agent.phases) {
-        throw new Error(
-          `Agent ${context.agent.name} does not have any phases defined.`
-        );
-      }
-
-      const normalizedPhase = phase.toLowerCase();
-      const phaseEntry = Object.entries(context.agent.phases).find(
-        ([phaseName]) => phaseName.toLowerCase() === normalizedPhase
-      );
-
-      if (!phaseEntry) {
-        const availablePhases = Object.keys(context.agent.phases).join(", ");
-        throw new Error(
-          `Phase '${phase}' not defined. Available: ${availablePhases}`
-        );
-      }
-
-      phaseInstructions = phaseEntry[1];
-    }
-
-    // If no explicit phase, check for in_progress todo with delegationInstructions
-    if (!phaseInstructions) {
-      const conversation = context.getConversation();
-      const todos = conversation.getTodos(context.agent.pubkey);
-      const inProgressTodos = todos.filter(
-        (t: TodoItem) => t.status === "in_progress" && t.delegationInstructions
-      );
-
-      if (inProgressTodos.length > 0) {
-        // Use the first in_progress todo's delegation instructions
-        phaseInstructions = inProgressTodos[0].delegationInstructions;
-      }
-    }
-
-
     // Publish delegation event
     const eventContext = createEventContext(context);
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
       content: delegation.prompt,
-      phase,
-      phaseInstructions,
       branch: delegation.branch,
     }, eventContext);
 
@@ -209,13 +156,6 @@ async function executeDelegate(
 }
 
 export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
-  const hasPhases =
-    context.agent.phases && Object.keys(context.agent.phases).length > 0;
-
-  const delegationItemSchema = hasPhases
-    ? phaseDelegationItemSchema
-    : baseDelegationItemSchema;
-
   const delegateSchema = z.object({
     delegations: z
       .array(delegationItemSchema)
@@ -223,9 +163,7 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
       .describe("Array of delegations to execute"),
   });
 
-  const description = hasPhases
-    ? "Delegate tasks to one or more agents. Each delegation can have its own prompt, branch, and phase. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt."
-    : "Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.";
+  const description = "Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.";
 
   const aiTool = tool({
     description,
@@ -249,9 +187,8 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
       if (delegations.length === 1) {
         const d = delegations[0];
-        const phaseStr = "phase" in d && d.phase ? ` (${d.phase} phase)` : "";
         const pairStr = d.pair ? " with pairing" : "";
-        return `Delegating to ${d.recipient}${phaseStr}${pairStr}`;
+        return `Delegating to ${d.recipient}${pairStr}`;
       }
 
       const hasPairing = delegations.some((d) => d.pair);

@@ -3,7 +3,7 @@ import { getNDK } from "@/nostr";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/phase-utils";
+import { createEventContext } from "@/utils/event-context";
 import { tool } from "ai";
 import { z } from "zod";
 

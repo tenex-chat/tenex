@@ -107,10 +107,6 @@ function serializeConversation(conversation: ConversationStore): Record<string, 
         // Strictly enforce primitive types for top-level fields
         id: String(conversation.id),
         title: conversation.title ? String(conversation.title) : undefined,
-        phase: conversation.phase ? String(conversation.phase) : undefined,
-        phaseStartedAt: typeof conversation.metadata.phaseStartedAt === "number"
-            ? conversation.metadata.phaseStartedAt
-            : undefined,
         metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},
         executionTime: safeCopy(conversation.executionTime),
         messageCount: messages.length,
@@ -185,7 +181,6 @@ async function executeConversationGet(
         conversationId: conversation.id,
         title: conversation.title,
         messageCount: conversation.getMessageCount(),
-        phase: conversation.phase,
         agent: context.agent.name,
     });
 
@@ -201,7 +196,7 @@ async function executeConversationGet(
 export function createConversationGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation metadata, execution state, and full message history. If conversationId is omitted, returns the current conversation. Useful for reviewing conversation context, analyzing message history, or accessing conversation metadata like phase, summary, requirements, and plan.",
+            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation metadata, execution state, and full message history. If conversationId is omitted, returns the current conversation. Useful for reviewing conversation context, analyzing message history, or accessing conversation metadata like summary, requirements, and plan.",
 
         inputSchema: conversationGetSchema,
 

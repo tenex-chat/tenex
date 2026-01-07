@@ -83,14 +83,12 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
       parts.push("");
     }
 
-    // Add worktree commands guidance for agents with shell access or phases
-    if (context.agent.phases) {
-      parts.push("### Delegation with Worktrees:");
-      parts.push("When using `delegate`, you can specify `branch: \"<name>\"` to create and work in an isolated worktree.");
-      parts.push("The worktree will be created from your current branch in `.worktrees/`, and the delegated agent will work in that isolation.");
-      parts.push("You are responsible for merging or cleaning up worktrees you create.");
-      parts.push("");
-    }
+    // Add worktree commands guidance
+    parts.push("### Delegation with Worktrees:");
+    parts.push("When using `delegate`, you can specify `branch: \"<name>\"` to create and work in an isolated worktree.");
+    parts.push("The worktree will be created from your current branch in `.worktrees/`, and the delegated agent will work in that isolation.");
+    parts.push("You are responsible for merging or cleaning up worktrees you create.");
+    parts.push("");
 
     return parts.join("\n");
   },

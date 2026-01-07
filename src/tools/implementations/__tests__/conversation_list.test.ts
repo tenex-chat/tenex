@@ -584,7 +584,6 @@ describe("conversation_list Tool", () => {
                 id: "conv1",
                 title: "Test Conversation",
                 summary: "A test summary",
-                phase: "execution",
                 statusLabel: "active",
                 statusCurrentActivity: "Working on task",
                 messageCount: 2,

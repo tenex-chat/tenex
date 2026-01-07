@@ -8,7 +8,6 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 
 // Import all fragment definitions
 import { agentIdentityFragment } from "./01-agent-identity";
-import { agentPhasesFragment } from "./05-agent-phases";
 import { agentTodosFragment } from "./06-agent-todos";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 // 10-referenced-article uses inline registration, no named export
@@ -26,7 +25,6 @@ import { worktreeContextFragment } from "./30-worktree-context";
 import { alphaModeFragment } from "./alpha-mode";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
-import { phaseTransitionFragment } from "./phase-transition";
 
 /**
  * Register all fragments explicitly
@@ -35,13 +33,11 @@ import { phaseTransitionFragment } from "./phase-transition";
 export function registerAllFragments(): void {
     // Core identity and context
     fragmentRegistry.register(agentIdentityFragment);
-    fragmentRegistry.register(agentPhasesFragment);
     fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
     fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(debugModeFragment);
     fragmentRegistry.register(delegationCompletionFragment);
-    fragmentRegistry.register(phaseTransitionFragment);
 
     // Agent collaboration
     fragmentRegistry.register(availableAgentsFragment);

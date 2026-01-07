@@ -52,10 +52,6 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
         agentDefinition.useCriteria = agent.useCriteria;
     }
 
-    if (agent.phases) {
-        agentDefinition.phases = agent.phases;
-    }
-
     agentDefinition.version = 1;
 
     await agentDefinition.sign(signer, { pTags: false });

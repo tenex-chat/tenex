@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
-import { normalizePhase } from "@/conversations/utils/phaseUtils";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -13,7 +12,7 @@ import { agentStorage } from "./AgentStorage";
  * ## Responsibility
  * Manages runtime AgentInstance objects (with methods like sign(), createLLMService())
  * - Scoped to ONE project - each project runtime has its own registry
- * - Fast lookups by slug, pubkey, eventId, or phase
+ * - Fast lookups by slug, pubkey, or eventId
  * - Loads agents from storage and hydrates them into runtime instances
  * - Can reload agents when storage updates
  *
@@ -220,7 +219,6 @@ export class AgentRegistry {
                         description: agent.description,
                         instructions: agent.instructions,
                         useCriteria: agent.useCriteria,
-                        phases: agent.phases,
                     },
                     whitelistedPubkeys
                 );
@@ -265,27 +263,6 @@ export class AgentRegistry {
      */
     getAllAgentsMap(): Map<string, AgentInstance> {
         return new Map(this.agents);
-    }
-
-    /**
-     * Get agents filtered by phase
-     */
-    getAgentsByPhase(phase: string | undefined): AgentInstance[] {
-        const agents = Array.from(this.agents.values());
-
-        if (phase === undefined) {
-            // Return agents without a specific phase (universal agents)
-            return agents.filter((agent) => !agent.phase);
-        }
-
-        // Return agents matching the phase or universal agents
-        const normalizedPhase = normalizePhase(phase);
-
-        return agents.filter((agent) => {
-            if (!agent.phase) return true; // Universal agents work in all phases
-            const agentPhase = normalizePhase(agent.phase);
-            return agentPhase === normalizedPhase;
-        });
     }
 
     /**

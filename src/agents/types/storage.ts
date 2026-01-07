@@ -9,8 +9,6 @@ export interface StoredAgentData {
     useCriteria?: string;
     llmConfig?: string;
     tools?: string[];
-    phase?: string;
-    phases?: Record<string, string>;
 }
 
 /**

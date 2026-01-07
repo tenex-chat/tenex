@@ -1,4 +1,3 @@
-import { shouldUseDefinitionForPhase } from "@/conversations/utils/phaseUtils";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -14,8 +13,6 @@ export interface AgentDiscoveryOptions {
     since?: number;
     /** Maximum creation timestamp */
     until?: number;
-    /** Filter by specific phase */
-    phase?: string;
 }
 
 /**
@@ -66,10 +63,6 @@ export class NDKAgentDiscovery {
                 filtered = this.filterByText(filtered, options.searchText);
             }
 
-            if (options.phase !== undefined) {
-                filtered = this.filterByPhase(filtered, options.phase);
-            }
-
             // Sort by creation time (newest first)
             filtered.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
@@ -97,22 +90,6 @@ export class NDKAgentDiscovery {
                 .toLowerCase();
 
             return searchableText.includes(searchLower);
-        });
-    }
-
-    /**
-     * Filter agents by phase
-     * @param agents - Array of agents to filter
-     * @param phase - Phase to filter by (empty string means no phase, specific value means that phase)
-     * @returns Filtered agents
-     */
-    private filterByPhase(agents: NDKAgentDefinition[], phase: string): NDKAgentDefinition[] {
-        return agents.filter((agent) => {
-            // Get phase from agent definition
-            const agentPhase = agent.phase;
-
-            // Use phase validation utility to determine if this definition should be used
-            return shouldUseDefinitionForPhase(agentPhase, phase);
         });
     }
 }

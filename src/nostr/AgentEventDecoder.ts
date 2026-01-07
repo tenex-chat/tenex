@@ -78,13 +78,6 @@ export class AgentEventDecoder {
     }
 
     /**
-     * Extract phase from event if present
-     */
-    static getPhase(event: NDKEvent): string | undefined {
-        return event.tagValue("phase");
-    }
-
-    /**
      * Check if event is a delegation request (kind:1 from agent to agent)
      */
     static isDelegationRequest(

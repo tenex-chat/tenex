@@ -192,7 +192,6 @@ export class DynamicToolService {
                     sign: async () => {},
                     llmConfig: "default",
                     tools: [],
-                    phases: undefined,
                 },
                 projectBasePath: process.cwd(),
                 workingDirectory: process.cwd(),

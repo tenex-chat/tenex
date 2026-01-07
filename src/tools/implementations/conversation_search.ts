@@ -18,7 +18,6 @@ type ConversationSearchInput = z.infer<typeof conversationSearchSchema>;
 interface ConversationSummary {
     id: string;
     title?: string;
-    phase?: string;
     messageCount: number;
     createdAt?: number;
     lastActivity?: number;
@@ -39,7 +38,6 @@ function summarizeConversation(conversation: ConversationStore): ConversationSum
     return {
         id: conversation.id,
         title: conversation.title,
-        phase: conversation.phase,
         messageCount: messages.length,
         createdAt: firstMessage?.timestamp,
         lastActivity: lastMessage?.timestamp,
@@ -81,7 +79,7 @@ async function executeConversationSearch(
 export function createConversationSearchTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Search conversations by title. Returns matching conversations with summary information including ID, title, phase, message count, and timestamps.",
+            "Search conversations by title. Returns matching conversations with summary information including ID, title, message count, and timestamps.",
 
         inputSchema: conversationSearchSchema,
 

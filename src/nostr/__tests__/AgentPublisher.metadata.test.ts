@@ -79,10 +79,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 description: "A test agent that does testing",
                 instructions: "Follow these test instructions carefully",
                 useCriteria: "Use when testing is needed",
-                phases: {
-                    planning: "Plan the tests carefully",
-                    execution: "Execute tests with precision",
-                },
             };
 
             await AgentPublisher.publishAgentProfile(
@@ -124,17 +120,9 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 expect(useCriteriaTag).toBeDefined();
                 expect(useCriteriaTag?.[1]).toBe("Use when testing is needed");
 
-                // Check phase tags
+                // Verify no phase tags (phases have been removed)
                 const phaseTags = tags.filter((tag) => tag[0] === "phase" && tag.length === 3);
-                expect(phaseTags.length).toBe(2);
-
-                const planningPhase = phaseTags.find((tag) => tag[1] === "planning");
-                expect(planningPhase).toBeDefined();
-                expect(planningPhase?.[2]).toBe("Plan the tests carefully");
-
-                const executionPhase = phaseTags.find((tag) => tag[1] === "execution");
-                expect(executionPhase).toBeDefined();
-                expect(executionPhase?.[2]).toBe("Execute tests with precision");
+                expect(phaseTags.length).toBe(0);
 
                 // Check bot tag is present
                 const botTag = tags.find((tag) => tag[0] === "bot" && tag.length === 1);
@@ -156,10 +144,6 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 description: "A test agent that does testing",
                 instructions: "Follow these test instructions carefully",
                 useCriteria: "Use when testing is needed",
-                phases: {
-                    planning: "Plan the tests carefully",
-                    execution: "Execute tests with precision",
-                },
             };
 
             const ndkAgentEventId = "a".repeat(64); // Valid hex event ID
@@ -203,6 +187,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 const useCriteriaTag = tags.find((tag) => tag[0] === "use-criteria");
                 expect(useCriteriaTag).toBeUndefined();
 
+                // Verify no phase tags
                 const phaseTags = tags.filter((tag) => tag[0] === "phase" && tag.length === 3);
                 expect(phaseTags.length).toBe(0);
 
@@ -223,7 +208,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
             const agentMetadata = {
                 description: "A test agent that does testing",
-                // No instructions, useCriteria, or phases
+                // No instructions or useCriteria
             };
 
             await AgentPublisher.publishAgentProfile(

@@ -258,6 +258,9 @@ const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
 /** File editing tools - auto-injected when fs_write is available */
 const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 
+/** Todo tools - for restricted agent execution (reminder mode) */
+const TODO_TOOLS: ToolName[] = ["todo_add", "todo_update"];
+
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
@@ -411,4 +414,34 @@ export function toolHasSideEffects(toolName: string): boolean {
     // Dynamic tools and MCP tools are assumed to have side effects by default
     // This is the safe default - assume side effects unless explicitly declared otherwise
     return true;
+}
+
+/**
+ * Get the list of todo tool names.
+ * Used for restricted agent execution in reminder mode.
+ * @returns Array of todo tool names
+ */
+export function getTodoToolNames(): ToolName[] {
+    return [...TODO_TOOLS];
+}
+
+/**
+ * Get todo tools as a keyed object.
+ * Used for creating restricted tool sets for reminder mode.
+ * @param context - Tool execution context
+ * @returns Object with todo tools keyed by name
+ */
+export function getTodoToolsObject(
+    context: ToolExecutionContext
+): Record<string, CoreTool<unknown, unknown>> {
+    const tools: Record<string, CoreTool<unknown, unknown>> = {};
+
+    for (const name of TODO_TOOLS) {
+        const tool = getTool(name, context);
+        if (tool) {
+            tools[name] = tool;
+        }
+    }
+
+    return tools;
 }
