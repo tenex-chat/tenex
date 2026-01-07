@@ -102,7 +102,7 @@ describe("DynamicToolService Race Condition Bug", () => {
          */
         it("logs warning for unrecognized tools that get dropped", () => {
             const toolList = [
-                "read_path",      // Valid static tool
+                "fs_read",      // Valid static tool
                 "shell",          // Valid static tool
                 "unrecognized_tool", // Invalid - not in registry
             ];
@@ -110,7 +110,7 @@ describe("DynamicToolService Race Condition Bug", () => {
             const { validTools, mcpToolRequests } = validateAndSeparateTools(toolList);
 
             // Static tools should be valid
-            expect(validTools).toContain("read_path");
+            expect(validTools).toContain("fs_read");
             expect(validTools).toContain("shell");
 
             // Unrecognized tool is still dropped but now with a warning logged
@@ -129,7 +129,7 @@ describe("DynamicToolService Race Condition Bug", () => {
         it("unrecognized tools are dropped with warning in processAgentTools pipeline", () => {
             // Simulate what happens after create_dynamic_tool if loadToolSync was NOT called
             const requestedTools = [
-                "read_path",
+                "fs_read",
                 "shell",
                 "nonexistent_tool", // Not loaded - will be dropped with warning
             ];
@@ -140,7 +140,7 @@ describe("DynamicToolService Race Condition Bug", () => {
             // The nonexistent tool is not in the final list (and a warning was logged)
             expect(finalTools).not.toContain("nonexistent_tool");
             // But valid tools are preserved
-            expect(finalTools).toContain("read_path");
+            expect(finalTools).toContain("fs_read");
             expect(finalTools).toContain("shell");
         });
     });
@@ -230,7 +230,7 @@ describe("Full Integration: create_dynamic_tool flow", () => {
 
             // Verify validateAndSeparateTools includes it
             const { validTools } = validateAndSeparateTools([
-                "read_path",
+                "fs_read",
                 testToolName,
             ]);
             expect(validTools).toContain(testToolName);

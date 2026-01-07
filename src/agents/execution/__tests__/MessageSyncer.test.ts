@@ -42,7 +42,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call-123",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         result: { error: "ENOENT: no such file or directory" },
                     },
                 ],
@@ -77,7 +77,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call-456",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         args: { path: "/some/file.txt" },
                     },
                 ],
@@ -113,7 +113,7 @@ describe("MessageSyncer", () => {
                 {
                     type: "tool-result",
                     toolCallId: "call-existing",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     result: { text: "file content" },
                 },
             ],
@@ -130,7 +130,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call-existing",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         result: { text: "file content" },
                     },
                 ],
@@ -201,7 +201,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call-mixed",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         args: { path: "/file.txt" },
                     },
                 ],
@@ -230,13 +230,13 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call-a",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         args: { path: "/a.txt" },
                     },
                     {
                         type: "tool-call",
                         toolCallId: "call-b",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         args: { path: "/b.txt" },
                     },
                 ],
@@ -263,13 +263,13 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call-x",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         result: { text: "content x" },
                     },
                     {
                         type: "tool-result",
                         toolCallId: "call-y",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         result: { error: "ENOENT" },
                     },
                 ],
@@ -333,7 +333,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-call",
                         toolCallId: "call-full",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         args: { path: "/nonexistent.txt" },
                     },
                 ],
@@ -344,7 +344,7 @@ describe("MessageSyncer", () => {
                     {
                         type: "tool-result",
                         toolCallId: "call-full",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         result: { error: "ENOENT: no such file" },
                     },
                 ],

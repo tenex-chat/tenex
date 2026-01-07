@@ -1,5 +1,4 @@
 import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
-import { getDefaultToolsForAgent } from "@/agents/constants";
 import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
@@ -111,7 +110,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
         instructions,
         useCriteria,
         llmConfig: DEFAULT_AGENT_LLM_CONFIG,
-        tools: toolTags.length > 0 ? toolTags : getDefaultToolsForAgent({ phases }),
+        tools: toolTags.length > 0 ? toolTags : [],
         phases,
     };
 }

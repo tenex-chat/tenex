@@ -36,12 +36,12 @@ describe("MCP Tool Filtering in getToolsObject", () => {
 
     it("should only include MCP tools that are explicitly requested in names array", () => {
         // Request only one specific MCP tool
-        const requestedTools = ["read_path", "mcp__server1__tool_a"];
+        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
 
         const tools = getToolsObject(requestedTools, mockContext);
 
         // Should include the requested static tool
-        expect(tools["read_path"]).toBeDefined();
+        expect(tools["fs_read"]).toBeDefined();
 
         // Should include ONLY the requested MCP tool
         expect(tools["mcp__server1__tool_a"]).toBeDefined();
@@ -53,12 +53,12 @@ describe("MCP Tool Filtering in getToolsObject", () => {
 
     it("should include no MCP tools when none are requested", () => {
         // Request only static tools, no MCP tools
-        const requestedTools = ["read_path", "shell"];
+        const requestedTools = ["fs_read", "shell"];
 
         const tools = getToolsObject(requestedTools, mockContext);
 
         // Should include the requested static tools
-        expect(tools["read_path"]).toBeDefined();
+        expect(tools["fs_read"]).toBeDefined();
         expect(tools["shell"]).toBeDefined();
 
         // Should NOT include any MCP tools
@@ -85,11 +85,11 @@ describe("MCP Tool Filtering in getToolsObject", () => {
         // Create context without mcpManager
         const contextWithoutMcp = createMockExecutionEnvironment();
 
-        const requestedTools = ["read_path", "mcp__server1__tool_a"];
+        const requestedTools = ["fs_read", "mcp__server1__tool_a"];
         const tools = getToolsObject(requestedTools, contextWithoutMcp);
 
         // Should include the static tool
-        expect(tools["read_path"]).toBeDefined();
+        expect(tools["fs_read"]).toBeDefined();
 
         // Should NOT include MCP tools (no mcpManager available)
         expect(tools["mcp__server1__tool_a"]).toBeUndefined();

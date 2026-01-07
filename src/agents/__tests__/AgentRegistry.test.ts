@@ -23,7 +23,7 @@ describe("AgentRegistry", () => {
             instructions: "Test instructions",
             useCriteria: "Test criteria",
             llmConfig: "anthropic:claude-sonnet-4",
-            tools: ["read_path", "shell"],
+            tools: ["fs_read", "shell"],
             eventId: "test-event-id",
             slug: "test-agent",
             phase: undefined,

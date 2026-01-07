@@ -309,7 +309,7 @@ async function executeGrep(
     }
 }
 
-export function createGrepTool(context: ToolExecutionContext): AISdkTool {
+export function createFsGrepTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Powerful content search tool built on ripgrep (with grep fallback). " +

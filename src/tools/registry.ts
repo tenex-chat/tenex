@@ -7,6 +7,7 @@
 import { dynamicToolService } from "@/services/DynamicToolService";
 import type { Tool as CoreTool } from "ai";
 import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext } from "./types";
+import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
@@ -14,8 +15,8 @@ import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
-import { createGlobTool } from "./implementations/glob";
-import { createGrepTool } from "./implementations/grep";
+import { createFsGlobTool } from "./implementations/fs_glob";
+import { createFsGrepTool } from "./implementations/fs_grep";
 import { createConversationListTool } from "./implementations/conversation_list";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
@@ -35,7 +36,7 @@ import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscript
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
 import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
 import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
-import { createReadPathTool } from "./implementations/read_path";
+import { createFsReadTool } from "./implementations/fs_read";
 import { createReportDeleteTool } from "./implementations/report_delete";
 import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
@@ -46,8 +47,8 @@ import { createListScheduledTasksTool } from "./implementations/schedule_tasks_l
 import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
-import { createWriteFileTool } from "./implementations/write_file";
-import { createEditTool } from "./implementations/edit";
+import { createFsWriteTool } from "./implementations/fs_write";
+import { createFsEditTool } from "./implementations/fs_edit";
 
 // Alpha mode bug reporting tools
 import { createBugListTool } from "./implementations/bug_list";
@@ -74,9 +75,9 @@ import { createNostrFetchTool } from "./implementations/nostr_fetch";
  */
 const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     // Read-only tools - these don't modify any state
-    read_path: { hasSideEffects: false },
-    glob: { hasSideEffects: false },
-    grep: { hasSideEffects: false },
+    fs_read: { hasSideEffects: false },
+    fs_glob: { hasSideEffects: false },
+    fs_grep: { hasSideEffects: false },
     conversation_get: { hasSideEffects: false },
     conversation_list: { hasSideEffects: false },
     conversation_search: { hasSideEffects: false },
@@ -106,6 +107,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
     // Agent tools
+    agents_publish: createAgentsPublishTool,
     agents_discover: createAgentsDiscoverTool,
     agents_hire: createAgentsHireTool,
     agents_list: createAgentsListTool,
@@ -116,8 +118,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     ask: createAskTool,
 
     // File search tools
-    glob: createGlobTool,
-    grep: createGrepTool,
+    fs_glob: createFsGlobTool,
+    fs_grep: createFsGrepTool,
 
     // Conversation tools
     conversation_get: createConversationGetTool,
@@ -138,9 +140,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     lesson_get: createLessonGetTool,
     lesson_learn: createLessonLearnTool,
 
-    read_path: createReadPathTool,
-    write_file: createWriteFileTool,
-    edit: createEditTool,
+    fs_read: createFsReadTool,
+    fs_write: createFsWriteTool,
+    fs_edit: createFsEditTool,
 
     // Report tools
     report_delete: createReportDeleteTool,
@@ -253,8 +255,8 @@ const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_ad
 /** Pairing tools - auto-injected when hasActivePairings is true */
 const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
 
-/** File editing tools - auto-injected when write_file is available */
-const FILE_EDIT_TOOLS: ToolName[] = ["edit"];
+/** File editing tools - auto-injected when fs_write is available */
+const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -301,8 +303,8 @@ export function getToolsObject(
         }
     }
 
-    // Auto-inject edit tool when write_file is available
-    if (regularTools.includes("write_file")) {
+    // Auto-inject edit tool when fs_write is available
+    if (regularTools.includes("fs_write")) {
         for (const editToolName of FILE_EDIT_TOOLS) {
             if (!regularTools.includes(editToolName)) {
                 regularTools.push(editToolName);

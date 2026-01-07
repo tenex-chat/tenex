@@ -321,7 +321,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                 toolCalls: [
                     {
                         toolCallId: "call_read_file",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         input: { path: "/src/index.ts" },
                     },
                     {
@@ -333,7 +333,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
                 toolResults: [
                     {
                         toolCallId: "call_read_file",
-                        toolName: "read_path",
+                        toolName: "fs_read",
                         output: { content: "file contents here" },
                     },
                     {
@@ -356,7 +356,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
             const toolCalls = assistantMsg!.content as any[];
             expect(toolCalls).toHaveLength(2);
 
-            expect(toolCalls[0].toolName).toBe("read_path");
+            expect(toolCalls[0].toolName).toBe("fs_read");
             expect(toolCalls[0].input).toEqual({ path: "/src/index.ts" });
 
             expect(toolCalls[1].toolName).toBe("delegate");
@@ -367,7 +367,7 @@ describe("AgentExecutor.onStopCheck - Tool Message Preservation", () => {
             const toolResults = toolMsg!.content as any[];
             expect(toolResults).toHaveLength(2);
 
-            expect(toolResults[0].toolName).toBe("read_path");
+            expect(toolResults[0].toolName).toBe("fs_read");
             expect(toolResults[0].output.content).toBe("file contents here");
 
             expect(toolResults[1].toolName).toBe("delegate");

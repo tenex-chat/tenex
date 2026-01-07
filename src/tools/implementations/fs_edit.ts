@@ -74,7 +74,7 @@ async function executeEdit(
 /**
  * Create an AI SDK tool for editing files
  */
-export function createEditTool(context: ToolExecutionContext): AISdkTool {
+export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Performs exact string replacements in files. The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance of old_string. Use replace_all for replacing and renaming strings across the file. This is useful for surgical edits without full file rewrites. Safe and sandboxed to project directory.",

@@ -89,8 +89,8 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
             pubkey: agentPubkey,
             role: "Test agent for e2e testing",
             llmConfig: defaultLlm,
-            tools: ["read_path"],
-            instructions: "You are a test agent. When asked to read a file, use the read_path tool. If the file doesn't exist, explain the error to the user.",
+            tools: ["fs_read"],
+            instructions: "You are a test agent. When asked to read a file, use the fs_read tool. If the file doesn't exist, explain the error to the user.",
             signer: agentSigner,
             createMetadataStore: (conversationId: string) => {
                 return new AgentMetadataStore(conversationId, "test", metadataPath);

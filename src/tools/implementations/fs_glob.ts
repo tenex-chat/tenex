@@ -94,7 +94,7 @@ async function executeGlob(
     return filesWithMtime.map((f) => f.path).join("\n");
 }
 
-export function createGlobTool(context: ToolExecutionContext): AISdkTool {
+export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Fast file pattern matching tool that works with any codebase size. " +

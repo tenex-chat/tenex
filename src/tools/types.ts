@@ -10,11 +10,11 @@ import type { Tool as CoreTool } from "ai";
  * Keep this list in sync with implementations registered in the tool registry.
  */
 export type ToolName =
-    | "read_path"
-    | "write_file"
-    | "edit"
-    | "glob"
-    | "grep"
+    | "fs_read"
+    | "fs_write"
+    | "fs_edit"
+    | "fs_glob"
+    | "fs_grep"
     | "conversation_get"
     | "conversation_list"
     | "lesson_learn"
@@ -25,6 +25,7 @@ export type ToolName =
     | "agents_list"
     | "agents_read"
     | "agents_write"
+    | "agents_publish"
     | "discover_capabilities"
     | "delegate"
     | "delegate_followup"
