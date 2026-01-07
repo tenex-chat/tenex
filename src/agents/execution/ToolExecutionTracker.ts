@@ -68,8 +68,23 @@ import { trace } from "@opentelemetry/api";
  */
 const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_crossproject"];
 
+/**
+ * Tools that publish addressable events and need delayed tool use event publishing.
+ * These tools return results containing addressable event references that should be
+ * tagged with 'a' tags on the tool use event.
+ */
+const ADDRESSABLE_EVENT_TOOLS = ["report_write"];
+
 function isDelegationTool(toolName: string): boolean {
     return DELEGATION_TOOLS.includes(toolName);
+}
+
+function isAddressableEventTool(toolName: string): boolean {
+    return ADDRESSABLE_EVENT_TOOLS.includes(toolName);
+}
+
+function needsDelayedPublishing(toolName: string): boolean {
+    return isDelegationTool(toolName) || isAddressableEventTool(toolName);
 }
 
 /**
@@ -215,14 +230,16 @@ export class ToolExecutionTracker {
 
         this.executions.set(toolCallId, execution);
 
-        // For delegation tools, delay publishing until completion so we have the delegation event IDs
-        if (isDelegationTool(toolName)) {
+        // For tools that need delayed publishing (delegation tools, addressable event tools),
+        // delay publishing until completion so we have the event IDs/references
+        if (needsDelayedPublishing(toolName)) {
             // Store context for delayed publishing in completeExecution
             execution.humanContent = humanContent;
             execution.eventContext = eventContext;
             execution.agentPublisher = agentPublisher;
 
-            logger.debug("[ToolExecutionTracker] Delegation tool tracked (delayed publishing)", {
+            const toolType = isDelegationTool(toolName) ? "delegation" : "addressable event";
+            logger.debug(`[ToolExecutionTracker] ${toolType} tool tracked (delayed publishing)`, {
                 toolCallId,
                 toolName,
                 totalTracked: this.executions.size,
@@ -327,15 +344,24 @@ export class ToolExecutionTracker {
         execution.error = error;
         execution.completed = true;
 
-        // For delegation tools with delayed publishing, publish the tool use event now
-        // with references to the delegation event IDs
+        // For tools with delayed publishing, publish the tool use event now with references
         if (execution.toolEventId === "" && execution.agentPublisher && execution.eventContext) {
-            // Extract event IDs from result.pendingDelegations
-            const pendingDelegations = (
-                result as { pendingDelegations?: Array<{ delegationConversationId: string }> }
-            )?.pendingDelegations;
-            const referencedEventIds =
-                pendingDelegations?.map((d) => d.delegationConversationId).filter((id): id is string => !!id) ?? [];
+            let referencedEventIds: string[] = [];
+            let referencedAddressableEvents: string[] = [];
+
+            if (isDelegationTool(execution.toolName)) {
+                // Extract event IDs from result.pendingDelegations for delegation tools
+                const pendingDelegations = (
+                    result as { pendingDelegations?: Array<{ delegationConversationId: string }> }
+                )?.pendingDelegations;
+                referencedEventIds =
+                    pendingDelegations?.map((d) => d.delegationConversationId).filter((id): id is string => !!id) ?? [];
+            } else if (isAddressableEventTool(execution.toolName)) {
+                // Extract addressable event references from result.referencedAddressableEvents
+                // Format: "30023:pubkey:d-tag" for NDKArticle
+                const addressableRefs = (result as { referencedAddressableEvents?: string[] })?.referencedAddressableEvents;
+                referencedAddressableEvents = addressableRefs?.filter((ref): ref is string => !!ref) ?? [];
+            }
 
             // Publish the delayed tool use event with references
             const toolEvent = await execution.agentPublisher.toolUse(
@@ -344,18 +370,26 @@ export class ToolExecutionTracker {
                     content: execution.humanContent || `Executed ${execution.toolName}`,
                     args: execution.input,
                     referencedEventIds,
+                    referencedAddressableEvents,
                 },
                 execution.eventContext
             );
 
             execution.toolEventId = toolEvent.id;
 
-            logger.debug("[ToolExecutionTracker] Delegation tool event published with references", {
+            const logDetails: Record<string, unknown> = {
                 toolCallId,
                 toolName: execution.toolName,
                 toolEventId: toolEvent.id,
-                referencedEventIds,
-            });
+            };
+            if (referencedEventIds.length > 0) {
+                logDetails.referencedEventIds = referencedEventIds;
+            }
+            if (referencedAddressableEvents.length > 0) {
+                logDetails.referencedAddressableEvents = referencedAddressableEvents;
+            }
+
+            logger.debug("[ToolExecutionTracker] Tool event published with references", logDetails);
         }
 
         // Add telemetry for tool completion

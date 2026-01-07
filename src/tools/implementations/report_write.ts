@@ -28,6 +28,8 @@ type ReportWriteOutput = {
     articleId: string;
     slug: string;
     message: string;
+    /** Addressable event references for a-tagging on the tool use event */
+    referencedAddressableEvents: string[];
 };
 
 // Core implementation - extracted from existing execute function
@@ -46,7 +48,7 @@ async function executeReportWrite(
 
     const reportService = new ReportService();
 
-    const articleId = await reportService.writeReport(
+    const result = await reportService.writeReport(
         {
             slug,
             title,
@@ -64,16 +66,19 @@ async function executeReportWrite(
 
     logger.info("✅ Report written successfully", {
         slug,
-        articleId,
+        articleId: result.encodedId,
+        addressableRef: result.addressableRef,
         memorize,
         agent: context.agent.name,
     });
 
     return {
         success: true,
-        articleId: `nostr:${articleId}`,
+        articleId: `nostr:${result.encodedId}`,
         slug,
         message: `Report "${title}" published successfully.${memorizeMessage}`,
+        // Include addressable reference for ToolExecutionTracker to add as a-tag
+        referencedAddressableEvents: [result.addressableRef],
     };
 }
 
