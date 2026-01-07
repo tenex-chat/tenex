@@ -134,9 +134,16 @@ export class SchedulerService {
         return true;
     }
 
-    public async getTasks(): Promise<ScheduledTask[]> {
-        // Return local tasks
-        return Array.from(this.taskMetadata.values());
+    public async getTasks(projectId?: string): Promise<ScheduledTask[]> {
+        const allTasks = Array.from(this.taskMetadata.values());
+
+        // If projectId is provided, filter tasks by that project
+        if (projectId) {
+            return allTasks.filter(task => task.projectId === projectId);
+        }
+
+        // Return all tasks if no filter specified
+        return allTasks;
     }
 
     private startTask(task: ScheduledTask): void {

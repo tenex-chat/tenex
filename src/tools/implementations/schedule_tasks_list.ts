@@ -1,5 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
+import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -10,7 +11,7 @@ import { z } from "zod";
  */
 export function createListScheduledTasksTool(_context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: "List all currently scheduled tasks",
+        description: "List scheduled tasks for the current project",
         inputSchema: z.object({
             // Status filter is simplified since we don't track all these states locally
         }),
@@ -18,8 +19,19 @@ export function createListScheduledTasksTool(_context: ToolExecutionContext): AI
             try {
                 const schedulerService = SchedulerService.getInstance();
 
-                // Get tasks from scheduler
-                const tasks = await schedulerService.getTasks();
+                // Get the current project ID from context
+                let projectId: string | undefined;
+                try {
+                    const projectCtx = getProjectContext();
+                    projectId = projectCtx.project.tagId();
+                } catch {
+                    // No project context available - this shouldn't happen in normal operation
+                    // but we handle it gracefully by returning no tasks
+                    logger.warn("No project context available when listing scheduled tasks");
+                }
+
+                // Get tasks from scheduler, filtered by current project
+                const tasks = await schedulerService.getTasks(projectId);
 
                 // Format tasks for output
                 const formattedTasks = tasks.map((task) => ({
@@ -55,7 +67,7 @@ export function createListScheduledTasksTool(_context: ToolExecutionContext): AI
     // Attach getHumanReadableContent as non-enumerable property
     Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: () => {
-            return "Listing all scheduled tasks";
+            return "Listing scheduled tasks for current project";
         },
         enumerable: false,
         configurable: true,
