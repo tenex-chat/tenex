@@ -45,8 +45,9 @@ async function buildAll() {
         }
 
         // Use bun to transpile all TypeScript files
+        // Mark @google/gemini-cli-core as external to avoid WASM import resolution issues
         console.log("📦 Transpiling TypeScript files...");
-        execSync("bun build src --outdir dist --target node --format esm", { stdio: "inherit" });
+        execSync("bun build src --outdir dist --target node --format esm --external @google/gemini-cli-core", { stdio: "inherit" });
 
         console.log("✅ Build completed successfully!");
     } catch (error) {
