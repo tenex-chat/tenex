@@ -272,6 +272,9 @@ export class AgentPublisher {
         // Add ask marker
         event.tags.push(["ask", "true"]);
 
+        // Add t-tag for ask events
+        event.tags.push(["t", "ask"]);
+
         // Add TLDR tag
         event.tags.push(["tldr", config.tldr]);
 
