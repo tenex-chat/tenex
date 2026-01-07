@@ -646,6 +646,134 @@ describe("ToolExecutionTracker", () => {
         });
     });
 
+    describe("Addressable event tool delayed publishing (report_write)", () => {
+        it("should return null and not publish for report_write tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "report-write-call",
+                toolName: "report_write",
+                args: { slug: "test-report", title: "Test Report", summary: "Summary", content: "Content" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return null for addressable event tools
+            expect(result).toBeNull();
+
+            // Should NOT have published yet
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+
+            // Should still be tracking
+            expect(tracker.isTracking("report-write-call")).toBe(true);
+
+            // Should have empty toolEventId
+            const execution = tracker.getExecution("report-write-call");
+            expect(execution?.toolEventId).toBe("");
+        });
+
+        it("should publish with referencedAddressableEvents on completion", async () => {
+            // Track report_write tool
+            await tracker.trackExecution({
+                toolCallId: "report-write-complete",
+                toolName: "report_write",
+                args: { slug: "test-report", title: "Test Report", summary: "Summary", content: "Content" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Simulate result with referencedAddressableEvents from report_write tool
+            const reportWriteResult = {
+                success: true,
+                articleId: "nostr:naddr1...",
+                slug: "test-report",
+                message: "Report published",
+                referencedAddressableEvents: ["30023:agent-pubkey-123:test-report"],
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "report-write-complete",
+                result: reportWriteResult,
+                error: false,
+                agentPubkey: "agent-pubkey-123",
+            });
+
+            // Should have published with referencedAddressableEvents
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    toolName: "report_write",
+                    referencedAddressableEvents: ["30023:agent-pubkey-123:test-report"],
+                }),
+                mockEventContext
+            );
+
+            // toolEventId should be updated
+            const execution = tracker.getExecution("report-write-complete");
+            expect(execution?.toolEventId).toBe("mock-event-id-123");
+        });
+
+        it("should handle missing referencedAddressableEvents gracefully", async () => {
+            await tracker.trackExecution({
+                toolCallId: "report-no-refs",
+                toolName: "report_write",
+                args: { slug: "test" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Result without referencedAddressableEvents
+            await tracker.completeExecution({
+                toolCallId: "report-no-refs",
+                result: { success: true, articleId: "naddr1...", slug: "test", message: "Done" },
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    referencedAddressableEvents: [],
+                }),
+                mockEventContext
+            );
+        });
+
+        it("should keep referencedEventIds empty for report_write", async () => {
+            await tracker.trackExecution({
+                toolCallId: "report-no-event-refs",
+                toolName: "report_write",
+                args: { slug: "test" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            const reportWriteResult = {
+                success: true,
+                articleId: "nostr:naddr1...",
+                slug: "test",
+                message: "Done",
+                referencedAddressableEvents: ["30023:pubkey:test"],
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "report-no-event-refs",
+                result: reportWriteResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should have empty referencedEventIds (q-tags) but populated referencedAddressableEvents (a-tags)
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    referencedEventIds: [],
+                    referencedAddressableEvents: ["30023:pubkey:test"],
+                }),
+                mockEventContext
+            );
+        });
+    });
+
     describe("Edge cases and error scenarios", () => {
         it("should handle MCP tools with incorrect format", async () => {
             await tracker.trackExecution({
