@@ -1,14 +1,82 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import chalk from "chalk";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
-import { ConversationStore } from "../conversations/ConversationStore";
+import { ConversationStore, type ConversationMetadata } from "../conversations/ConversationStore";
 import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
+import { getNDK } from "../nostr/ndkClient";
+import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "@/services/projects";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
+
+/**
+ * Fetch a kind 30023 (NDKArticle) from an a-tag reference.
+ * @param aTagValue - The a-tag value in format "30023:pubkey:d-tag"
+ * @returns The article metadata or null if not found
+ */
+async function fetchReferencedArticle(
+    aTagValue: string
+): Promise<ConversationMetadata["referencedArticle"] | null> {
+    try {
+        const parts = aTagValue.split(":");
+        if (parts.length < 3 || parts[0] !== "30023") {
+            return null;
+        }
+
+        const [, pubkey, ...dTagParts] = parts;
+        const dTag = dTagParts.join(":"); // Handle d-tags that contain colons
+
+        const ndk = getNDK();
+        const filter = {
+            kinds: [30023],
+            authors: [pubkey],
+            "#d": [dTag],
+        };
+
+        const events = await ndk.fetchEvents(filter);
+        if (events.size === 0) {
+            logger.debug(chalk.yellow(`Referenced article not found: ${aTagValue}`));
+            return null;
+        }
+
+        const event = Array.from(events)[0];
+        const article = NDKArticle.from(event);
+
+        logger.info(chalk.cyan(`📄 Fetched referenced article: "${article.title || dTag}"`));
+
+        return {
+            title: article.title || dTag,
+            content: article.content || "",
+            dTag,
+        };
+    } catch (error) {
+        logger.debug(chalk.yellow(`Failed to fetch referenced article: ${formatAnyError(error)}`));
+        return null;
+    }
+}
+
+/**
+ * Extract and fetch the first kind 30023 article reference from an event's a-tags.
+ * @param event - The event to extract article references from
+ * @returns The article metadata or null if none found
+ */
+async function extractReferencedArticle(
+    event: NDKEvent
+): Promise<ConversationMetadata["referencedArticle"] | null> {
+    const aTags = TagExtractor.getATags(event);
+
+    // Find the first a-tag referencing a kind 30023 (article)
+    const articleATag = aTags.find((tag) => tag.startsWith("30023:"));
+    if (!articleATag) {
+        return null;
+    }
+
+    return fetchReferencedArticle(articleATag);
+}
 
 interface EventHandlerContext {
     agentExecutor: AgentExecutor;
@@ -26,6 +94,22 @@ export const handleNewConversation = async (
     try {
         // Create conversation
         const conversation = await ConversationStore.create(event);
+
+        // Check for referenced kind 30023 articles and populate metadata
+        const referencedArticle = await extractReferencedArticle(event);
+        if (referencedArticle) {
+            conversation.updateMetadata({ referencedArticle });
+            await conversation.save();
+
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan) {
+                activeSpan.addEvent("referenced_article_loaded", {
+                    "article.title": referencedArticle.title,
+                    "article.dTag": referencedArticle.dTag,
+                    "article.content_length": referencedArticle.content.length,
+                });
+            }
+        }
 
         // Get project context
         const projectCtx = getProjectContext();
