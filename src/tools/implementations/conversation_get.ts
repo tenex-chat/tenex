@@ -28,15 +28,15 @@ interface ConversationGetOutput {
  */
 function safeDeepCopy(obj: unknown, seen = new WeakSet()): unknown {
     // Handle primitives and special values
-    if (obj === null || typeof obj !== 'object') {
-        if (typeof obj === 'bigint') return obj.toString();
-        if (typeof obj === 'function') return undefined;
+    if (obj === null || typeof obj !== "object") {
+        if (typeof obj === "bigint") return obj.toString();
+        if (typeof obj === "function") return undefined;
         return obj;
     }
 
     // Cycle detection
     if (seen.has(obj)) {
-        return '[Circular]';
+        return "[Circular]";
     }
     seen.add(obj);
 
@@ -72,7 +72,7 @@ function safeDeepCopy(obj: unknown, seen = new WeakSet()): unknown {
             try {
                 result[key] = safeDeepCopy((obj as Record<string, unknown>)[key], seen);
             } catch {
-                result[key] = '[Access Error]';
+                result[key] = "[Access Error]";
             }
         }
     }
@@ -88,7 +88,7 @@ function safeCopy<T>(data: T): T {
         return safeDeepCopy(data) as T;
     } catch {
         // Fallback to string representation if even deep copy fails
-        return '[Serialization Failed]' as unknown as T;
+        return "[Serialization Failed]" as unknown as T;
     }
 }
 
@@ -108,7 +108,7 @@ function serializeConversation(conversation: ConversationStore): Record<string, 
         id: String(conversation.id),
         title: conversation.title ? String(conversation.title) : undefined,
         phase: conversation.phase ? String(conversation.phase) : undefined,
-        phaseStartedAt: typeof conversation.metadata.phaseStartedAt === 'number'
+        phaseStartedAt: typeof conversation.metadata.phaseStartedAt === "number"
             ? conversation.metadata.phaseStartedAt
             : undefined,
         metadata: conversation.metadata ? safeCopy(conversation.metadata) : {},

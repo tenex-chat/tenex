@@ -43,7 +43,7 @@ Is this acceptable behavior or should the agent be prompted to respond?`;
 
   buildCorrectionMessage(_context: PostCompletionContext, verification: VerificationResult): string {
     return verification.correctionMessage ||
-      `You completed your turn without providing any response. Please provide a meaningful response to the user's request.`;
+      "You completed your turn without providing any response. Please provide a meaningful response to the user's request.";
   }
 
   getCorrectionAction(_verification: VerificationResult): CorrectionAction {

@@ -36,7 +36,7 @@ async function executeDelegateFollowup(
   const delegationInfo = ralRegistry.findDelegation(delegation_conversation_id);
 
   let recipientPubkey = delegationInfo?.pending?.recipientPubkey ?? delegationInfo?.completed?.recipientPubkey;
-  let ralNumber = delegationInfo?.ralNumber;
+  const ralNumber = delegationInfo?.ralNumber;
 
   // Fall back to NDK fetch if not found locally (e.g., external delegations or stale state)
   if (!recipientPubkey) {
@@ -108,7 +108,7 @@ async function executeDelegateFollowup(
   // Return normal result - agent continues without blocking
   return {
     success: true,
-    message: `Follow-up sent. The agent will respond when ready.`,
+    message: "Follow-up sent. The agent will respond when ready.",
     delegationConversationId: delegation_conversation_id,
     followupEventId,
   };

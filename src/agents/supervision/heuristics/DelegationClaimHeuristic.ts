@@ -69,7 +69,7 @@ Did the agent intend to delegate but forget to use the tool, or was this just a 
 
   buildCorrectionMessage(_context: PostCompletionContext, verification: VerificationResult): string {
     return verification.correctionMessage ||
-      `You mentioned delegating to an agent but did not call the delegate tool. If you intended to delegate, please use the delegate tool. If you were just discussing delegation, please clarify your intentions.`;
+      "You mentioned delegating to an agent but did not call the delegate tool. If you intended to delegate, please use the delegate tool. If you were just discussing delegation, please clarify your intentions.";
   }
 
   getCorrectionAction(_verification: VerificationResult): CorrectionAction {

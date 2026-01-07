@@ -131,7 +131,7 @@ export class AgentPublisher {
 
                 if (successRelays.length === 0) {
                     span.setStatus({ code: SpanStatusCode.ERROR, message: "0 relays accepted event" });
-                    logger.warn(`Event published to 0 relays`, {
+                    logger.warn("Event published to 0 relays", {
                         eventId: event.id?.substring(0, 8),
                         eventType,
                         agent: this.agent.slug,

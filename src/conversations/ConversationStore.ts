@@ -19,6 +19,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
+import { convertToMultimodalContent } from "./utils/multimodal-content";
 
 export type MessageType = "text" | "tool-call" | "tool-result";
 
@@ -846,6 +847,9 @@ export class ConversationStore {
 
     /**
      * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+     *
+     * For text messages containing image URLs, the content is converted to
+     * multimodal format (TextPart + ImagePart array) for AI SDK compatibility.
      */
     private async entryToMessage(
         entry: ConversationEntry,
@@ -863,7 +867,12 @@ export class ConversationStore {
 
         // Text message - add attribution prefix
         const formattedContent = await this.formatWithAttribution(entry, entry.content);
-        return { role, content: formattedContent } as ModelMessage;
+
+        // Convert to multimodal format if content contains image URLs
+        // This allows the AI SDK to fetch and process images automatically
+        const content = convertToMultimodalContent(formattedContent);
+
+        return { role, content } as ModelMessage;
     }
 
     async buildMessagesForRal(

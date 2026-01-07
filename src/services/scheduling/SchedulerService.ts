@@ -230,7 +230,7 @@ export class SchedulerService {
         await event.sign(signer);
         await event.publish();
 
-        logger.info(`Published scheduled task event`, {
+        logger.info("Published scheduled task event", {
             taskId: task.id,
             projectId: task.projectId,
             eventId: event.id?.substring(0, 8),

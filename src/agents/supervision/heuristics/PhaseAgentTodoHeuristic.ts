@@ -43,7 +43,7 @@ Is this an acceptable exception, or should the agent set up a todo list first?`;
 
   buildCorrectionMessage(_context: PreToolContext, verification: VerificationResult): string {
     return verification.correctionMessage ||
-      `Before delegating, please set up a todo list to organize your work. As a phase manager, you should track your tasks and progress before assigning work to other agents.`;
+      "Before delegating, please set up a todo list to organize your work. As a phase manager, you should track your tasks and progress before assigning work to other agents.";
   }
 
   getCorrectionAction(_verification: VerificationResult): CorrectionAction {

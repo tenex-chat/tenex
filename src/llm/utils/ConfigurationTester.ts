@@ -148,7 +148,7 @@ Assistant: Great choice. OAuth is secure and user-friendly. Let me outline the s
             console.log(chalk.white("\nGenerated summary:"));
             console.log(chalk.cyan(`  Title: ${result.object.title}`));
             console.log(chalk.cyan(`  Summary: ${result.object.summary}`));
-            console.log(chalk.cyan(`  Key Points:`));
+            console.log(chalk.cyan("  Key Points:"));
             for (const point of result.object.keyPoints) {
                 console.log(chalk.cyan(`    • ${point}`));
             }
