@@ -13,8 +13,9 @@ import { createAgentsListTool } from "./implementations/agents_list";
 import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
-import { createCodebaseSearchTool } from "./implementations/codebase_search";
 import { createConversationGetTool } from "./implementations/conversation_get";
+import { createGlobTool } from "./implementations/glob";
+import { createGrepTool } from "./implementations/grep";
 import { createConversationListTool } from "./implementations/conversation_list";
 import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
@@ -74,7 +75,8 @@ import { createNostrFetchTool } from "./implementations/nostr_fetch";
 const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     // Read-only tools - these don't modify any state
     read_path: { hasSideEffects: false },
-    codebase_search: { hasSideEffects: false },
+    glob: { hasSideEffects: false },
+    grep: { hasSideEffects: false },
     conversation_get: { hasSideEffects: false },
     conversation_list: { hasSideEffects: false },
     conversation_search: { hasSideEffects: false },
@@ -113,8 +115,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Ask tool
     ask: createAskTool,
 
-    // Codebase search
-    codebase_search: createCodebaseSearchTool,
+    // File search tools
+    glob: createGlobTool,
+    grep: createGrepTool,
 
     // Conversation tools
     conversation_get: createConversationGetTool,
