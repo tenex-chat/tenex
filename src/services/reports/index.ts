@@ -1,2 +1,2 @@
-export type { ReportData, ReportInfo, ReportSummary } from "./ReportService";
+export type { ReportData, ReportInfo, ReportSummary, WriteReportResult } from "./ReportService";
 export { ReportService } from "./ReportService";

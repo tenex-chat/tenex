@@ -73,7 +73,8 @@ export interface ToolUseIntent {
     toolName: string;
     content: string; // e.g., "Reading $path"
     args?: unknown; // Tool arguments to be serialized
-    referencedEventIds?: string[]; // Event IDs to reference (e.g., delegation event IDs)
+    referencedEventIds?: string[]; // Event IDs to reference with q-tags (e.g., delegation event IDs)
+    referencedAddressableEvents?: string[]; // Addressable event references with a-tags (e.g., "30023:pubkey:d-tag")
 }
 
 export type AgentIntent =
@@ -541,6 +542,14 @@ export class AgentEventEncoder {
         if (intent.referencedEventIds) {
             for (const eventId of intent.referencedEventIds) {
                 event.tag(["q", eventId]);
+            }
+        }
+
+        // Add a-tags for referenced addressable events (e.g., NDKArticle reports)
+        // Format: "30023:pubkey:d-tag" for kind 30023 addressable events
+        if (intent.referencedAddressableEvents) {
+            for (const addressableRef of intent.referencedAddressableEvents) {
+                event.tag(["a", addressableRef]);
             }
         }
 

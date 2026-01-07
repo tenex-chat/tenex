@@ -39,6 +39,13 @@ export interface ReportSummary {
     hashtags?: string[];
 }
 
+export interface WriteReportResult {
+    /** The naddr-encoded article ID (e.g., "naddr1...") */
+    encodedId: string;
+    /** The addressable event reference for a-tagging (format: "30023:pubkey:d-tag") */
+    addressableRef: string;
+}
+
 type ReportAuthor = Pick<AgentInstance, "pubkey" | "signer" | "sign">;
 
 /**
@@ -58,8 +65,9 @@ export class ReportService {
 
     /**
      * Write or update a report
+     * @returns WriteReportResult containing both the encoded ID and addressable reference
      */
-    async writeReport(data: ReportData, agent: ReportAuthor): Promise<string> {
+    async writeReport(data: ReportData, agent: ReportAuthor): Promise<WriteReportResult> {
         const projectCtx = getProjectContext();
         if (!projectCtx?.project) {
             throw new Error("No project context available");
@@ -101,8 +109,14 @@ export class ReportService {
         await agent.sign(article);
         await article.publish();
 
-        // Return the encoded article ID
-        return article.encode();
+        // Build the addressable reference for a-tagging: "30023:pubkey:d-tag"
+        // NDKArticle is kind 30023
+        const addressableRef = `30023:${agent.pubkey}:${data.slug}`;
+
+        return {
+            encodedId: article.encode(),
+            addressableRef,
+        };
     }
 
     /**
