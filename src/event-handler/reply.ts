@@ -1,5 +1,5 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { trace } from "@opentelemetry/api";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import type { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { createExecutionContext } from "../agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "../conversations/ConversationStore";
@@ -184,10 +184,20 @@ async function handleReplyLogic(
 
     // If this is a completion event but no delegation target was found, drop it.
     // This prevents orphan completions from triggering new RALs and causing ping-pong loops.
+    // This is a conceptual bug - it means we failed to register the delegation properly.
     if (AgentEventDecoder.isDelegationCompletion(event)) {
-        trace.getActiveSpan()?.addEvent("reply.completion_dropped_no_waiting_ral", {
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("reply.completion_dropped_no_waiting_ral", {
             "event.id": event.id ?? "",
             "event.pubkey": event.pubkey.substring(0, 8),
+        });
+        activeSpan?.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: "Delegation completion dropped: no waiting RAL found. This indicates a delegation registration bug.",
+        });
+        logger.error("[reply] Delegation completion dropped - no waiting RAL", {
+            eventId: event.id,
+            eventPubkey: event.pubkey.substring(0, 8),
         });
         return;
     }

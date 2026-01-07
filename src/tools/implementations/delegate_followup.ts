@@ -36,7 +36,6 @@ async function executeDelegateFollowup(
   const delegationInfo = ralRegistry.findDelegation(delegation_conversation_id);
 
   let recipientPubkey = delegationInfo?.pending?.recipientPubkey ?? delegationInfo?.completed?.recipientPubkey;
-  const ralNumber = delegationInfo?.ralNumber;
 
   // Fall back to NDK fetch if not found locally (e.g., external delegations or stale state)
   if (!recipientPubkey) {
@@ -58,8 +57,10 @@ async function executeDelegateFollowup(
     );
   }
 
-  // Use the original delegation's ralNumber if available, otherwise use current context
-  const effectiveRalNumber = ralNumber ?? context.ralNumber;
+  // Always use the CURRENT RAL number from context.
+  // The delegation's stored ralNumber refers to the RAL that created it, which may have
+  // been cleared since then. We need to register on the CURRENT RAL so it resumes correctly.
+  const effectiveRalNumber = context.ralNumber;
 
   logger.info("[delegate_followup] Publishing follow-up", {
     fromAgent: context.agent.slug,
