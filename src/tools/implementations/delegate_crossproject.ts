@@ -89,13 +89,6 @@ async function executeDelegateCrossProject(
         );
     }
 
-    // Prevent self-delegation within the same project
-    if (agentPubkey === context.agent.pubkey) {
-        throw new Error(
-            "Cannot delegate to yourself in another project. Use delegate tool for same-project delegation."
-        );
-    }
-
     const ndk = getNDK();
 
     logger.info("[delegate_crossproject] Publishing cross-project delegation", {
