@@ -7,6 +7,7 @@ export {
     SilentAgentHeuristic,
     DelegationClaimHeuristic,
     PhaseAgentTodoHeuristic,
+    PendingTodosHeuristic,
 } from "./heuristics";
 
 // Services

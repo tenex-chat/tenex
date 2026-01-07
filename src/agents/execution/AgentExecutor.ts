@@ -665,9 +665,10 @@ export class AgentExecutor {
             const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
 
             // Check todo state for supervision context
-            const hasTodoList = conversationStore
-                ? conversationStore.getTodos(context.agent.pubkey).length > 0
-                : false;
+            const todos = conversationStore
+                ? conversationStore.getTodos(context.agent.pubkey)
+                : [];
+            const hasTodoList = todos.length > 0;
             const hasBeenNudgedAboutTodos = conversationStore
                 ? conversationStore.hasBeenNudgedAboutTodos(context.agent.pubkey)
                 : false;
@@ -683,6 +684,12 @@ export class AgentExecutor {
                 availableTools: toolsObject,
                 hasTodoList,
                 hasBeenNudgedAboutTodos,
+                todos: todos.map((t) => ({
+                    id: t.id,
+                    title: t.title,
+                    status: t.status,
+                    description: t.description,
+                })),
             };
 
             const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext);
