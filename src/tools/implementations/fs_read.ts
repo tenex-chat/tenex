@@ -84,7 +84,7 @@ async function executeReadPath(
  * Create an AI SDK tool for reading paths
  * This is the primary implementation
  */
-export function createReadPathTool(context: ToolExecutionContext): AISdkTool {
+export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. By default, reads the entire file. You can optionally specify offset and limit for large files. Results include line numbers when using offset/limit. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Safe and sandboxed to project directory.",

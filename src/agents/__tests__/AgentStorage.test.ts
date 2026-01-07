@@ -41,7 +41,7 @@ describe("AgentStorage", () => {
                 instructions: "Test instructions",
                 useCriteria: "Test criteria",
                 llmConfig: "anthropic:claude-sonnet-4",
-                tools: ["read_path", "shell"],
+                tools: ["fs_read", "shell"],
                 phases: { planning: "Plan the task" },
                 eventId: "test-event-id",
                 projects: ["project-1"],
@@ -55,7 +55,7 @@ describe("AgentStorage", () => {
             expect(agent.instructions).toBe("Test instructions");
             expect(agent.useCriteria).toBe("Test criteria");
             expect(agent.llmConfig).toBe("anthropic:claude-sonnet-4");
-            expect(agent.tools).toEqual(["read_path", "shell"]);
+            expect(agent.tools).toEqual(["fs_read", "shell"]);
             expect(agent.phases).toEqual({ planning: "Plan the task" });
             expect(agent.eventId).toBe("test-event-id");
             expect(agent.projects).toEqual(["project-1"]);
@@ -103,7 +103,7 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                tools: ["read_path"],
+                tools: ["fs_read"],
             });
 
             await storage.saveAgent(agent);
@@ -240,12 +240,12 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                tools: ["read_path"],
+                tools: ["fs_read"],
             });
 
             await storage.saveAgent(agent);
 
-            const newTools = ["read_path", "shell", "agents_write"];
+            const newTools = ["fs_read", "shell", "agents_write"];
             const success = await storage.updateAgentTools(signer.pubkey, newTools);
             expect(success).toBe(true);
 
@@ -254,7 +254,7 @@ describe("AgentStorage", () => {
         });
 
         it("should return false for non-existent agent", async () => {
-            const success = await storage.updateAgentTools("nonexistent-pubkey", ["read_path"]);
+            const success = await storage.updateAgentTools("nonexistent-pubkey", ["fs_read"]);
             expect(success).toBe(false);
         });
     });

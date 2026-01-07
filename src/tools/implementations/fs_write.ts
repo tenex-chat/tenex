@@ -37,7 +37,7 @@ async function executeWriteFile(
 /**
  * Create an AI SDK tool for writing files
  */
-export function createWriteFileTool(context: ToolExecutionContext): AISdkTool {
+export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
             "Write content to a file in the filesystem. Creates parent directories automatically if they don't exist. Overwrites existing files. Paths are relative to project root unless absolute. Safe and sandboxed to project directory.",

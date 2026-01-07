@@ -3,12 +3,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 import type { ExecutionEnvironment } from "@/tools/types";
-import { createEditTool } from "../edit";
+import { createFsEditTool } from "../fs_edit";
 
-describe("edit tool", () => {
+describe("fs_edit tool", () => {
     let testDir: string;
     let context: ExecutionEnvironment;
-    let editTool: ReturnType<typeof createEditTool>;
+    let editTool: ReturnType<typeof createFsEditTool>;
 
     beforeEach(async () => {
         testDir = await createTempDir();
@@ -22,7 +22,7 @@ describe("edit tool", () => {
         } as ExecutionEnvironment;
 
         // Create tool instance
-        editTool = createEditTool(context);
+        editTool = createFsEditTool(context);
     });
 
     afterEach(async () => {

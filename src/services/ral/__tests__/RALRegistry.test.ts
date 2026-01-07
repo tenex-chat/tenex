@@ -416,17 +416,17 @@ describe("RALRegistry", () => {
     it("should set current tool and toolStartedAt", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "read_path");
+      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
 
       const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.currentTool).toBe("read_path");
+      expect(state?.currentTool).toBe("fs_read");
       expect(state?.toolStartedAt).toBeDefined();
     });
 
     it("should clear current tool when set to undefined", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "read_path");
+      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
       registry.setCurrentTool(agentPubkey, conversationId, ralNumber, undefined);
 
       const state = registry.getState(agentPubkey, conversationId);
@@ -436,7 +436,7 @@ describe("RALRegistry", () => {
 
     it("should handle setCurrentTool for non-existent RAL gracefully", () => {
       expect(() => {
-        registry.setCurrentTool("nonexistent", conversationId, 1, "read_path");
+        registry.setCurrentTool("nonexistent", conversationId, 1, "fs_read");
       }).not.toThrow();
     });
   });

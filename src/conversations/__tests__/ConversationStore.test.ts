@@ -212,7 +212,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-call",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     input: { path: "/tmp/test" },
                 }] as ToolCallPart[],
             });
@@ -224,7 +224,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-result",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     output: { type: "text", value: "file content" },
                 }] as ToolResultPart[],
             });
@@ -255,7 +255,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-call",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     input: { path: "/tmp/test" },
                 }] as ToolCallPart[],
             });
@@ -285,7 +285,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-call",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     input: {},
                 }] as ToolCallPart[],
             });
@@ -297,7 +297,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-result",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     output: { type: "text", value: "content" },
                 }] as ToolResultPart[],
             });
@@ -324,7 +324,7 @@ describe("ConversationStore", () => {
                 toolData: [{
                     type: "tool-call",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     input: {},
                 }] as ToolCallPart[],
             });

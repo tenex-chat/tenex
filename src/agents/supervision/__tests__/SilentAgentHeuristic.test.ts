@@ -79,7 +79,7 @@ describe("SilentAgentHeuristic", () => {
         it("should trigger when agent has tool calls but none are delegate", async () => {
             const context = createContext({
                 messageContent: "",
-                toolCallsMade: ["read_file", "write_file"],
+                toolCallsMade: ["read_file", "fs_write"],
             });
 
             const result = await heuristic.detect(context);

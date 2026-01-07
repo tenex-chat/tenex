@@ -8,7 +8,7 @@ describe("Tool Registry", () => {
 
     describe("getTool", () => {
         it("should return tool when exists", () => {
-            const tool = getTool("read_path", mockContext);
+            const tool = getTool("fs_read", mockContext);
             expect(tool).toBeDefined();
             expect(tool?.description).toContain("Read a file or directory");
         });
@@ -28,13 +28,13 @@ describe("Tool Registry", () => {
 
     describe("getTools", () => {
         it("should return array of existing tools", () => {
-            const tools = getTools(["read_path", "shell"], mockContext);
+            const tools = getTools(["fs_read", "shell"], mockContext);
             expect(tools).toHaveLength(2);
         });
 
         it("should filter out non-existent tools", () => {
             // @ts-expect-error Testing with invalid tool name
-            const tools = getTools(["read_path", "non_existent" as ToolName, "shell"], mockContext);
+            const tools = getTools(["fs_read", "non_existent" as ToolName, "shell"], mockContext);
             expect(tools).toHaveLength(2);
         });
 

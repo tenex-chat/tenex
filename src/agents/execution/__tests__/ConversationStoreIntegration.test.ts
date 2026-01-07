@@ -96,7 +96,7 @@ describe("ConversationStore Agent Execution Integration", () => {
                 toolData: [{
                     type: "tool-call",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     input: { path: "/tmp/test.txt" },
                 }] as ToolCallPart[],
             });
@@ -110,7 +110,7 @@ describe("ConversationStore Agent Execution Integration", () => {
                 toolData: [{
                     type: "tool-result",
                     toolCallId: "call_1",
-                    toolName: "read_path",
+                    toolName: "fs_read",
                     output: { type: "text", value: "File contents here" },
                 }] as ToolResultPart[],
             });
