@@ -34,7 +34,6 @@ interface ConversationSummary {
     projectId?: string;
     title?: string;
     summary?: string;
-    phase?: string;
     statusLabel?: string;
     statusCurrentActivity?: string;
     messageCount: number;
@@ -59,7 +58,6 @@ function summarizeConversation(conversation: ConversationStore, projectId?: stri
         projectId,
         title: metadata.title ?? conversation.title,
         summary: metadata.summary,
-        phase: metadata.phase ?? conversation.phase,
         statusLabel: metadata.statusLabel,
         statusCurrentActivity: metadata.statusCurrentActivity,
         messageCount: messages.length,
@@ -173,7 +171,7 @@ async function executeConversationList(
 export function createConversationListTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "List conversations for this project with summary information including ID, title, summary, phase, status, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use this to discover available conversations before retrieving specific ones with conversation_get.",
+            "List conversations for this project with summary information including ID, title, summary, status, message count, and timestamps. Results are sorted by most recent activity. Supports optional date range filtering with fromTime/toTime (Unix timestamps in seconds). Use this to discover available conversations before retrieving specific ones with conversation_get.",
 
         inputSchema: conversationListSchema,
 

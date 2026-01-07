@@ -29,8 +29,6 @@ export interface DelegationIntent {
     delegations: Array<{
         recipient: string;
         request: string;
-        phase?: string;
-        phaseInstructions?: string;
         branch?: string;
     }>;
     type?: "delegation" | "delegation_followup" | "ask";
@@ -95,7 +93,6 @@ export interface EventContext {
     executionTime?: number;
     model?: string;
     cost?: number; // LLM cost in USD
-    phase?: string; // Current phase for phase-aware events
     ralNumber: number; // RAL number for this execution - required for all conversational events
 }
 
@@ -242,16 +239,6 @@ export class AgentEventEncoder {
             // Add recipient as p-tag
             event.tag(["p", delegation.recipient]);
 
-            // Phase metadata if provided
-            if (delegation.phase) {
-                event.tag(["phase", delegation.phase]);
-
-                // Add phase instructions as a separate tag
-                if (delegation.phaseInstructions) {
-                    event.tag(["phase-instructions", delegation.phaseInstructions]);
-                }
-            }
-
             // Branch metadata if provided (for worktree support)
             if (delegation.branch) {
                 event.tag(["branch", delegation.branch]);
@@ -266,7 +253,6 @@ export class AgentEventEncoder {
             }
 
             logger.debug("Encoded delegation request", {
-                phase: delegation.phase,
                 recipient: delegation.recipient.substring(0, 8),
             });
 
@@ -325,11 +311,6 @@ export class AgentEventEncoder {
      */
     public addStandardTags(event: NDKEvent, context: EventContext): void {
         this.aTagProject(event);
-
-        // Phase metadata
-        if (context.phase) {
-            event.tag(["phase", context.phase]);
-        }
 
         // LLM metadata
         if (context.model) {
@@ -493,7 +474,7 @@ export class AgentEventEncoder {
         followUpEvent.tags = followUpEvent.tags.filter((t) => t[0] !== "p");
         followUpEvent.tag(responseEvent.author);
 
-        // Add standard metadata (project tag, phase, model, cost, etc)
+        // Add standard metadata (project tag, model, cost, execution time, ral number)
         this.addStandardTags(followUpEvent, context);
 
         // Forward branch tag from response event

@@ -33,7 +33,7 @@ import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
 import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/phase-utils";
+import { createEventContext } from "@/utils/event-context";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type {
@@ -238,7 +238,6 @@ export class AgentExecutor {
                 const conversation = fullContext.getConversation();
                 if (conversation) {
                     span.setAttributes({
-                        "conversation.phase": conversation.phase,
                         "conversation.message_count": conversation.getMessageCount(),
                     });
                 }
@@ -247,7 +246,6 @@ export class AgentExecutor {
                 span.addEvent("executor.started", {
                     ral_number: ralNumber,
                     is_resumption: isResumption,
-                    has_phases: !!context.agent.phases,
                 });
 
                 try {
@@ -446,7 +444,6 @@ export class AgentExecutor {
                         const preToolContext: PreToolContext = {
                             agentSlug: context.agent.slug,
                             agentPubkey: context.agent.pubkey,
-                            hasPhases: !!context.agent.phases,
                             toolName,
                             toolArgs: input,
                             hasTodoList,
@@ -459,7 +456,6 @@ export class AgentExecutor {
                         logger.debug(`[AgentExecutor] Running pre-tool supervision for "${toolName}"`, {
                             agent: context.agent.slug,
                             hasTodoList,
-                            hasPhases: !!context.agent.phases,
                         });
 
                         const supervisionResult = await supervisorOrchestrator.checkPreTool(preToolContext);
@@ -672,11 +668,13 @@ export class AgentExecutor {
             const hasBeenNudgedAboutTodos = conversationStore
                 ? conversationStore.hasBeenNudgedAboutTodos(context.agent.pubkey)
                 : false;
+            const hasBeenRemindedAboutTodos = conversationStore
+                ? conversationStore.hasBeenRemindedAboutTodos(context.agent.pubkey)
+                : false;
 
             const supervisionContext: PostCompletionContext = {
                 agentSlug: context.agent.slug,
                 agentPubkey: context.agent.pubkey,
-                hasPhases: !!context.agent.phases,
                 messageContent: completionEvent.message || "",
                 toolCallsMade,
                 systemPrompt,
@@ -684,6 +682,7 @@ export class AgentExecutor {
                 availableTools: toolsObject,
                 hasTodoList,
                 hasBeenNudgedAboutTodos,
+                hasBeenRemindedAboutTodos,
                 todos: todos.map((t) => ({
                     id: t.id,
                     title: t.title,
@@ -710,6 +709,12 @@ export class AgentExecutor {
                 // Mark agent as nudged if this was the todo nudge heuristic
                 if (supervisionResult.heuristicId === "consecutive-tools-without-todo" && conversationStore) {
                     conversationStore.setNudgedAboutTodos(context.agent.pubkey);
+                    await conversationStore.save();
+                }
+
+                // Mark agent as reminded if this was the todo reminder heuristic
+                if (supervisionResult.heuristicId === "todo-reminder" && conversationStore) {
+                    conversationStore.setRemindedAboutTodos(context.agent.pubkey);
                     await conversationStore.save();
                 }
 

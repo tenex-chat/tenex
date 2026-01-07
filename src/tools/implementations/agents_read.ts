@@ -24,7 +24,6 @@ interface AgentsReadOutput {
         useCriteria?: string;
         llmConfig?: string;
         tools?: string[];
-        phases?: Record<string, string>;
         eventId?: string;
         pubkey: string;
     };
@@ -71,7 +70,6 @@ async function executeAgentsRead(
             useCriteria: agent.useCriteria,
             llmConfig: agent.llmConfig,
             tools: agent.tools,
-            phases: agent.phases,
             eventId: agent.eventId,
             pubkey: agent.pubkey,
         },

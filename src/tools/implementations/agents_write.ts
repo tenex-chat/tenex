@@ -22,12 +22,6 @@ const agentsWriteSchema = z.object({
         .describe(
             "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
         ),
-    phases: z
-        .record(z.string(), z.string())
-        .nullable()
-        .describe(
-            "Phase definitions for this agent - maps phase names to their instructions. When phases are defined, the agent can use the phase parameter when delegating tasks."
-        ),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
@@ -53,7 +47,7 @@ async function executeAgentsWrite(
     input: AgentsWriteInput,
     context?: ToolExecutionContext
 ): Promise<AgentsWriteOutput> {
-    const { slug, name, role, description, instructions, useCriteria, llmConfig, tools, phases } =
+    const { slug, name, role, description, instructions, useCriteria, llmConfig, tools } =
         input;
 
     if (!slug) {
@@ -91,7 +85,6 @@ async function executeAgentsWrite(
         if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria ?? undefined;
         if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig ?? undefined;
         if (tools !== undefined) existingAgent.tools = tools ?? undefined;
-        if (phases !== undefined) existingAgent.phases = phases ?? undefined;
 
         // Save to storage
         await agentStorage.saveAgent(existingAgent);
@@ -145,7 +138,6 @@ async function executeAgentsWrite(
         useCriteria,
         llmConfig: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
         tools,
-        phases,
         eventId: undefined, // Locally created agents don't have event IDs
         projects: [projectDTag], // Use d-tag for consistent storage/retrieval
     });

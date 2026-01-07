@@ -80,7 +80,7 @@ export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TO
  */
 export type ToolAgentInfo = Pick<
     AgentInstance,
-    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools" | "phases"
+    "name" | "pubkey" | "slug" | "signer" | "sign" | "llmConfig" | "tools"
 >;
 
 /**

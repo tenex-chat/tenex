@@ -10,12 +10,15 @@ describe("SilentAgentHeuristic", () => {
     ): PostCompletionContext => ({
         agentSlug: "test-agent",
         agentPubkey: "abc123",
-        hasPhases: false,
         messageContent: "",
         toolCallsMade: [],
         systemPrompt: "You are a helpful assistant.",
         conversationHistory: [],
         availableTools: {},
+        hasTodoList: false,
+        hasBeenNudgedAboutTodos: false,
+        hasBeenRemindedAboutTodos: false,
+        todos: [],
         ...overrides,
     });
 

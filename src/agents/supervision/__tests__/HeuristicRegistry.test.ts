@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { HeuristicRegistry } from "../heuristics/HeuristicRegistry";
 import { SilentAgentHeuristic } from "../heuristics/SilentAgentHeuristic";
 import { DelegationClaimHeuristic } from "../heuristics/DelegationClaimHeuristic";
-import { PhaseAgentTodoHeuristic } from "../heuristics/PhaseAgentTodoHeuristic";
 
 // Mock logger
 vi.mock("@/utils/logger", () => ({
@@ -40,23 +39,22 @@ describe("HeuristicRegistry", () => {
         const registry = HeuristicRegistry.getInstance();
         registry.register(new SilentAgentHeuristic());
         registry.register(new DelegationClaimHeuristic());
-        registry.register(new PhaseAgentTodoHeuristic());
 
         const postCompletion = registry.getByTiming("post-completion");
         const preTool = registry.getByTiming("pre-tool-execution");
 
         expect(postCompletion.length).toBe(2);
-        expect(preTool.length).toBe(1);
+        expect(preTool.length).toBe(0);
     });
 
     it("should get pre-tool heuristics filtered by tool name", () => {
         const registry = HeuristicRegistry.getInstance();
-        registry.register(new PhaseAgentTodoHeuristic());
+        // No pre-tool heuristics registered
 
         const delegateHeuristics = registry.getPreToolHeuristics("delegate");
         const otherHeuristics = registry.getPreToolHeuristics("some-other-tool");
 
-        expect(delegateHeuristics.length).toBe(1);
+        expect(delegateHeuristics.length).toBe(0);
         expect(otherHeuristics.length).toBe(0);
     });
 

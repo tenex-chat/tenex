@@ -81,8 +81,6 @@ export interface PostCompletionContext {
     agentSlug: string;
     /** Agent's Nostr public key */
     agentPubkey: string;
-    /** Whether the agent execution has phases */
-    hasPhases: boolean;
     /** The final message content from the agent */
     messageContent: string;
     /** Names of tools that were called during execution */
@@ -97,6 +95,8 @@ export interface PostCompletionContext {
     hasTodoList: boolean;
     /** Whether the agent has already been nudged about todo usage in this conversation */
     hasBeenNudgedAboutTodos: boolean;
+    /** Whether the agent has already been reminded about incomplete todos in this conversation */
+    hasBeenRemindedAboutTodos: boolean;
     /** The agent's todo items (for detailed inspection by heuristics) */
     todos: Array<{ id: string; title: string; status: string; description?: string }>;
 }
@@ -109,8 +109,6 @@ export interface PreToolContext {
     agentSlug: string;
     /** Agent's Nostr public key */
     agentPubkey: string;
-    /** Whether the agent execution has phases */
-    hasPhases: boolean;
     /** Name of the tool about to be executed */
     toolName: string;
     /** Arguments passed to the tool */

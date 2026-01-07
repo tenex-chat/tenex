@@ -42,7 +42,6 @@ describe("AgentStorage", () => {
                 useCriteria: "Test criteria",
                 llmConfig: "anthropic:claude-sonnet-4",
                 tools: ["fs_read", "shell"],
-                phases: { planning: "Plan the task" },
                 eventId: "test-event-id",
                 projects: ["project-1"],
             });
@@ -56,7 +55,6 @@ describe("AgentStorage", () => {
             expect(agent.useCriteria).toBe("Test criteria");
             expect(agent.llmConfig).toBe("anthropic:claude-sonnet-4");
             expect(agent.tools).toEqual(["fs_read", "shell"]);
-            expect(agent.phases).toEqual({ planning: "Plan the task" });
             expect(agent.eventId).toBe("test-event-id");
             expect(agent.projects).toEqual(["project-1"]);
         });
@@ -72,14 +70,12 @@ describe("AgentStorage", () => {
                 instructions: null,
                 useCriteria: null,
                 tools: null,
-                phases: null,
             });
 
             expect(agent.description).toBeUndefined();
             expect(agent.instructions).toBeUndefined();
             expect(agent.useCriteria).toBeUndefined();
             expect(agent.tools).toBeUndefined();
-            expect(agent.phases).toBeUndefined();
         });
 
         it("should default projects to empty array", () => {

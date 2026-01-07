@@ -55,7 +55,7 @@ describe("Delegation tools - Self-delegation validation", () => {
     });
 
     describe("delegate tool", () => {
-        it("should allow self-delegation without phase by slug", async () => {
+        it("should allow self-delegation by slug", async () => {
             const context = {
                 ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
@@ -70,13 +70,13 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation without phase is now allowed
+            // Self-delegation is allowed
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
             expect(result.__stopExecution).toBe(true);
         });
 
-        it("should allow self-delegation without phase by pubkey", async () => {
+        it("should allow self-delegation by pubkey", async () => {
             const context = {
                 ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
@@ -91,13 +91,13 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation without phase is now allowed
+            // Self-delegation is allowed
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
             expect(result.__stopExecution).toBe(true);
         });
 
-        it("should allow self in multiple recipients without phase", async () => {
+        it("should allow self in multiple recipients", async () => {
             const context = {
                 ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
@@ -113,7 +113,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation without phase is now allowed
+            // Self-delegation is allowed
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
             expect(result.__stopExecution).toBe(true);

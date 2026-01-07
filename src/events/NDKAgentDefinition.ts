@@ -93,47 +93,4 @@ export class NDKAgentDefinition extends NDKEvent {
         if (value) this.tags.push(["use-criteria", value]);
     }
 
-    get phase(): string | undefined {
-        return this.tagValue("phase");
-    }
-
-    /**
-     * The project phase this agent definition is associated with.
-     * When set, this agent definition only applies to this specific phase.
-     */
-    set phase(value: string | undefined) {
-        this.removeTag("phase");
-        if (value) this.tags.push(["phase", value]);
-    }
-
-    /**
-     * Get phase definitions for this agent
-     * Phases are stored as "phase" tags with format: ["phase", "phase-name", "instructions"]
-     */
-    get phases(): Record<string, string> | undefined {
-        const phaseTags = this.tags.filter((tag) => tag[0] === "phase" && tag[1] && tag[2]);
-        if (phaseTags.length === 0) return undefined;
-
-        const phases: Record<string, string> = {};
-        for (const [, phaseName, instructions] of phaseTags) {
-            phases[phaseName] = instructions;
-        }
-        return phases;
-    }
-
-    /**
-     * Set phase definitions for this agent
-     * @param value - Object mapping phase names to their instructions
-     */
-    set phases(value: Record<string, string> | undefined) {
-        // Remove all existing multi-value phase tags (keep single phase tag if it exists)
-        this.tags = this.tags.filter((tag) => !(tag[0] === "phase" && tag[2]));
-
-        // Add new phase tags with instructions
-        if (value) {
-            for (const [phaseName, instructions] of Object.entries(value)) {
-                this.tags.push(["phase", phaseName, instructions]);
-            }
-        }
-    }
 }

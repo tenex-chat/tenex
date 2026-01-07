@@ -139,28 +139,6 @@ export class TagExtractor {
     }
 
     /**
-     * Extract phase tags from an event
-     * @param event - The event to extract phase tags from
-     * @returns Array of phase tag values
-     */
-    static getPhaseTags(event: NDKEvent): string[] {
-        return event.tags
-            .filter((tag) => tag[0] === "phase")
-            .map((tag) => tag[1])
-            .filter((value): value is string => !!value);
-    }
-
-    /**
-     * Get the first phase tag value
-     * @param event - The event to extract phase from
-     * @returns The first phase tag value or null
-     */
-    static getPhase(event: NDKEvent): string | null {
-        const phases = this.getPhaseTags(event);
-        return phases.length > 0 ? phases[0] : null;
-    }
-
-    /**
      * Extract nudge tags from an event
      * @param event - The event to extract nudge tags from
      * @returns Array of nudge event IDs

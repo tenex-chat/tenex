@@ -42,8 +42,6 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
         tools: validToolNames,
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
-        phase: storedAgent.phase,
-        phases: storedAgent.phases,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
@@ -175,7 +173,6 @@ export async function loadAgentIntoRegistry(
                     description: freshAgent.description,
                     instructions: freshAgent.instructions,
                     useCriteria: freshAgent.useCriteria,
-                    phases: freshAgent.phases,
                 },
                 whitelistedPubkeys
             );

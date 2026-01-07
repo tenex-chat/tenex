@@ -28,10 +28,6 @@ export interface DelegateConfig {
     recipient: string;
     /** The content/instructions for the delegation */
     content: string;
-    /** Optional phase name for phase-aware delegations */
-    phase?: string;
-    /** Optional phase-specific instructions */
-    phaseInstructions?: string;
     /** Optional branch for worktree support */
     branch?: string;
 }
@@ -261,13 +257,6 @@ export class AgentPublisher {
 
         // No e-tag: delegation events start separate conversations
 
-        // Add phase tags if present
-        if (config.phase) {
-            event.tags.push(["phase", config.phase]);
-        }
-        if (config.phaseInstructions) {
-            event.tags.push(["phase-instructions", config.phaseInstructions]);
-        }
         if (config.branch) {
             event.tags.push(["branch", config.branch]);
         }
@@ -513,7 +502,6 @@ export class AgentPublisher {
             description?: string;
             instructions?: string;
             useCriteria?: string;
-            phases?: Record<string, string>;
         },
         whitelistedPubkeys?: string[]
     ): Promise<void> {
@@ -574,12 +562,6 @@ export class AgentPublisher {
                 }
                 if (agentMetadata.useCriteria) {
                     profileEvent.tags.push(["use-criteria", agentMetadata.useCriteria]);
-                }
-                if (agentMetadata.phases) {
-                    // Add phase tags with instructions
-                    for (const [phaseName, instructions] of Object.entries(agentMetadata.phases)) {
-                        profileEvent.tags.push(["phase", phaseName, instructions]);
-                    }
                 }
             }
 

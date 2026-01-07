@@ -43,8 +43,6 @@ export interface Injection {
 
 export interface ConversationMetadata {
     title?: string;
-    phase?: string;
-    phaseStartedAt?: number;
     branch?: string;
     summary?: string;
     requirements?: string;
@@ -79,6 +77,7 @@ interface ConversationState {
     metadata: ConversationMetadata;
     agentTodos: Record<string, TodoItem[]>;
     todoNudgedAgents: string[]; // Agents who have been nudged about todo usage
+    todoRemindedAgents: string[]; // Agents who have been reminded about incomplete todos
     blockedAgents: string[];
     executionTime: ExecutionTime;
 }
@@ -508,6 +507,7 @@ export class ConversationStore {
         metadata: {},
         agentTodos: {},
         todoNudgedAgents: [],
+        todoRemindedAgents: [],
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
     };
@@ -549,6 +549,7 @@ export class ConversationStore {
                 metadata: loaded.metadata ?? {},
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
+                todoRemindedAgents: loaded.todoRemindedAgents ?? [],
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
@@ -569,6 +570,7 @@ export class ConversationStore {
                 metadata: {},
                 agentTodos: {},
                 todoNudgedAgents: [],
+                todoRemindedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
@@ -592,10 +594,6 @@ export class ConversationStore {
 
     get title(): string | undefined {
         return this.state.metadata.title;
-    }
-
-    get phase(): string | undefined {
-        return this.state.metadata.phase;
     }
 
     get metadata(): ConversationMetadata {
@@ -930,15 +928,6 @@ export class ConversationStore {
         this.state.metadata.title = title;
     }
 
-    getPhase(): string | undefined {
-        return this.state.metadata.phase;
-    }
-
-    setPhase(phase: string): void {
-        this.state.metadata.phase = phase;
-        this.state.metadata.phaseStartedAt = Date.now();
-    }
-
     // Todo Operations
 
     getTodos(agentPubkey: string): TodoItem[] {
@@ -958,6 +947,18 @@ export class ConversationStore {
     setNudgedAboutTodos(agentPubkey: string): void {
         if (!this.state.todoNudgedAgents.includes(agentPubkey)) {
             this.state.todoNudgedAgents.push(agentPubkey);
+        }
+    }
+
+    // Todo Reminder Operations (for incomplete todos)
+
+    hasBeenRemindedAboutTodos(agentPubkey: string): boolean {
+        return this.state.todoRemindedAgents.includes(agentPubkey);
+    }
+
+    setRemindedAboutTodos(agentPubkey: string): void {
+        if (!this.state.todoRemindedAgents.includes(agentPubkey)) {
+            this.state.todoRemindedAgents.push(agentPubkey);
         }
     }
 

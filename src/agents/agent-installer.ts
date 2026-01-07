@@ -87,20 +87,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
         logger.info(`Agent "${title}" requests access to ${toolTags.length} tool(s):`, toolTags);
     }
 
-    // Extract phase definitions from the agent definition event
-    const phaseTags = event.tags.filter((tag) => tag[0] === "phase" && tag[1] && tag[2]);
-    let phases: Record<string, string> | undefined;
-    if (phaseTags.length > 0) {
-        phases = {};
-        for (const [, phaseName, phaseInstructions] of phaseTags) {
-            phases[phaseName] = phaseInstructions;
-        }
-        logger.info(
-            `Agent "${title}" defines ${Object.keys(phases).length} phase(s):`,
-            Object.keys(phases)
-        );
-    }
-
     return {
         eventId: event.id,
         slug,
@@ -111,7 +97,6 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
         useCriteria,
         llmConfig: DEFAULT_AGENT_LLM_CONFIG,
         tools: toolTags.length > 0 ? toolTags : [],
-        phases,
     };
 }
 
@@ -123,7 +108,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
  * ## Flow
  * 1. Fetch agent definition event from Nostr relays (by eventId)
  * 2. Validate event structure (has title, content, etc.)
- * 3. Parse event tags (tools, phases, etc.)
+ * 3. Parse event tags (tools, etc.)
  * 4. Generate new private key for this agent instance
  * 5. Save to AgentStorage
  * 6. Return StoredAgent
@@ -186,7 +171,6 @@ export async function installAgentFromNostr(
         useCriteria: agentData.useCriteria,
         llmConfig: agentData.llmConfig,
         tools: agentData.tools,
-        phases: agentData.phases,
         eventId: agentData.eventId,
         projects: [], // Projects are managed by agent-loader
     });

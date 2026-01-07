@@ -239,9 +239,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
-    // Add agent phases awareness if agent has phases defined
-    systemPromptBuilder.add("agent-phases", { agent });
-
     // Add nudge content if present (from kind:4201 events referenced by the triggering event)
     if (nudgeContent && nudgeContent.trim().length > 0) {
         systemPromptBuilder.add("nudges", { nudgeContent });

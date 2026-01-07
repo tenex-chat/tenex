@@ -26,8 +26,6 @@ describe("AgentRegistry", () => {
             tools: ["fs_read", "shell"],
             eventId: "test-event-id",
             slug: "test-agent",
-            phase: undefined,
-            phases: undefined,
             createMetadataStore: mock(() => ({}) as any),
             createLLMService: mock(() => ({}) as any),
             sign: mock(async () => {}),
@@ -144,47 +142,6 @@ describe("AgentRegistry", () => {
             expect(agents.map((a) => a.slug)).toContain("agent-1");
             expect(agents.map((a) => a.slug)).toContain("agent-2");
             expect(agents.map((a) => a.slug)).toContain("agent-3");
-        });
-    });
-
-    describe("getAgentsByPhase", () => {
-        it("should return agents without phase when phase is undefined", () => {
-            const universal = createMockAgent({ slug: "universal", phase: undefined });
-            const planning = createMockAgent({ slug: "planning", phase: "planning" });
-
-            registry.addAgent(universal);
-            registry.addAgent(planning);
-
-            const agents = registry.getAgentsByPhase(undefined);
-            expect(agents.length).toBe(1);
-            expect(agents[0].slug).toBe("universal");
-        });
-
-        it("should return agents matching phase plus universal agents", () => {
-            const universal = createMockAgent({ slug: "universal", phase: undefined });
-            const planning = createMockAgent({ slug: "planning", phase: "planning" });
-            const execution = createMockAgent({ slug: "execution", phase: "execution" });
-
-            registry.addAgent(universal);
-            registry.addAgent(planning);
-            registry.addAgent(execution);
-
-            const agents = registry.getAgentsByPhase("planning");
-            expect(agents.length).toBe(2);
-            expect(agents.map((a) => a.slug)).toContain("universal");
-            expect(agents.map((a) => a.slug)).toContain("planning");
-            expect(agents.map((a) => a.slug)).not.toContain("execution");
-        });
-
-        it("should normalize phase names when comparing", () => {
-            const agent = createMockAgent({ slug: "planning", phase: "Planning" });
-
-            registry.addAgent(agent);
-
-            // Should match despite different casing
-            const agents = registry.getAgentsByPhase("planning");
-            expect(agents.length).toBe(1);
-            expect(agents[0].slug).toBe("planning");
         });
     });
 

@@ -21,7 +21,6 @@ type AgentInfo = {
     instructions?: string;
     useCriteria?: string;
     tools?: string[];
-    phases?: Record<string, string>;
     eventId?: string;
     pubkey: string;
 };
@@ -54,7 +53,6 @@ async function executeAgentsList(input: AgentsListInput): Promise<AgentsListOutp
         instructions: verbose ? agent.instructions : undefined,
         useCriteria: agent.useCriteria,
         tools: agent.tools,
-        phases: agent.phases,
         eventId: agent.eventId,
         pubkey: agent.pubkey,
     }));

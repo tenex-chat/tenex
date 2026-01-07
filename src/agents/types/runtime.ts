@@ -28,8 +28,6 @@ export interface AgentInstance {
     tools: string[];
     eventId?: string;
     slug: string;
-    phase?: string;
-    phases?: Record<string, string>;
     useAISDKAgent?: boolean; // Feature flag: use AI SDK Agent class instead of traditional AgentExecutor
     maxAgentSteps?: number; // Maximum steps for AI SDK Agent agentic loop (default: 10)
     createMetadataStore(conversationId: string): AgentMetadataStore;
