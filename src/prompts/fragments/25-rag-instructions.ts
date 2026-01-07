@@ -255,15 +255,15 @@ rag_query({
 
 ## Integration with Other Tools
 
-### With codebase_search
+### With grep
 Index search results for faster future retrieval:
 \`\`\`typescript
-// After codebase_search finds relevant files
+// After grep finds relevant files
 rag_add_documents({
   collection: "indexed_code",
-  documents: searchResults.map(result => ({
-    file_path: result.path,
-    metadata: { type: result.type }
+  documents: searchResults.map(file => ({
+    file_path: file,
+    metadata: { type: "code" }
   }))
 })
 \`\`\`

@@ -11,7 +11,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_get", // All agents should access lessons
     "lesson_learn", // All agents should be able to learn
     "read_path", // All agents need file system access
-    "codebase_search", // All agents need file system access
+    "glob", // All agents need file pattern matching
+    "grep", // All agents need content search
     "reports_list", // All agents should see available reports
     "report_read", // All agents should read reports
     // RAG tools for enhanced memory and knowledge management
@@ -38,7 +39,8 @@ export function getDefaultToolsForAgent(_agent: AgentPhaseInfo): ToolName[] {
     const tools: ToolName[] = [
         "read_path",
         "lesson_learn",
-        "codebase_search",
+        "glob",
+        "grep",
         "shell",
         "discover_capabilities",
         "agents_hire",
