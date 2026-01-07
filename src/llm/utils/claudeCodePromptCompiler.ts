@@ -1,9 +1,47 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, TextPart, ImagePart } from "ai";
+
+/**
+ * Extract text content from a message content field.
+ * Handles both string content and multimodal content (TextPart + ImagePart arrays).
+ *
+ * For multimodal content, extracts the text part and notes any images.
+ */
+function extractTextContent(content: ModelMessage["content"]): string {
+    if (typeof content === "string") {
+        return content;
+    }
+
+    if (!Array.isArray(content)) {
+        return JSON.stringify(content);
+    }
+
+    // Handle multimodal content (arrays of parts)
+    const parts: string[] = [];
+    let imageCount = 0;
+
+    for (const part of content) {
+        if ((part as TextPart).type === "text") {
+            parts.push((part as TextPart).text);
+        } else if ((part as ImagePart).type === "image") {
+            imageCount++;
+        }
+    }
+
+    // If there were images, note them at the end
+    if (imageCount > 0) {
+        parts.push(`[${imageCount} image${imageCount > 1 ? "s" : ""} attached]`);
+    }
+
+    return parts.join("\n");
+}
 
 /**
  * Compiles messages for Claude Code when NOT resuming.
  * Extracts first system message as customSystemPrompt,
  * compiles remaining messages (preserving order) as appendSystemPrompt.
+ *
+ * Note: Multimodal content (images) is converted to text descriptions since
+ * Claude Code uses a text-based prompt compilation approach.
  */
 export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
     customSystemPrompt?: string;
@@ -19,7 +57,7 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         firstSystemIndex !== -1
             ? typeof messages[firstSystemIndex].content === "string"
                 ? messages[firstSystemIndex].content
-                : undefined
+                : extractTextContent(messages[firstSystemIndex].content)
             : undefined;
 
     // Compile ALL remaining messages (after first system) preserving order
@@ -33,7 +71,8 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
             const msg = messages[i];
             const roleLabel =
                 msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
-            appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
+            const textContent = extractTextContent(msg.content);
+            appendParts.push(`${roleLabel}: ${textContent}\n\n`);
         }
 
         appendParts.push("=== End History ===\n");
@@ -44,7 +83,8 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
         for (const msg of messages) {
             const roleLabel =
                 msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
-            appendParts.push(`${roleLabel}: ${msg.content}\n\n`);
+            const textContent = extractTextContent(msg.content);
+            appendParts.push(`${roleLabel}: ${textContent}\n\n`);
         }
 
         appendParts.push("=== End History ===\n");
@@ -59,6 +99,9 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
  * Converts system messages to user messages for active Claude Code sessions.
  * When resuming a session, Claude Code doesn't receive new system messages,
  * so we convert them to user messages to ensure they're delivered.
+ *
+ * Note: Multimodal content is preserved for user messages (they support images),
+ * but system messages with multimodal content are converted to text descriptions.
  */
 export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelMessage[] {
     // For resuming sessions, we need to convert system messages that appear
@@ -81,15 +124,15 @@ export function convertSystemMessagesForResume(messages: ModelMessage[]): ModelM
 
         // Convert subsequent system messages to user messages with clear marker
         if (msg.role === "system") {
-            const content =
-                typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+            // Use extractTextContent to handle multimodal content gracefully
+            const content = extractTextContent(msg.content);
             return {
                 role: "user" as const,
                 content: `[System Context]: ${content}`,
             };
         }
 
-        // Keep user and assistant messages as-is
+        // Keep user and assistant messages as-is (preserving multimodal content)
         return msg;
     });
 

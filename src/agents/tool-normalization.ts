@@ -95,7 +95,7 @@ export function validateAndSeparateTools(toolNames: string[]): {
     if (droppedTools.length > 0) {
         logger.warn(
             `[tool-normalization] Dropping ${droppedTools.length} unrecognized tool(s): ${droppedTools.join(", ")}. ` +
-            `If these are dynamic tools, they may not have loaded yet.`
+            "If these are dynamic tools, they may not have loaded yet."
         );
     }
 

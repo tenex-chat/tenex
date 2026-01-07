@@ -374,7 +374,7 @@ export class EventHandler {
                     stopSpan.end();
 
                     const stopSpanContext = stopSpan.spanContext();
-                    console.log(`[STOP] Created span: traceId=${stopSpanContext.traceId?.substring(0, 8)} spanId=${stopSpanContext.spanId?.substring(0, 8)} parent=${targetRal?.executionSpanId?.substring(0, 8) || 'none'}`);
+                    console.log(`[STOP] Created span: traceId=${stopSpanContext.traceId?.substring(0, 8)} spanId=${stopSpanContext.spanId?.substring(0, 8)} parent=${targetRal?.executionSpanId?.substring(0, 8) || "none"}`);
 
                     logger.info(`[EventHandler] Stopped agent ${agent.slug} in conversation ${conversationId.substring(0, 8)}`, {
                         ralsAborted: aborted,

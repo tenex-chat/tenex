@@ -499,7 +499,7 @@ export class AgentExecutor {
 
                         return await originalExecute(input, options);
                     } catch (error) {
-                        logger.error(`[AgentExecutor] Error during pre-tool supervision check`, {
+                        logger.error("[AgentExecutor] Error during pre-tool supervision check", {
                             tool: toolName,
                             error: formatAnyError(error),
                         });
@@ -1144,7 +1144,7 @@ export class AgentExecutor {
                     );
                     const uniqueNames = [...new Set(delegatedAgentNames)];
                     responseContextContent += `\nYou have delegations to: ${uniqueNames.map(n => `@${n}`).join(", ")}.`;
-                    responseContextContent += `\nIf you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.`;
+                    responseContextContent += "\nIf you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.";
                 }
 
                 rebuiltMessages.push({
@@ -1275,7 +1275,7 @@ export class AgentExecutor {
                     "agent.slug": context.agent.slug,
                     "conversation.id": context.conversationId,
                 });
-                logger.info(`[AgentExecutor] Execution aborted by stop signal`, {
+                logger.info("[AgentExecutor] Execution aborted by stop signal", {
                     agent: context.agent.slug,
                     ralNumber,
                     conversationId: context.conversationId.substring(0, 8),

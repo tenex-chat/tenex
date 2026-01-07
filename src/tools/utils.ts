@@ -23,7 +23,7 @@ export function resolveAndValidatePath(filePath: string, projectPath: string): s
         });
         throw new Error(
             `Cannot resolve path "${filePath}": projectPath is empty. ` +
-            `This indicates a bug in the execution context - workingDirectory was not set.`
+            "This indicates a bug in the execution context - workingDirectory was not set."
         );
     }
 

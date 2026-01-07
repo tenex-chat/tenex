@@ -141,7 +141,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
 
     // Validate working directory - fail fast if it's empty
     if (!workingDir) {
-        const errorMsg = `Shell command cannot run: workingDirectory is empty. ` +
+        const errorMsg = "Shell command cannot run: workingDirectory is empty. " +
             `Context projectBasePath: "${context.projectBasePath}", ` +
             `Context workingDirectory: "${context.workingDirectory}"`;
         span?.addEvent("shell.error", { error: errorMsg });

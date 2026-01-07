@@ -156,7 +156,7 @@ export class AgentRouter {
         if (!agentSlug || !conversationId) {
             logger.warn(
                 chalk.yellow(
-                    `[AgentRouter] Delegation recorded but missing agentSlug or conversationId`
+                    "[AgentRouter] Delegation recorded but missing agentSlug or conversationId"
                 )
             );
             return null;
