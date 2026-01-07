@@ -3,3 +3,4 @@ export { SilentAgentHeuristic } from "./SilentAgentHeuristic";
 export { DelegationClaimHeuristic } from "./DelegationClaimHeuristic";
 export { PhaseAgentTodoHeuristic } from "./PhaseAgentTodoHeuristic";
 export { ConsecutiveToolsWithoutTodoHeuristic } from "./ConsecutiveToolsWithoutTodoHeuristic";
+export { PendingTodosHeuristic } from "./PendingTodosHeuristic";

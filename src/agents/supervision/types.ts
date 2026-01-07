@@ -97,6 +97,8 @@ export interface PostCompletionContext {
     hasTodoList: boolean;
     /** Whether the agent has already been nudged about todo usage in this conversation */
     hasBeenNudgedAboutTodos: boolean;
+    /** The agent's todo items (for detailed inspection by heuristics) */
+    todos: Array<{ id: string; title: string; status: string; description?: string }>;
 }
 
 /**
