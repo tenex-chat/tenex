@@ -1303,6 +1303,9 @@ export class AgentExecutor {
                 return false;
             };
 
+            // Set streaming context for local socket streaming
+            llmService.setStreamingContext(context.agent.pubkey, context.conversationId);
+
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,
@@ -1348,6 +1351,7 @@ export class AgentExecutor {
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
+            llmService.clearStreamingContext();
 
             // Clear LLM span ID to prevent memory leaks
             const currentSpan = trace.getActiveSpan();
