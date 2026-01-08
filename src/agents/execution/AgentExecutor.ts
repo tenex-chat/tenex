@@ -1005,6 +1005,7 @@ export class AgentExecutor {
                 toolsObject,
                 agentPublisher,
                 eventContext,
+                usage: event.usage,
             });
 
             // Add tool event to conversation history so it's visible in future turns
@@ -1062,8 +1063,12 @@ export class AgentExecutor {
                     toolCalls: Array<{ toolName: string }>;
                     text: string;
                     reasoningText?: string;
+                    usage?: { inputTokens?: number; outputTokens?: number };
                 }>;
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
+                // Pass steps to LLM service for usage tracking (makes usage available for tool events)
+                llmService.updateUsageFromSteps(step.steps);
+
                 // Update execution context with latest messages
                 execContext.accumulatedMessages = step.messages;
 
