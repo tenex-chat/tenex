@@ -84,6 +84,9 @@ export async function resolveContextWindow(provider: string, model: string): Pro
         case "openrouter":
             await fetchAndCacheOpenRouter();
             break;
+        case "ollama":
+            await fetchAndCacheOllama(model);
+            break;
     }
 }
 
@@ -101,5 +104,49 @@ async function fetchAndCacheOpenRouter(): Promise<void> {
         await fetchPromise;
     } finally {
         pendingFetches.delete("openrouter");
+    }
+}
+
+async function fetchAndCacheOllama(model: string): Promise<void> {
+    const key = `ollama:${model}`;
+
+    // Per-model fetch for Ollama (no bulk API)
+    if (pendingFetches.has(key)) {
+        await pendingFetches.get(key);
+        return;
+    }
+
+    const fetchPromise = (async () => {
+        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+        const response = await fetch(`${baseUrl}/api/show`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: model }),
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        interface OllamaShowResponse {
+            model_info?: {
+                "llama.context_length"?: number;
+            };
+        }
+
+        const data = (await response.json()) as OllamaShowResponse;
+        const contextLength = data.model_info?.["llama.context_length"];
+
+        if (contextLength) {
+            cache.set(key, contextLength);
+        }
+    })();
+
+    pendingFetches.set(key, fetchPromise);
+
+    try {
+        await fetchPromise;
+    } finally {
+        pendingFetches.delete(key);
     }
 }

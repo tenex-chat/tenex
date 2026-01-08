@@ -55,5 +55,27 @@ describe("context-window-cache", () => {
 
             expect(fetch).toHaveBeenCalledTimes(1);
         });
+
+        it("fetches Ollama model context window via /api/show", async () => {
+            global.fetch = vi.fn().mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({
+                    model_info: {
+                        "llama.context_length": 8192
+                    }
+                })
+            });
+
+            await resolveContextWindow("ollama", "llama3.2:3b");
+
+            expect(getContextWindow("ollama", "llama3.2:3b")).toBe(8192);
+            expect(fetch).toHaveBeenCalledWith(
+                "http://localhost:11434/api/show",
+                expect.objectContaining({
+                    method: "POST",
+                    body: JSON.stringify({ name: "llama3.2:3b" })
+                })
+            );
+        });
     });
 });
