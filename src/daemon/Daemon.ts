@@ -20,6 +20,8 @@ import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
+import { UnixSocketTransport } from "./UnixSocketTransport";
+import { streamPublisher } from "@/llm";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -43,6 +45,7 @@ export class Daemon {
     private isRunning = false;
     private shutdownHandlers: Array<() => Promise<void>> = [];
     private lockfile: Lockfile | null = null;
+    private streamTransport: UnixSocketTransport | null = null;
 
     // Runtime management delegated to RuntimeLifecycle
     private runtimeLifecycle: RuntimeLifecycle | null = null;
@@ -112,7 +115,13 @@ export class Daemon {
             // Projects will be discovered naturally as events arrive
             await this.subscriptionManager.start();
 
-            // 9. Setup graceful shutdown
+            // 9. Start local streaming socket
+            this.streamTransport = new UnixSocketTransport();
+            await this.streamTransport.start();
+            streamPublisher.setTransport(this.streamTransport);
+            logger.info("Local streaming socket started", { path: this.streamTransport.getSocketPath() });
+
+            // 10. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -616,6 +625,13 @@ export class Daemon {
             this.isRunning = false;
 
             try {
+                // Stop streaming socket
+                if (this.streamTransport) {
+                    await this.streamTransport.stop();
+                    streamPublisher.setTransport(null);
+                    this.streamTransport = null;
+                }
+
                 // Stop accepting new events
                 if (this.subscriptionManager) {
                     this.subscriptionManager.stop();
@@ -846,6 +862,13 @@ export class Daemon {
 
 
         this.isRunning = false;
+
+        // Stop streaming socket
+        if (this.streamTransport) {
+            await this.streamTransport.stop();
+            streamPublisher.setTransport(null);
+            this.streamTransport = null;
+        }
 
         // Stop subscription
         if (this.subscriptionManager) {
