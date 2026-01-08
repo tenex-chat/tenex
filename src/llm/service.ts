@@ -31,6 +31,7 @@ import {
     compileMessagesForClaudeCode,
     convertSystemMessagesForResume,
 } from "./utils/claudeCodePromptCompiler";
+import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
 
 /**
@@ -156,6 +157,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 "LLMService requires either a registry or Claude Code provider function"
             );
         }
+
+        // Fire-and-forget: start resolving context window
+        resolveContextWindow(this.provider, this.model).catch(() => {
+            // Silently ignore - context window will be undefined if fetch fails
+        });
     }
 
     /**
@@ -164,6 +170,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
         this.currentStepUsage = calculateCumulativeUsage(steps);
+    }
+
+    /**
+     * Get context window for current model
+     */
+    getModelContextWindow(): number | undefined {
+        return getContextWindow(this.provider, this.model);
     }
 
     /**
@@ -794,6 +807,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                         costUsd: openrouterUsage?.cost,
                         cachedInputTokens: openrouterUsage?.promptTokensDetails?.cachedTokens,
                         reasoningTokens: openrouterUsage?.completionTokensDetails?.reasoningTokens,
+                        contextWindow: this.getModelContextWindow(),
                     },
                     finishReason: e.finishReason,
                 });
@@ -851,7 +865,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             toolName,
             toolCallId,
             args,
-            usage: this.currentStepUsage,
+            usage: this.currentStepUsage
+                ? { ...this.currentStepUsage, contextWindow: this.getModelContextWindow() }
+                : undefined,
         });
     }
 
