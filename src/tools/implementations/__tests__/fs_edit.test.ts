@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 import type { ExecutionEnvironment } from "@/tools/types";
@@ -35,13 +35,12 @@ describe("fs_edit tool", () => {
             writeFileSync(filePath, "Hello, World!", "utf-8");
 
             const result = await editTool.execute({
-                path: "test.txt",
+                path: filePath,
                 old_string: "World",
                 new_string: "Universe",
             });
 
             expect(result).toContain("Successfully replaced 1 occurrence");
-            expect(result).toContain("test.txt");
 
             const content = readFileSync(filePath, "utf-8");
             expect(content).toBe("Hello, Universe!");
@@ -55,7 +54,7 @@ describe("fs_edit tool", () => {
             writeFileSync(filePath, original, "utf-8");
 
             const result = await editTool.execute({
-                path: "multi.txt",
+                path: filePath,
                 old_string: 'console.log("old");',
                 new_string: 'console.log("new");',
             });
@@ -75,7 +74,7 @@ line 4`;
             writeFileSync(filePath, original, "utf-8");
 
             const result = await editTool.execute({
-                path: "context.txt",
+                path: filePath,
                 old_string: `line 2
 line 3`,
                 new_string: `line 2
@@ -95,7 +94,7 @@ modified line 3`,
             writeFileSync(filePath, "foo bar foo baz foo", "utf-8");
 
             const result = await editTool.execute({
-                path: "multiple.txt",
+                path: filePath,
                 old_string: "foo",
                 new_string: "qux",
                 replace_all: true,
@@ -113,7 +112,7 @@ modified line 3`,
 
             await expect(
                 editTool.execute({
-                    path: "duplicate.txt",
+                    path: filePath,
                     old_string: "test",
                     new_string: "replaced",
                 })
@@ -125,7 +124,7 @@ modified line 3`,
             writeFileSync(filePath, "a.b a.b a.b", "utf-8");
 
             const result = await editTool.execute({
-                path: "special.txt",
+                path: filePath,
                 old_string: "a.b",
                 new_string: "c.d",
                 replace_all: true,
@@ -145,7 +144,7 @@ modified line 3`,
 
             await expect(
                 editTool.execute({
-                    path: "test.txt",
+                    path: filePath,
                     old_string: "NotFound",
                     new_string: "Replaced",
                 })
@@ -158,27 +157,28 @@ modified line 3`,
 
             await expect(
                 editTool.execute({
-                    path: "test.txt",
+                    path: filePath,
                     old_string: "World",
                     new_string: "World",
                 })
             ).rejects.toThrow("old_string and new_string must be different");
         });
 
-        it("should reject paths outside project directory", async () => {
+        it("should reject relative paths", async () => {
             await expect(
                 editTool.execute({
                     path: "../../../etc/passwd",
                     old_string: "old",
                     new_string: "new",
                 })
-            ).rejects.toThrow("Path outside project directory");
+            ).rejects.toThrow("Path must be absolute");
         });
 
         it("should fail when file does not exist", async () => {
+            const nonExistent = path.join(testDir, "nonexistent.txt");
             await expect(
                 editTool.execute({
-                    path: "nonexistent.txt",
+                    path: nonExistent,
                     old_string: "old",
                     new_string: "new",
                 })
@@ -192,7 +192,7 @@ modified line 3`,
             writeFileSync(filePath, "Hello, World!", "utf-8");
 
             const result = await editTool.execute({
-                path: "test.txt",
+                path: filePath,
                 old_string: ", ",
                 new_string: "",
             });
@@ -208,7 +208,7 @@ modified line 3`,
             writeFileSync(filePath, "你好世界 🌍", "utf-8");
 
             const result = await editTool.execute({
-                path: "unicode.txt",
+                path: filePath,
                 old_string: "世界",
                 new_string: "宇宙",
             });
@@ -242,7 +242,7 @@ modified line 3`,
             await fs.writeFile(filePath, "Test content", "utf-8");
 
             const result = await editTool.execute({
-                path: "subdir/nested.txt",
+                path: filePath,
                 old_string: "Test",
                 new_string: "Updated",
             });
@@ -258,6 +258,82 @@ modified line 3`,
         it("should return human-readable description", () => {
             const readable = editTool.getHumanReadableContent?.({ path: "test.txt" });
             expect(readable).toBe("Editing test.txt");
+        });
+    });
+
+    describe("allowOutsideWorkingDirectory", () => {
+        it("should block editing outside working directory by default", async () => {
+            const outsideDir = await createTempDir();
+            const outsideFile = path.join(outsideDir, "outside.txt");
+            writeFileSync(outsideFile, "original content");
+
+            try {
+                const result = await editTool.execute({
+                    path: outsideFile,
+                    old_string: "original",
+                    new_string: "modified",
+                });
+
+                expect(result).toContain("outside your working directory");
+                expect(result).toContain("allowOutsideWorkingDirectory: true");
+                // File should NOT be modified
+                expect(readFileSync(outsideFile, "utf-8")).toBe("original content");
+            } finally {
+                await cleanupTempDir(outsideDir);
+            }
+        });
+
+        it("should allow editing outside when flag is set", async () => {
+            const outsideDir = await createTempDir();
+            const outsideFile = path.join(outsideDir, "outside.txt");
+            writeFileSync(outsideFile, "original content");
+
+            try {
+                const result = await editTool.execute({
+                    path: outsideFile,
+                    old_string: "original",
+                    new_string: "modified",
+                    allowOutsideWorkingDirectory: true,
+                });
+
+                expect(result).toContain("Successfully replaced");
+                expect(readFileSync(outsideFile, "utf-8")).toBe("modified content");
+            } finally {
+                await cleanupTempDir(outsideDir);
+            }
+        });
+
+        it("should allow editing files within working directory without flag", async () => {
+            const filePath = path.join(testDir, "inside.txt");
+            writeFileSync(filePath, "original content");
+
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "original",
+                new_string: "modified",
+            });
+
+            expect(result).toContain("Successfully replaced");
+            expect(readFileSync(filePath, "utf-8")).toBe("modified content");
+        });
+
+        it("should block paths that look similar but are outside", async () => {
+            const similarDir = testDir + "-backup";
+            mkdirSync(similarDir, { recursive: true });
+            const outsideFile = path.join(similarDir, "sneaky.txt");
+            writeFileSync(outsideFile, "original content");
+
+            try {
+                const result = await editTool.execute({
+                    path: outsideFile,
+                    old_string: "original",
+                    new_string: "modified",
+                });
+
+                expect(result).toContain("outside your working directory");
+            } finally {
+                await cleanupTempDir(similarDir);
+            }
         });
     });
 });
