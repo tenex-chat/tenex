@@ -26,8 +26,7 @@ import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
-import { streamPublisher } from "./StreamPublisher";
-import type { LanguageModelUsageWithCostUsd, LocalStreamChunk } from "./types";
+import type { LanguageModelUsageWithCostUsd } from "./types";
 import {
     compileMessagesForClaudeCode,
     convertSystemMessagesForResume,
@@ -103,6 +102,14 @@ export interface ReasoningEvent {
 }
 
 /**
+ * Raw chunk event - emitted for every valid chunk from the AI SDK stream
+ * Allows consumers to process raw chunks without LLMService knowing about their use case
+ */
+export interface RawChunkEvent {
+    chunk: TextStreamPart<Record<string, AISdkTool>>;
+}
+
+/**
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management
  */
@@ -122,10 +129,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private cachedContentForComplete = "";
     /** Cumulative usage from previous steps, set via setCurrentStepUsage */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
-    /** Agent pubkey for local streaming context */
-    private streamingAgentPubkey: string | null = null;
-    /** Conversation ID for local streaming context */
-    private streamingConversationId: string | null = null;
 
     constructor(
         private readonly registry: ProviderRegistryProvider<any, any> | null,
@@ -161,22 +164,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
         this.currentStepUsage = calculateCumulativeUsage(steps);
-    }
-
-    /**
-     * Set context for local streaming (call before stream())
-     */
-    setStreamingContext(agentPubkey: string, conversationId: string): void {
-        this.streamingAgentPubkey = agentPubkey;
-        this.streamingConversationId = conversationId;
-    }
-
-    /**
-     * Clear streaming context (call after stream completes)
-     */
-    clearStreamingContext(): void {
-        this.streamingAgentPubkey = null;
-        this.streamingConversationId = null;
     }
 
     /**
@@ -562,15 +549,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             return;
         }
 
-        // Publish to local streaming socket
-        if (this.streamingAgentPubkey && this.streamingConversationId) {
-            const localChunk: LocalStreamChunk = {
-                agent_pubkey: this.streamingAgentPubkey,
-                conversation_id: this.streamingConversationId,
-                data: event.chunk,
-            };
-            streamPublisher.write(localChunk);
-        }
+        // Emit raw-chunk event for consumers (e.g., local streaming)
+        this.emit("raw-chunk", { chunk: event.chunk });
 
         // Emit chunk-type-change event BEFORE processing the new chunk
         // This allows listeners to flush buffers before new content of a different type arrives
