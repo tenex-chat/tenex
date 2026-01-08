@@ -129,6 +129,8 @@ export interface TrackExecutionOptions {
     agentPublisher: AgentPublisher;
     /** Context for event publishing */
     eventContext: EventContext;
+    /** Cumulative usage from previous steps (if available) */
+    usage?: import("@/llm/types").LanguageModelUsageWithCostUsd;
 }
 
 /**
@@ -193,7 +195,7 @@ export class ToolExecutionTracker {
      * @throws Will throw if Nostr event publishing fails
      */
     async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent | null> {
-        const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext } = options;
+        const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext, usage } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
@@ -254,6 +256,7 @@ export class ToolExecutionTracker {
                 toolName,
                 content: humanContent,
                 args,
+                usage,
             },
             eventContext
         );

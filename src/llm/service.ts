@@ -31,6 +31,7 @@ import {
     compileMessagesForClaudeCode,
     convertSystemMessagesForResume,
 } from "./utils/claudeCodePromptCompiler";
+import { calculateCumulativeUsage } from "./utils/usage";
 
 /**
  * Content delta event
@@ -54,6 +55,8 @@ export interface ToolWillExecuteEvent {
     toolName: string;
     toolCallId: string;
     args: unknown;
+    /** Cumulative usage from previous steps (if available) */
+    usage?: LanguageModelUsageWithCostUsd;
 }
 
 /**
@@ -116,6 +119,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private cachedContentForComplete = "";
+    /** Cumulative usage from previous steps, set via setCurrentStepUsage */
+    private currentStepUsage?: LanguageModelUsageWithCostUsd;
 
     constructor(
         private readonly registry: ProviderRegistryProvider<any, any> | null,
@@ -143,6 +148,14 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 "LLMService requires either a registry or Claude Code provider function"
             );
         }
+    }
+
+    /**
+     * Update cumulative usage from completed steps.
+     * Called from prepareStep to make usage available for tool-will-execute events.
+     */
+    updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
+        this.currentStepUsage = calculateCumulativeUsage(steps);
     }
 
     /**
@@ -821,6 +834,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             toolName,
             toolCallId,
             args,
+            usage: this.currentStepUsage,
         });
     }
 
