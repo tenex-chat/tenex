@@ -8,3 +8,4 @@
 export { getDaemon } from "./Daemon";
 export { TerminalInputManager } from "./TerminalInputManager";
 export { ProcessManagerController } from "./ProcessManagerController";
+export { UnixSocketTransport } from "./UnixSocketTransport";
