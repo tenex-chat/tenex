@@ -114,6 +114,8 @@ export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     cachedInputTokens?: number;
     /** Reasoning tokens (from OpenRouter completionTokensDetails.reasoningTokens) */
     reasoningTokens?: number;
+    /** Model context window size in tokens */
+    contextWindow?: number;
 };
 
 /**
