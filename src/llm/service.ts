@@ -26,7 +26,8 @@ import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
-import type { LanguageModelUsageWithCostUsd } from "./types";
+import { streamPublisher } from "./StreamPublisher";
+import type { LanguageModelUsageWithCostUsd, LocalStreamChunk } from "./types";
 import {
     compileMessagesForClaudeCode,
     convertSystemMessagesForResume,
@@ -121,6 +122,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private cachedContentForComplete = "";
     /** Cumulative usage from previous steps, set via setCurrentStepUsage */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
+    /** Agent pubkey for local streaming context */
+    private streamingAgentPubkey: string | null = null;
+    /** Conversation ID for local streaming context */
+    private streamingConversationId: string | null = null;
 
     constructor(
         private readonly registry: ProviderRegistryProvider<any, any> | null,
@@ -156,6 +161,22 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
         this.currentStepUsage = calculateCumulativeUsage(steps);
+    }
+
+    /**
+     * Set context for local streaming (call before stream())
+     */
+    setStreamingContext(agentPubkey: string, conversationId: string): void {
+        this.streamingAgentPubkey = agentPubkey;
+        this.streamingConversationId = conversationId;
+    }
+
+    /**
+     * Clear streaming context (call after stream completes)
+     */
+    clearStreamingContext(): void {
+        this.streamingAgentPubkey = null;
+        this.streamingConversationId = null;
     }
 
     /**
@@ -539,6 +560,16 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Validate chunk before any processing - some LLMs send chunks that should be ignored
         if (shouldIgnoreChunk(chunk)) {
             return;
+        }
+
+        // Publish to local streaming socket
+        if (this.streamingAgentPubkey && this.streamingConversationId) {
+            const localChunk: LocalStreamChunk = {
+                agent_pubkey: this.streamingAgentPubkey,
+                conversation_id: this.streamingConversationId,
+                data: event.chunk,
+            };
+            streamPublisher.write(localChunk);
         }
 
         // Emit chunk-type-change event BEFORE processing the new chunk
