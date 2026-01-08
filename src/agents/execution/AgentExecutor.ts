@@ -14,12 +14,14 @@ import type {
     ChunkTypeChangeEvent,
     CompleteEvent,
     ContentEvent,
+    RawChunkEvent,
     ReasoningEvent,
     SessionCapturedEvent,
     StreamErrorEvent,
     ToolDidExecuteEvent,
     ToolWillExecuteEvent,
 } from "@/llm/service";
+import { streamPublisher } from "@/llm";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
@@ -1303,8 +1305,14 @@ export class AgentExecutor {
                 return false;
             };
 
-            // Set streaming context for local socket streaming
-            llmService.setStreamingContext(context.agent.pubkey, context.conversationId);
+            // Subscribe to raw chunks and forward to local streaming socket
+            llmService.on("raw-chunk", (event: RawChunkEvent) => {
+                streamPublisher.write({
+                    agent_pubkey: context.agent.pubkey,
+                    conversation_id: context.conversationId,
+                    data: event.chunk,
+                });
+            });
 
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
@@ -1351,7 +1359,6 @@ export class AgentExecutor {
 
             llmOpsRegistry.completeOperation(context);
             llmService.removeAllListeners();
-            llmService.clearStreamingContext();
 
             // Clear LLM span ID to prevent memory leaks
             const currentSpan = trace.getActiveSpan();
