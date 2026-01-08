@@ -548,6 +548,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 from: this.previousChunkType,
                 to: chunk.type,
             });
+            // Clear cached content after emitting chunk-type-change.
+            // IMPORTANT: AgentExecutor listens to chunk-type-change and publishes the content
+            // buffer as a kind:1 event BEFORE this clearing happens. Without that publish,
+            // interim text (e.g., "I'll fetch that naddr...") would be lost.
+            // See: src/agents/execution/AgentExecutor.ts chunk-type-change handler
             this.cachedContentForComplete = "";
         }
 
@@ -734,10 +739,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     }
                 }
 
-                // For streaming, use cached content or e.text
-                const finalMessage = this.cachedContentForComplete
-                    ? this.cachedContentForComplete
-                    : e.text || "";
+                // For streaming, use cached content only. Don't fall back to e.text.
+                // When cachedContentForComplete is empty, it means all content was already
+                // published via chunk-type-change events (interim text before tool calls).
+                // Falling back to e.text would cause duplicate publishing.
+                const finalMessage = this.cachedContentForComplete;
 
                 if (
                     this.provider === "claudeCode" &&
