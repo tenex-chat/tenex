@@ -761,29 +761,36 @@ export class AgentExecutor {
             has_pending_delegations: hasPendingDelegations,
         });
 
-        let responseEvent: NDKEvent;
+        let responseEvent: NDKEvent | undefined;
 
         if (hasPendingDelegations) {
             // Mid-loop response - use conversation() (kind:1, no p-tag)
-            responseEvent = await agentPublisher.conversation(
-                { content: completionEvent.message },
-                eventContext
-            );
+            // Skip if content is empty - interim text was already published via chunk-type-change
+            // events in executeStreaming. Publishing empty content would be noise.
+            if (completionEvent.message.trim().length > 0) {
+                responseEvent = await agentPublisher.conversation(
+                    { content: completionEvent.message },
+                    eventContext
+                );
+            }
         } else {
             // Final completion - use complete() (kind:1, with p-tag)
+            // Always publish completion even if empty to mark conversation as complete
             responseEvent = await agentPublisher.complete(
                 { content: completionEvent.message, usage: completionEvent.usage },
                 eventContext
             );
         }
 
-        // Add event to conversation history immediately
-        await ConversationStore.addEvent(context.conversationId, responseEvent);
+        // Add event to conversation history if we published one
+        if (responseEvent) {
+            await ConversationStore.addEvent(context.conversationId, responseEvent);
 
-        trace.getActiveSpan()?.addEvent("executor.published", {
-            "event.id": responseEvent.id || "",
-            is_completion: !hasPendingDelegations,
-        });
+            trace.getActiveSpan()?.addEvent("executor.published", {
+                "event.id": responseEvent.id || "",
+                is_completion: !hasPendingDelegations,
+            });
+        }
 
         return responseEvent;
     }
@@ -925,6 +932,19 @@ export class AgentExecutor {
             }
         };
 
+        // Flush content buffer to publish interim text as kind:1 events.
+        // This is called on chunk-type-change (e.g., text -> tool-call) so users see
+        // real-time text output before tool execution, not just the final message.
+        // IMPORTANT: LLMService clears cachedContentForComplete on chunk-type-change,
+        // so we must publish here BEFORE that happens or the text is lost.
+        // See: src/llm/service.ts chunk-type-change handler
+        const flushContentBuffer = async (): Promise<void> => {
+            if (contentBuffer.trim().length > 0) {
+                await agentPublisher.conversation({ content: contentBuffer }, eventContext);
+                contentBuffer = "";
+            }
+        };
+
         llmService.on("content", (event: ContentEvent) => {
             process.stdout.write(chalk.white(event.delta));
             contentBuffer += event.delta;
@@ -940,8 +960,12 @@ export class AgentExecutor {
             if (event.from === "reasoning-delta") {
                 await flushReasoningBuffer();
             }
-            // Content buffer is NOT flushed here - completion event handles final publish
-            // to avoid duplicate messages (content would be published both here and at completion)
+            // Flush content buffer when switching away from text content (e.g., to tool calls).
+            // This publishes interim text as kind:1 events so users see real-time output.
+            // Must happen BEFORE LLMService clears cachedContentForComplete on chunk-type-change.
+            if (event.from === "text-delta") {
+                await flushContentBuffer();
+            }
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
