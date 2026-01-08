@@ -93,6 +93,22 @@ export async function handleDelegationCompletion(
                         "delegation.event_id": eTag,
                         "transcript.message_count": fullTranscript.length,
                     });
+
+                    // Include the current completion event in the transcript
+                    // since it hasn't been stored yet when this handler runs
+                    const pTags = TagExtractor.getPTags(event);
+                    if (event.content && pTags.length > 0) {
+                        fullTranscript.push({
+                            senderPubkey: event.pubkey,
+                            recipientPubkey: pTags[0],
+                            content: event.content,
+                            timestamp: event.created_at ? event.created_at * 1000 : Date.now(),
+                        });
+                        span.addEvent("appended_current_event_to_transcript", {
+                            "event.content_length": event.content.length,
+                            "transcript.final_count": fullTranscript.length,
+                        });
+                    }
                 }
             } catch (err) {
                 // If we fail to load the conversation history, fall back to default behavior
