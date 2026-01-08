@@ -115,3 +115,15 @@ export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     /** Reasoning tokens (from OpenRouter completionTokensDetails.reasoningTokens) */
     reasoningTokens?: number;
 };
+
+/**
+ * Chunk sent over local streaming socket
+ */
+export interface LocalStreamChunk {
+    /** Hex pubkey of the agent generating this response */
+    agent_pubkey: string;
+    /** Root event ID of the conversation (hex) */
+    conversation_id: string;
+    /** Raw AI SDK chunk - passthrough without transformation */
+    data: unknown;
+}
