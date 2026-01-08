@@ -3,12 +3,11 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveAndValidatePath } from "../utils";
 
 const editSchema = z.object({
     path: z
         .string()
-        .describe("The file path to edit (absolute or relative to project root)"),
+        .describe("The absolute path to the file to edit"),
     old_string: z.string().describe("The exact text to replace"),
     new_string: z.string().describe("The text to replace it with (must be different from old_string)"),
     replace_all: z
@@ -16,6 +15,10 @@ const editSchema = z.object({
         .optional()
         .default(false)
         .describe("Replace all occurrences of old_string (default false)"),
+    allowOutsideWorkingDirectory: z
+        .boolean()
+        .optional()
+        .describe("Set to true to edit files outside the working directory. Required when path is not within the project."),
 });
 
 /**
@@ -26,13 +29,24 @@ async function executeEdit(
     oldString: string,
     newString: string,
     replaceAll: boolean,
-    context: ToolExecutionContext
+    workingDirectory: string,
+    allowOutsideWorkingDirectory?: boolean,
 ): Promise<string> {
-    // Resolve path and ensure it's within project
-    const fullPath = resolveAndValidatePath(path, context.workingDirectory);
+    if (!path.startsWith("/")) {
+        throw new Error(`Path must be absolute, got: ${path}`);
+    }
+
+    // Check if path is outside working directory
+    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
+    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
+    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+
+    if (isOutside && !allowOutsideWorkingDirectory) {
+        return `Path "${path}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
+    }
 
     // Read the file
-    const content = await readFile(fullPath, "utf-8");
+    const content = await readFile(path, "utf-8");
 
     // Check if old_string exists
     if (!content.includes(oldString)) {
@@ -66,7 +80,7 @@ async function executeEdit(
     }
 
     // Write the file
-    await writeFile(fullPath, newContent, "utf-8");
+    await writeFile(path, newContent, "utf-8");
 
     return `Successfully replaced ${replacementCount} occurrence(s) in ${path}`;
 }
@@ -77,7 +91,7 @@ async function executeEdit(
 export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
-            "Performs exact string replacements in files. The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance of old_string. Use replace_all for replacing and renaming strings across the file. This is useful for surgical edits without full file rewrites. Safe and sandboxed to project directory.",
+            "Performs exact string replacements in files. The edit will FAIL if old_string is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance of old_string. Path must be absolute. Editing outside the working directory requires allowOutsideWorkingDirectory: true.",
 
         inputSchema: editSchema,
 
@@ -86,18 +100,20 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
             old_string,
             new_string,
             replace_all = false,
+            allowOutsideWorkingDirectory,
         }: {
             path: string;
             old_string: string;
             new_string: string;
             replace_all?: boolean;
+            allowOutsideWorkingDirectory?: boolean;
         }) => {
             try {
                 if (old_string === new_string) {
                     throw new Error("old_string and new_string must be different");
                 }
 
-                return await executeEdit(path, old_string, new_string, replace_all, context);
+                return await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
                 throw new Error(`Failed to edit ${path}: ${formatAnyError(error)}`);
             }

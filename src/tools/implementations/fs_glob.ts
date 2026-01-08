@@ -2,7 +2,6 @@ import { glob } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { relative } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import { resolveAndValidatePath } from "../utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -14,7 +13,7 @@ const globSchema = z.object({
         .string()
         .optional()
         .describe(
-            "Directory to search in. Defaults to project root. " +
+            "Absolute path to directory to search in. Defaults to working directory. " +
             "IMPORTANT: Omit this field to use the default. DO NOT pass 'undefined' or 'null'."
         ),
     head_limit: z
@@ -25,6 +24,10 @@ const globSchema = z.object({
         .number()
         .default(0)
         .describe("Skip first N files before applying head_limit"),
+    allowOutsideWorkingDirectory: z
+        .boolean()
+        .optional()
+        .describe("Set to true to glob outside the working directory. Required when path is not within the project."),
 });
 
 type GlobInput = z.infer<typeof globSchema>;
@@ -51,14 +54,26 @@ function applyPagination<T>(items: T[], offset: number, limit: number): T[] {
 
 async function executeGlob(
     input: GlobInput,
-    context: ToolExecutionContext
+    workingDirectory: string,
 ): Promise<string> {
-    const { pattern, path: inputPath, head_limit, offset } = input;
+    const { pattern, path: inputPath, head_limit, offset, allowOutsideWorkingDirectory } = input;
 
-    // Resolve search directory
-    const searchDir = inputPath
-        ? resolveAndValidatePath(inputPath, context.workingDirectory)
-        : context.workingDirectory;
+    // If path is provided, validate it's absolute
+    if (inputPath && !inputPath.startsWith("/")) {
+        return `Path must be absolute, got: ${inputPath}`;
+    }
+
+    // Determine search directory
+    const searchDir = inputPath ?? workingDirectory;
+
+    // Check if path is outside working directory
+    const normalizedPath = searchDir.endsWith("/") ? searchDir.slice(0, -1) : searchDir;
+    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
+    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+
+    if (isOutside && !allowOutsideWorkingDirectory) {
+        return `Path "${searchDir}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
+    }
 
     // Collect files with modification times
     const filesWithMtime: FileWithMtime[] = [];
@@ -83,7 +98,7 @@ async function executeGlob(
                 const stats = await stat(fullPath);
                 if (stats.isFile()) {
                     filesWithMtime.push({
-                        path: relative(context.workingDirectory, fullPath),
+                        path: relative(workingDirectory, fullPath),
                         mtime: stats.mtimeMs,
                     });
                 }
@@ -122,12 +137,12 @@ export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
             "Supports glob patterns like '**/*.ts' or 'src/**/*.tsx'. " +
             "Returns matching file paths sorted by modification time (most recent first). " +
             "Results limited to 100 files by default (use head_limit to adjust, 0 for unlimited). " +
-            "Automatically excludes node_modules, .git, dist, build, .next, and coverage directories.",
+            "Path must be absolute. Globbing outside the working directory requires allowOutsideWorkingDirectory: true.",
 
         inputSchema: globSchema,
 
         execute: async (input: GlobInput) => {
-            return await executeGlob(input, context);
+            return await executeGlob(input, context.workingDirectory);
         },
     });
 

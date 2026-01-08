@@ -2,7 +2,6 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { relative } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import { resolveAndValidatePath } from "../utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -17,7 +16,7 @@ const grepSchema = z.object({
     path: z
         .string()
         .optional()
-        .describe("File or directory to search. Defaults to project root."),
+        .describe("Absolute path to file or directory to search. Defaults to working directory."),
     output_mode: z
         .enum(["files_with_matches", "content", "count"])
         .default("files_with_matches")
@@ -64,6 +63,10 @@ const grepSchema = z.object({
         .number()
         .default(0)
         .describe("Skip first N entries before applying head_limit"),
+    allowOutsideWorkingDirectory: z
+        .boolean()
+        .optional()
+        .describe("Set to true to search outside the working directory. Required when path is not within the project."),
 });
 
 type GrepInput = z.infer<typeof grepSchema>;
@@ -231,18 +234,30 @@ function applyPagination(lines: string[], offset: number, limit: number): string
 
 async function executeGrep(
     input: GrepInput,
-    context: ToolExecutionContext
+    workingDirectory: string,
 ): Promise<string> {
-    const { pattern, path: inputPath, output_mode, head_limit, offset } = input;
+    const { pattern, path: inputPath, output_mode, head_limit, offset, allowOutsideWorkingDirectory } = input;
 
     if (!pattern) {
         return "Error: pattern is required";
     }
 
-    // Resolve search path
-    const searchPath = inputPath
-        ? resolveAndValidatePath(inputPath, context.workingDirectory)
-        : context.workingDirectory;
+    // If path is provided, validate it's absolute
+    if (inputPath && !inputPath.startsWith("/")) {
+        return `Path must be absolute, got: ${inputPath}`;
+    }
+
+    // Determine search path
+    const searchPath = inputPath ?? workingDirectory;
+
+    // Check if path is outside working directory
+    const normalizedPath = searchPath.endsWith("/") ? searchPath.slice(0, -1) : searchPath;
+    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
+    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+
+    if (isOutside && !allowOutsideWorkingDirectory) {
+        return `Path "${searchPath}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
+    }
 
     const useRipgrep = await isRipgrepAvailable();
     const command = useRipgrep
@@ -251,7 +266,7 @@ async function executeGrep(
 
     try {
         const { stdout } = await execAsync(command, {
-            cwd: context.workingDirectory,
+            cwd: workingDirectory,
             timeout: 30000,
             maxBuffer: 1024 * 1024 * 10, // 10MB
         });
@@ -266,14 +281,14 @@ async function executeGrep(
         lines = lines.map((line) => {
             // Handle different output formats
             if (output_mode === "files_with_matches") {
-                return relative(context.workingDirectory, line);
+                return relative(workingDirectory, line);
             } else if (output_mode === "count") {
                 // Format: /path/to/file:count
                 const colonIdx = line.lastIndexOf(":");
                 if (colonIdx > 0) {
                     const filePath = line.substring(0, colonIdx);
                     const count = line.substring(colonIdx + 1);
-                    return `${relative(context.workingDirectory, filePath)}:${count}`;
+                    return `${relative(workingDirectory, filePath)}:${count}`;
                 }
             } else {
                 // Content mode: /path/to/file:line:content
@@ -281,7 +296,7 @@ async function executeGrep(
                 if (firstColon > 0) {
                     const filePath = line.substring(0, firstColon);
                     const rest = line.substring(firstColon);
-                    return `${relative(context.workingDirectory, filePath)}${rest}`;
+                    return `${relative(workingDirectory, filePath)}${rest}`;
                 }
             }
             return line;
@@ -316,13 +331,12 @@ export function createFsGrepTool(context: ToolExecutionContext): AISdkTool {
             "Supports full regex syntax (e.g., 'log.*Error', 'function\\s+\\w+'). " +
             "Output modes: 'files_with_matches' (default, file paths only), 'content' (matching lines), 'count' (match counts). " +
             "Filter files with 'glob' parameter (e.g., '*.ts') or 'type' parameter (e.g., 'ts', 'py'). " +
-            "Use 'multiline: true' for patterns that span lines. " +
-            "Context lines (-A, -B, -C) only work with output_mode: 'content'.",
+            "Path must be absolute. Searching outside the working directory requires allowOutsideWorkingDirectory: true.",
 
         inputSchema: grepSchema,
 
         execute: async (input: GrepInput) => {
-            return await executeGrep(input, context);
+            return await executeGrep(input, context.workingDirectory);
         },
     });
 

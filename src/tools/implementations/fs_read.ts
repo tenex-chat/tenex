@@ -3,112 +3,112 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
-import { resolveAndValidatePath } from "../utils";
+
+const DEFAULT_LINE_LIMIT = 2000;
+const MAX_LINE_LENGTH = 2000;
 
 const readPathSchema = z.object({
     path: z
         .string()
-        .describe("The file or directory path to read (absolute or relative to project root)"),
+        .describe("The absolute path to the file or directory to read"),
     offset: z
         .number()
-        .min(0)
+        .min(1)
         .optional()
-        .describe("Line number to start reading from (0-indexed). If omitted, starts from beginning."),
+        .describe("Line number to start reading from (1-based). If omitted, starts from line 1."),
     limit: z
         .number()
+        .min(1)
         .optional()
-        .describe("Maximum number of lines to read. If omitted, reads entire file."),
+        .describe(`Maximum number of lines to read. Defaults to ${DEFAULT_LINE_LIMIT}.`),
+    allowOutsideWorkingDirectory: z
+        .boolean()
+        .optional()
+        .describe("Set to true to read files outside the working directory. Required when path is not within the project."),
 });
 
 /**
  * Core implementation of the read_path functionality
- * Shared between AI SDK and legacy Tool interfaces
  */
 async function executeReadPath(
     path: string,
-    context: ToolExecutionContext,
+    workingDirectory: string,
     offset?: number,
     limit?: number,
+    allowOutsideWorkingDirectory?: boolean,
 ): Promise<string> {
-    // Resolve path and ensure it's within project
-    const fullPath = resolveAndValidatePath(path, context.workingDirectory);
-
-    // Check if path is a directory first
-    const stats = await stat(fullPath);
-    let content: string;
-
-    if (stats.isDirectory()) {
-        // Get directory contents
-        const files = await readdir(fullPath);
-        const fileList = files.map((file) => `  - ${file}`).join("\n");
-
-        content = `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
-    } else {
-        const rawContent = await readFile(fullPath, "utf-8");
-
-        // If offset or limit are provided, process the file line by line
-        if (offset !== undefined || limit !== undefined) {
-            const lines = rawContent.split("\n");
-            const totalLines = lines.length;
-
-            // Validate offset
-            const startIndex = offset ?? 0;
-            if (startIndex >= totalLines) {
-                return `File has only ${totalLines} line(s), but offset ${offset} was requested.`;
-            }
-
-            // Apply offset and limit
-            const endIndex =
-                limit !== undefined ? startIndex + limit : totalLines;
-            const selectedLines = lines.slice(startIndex, endIndex);
-
-            // Format with line numbers like "cat -n"
-            const numberedLines = selectedLines
-                .map((line, idx) => {
-                    const lineNum = startIndex + idx + 1;
-                    return `${lineNum.toString().padStart(6)}\t${line}`;
-                })
-                .join("\n");
-
-            content = numberedLines;
-        } else {
-            // No offset/limit - return as-is for backwards compatibility
-            content = rawContent;
-        }
+    if (!path.startsWith("/")) {
+        throw new Error(`Path must be absolute, got: ${path}`);
     }
 
-    return content;
+    // Check if path is outside working directory
+    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
+    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
+    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+
+    if (isOutside && !allowOutsideWorkingDirectory) {
+        return `Path "${path}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
+    }
+
+    const stats = await stat(path);
+
+    if (stats.isDirectory()) {
+        const files = await readdir(path);
+        const fileList = files.map((file) => `  - ${file}`).join("\n");
+        return `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
+    }
+
+    const rawContent = await readFile(path, "utf-8");
+    const lines = rawContent.split("\n");
+    const totalLines = lines.length;
+
+    // 1-based offset, default to line 1
+    const startLine = offset ?? 1;
+    const startIndex = startLine - 1;
+
+    if (startIndex >= totalLines) {
+        return `File has only ${totalLines} line(s), but offset ${offset} was requested.`;
+    }
+
+    // Apply limit (default to DEFAULT_LINE_LIMIT)
+    const effectiveLimit = limit ?? DEFAULT_LINE_LIMIT;
+    const endIndex = Math.min(startIndex + effectiveLimit, totalLines);
+    const selectedLines = lines.slice(startIndex, endIndex);
+
+    // Format with line numbers and truncate long lines
+    const numberedLines = selectedLines
+        .map((line, idx) => {
+            const lineNum = startIndex + idx + 1;
+            const truncatedLine = line.length > MAX_LINE_LENGTH
+                ? line.slice(0, MAX_LINE_LENGTH) + "..."
+                : line;
+            return `${lineNum.toString().padStart(6)}\t${truncatedLine}`;
+        })
+        .join("\n");
+
+    // Add info about truncation if we didn't read the whole file
+    const remainingLines = totalLines - endIndex;
+    if (remainingLines > 0) {
+        return `${numberedLines}\n\n[Showing lines ${startLine}-${endIndex} of ${totalLines}. ${remainingLines} more lines available. Use offset=${endIndex + 1} to continue.]`;
+    }
+
+    return numberedLines;
 }
 
 /**
  * Create an AI SDK tool for reading paths
- * This is the primary implementation
  */
 export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
-            "Read a file or directory from the filesystem. Returns file contents for files, or directory listing for directories. By default, reads the entire file. You can optionally specify offset and limit for large files. Results include line numbers when using offset/limit. Paths are relative to project root unless absolute. Use this instead of shell commands like cat, ls, find. Safe and sandboxed to project directory.",
+            `Read a file or directory from the filesystem. Returns file contents with line numbers for files, or directory listing for directories. By default reads up to ${DEFAULT_LINE_LIMIT} lines starting from line 1. Use offset (1-based) and limit to paginate large files. Lines longer than ${MAX_LINE_LENGTH} characters are truncated. Path must be absolute. Reading outside the working directory requires allowOutsideWorkingDirectory: true.`,
 
         inputSchema: readPathSchema,
 
-        execute: async ({ path, offset, limit }: { path: string; offset?: number; limit?: number }) => {
+        execute: async ({ path, offset, limit, allowOutsideWorkingDirectory }: { path: string; offset?: number; limit?: number; allowOutsideWorkingDirectory?: boolean }) => {
             try {
-                return await executeReadPath(path, context, offset, limit);
+                return await executeReadPath(path, context.workingDirectory, offset, limit, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
-                // If it's an EISDIR error that we somehow missed, provide helpful guidance
-                if (error instanceof Error && "code" in error && error.code === "EISDIR") {
-                    try {
-                        const fullPath = resolveAndValidatePath(path, context.workingDirectory);
-                        const files = await readdir(fullPath);
-                        const fileList = files.map((file) => `  - ${file}`).join("\n");
-
-                        return `Directory listing for ${path}:\n${fileList}\n\nTo read a specific file, please specify the full path to the file.`;
-                    } catch {
-                        // If we can't read the directory, throw the original error
-                        throw new Error(`Failed to read ${path}: ${error.message}`);
-                    }
-                }
-
                 throw new Error(`Failed to read ${path}: ${formatAnyError(error)}`);
             }
         },
