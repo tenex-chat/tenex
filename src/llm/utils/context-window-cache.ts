@@ -3,7 +3,12 @@
  * Provides both hardcoded fallbacks and dynamic fetching
  */
 
+import { fetchOpenRouterModels } from "@/llm/providers/openrouter-models";
+
 const cache = new Map<string, number>();
+
+/** Track in-flight fetches to avoid duplicate requests */
+const pendingFetches = new Map<string, Promise<void>>();
 
 /**
  * Hardcoded context windows for providers without metadata APIs
@@ -55,4 +60,46 @@ export function getContextWindow(provider: string, model: string): number | unde
  */
 export function clearCache(): void {
     cache.clear();
+}
+
+/**
+ * Resolve context window for a model (async)
+ * For OpenRouter, fetches and caches all models at once
+ */
+export async function resolveContextWindow(provider: string, model: string): Promise<void> {
+    const key = `${provider}:${model}`;
+
+    // Already cached
+    if (cache.has(key) || KNOWN_CONTEXT_WINDOWS[key]) {
+        return;
+    }
+
+    // Check if fetch already in progress
+    if (pendingFetches.has(provider)) {
+        await pendingFetches.get(provider);
+        return;
+    }
+
+    switch (provider) {
+        case "openrouter":
+            await fetchAndCacheOpenRouter();
+            break;
+    }
+}
+
+async function fetchAndCacheOpenRouter(): Promise<void> {
+    const fetchPromise = (async () => {
+        const models = await fetchOpenRouterModels();
+        for (const model of models) {
+            cache.set(`openrouter:${model.id}`, model.context_length);
+        }
+    })();
+
+    pendingFetches.set("openrouter", fetchPromise);
+
+    try {
+        await fetchPromise;
+    } finally {
+        pendingFetches.delete("openrouter");
+    }
 }
