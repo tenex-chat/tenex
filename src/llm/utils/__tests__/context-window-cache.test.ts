@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
 import { getContextWindow, clearCache, resolveContextWindow } from "../context-window-cache";
 
 describe("context-window-cache", () => {
@@ -7,15 +7,15 @@ describe("context-window-cache", () => {
     });
 
     describe("getContextWindow", () => {
-        it("returns undefined for unknown models", () => {
+        test("returns undefined for unknown models", () => {
             expect(getContextWindow("unknown", "unknown-model")).toBeUndefined();
         });
 
-        it("returns hardcoded value for known Anthropic models", () => {
+        test("returns hardcoded value for known Anthropic models", () => {
             expect(getContextWindow("anthropic", "claude-sonnet-4-20250514")).toBe(200_000);
         });
 
-        it("returns hardcoded value for known OpenAI models", () => {
+        test("returns hardcoded value for known OpenAI models", () => {
             expect(getContextWindow("openai", "gpt-4o")).toBe(128_000);
         });
     });
@@ -23,19 +23,22 @@ describe("context-window-cache", () => {
     describe("resolveContextWindow", () => {
         beforeEach(() => {
             clearCache();
-            vi.restoreAllMocks();
         });
 
-        it("fetches and caches OpenRouter model context window", async () => {
-            global.fetch = vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: () => Promise.resolve({
-                    data: [
-                        { id: "openai/gpt-4o", context_length: 128000 },
-                        { id: "anthropic/claude-3-opus", context_length: 200000 },
-                    ]
+        test("fetches and caches OpenRouter model context window", async () => {
+            const mockFetch = mock(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            data: [
+                                { id: "openai/gpt-4o", context_length: 128000 },
+                                { id: "anthropic/claude-3-opus", context_length: 200000 },
+                            ],
+                        }),
                 })
-            });
+            );
+            global.fetch = mockFetch as unknown as typeof fetch;
 
             await resolveContextWindow("openrouter", "openai/gpt-4o");
 
@@ -44,36 +47,44 @@ describe("context-window-cache", () => {
             expect(getContextWindow("openrouter", "anthropic/claude-3-opus")).toBe(200000);
         });
 
-        it("does not fetch if already cached", async () => {
-            global.fetch = vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: () => Promise.resolve({ data: [{ id: "test/model", context_length: 50000 }] })
-            });
+        test("does not fetch if already cached", async () => {
+            const mockFetch = mock(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({ data: [{ id: "test/model", context_length: 50000 }] }),
+                })
+            );
+            global.fetch = mockFetch as unknown as typeof fetch;
 
             await resolveContextWindow("openrouter", "test/model");
             await resolveContextWindow("openrouter", "test/model");
 
-            expect(fetch).toHaveBeenCalledTimes(1);
+            expect(mockFetch).toHaveBeenCalledTimes(1);
         });
 
-        it("fetches Ollama model context window via /api/show", async () => {
-            global.fetch = vi.fn().mockResolvedValueOnce({
-                ok: true,
-                json: () => Promise.resolve({
-                    model_info: {
-                        "llama.context_length": 8192
-                    }
+        test("fetches Ollama model context window via /api/show", async () => {
+            const mockFetch = mock(() =>
+                Promise.resolve({
+                    ok: true,
+                    json: () =>
+                        Promise.resolve({
+                            model_info: {
+                                "llama.context_length": 8192,
+                            },
+                        }),
                 })
-            });
+            );
+            global.fetch = mockFetch as unknown as typeof fetch;
 
             await resolveContextWindow("ollama", "llama3.2:3b");
 
             expect(getContextWindow("ollama", "llama3.2:3b")).toBe(8192);
-            expect(fetch).toHaveBeenCalledWith(
+            expect(mockFetch).toHaveBeenCalledWith(
                 "http://localhost:11434/api/show",
                 expect.objectContaining({
                     method: "POST",
-                    body: JSON.stringify({ name: "llama3.2:3b" })
+                    body: JSON.stringify({ name: "llama3.2:3b" }),
                 })
             );
         });
