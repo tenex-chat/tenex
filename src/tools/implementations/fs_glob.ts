@@ -17,6 +17,14 @@ const globSchema = z.object({
             "Directory to search in. Defaults to project root. " +
             "IMPORTANT: Omit this field to use the default. DO NOT pass 'undefined' or 'null'."
         ),
+    head_limit: z
+        .number()
+        .default(100)
+        .describe("Limit output to first N files. Use 0 for unlimited."),
+    offset: z
+        .number()
+        .default(0)
+        .describe("Skip first N files before applying head_limit"),
 });
 
 type GlobInput = z.infer<typeof globSchema>;
@@ -36,11 +44,16 @@ const DEFAULT_EXCLUDES = [
     "**/.worktrees/**",
 ];
 
+function applyPagination<T>(items: T[], offset: number, limit: number): T[] {
+    const offsetItems = offset > 0 ? items.slice(offset) : items;
+    return limit > 0 ? offsetItems.slice(0, limit) : offsetItems;
+}
+
 async function executeGlob(
     input: GlobInput,
     context: ToolExecutionContext
 ): Promise<string> {
-    const { pattern, path: inputPath } = input;
+    const { pattern, path: inputPath, head_limit, offset } = input;
 
     // Resolve search directory
     const searchDir = inputPath
@@ -90,8 +103,16 @@ async function executeGlob(
     // Sort by modification time (most recent first)
     filesWithMtime.sort((a, b) => b.mtime - a.mtime);
 
-    // Return file paths, one per line
-    return filesWithMtime.map((f) => f.path).join("\n");
+    // Apply pagination
+    const paginatedFiles = applyPagination(filesWithMtime, offset, head_limit);
+    const truncated = paginatedFiles.length < filesWithMtime.length;
+    const result = paginatedFiles.map((f) => f.path).join("\n");
+
+    if (truncated) {
+        return `${result}\n\n[Truncated: showing ${paginatedFiles.length} of ${filesWithMtime.length} files]`;
+    }
+
+    return result;
 }
 
 export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
@@ -100,6 +121,7 @@ export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
             "Fast file pattern matching tool that works with any codebase size. " +
             "Supports glob patterns like '**/*.ts' or 'src/**/*.tsx'. " +
             "Returns matching file paths sorted by modification time (most recent first). " +
+            "Results limited to 100 files by default (use head_limit to adjust, 0 for unlimited). " +
             "Automatically excludes node_modules, .git, dist, build, .next, and coverage directories.",
 
         inputSchema: globSchema,
