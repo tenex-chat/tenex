@@ -1,4 +1,5 @@
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { CategoryManager } from "@/conversations/services";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
 import { NDKKind } from "@/nostr/kinds";
@@ -12,7 +13,13 @@ import { z } from "zod";
 const tracer = trace.getTracer("tenex.summarizer");
 
 export class ConversationSummarizer {
-    constructor(private context: ProjectContext) {}
+    private categoryManager: CategoryManager;
+
+    constructor(private context: ProjectContext) {
+        // CategoryManager stores categories in ~/.tenex/data
+        this.categoryManager = new CategoryManager(config.getConfigPath());
+        this.categoryManager.initialize();
+    }
 
     async summarizeAndPublish(conversation: ConversationStore): Promise<void> {
         // Create a fresh span using ROOT_CONTEXT to avoid inheriting an ended span
@@ -64,6 +71,12 @@ export class ConversationSummarizer {
                     return;
                 }
 
+                // Get existing categories for consistency
+                const existingCategories = await this.categoryManager.getCategories();
+                const categoryListText = existingCategories.length > 0
+                    ? `Existing categories (prefer these for consistency): ${existingCategories.join(", ")}`
+                    : "No existing categories yet. Create new ones as needed.";
+
                 // Generate title, summary, and status information
                 const { object: result } = await llmService.generateObject(
                     [
@@ -84,7 +97,12 @@ Generate a status_current_activity that is consistent with status_label:
 - If failed: describe what failed (e.g., "Build failed with errors", "Tests not passing")
 - If in progress: describe the current action (e.g., "Implementing feature X", "Debugging issue")
 - If blocked/waiting: describe what's needed (e.g., "Waiting for user input", "Awaiting approval")
-Focus on what was accomplished or discussed, not on the process. Be truthful about failures and errors.`,
+Focus on what was accomplished or discussed, not on the process. Be truthful about failures and errors.
+
+CATEGORIES: Assign 1-3 category tags to classify this conversation.
+- Use lowercase, singular nouns only (e.g., "authentication", "storage", "testing")
+- ${categoryListText}
+- If no existing category fits, create a new descriptive one following the format requirements`,
                         },
                         {
                             role: "user",
@@ -102,6 +120,12 @@ Focus on what was accomplished or discussed, not on the process. Be truthful abo
                         status_current_activity: z
                             .string()
                             .describe("Description of current activity or what comes next"),
+                        categories: z
+                            .array(z.string())
+                            .max(3)
+                            .describe(
+                                "1-3 category tags for classifying the conversation. Use lowercase, singular nouns only (e.g., 'authentication', 'storage', 'testing'). Must be from the existing category list if possible."
+                            ),
                     })
                 );
 
@@ -124,6 +148,11 @@ Focus on what was accomplished or discussed, not on the process. Be truthful abo
                 if (result.status_current_activity) {
                     event.tags.push(["status-current-activity", result.status_current_activity]);
                 }
+                if (result.categories && result.categories.length > 0) {
+                    for (const category of result.categories) {
+                        event.tags.push(["t", category]);
+                    }
+                }
                 event.tags.push(["a", this.context.project.tagId()]); // Project reference
                 event.tags.push(["model", summarizationConfig.model]);
 
@@ -134,6 +163,11 @@ Focus on what was accomplished or discussed, not on the process. Be truthful abo
                 console.log(
                     `Published metadata for conversation ${conversation.id}: ${result.title}`
                 );
+
+                // Update category tally for future consistency
+                if (result.categories && result.categories.length > 0) {
+                    await this.categoryManager.updateCategories(result.categories);
+                }
 
                 span.setStatus({ code: SpanStatusCode.OK });
             } catch (error) {
