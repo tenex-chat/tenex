@@ -5,12 +5,12 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const reportsListSchema = z.object({
-    allAgents: z
+    onlyMine: z
         .boolean()
         .nullable()
         .default(false)
         .describe(
-            "If true, get articles from all agents in the project. If false, only from current agent"
+            "If true, only show reports authored by the current agent. If false (default), show all reports in the project."
         ),
 });
 
@@ -41,10 +41,10 @@ async function executeReportsList(
     input: ReportsListInput,
     context: ToolExecutionContext
 ): Promise<ReportsListOutput> {
-    const { allAgents = false } = input;
+    const { onlyMine = false } = input;
 
     logger.info("📚 Listing reports", {
-        allAgents,
+        onlyMine,
         agent: context.agent.name,
     });
 
@@ -53,12 +53,12 @@ async function executeReportsList(
     // Determine which agent pubkeys to use
     let agentPubkeys: string[] | undefined;
 
-    if (!allAgents) {
-        // Only current agent
+    if (onlyMine) {
+        // Only current agent's reports
         agentPubkeys = [context.agent.pubkey];
     } else {
-        // Get all project agent pubkeys
-        agentPubkeys = reportService.getAllProjectAgentPubkeys();
+        // All reports in the project (no filter - shows all cached project reports)
+        agentPubkeys = undefined;
     }
 
     // Fetch the reports
@@ -72,7 +72,7 @@ async function executeReportsList(
 
     logger.info("✅ Reports listed successfully", {
         total: reports.length,
-        allAgents,
+        onlyMine,
         agent: context.agent.name,
     });
 

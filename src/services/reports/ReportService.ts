@@ -121,9 +121,13 @@ export class ReportService {
 
     /**
      * Read a report by slug or naddr
-     * First tries the cache, then falls back to NDK fetch if not found
+     * First tries the cache, then falls back to NDK fetch if not found.
+     *
+     * Reports are project-scoped: any agent can read any report in the project.
+     * When searching by slug, we filter by project tag (#a) to find reports
+     * belonging to the current project regardless of author.
      */
-    async readReport(identifier: string, agentPubkey?: string): Promise<ReportInfo | null> {
+    async readReport(identifier: string): Promise<ReportInfo | null> {
         const projectCtx = getProjectContext();
 
         // First, try to find in cache
@@ -137,18 +141,11 @@ export class ReportService {
                     return cachedReport;
                 }
             }
-        } else if (agentPubkey) {
-            // Try cache lookup by agent pubkey and slug
-            const cachedReport = projectCtx.getReport(agentPubkey, identifier);
-            if (cachedReport) {
-                logger.debug("📰 Report found in cache (by slug)", { slug: identifier });
-                return cachedReport;
-            }
         } else {
-            // Try to find by slug across all authors
+            // Try to find by slug across all authors in the project
             const cachedReport = projectCtx.getReportBySlug(identifier);
             if (cachedReport) {
-                logger.debug("📰 Report found in cache (by slug, any author)", { slug: identifier });
+                logger.debug("📰 Report found in cache (by slug)", { slug: identifier });
                 return cachedReport;
             }
         }
@@ -176,18 +173,24 @@ export class ReportService {
                     article = NDKArticle.from(event);
                 }
             }
-        } else if (agentPubkey) {
-            // Treat as a slug - search for articles with this d-tag from specific agent
+        } else {
+            // Treat as a slug - search for articles with this d-tag in the current project
+            // Use project tag (#a) to scope the search to this project
+            const projectTagId = projectCtx.project.tagId();
             const filter = {
                 kinds: [30023],
-                authors: [agentPubkey],
                 "#d": [identifier],
+                "#a": [projectTagId],
             };
 
             const events = await this.ndk.fetchEvents(filter);
             if (events.size > 0) {
-                const event = Array.from(events)[0];
-                article = NDKArticle.from(event);
+                // If multiple reports with same slug exist (different authors),
+                // return the most recently published one
+                const sortedEvents = Array.from(events).sort((a, b) =>
+                    (b.created_at || 0) - (a.created_at || 0)
+                );
+                article = NDKArticle.from(sortedEvents[0]);
             }
         }
 
