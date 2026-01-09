@@ -120,8 +120,8 @@ async function executeReportRead(
     // Remove nostr: prefix if present
     const cleanIdentifier = identifier.startsWith("nostr:") ? identifier.slice(6) : identifier;
 
-    // Use agent pubkey for slug lookups
-    const report = await reportService.readReport(cleanIdentifier, context.agent.pubkey);
+    // Reports are project-scoped - any agent can read any report in the project
+    const report = await reportService.readReport(cleanIdentifier);
 
     if (!report) {
         logger.info("📭 No report found", {
