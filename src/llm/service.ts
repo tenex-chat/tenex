@@ -793,18 +793,44 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     e.providerMetadata?.openrouter as {
                         usage?: {
                             cost?: number;
+                            promptTokens?: number;
+                            completionTokens?: number;
+                            totalTokens?: number;
                             promptTokensDetails?: { cachedTokens?: number };
                             completionTokensDetails?: { reasoningTokens?: number };
                         };
                     }
                 )?.usage;
 
+                // Extract Claude Code-specific cost data
+                const claudeCodeCostUsd = (
+                    e.providerMetadata?.["claude-code"] as {
+                        costUsd?: number;
+                        sessionId?: string;
+                        durationMs?: number;
+                    }
+                )?.costUsd;
+
+                // Use OpenRouter's token counts as primary source (more reliable for streaming)
+                // Fall back to AI SDK's totalUsage if OpenRouter metadata unavailable
+                const inputTokens =
+                    openrouterUsage?.promptTokens ?? e.totalUsage?.inputTokens;
+                const outputTokens =
+                    openrouterUsage?.completionTokens ?? e.totalUsage?.outputTokens;
+                const totalTokens =
+                    openrouterUsage?.totalTokens ??
+                    (inputTokens !== undefined && outputTokens !== undefined
+                        ? inputTokens + outputTokens
+                        : undefined);
+
                 this.emit("complete", {
                     message: finalMessage,
                     steps: e.steps,
                     usage: {
-                        ...(e.totalUsage || {}),
-                        costUsd: openrouterUsage?.cost,
+                        inputTokens,
+                        outputTokens,
+                        totalTokens,
+                        costUsd: openrouterUsage?.cost ?? claudeCodeCostUsd,
                         cachedInputTokens: openrouterUsage?.promptTokensDetails?.cachedTokens,
                         reasoningTokens: openrouterUsage?.completionTokensDetails?.reasoningTokens,
                         contextWindow: this.getModelContextWindow(),

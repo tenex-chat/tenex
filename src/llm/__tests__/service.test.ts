@@ -809,7 +809,52 @@ describe("LLMService stream()", () => {
         expect(completeEvent.finishReason).toBe("stop");
     });
 
-    test("extracts OpenRouter usage metadata", async () => {
+    test("extracts OpenRouter usage metadata including token counts", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+
+        const completeSpy = mock(() => {});
+        service.on("complete", completeSpy);
+
+        const messages: ModelMessage[] = [
+            { role: "user", content: [{ type: "text", text: "Hello" }] },
+        ];
+
+        await service.stream(messages, {});
+
+        if (capturedOnFinish) {
+            await capturedOnFinish({
+                text: "Response",
+                steps: [],
+                totalUsage: { inputTokens: 100, outputTokens: 200 }, // AI SDK fallback
+                finishReason: "stop",
+                providerMetadata: {
+                    openrouter: {
+                        usage: {
+                            cost: 0.0025,
+                            promptTokens: 4757, // OpenRouter-specific naming
+                            completionTokens: 12,
+                            totalTokens: 4769,
+                            promptTokensDetails: { cachedTokens: 50 },
+                            completionTokensDetails: { reasoningTokens: 30 },
+                        },
+                    },
+                },
+            });
+        }
+
+        expect(completeSpy).toHaveBeenCalled();
+        const completeEvent = completeSpy.mock.calls[0][0];
+        // Token counts should come from OpenRouter metadata (primary source)
+        expect(completeEvent.usage.inputTokens).toBe(4757);
+        expect(completeEvent.usage.outputTokens).toBe(12);
+        expect(completeEvent.usage.totalTokens).toBe(4769);
+        // Other OpenRouter-specific fields
+        expect(completeEvent.usage.costUsd).toBe(0.0025);
+        expect(completeEvent.usage.cachedInputTokens).toBe(50);
+        expect(completeEvent.usage.reasoningTokens).toBe(30);
+    });
+
+    test("falls back to AI SDK totalUsage when OpenRouter token counts unavailable", async () => {
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
 
         const completeSpy = mock(() => {});
@@ -831,6 +876,7 @@ describe("LLMService stream()", () => {
                     openrouter: {
                         usage: {
                             cost: 0.0025,
+                            // No token counts in provider metadata
                             promptTokensDetails: { cachedTokens: 50 },
                             completionTokensDetails: { reasoningTokens: 30 },
                         },
@@ -841,9 +887,10 @@ describe("LLMService stream()", () => {
 
         expect(completeSpy).toHaveBeenCalled();
         const completeEvent = completeSpy.mock.calls[0][0];
-        expect(completeEvent.usage.costUsd).toBe(0.0025);
-        expect(completeEvent.usage.cachedInputTokens).toBe(50);
-        expect(completeEvent.usage.reasoningTokens).toBe(30);
+        // Should fall back to AI SDK totalUsage
+        expect(completeEvent.usage.inputTokens).toBe(100);
+        expect(completeEvent.usage.outputTokens).toBe(200);
+        expect(completeEvent.usage.totalTokens).toBe(300); // Calculated fallback
     });
 
     test("emits session-captured for claudeCode with session metadata", async () => {
@@ -882,6 +929,51 @@ describe("LLMService stream()", () => {
         expect(sessionSpy.mock.calls[0][0]).toEqual({
             sessionId: "stream-session-456",
         });
+    });
+
+    test("extracts costUsd from claude-code provider metadata", async () => {
+        const claudeCodeProvider = createMockClaudeCodeProvider();
+        const service = new LLMService(
+            null,
+            "claudeCode",
+            "claude-3",
+            undefined,
+            undefined,
+            claudeCodeProvider
+        );
+
+        const completeSpy = mock(() => {});
+        service.on("complete", completeSpy);
+
+        const messages: ModelMessage[] = [
+            { role: "user", content: [{ type: "text", text: "Hello" }] },
+        ];
+
+        await service.stream(messages, {});
+
+        if (capturedOnFinish) {
+            await capturedOnFinish({
+                text: "Response",
+                steps: [],
+                totalUsage: { inputTokens: 55865, outputTokens: 324 },
+                finishReason: "stop",
+                providerMetadata: {
+                    "claude-code": {
+                        sessionId: "stream-session-456",
+                        costUsd: 0.16652625,
+                        durationMs: 11580,
+                    },
+                },
+            });
+        }
+
+        expect(completeSpy).toHaveBeenCalled();
+        const completeEvent = completeSpy.mock.calls[0][0];
+        // costUsd should come from claude-code provider metadata
+        expect(completeEvent.usage.costUsd).toBe(0.16652625);
+        // Token counts should come from AI SDK totalUsage (fallback)
+        expect(completeEvent.usage.inputTokens).toBe(55865);
+        expect(completeEvent.usage.outputTokens).toBe(324);
     });
 
     test("respects custom onStopCheck callback", async () => {
