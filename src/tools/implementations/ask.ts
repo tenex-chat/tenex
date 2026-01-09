@@ -1,5 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
+import { getPubkeyService } from "@/services/PubkeyService";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -50,13 +51,16 @@ const askSchema = z.object({
     "A brief title that encompasses all questions being asked (3-5 words). This helps the user quickly understand the topic at a glance."
   ),
   context: z.string().describe(
-    "Full background and all information the user needs to understand and answer the questions. " +
+    "Background information the user needs to understand and answer the questions. " +
     "CRITICAL: The user has NO access to your conversation history - include ALL relevant details, " +
-    "prior decisions, constraints, and reasoning. Be comprehensive but concise."
+    "prior decisions, constraints, and reasoning. Be comprehensive but concise. " +
+    "DO NOT include the questions themselves in this field - questions go ONLY in the 'questions' array below. " +
+    "This field is for context/background ONLY."
   ),
   questions: z.array(questionSchema).min(1).describe(
     "Array of questions to ask. Use 'question' type for single-select, 'multiselect' type for multi-select. " +
-    "Can mix types. Keep to 1-4 questions per ask event."
+    "Can mix types. Keep to 1-4 questions per ask event. " +
+    "Questions are rendered separately from the context - do NOT duplicate them in the context field."
   ),
 });
 
@@ -73,8 +77,14 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     throw new Error("No project owner configured - cannot determine who to ask");
   }
 
+  // Get human-readable name for the recipient
+  const pubkeyService = getPubkeyService();
+  const recipientName = await pubkeyService.getName(ownerPubkey);
+
   logger.info("[ask] Publishing ask event", {
     fromAgent: context.agent.slug,
+    toUser: recipientName,
+    toUserPubkey: ownerPubkey.substring(0, 8),
     questionCount: questions.length,
     questionTypes: questions.map(q => q.type),
   });
@@ -110,30 +120,40 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
 export function createAskTool(context: ToolExecutionContext): AISdkTool {
   const aiTool = tool({
-    description: `Ask questions to the project owner and wait for their response.
+    description: `Ask questions to a human user (the project owner) and wait for their response.
 
-Use this tool when you need to:
+PURPOSE: Use this tool ONLY to ask questions to humans. Do NOT use it for any other purpose.
+
+When to use:
 1. Gather user preferences or requirements
 2. Clarify ambiguous instructions
 3. Get decisions on implementation choices
 4. Offer choices about what direction to take
 
-IMPORTANT: This creates a completely new conversation - the user has ZERO context from your current work.
-You MUST provide comprehensive context including all background information, prior decisions, constraints,
-and reasoning needed for the user to understand and answer your questions.
+CRITICAL - Structure your input correctly:
+- "context": Background information ONLY. Do NOT put questions here.
+- "questions": Array of actual questions. Questions are rendered separately by the UI.
+
+BAD example (questions in context):
+  context: "I found X and Y. Which do you prefer? Also, should I use Z?"
+  questions: [...]
+
+GOOD example (context is just background):
+  context: "I found X and Y while investigating the issue. Here's what each does: ..."
+  questions: [{type: "question", title: "Preference", question: "Which approach do you prefer?", suggestions: ["X", "Y"]}]
+
+The user sees the context field as explanatory text, then sees each question rendered as a separate UI element.
+DO NOT duplicate questions in the context - they will appear twice to the user.
 
 Question types:
 - "question": Single-select. User picks one option or provides their own answer.
-- "multiselect": Multi-select. User can pick multiple options or provide their own answer.
-
-Note: All questions are inherently open-ended - users can always respond with whatever they want.
-The suggestions/options you provide are helpful hints, not constraints.
+- "multiselect": Multi-select. User can pick multiple options.
 
 Tips:
-- If you recommend a specific option, make it the first in the list and add "(Recommended)" suffix
+- If you recommend an option, make it first and add "(Recommended)" suffix
 - Keep titles short (max 12 chars) for clean display
 - Group related questions in a single ask event (1-4 questions)
-- Be comprehensive in the context field - the user sees ONLY what you provide`,
+- The user has NO access to your conversation history - include all relevant context`,
     inputSchema: askSchema,
     execute: async (input: AskInput) => {
       return await executeAsk(input, context);

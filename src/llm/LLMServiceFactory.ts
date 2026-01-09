@@ -148,6 +148,20 @@ export class LLMServiceFactory {
             enableTenexTools: this.enableTenexTools,
         };
 
+        console.log("[LLMServiceFactory] Creating service with context:", {
+            config: {
+                provider: actualProvider,
+                model: config.model,
+            },
+            agentName: context?.agentName,
+            toolCount: Object.keys(context?.tools || {}).length,
+            toolNames: Object.keys(context?.tools || {}),
+            enableTenexTools: this.enableTenexTools,
+            hasMcpConfig: !!context?.mcpConfig,
+            mcpEnabled: context?.mcpConfig?.enabled,
+            mcpServerCount: Object.keys(context?.mcpConfig?.servers || {}).length,
+        });
+
         // Get the provider from the registry
         const provider = providerRegistry.getProvider(actualProvider);
 
