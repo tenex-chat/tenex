@@ -125,8 +125,27 @@ async function executeLessonLearn(
 // AI SDK tool factory
 export function createLessonLearnTool(context: ToolExecutionContext): AISdkTool {
     return tool({
-        description:
-            "Record new lessons and insights for future reference. Use when discovering patterns, solutions, or important knowledge that should be preserved. ALWAYS use when the user instructs you to remember something or change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.",
+        description: `Record new lessons and insights for future reference. Use for content ABOUT YOUR BEHAVIOR, such as:
+- Patterns in how you approach tasks
+- Debugging workflows that work well
+- User preferences and communication styles
+- Behavioral adjustments when user requests changes
+- Performance patterns in your tool usage
+- Things to do differently in future work
+
+Use when the user instructs you to remember something about YOUR BEHAVIOR or PREFERENCES, or when the user instructs you to change some behavior. Lessons persist across conversations and help build institutional memory. Include both concise lesson and detailed explanation when complexity warrants it. Categorize and tag appropriately for future discovery. Lessons become immediately available via lesson_get.
+
+**CRITICAL:** Only use this for content ABOUT YOUR BEHAVIOR. For content about the project itself, use report_write instead.
+
+**NEVER use for:**
+- Project conventions or patterns
+- Architecture documentation
+- Technical specifications
+- Design decisions
+- API documentation
+- Any content that would help others understand the project
+
+See also: report_write (for project documentation)`,
         inputSchema: lessonLearnSchema,
         execute: async (input: LessonLearnInput) => {
             return await executeLessonLearn(input, context);

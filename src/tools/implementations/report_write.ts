@@ -85,7 +85,24 @@ async function executeReportWrite(
 // AI SDK tool factory
 export function createReportWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
-        description: `Write reports and documentation as NDKArticle events. Use for creating persistent documentation like architecture docs, implementation plans, or project summaries. Reports are stored on Nostr network and accessible via slug. Updates existing reports with same slug. Supports markdown format and hashtags for categorization. Reports can be read back with report_read or listed with reports_list.
+        description: `Write reports and documentation as NDKArticle events. Use for creating persistent documentation ABOUT THE PROJECT, such as:
+- Architecture documentation
+- Implementation plans
+- Project summaries
+- Design decisions
+- Technical specifications
+- API documentation
+- Team guidelines and conventions
+
+Reports are stored on Nostr network and accessible via slug. Updates existing reports with same slug. Supports markdown format and hashtags for categorization. Reports can be read back with report_read or listed with reports_list.
+
+**CRITICAL:** Only use this for content ABOUT THE PROJECT. For content about your behavior or patterns in how you work, use lesson_learn instead.
+
+**NEVER use for:**
+- Behavioral patterns or workflows
+- User preferences or communication styles
+- Debugging approaches or work patterns
+- "I've learned to..." statements about your approach
 
 **Memorize Parameter**: Set memorize=true when the report contains information that is fundamental to your role and should always be available in your system prompt. Use this for:
 - Core architectural decisions you need to reference frequently
@@ -93,7 +110,9 @@ export function createReportWriteTool(context: ToolExecutionContext): AISdkTool 
 - Project conventions or patterns you must follow consistently
 - Any content you want persisted across all future conversations
 
-When memorize=true, a "memorize" tag is added to the article and the content will be automatically injected into your system prompt.`,
+When memorize=true, a "memorize" tag is added to the article and the content will be automatically injected into your system prompt.
+
+See also: lesson_learn (for behavioral insights)`,
         inputSchema: reportWriteSchema,
         execute: async (input: ReportWriteInput) => {
             return await executeReportWrite(input, context);
