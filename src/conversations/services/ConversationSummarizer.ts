@@ -159,7 +159,7 @@ CATEGORIES: Assign 1-3 category tags to classify this conversation.
                 // Sign and publish with backend signer
                 const backendSigner = await config.getBackendSigner();
                 await event.sign(backendSigner);
-                await event.publish();
+                event.publish();
                 console.log(
                     `Published metadata for conversation ${conversation.id}: ${result.title}`
                 );

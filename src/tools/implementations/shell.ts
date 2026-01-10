@@ -297,7 +297,8 @@ OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
 - Commands run with timeout (default 2 minutes, max 10 minutes)
 
-Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.`,
+Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.
+- Time-based delays: Use shell(sleep N) to wait N seconds (e.g., shell(sleep 5) for 5 seconds).`,
 
         inputSchema: shellSchema,
 

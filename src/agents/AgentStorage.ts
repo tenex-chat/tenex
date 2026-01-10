@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { StoredAgentData } from "@/agents/types";
+import type { MCPServerConfig } from "@/llm/providers/types";
 import { ensureDirectory, fileExists } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -53,6 +54,7 @@ export function createStoredAgent(config: {
     tools?: string[] | null;
     eventId?: string;
     projects?: string[];
+    mcpServers?: Record<string, MCPServerConfig>;
 }): StoredAgent {
     return {
         eventId: config.eventId,
@@ -66,6 +68,7 @@ export function createStoredAgent(config: {
         llmConfig: config.llmConfig,
         tools: config.tools ?? undefined,
         projects: config.projects ?? [],
+        mcpServers: config.mcpServers,
     };
 }
 

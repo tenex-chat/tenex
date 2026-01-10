@@ -1,3 +1,4 @@
+import { logger } from "@/utils/logger";
 import type { LocalStreamChunk } from "./types";
 
 /**
@@ -20,8 +21,14 @@ export class StreamPublisher {
     }
 
     write(chunk: LocalStreamChunk): void {
-        if (this.transport?.isConnected()) {
-            this.transport.write(chunk);
+        const connected = this.transport?.isConnected() ?? false;
+        logger.debug("[StreamPublisher] write called", {
+            hasTransport: !!this.transport,
+            isConnected: connected,
+            chunkType: (chunk.data as { type?: string })?.type,
+        });
+        if (connected) {
+            this.transport!.write(chunk);
         }
     }
 
