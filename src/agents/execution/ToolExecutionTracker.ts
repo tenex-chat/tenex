@@ -54,6 +54,7 @@
  * ```
  */
 
+import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -63,12 +64,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
 /**
- * Tools that publish delegation/ask events and need delayed tool use event publishing.
- * These tools return a StopExecutionSignal with pendingDelegations containing event IDs.
- */
-const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_crossproject"];
-
-/**
  * Tools that publish addressable events and need delayed tool use event publishing.
  * These tools return results containing addressable event references that should be
  * tagged with 'a' tags on the tool use event.
@@ -76,52 +71,16 @@ const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_cros
 const ADDRESSABLE_EVENT_TOOLS = ["report_write"];
 
 /**
- * Check if a tool is a delegation tool that needs delayed publishing.
- * This includes both direct tool names and MCP-wrapped versions (e.g., mcp__tenex__delegate).
- */
-function isDelegationTool(toolName: string): boolean {
-    // Check direct match first
-    if (DELEGATION_TOOLS.includes(toolName)) {
-        return true;
-    }
-
-    // Check for MCP-wrapped delegation tools (e.g., mcp__tenex__delegate)
-    // Extract the actual tool name from MCP format: mcp__<server>__<tool>
-    if (toolName.startsWith("mcp__")) {
-        const parts = toolName.split("__");
-        if (parts.length >= 3) {
-            const actualToolName = parts.slice(2).join("__"); // Handle tools with __ in their name
-            return DELEGATION_TOOLS.includes(actualToolName);
-        }
-    }
-
-    return false;
-}
-
-/**
  * Check if a tool publishes addressable events that need delayed publishing.
  * This includes both direct tool names and MCP-wrapped versions.
  */
 function isAddressableEventTool(toolName: string): boolean {
-    // Check direct match first
-    if (ADDRESSABLE_EVENT_TOOLS.includes(toolName)) {
-        return true;
-    }
-
-    // Check for MCP-wrapped tools (e.g., mcp__tenex__report_write)
-    if (toolName.startsWith("mcp__")) {
-        const parts = toolName.split("__");
-        if (parts.length >= 3) {
-            const actualToolName = parts.slice(2).join("__");
-            return ADDRESSABLE_EVENT_TOOLS.includes(actualToolName);
-        }
-    }
-
-    return false;
+    const baseToolName = unwrapMcpToolName(toolName);
+    return ADDRESSABLE_EVENT_TOOLS.includes(baseToolName);
 }
 
 function needsDelayedPublishing(toolName: string): boolean {
-    return isDelegationTool(toolName) || isAddressableEventTool(toolName);
+    return isDelegateToolName(toolName) || isAddressableEventTool(toolName);
 }
 
 /**
@@ -182,27 +141,6 @@ export interface CompleteExecutionOptions {
     error: boolean;
     /** Public key of the agent that executed the tool */
     agentPubkey: string;
-}
-
-/**
- * Format MCP tool names for human readability
- * Converts "mcp__repomix__pack_codebase" to "repomix's pack_codebase"
- */
-function formatMCPToolName(toolName: string): string {
-    if (!toolName.startsWith("mcp__")) {
-        return toolName;
-    }
-
-    // Split the MCP tool name: mcp__<server>__<tool>
-    const parts = toolName.split("__");
-    if (parts.length !== 3) {
-        return toolName;
-    }
-
-    const [, serverName, toolMethod] = parts;
-
-    // Simple format: server's tool_name
-    return `${serverName}'s ${toolMethod.replace(/_/g, " ")}`;
 }
 
 /**
@@ -277,7 +215,7 @@ export class ToolExecutionTracker {
             execution.eventContext = eventContext;
             execution.agentPublisher = agentPublisher;
 
-            const toolType = isDelegationTool(toolName) ? "delegation" : "addressable event";
+            const toolType = isDelegateToolName(toolName) ? "delegation" : "addressable event";
             logger.debug(`[ToolExecutionTracker] ${toolType} tool tracked (delayed publishing)`, {
                 toolCallId,
                 toolName,
@@ -389,7 +327,7 @@ export class ToolExecutionTracker {
             let referencedEventIds: string[] = [];
             let referencedAddressableEvents: string[] = [];
 
-            if (isDelegationTool(execution.toolName)) {
+            if (isDelegateToolName(execution.toolName)) {
                 // Extract event IDs from result.pendingDelegations for delegation tools
                 // For MCP-wrapped tools (via TenexToolsAdapter), the original result may be
                 // stored in _tenexOriginalResult to preserve the StopExecutionSignal structure
@@ -587,7 +525,7 @@ export class ToolExecutionTracker {
 
         // Special formatting for MCP tools
         if (toolName.startsWith("mcp__")) {
-            return `Executing ${formatMCPToolName(toolName)}`;
+            return `Executing ${formatMcpToolName(toolName)}`;
         }
 
         // Default format
