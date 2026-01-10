@@ -915,6 +915,7 @@ export class AgentExecutor {
             tools: toolsObject,
             sessionId,
             workingDirectory: context.workingDirectory,
+            conversationId: context.conversationId,
         });
 
         const agentPublisher = context.agentPublisher;
@@ -1307,6 +1308,10 @@ export class AgentExecutor {
 
             // Subscribe to raw chunks and forward to local streaming socket
             llmService.on("raw-chunk", (event: RawChunkEvent) => {
+                logger.debug("[AgentExecutor] raw-chunk received", {
+                    chunkType: event.chunk.type,
+                    agentPubkey: context.agent.pubkey.substring(0, 8),
+                });
                 streamPublisher.write({
                     agent_pubkey: context.agent.pubkey,
                     conversation_id: context.conversationId,

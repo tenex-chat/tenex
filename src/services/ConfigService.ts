@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
+import type { MCPConfig } from "@/llm/providers/types";
 import type { LLMService } from "@/llm/service";
 import type {
     ConfigFile,
@@ -270,10 +271,40 @@ export class ConfigService {
             /** Working directory path for Claude Code execution */
             workingDirectory?: string;
             sessionId?: string;
+            /** Agent-specific MCP configuration to merge with project/global config */
+            mcpConfig?: MCPConfig;
+            /** Conversation ID for OpenRouter correlation */
+            conversationId?: string;
         }
     ): LLMService {
-        const config = this.getLLMConfig(configName);
-        return llmServiceFactory.createService(config, context as Parameters<typeof llmServiceFactory.createService>[1]);
+        const llmConfig = this.getLLMConfig(configName);
+
+        // Merge agent MCP config with project/global MCP config
+        // Agent config overrides project config for the same server names
+        let finalMcpConfig: MCPConfig | undefined;
+
+        if (this.loadedConfig?.mcp && context?.mcpConfig) {
+            // Merge: agent config overrides project config
+            finalMcpConfig = {
+                enabled: context.mcpConfig.enabled ?? this.loadedConfig.mcp.enabled,
+                servers: {
+                    ...this.loadedConfig.mcp.servers,
+                    ...context.mcpConfig.servers,
+                },
+            };
+        } else if (context?.mcpConfig) {
+            finalMcpConfig = context.mcpConfig;
+        } else if (this.loadedConfig?.mcp) {
+            finalMcpConfig = {
+                enabled: this.loadedConfig.mcp.enabled,
+                servers: this.loadedConfig.mcp.servers,
+            };
+        }
+
+        return llmServiceFactory.createService(llmConfig, {
+            ...context,
+            mcpConfig: finalMcpConfig,
+        } as Parameters<typeof llmServiceFactory.createService>[1]);
     }
 
     // =====================================================================================

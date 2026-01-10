@@ -126,6 +126,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private readonly claudeCodeBaseSettings?: ClaudeCodeSettings;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
+    private readonly conversationId?: string;
     private cachedContentForComplete = "";
     /** Cumulative usage from previous steps, set via setCurrentStepUsage */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
@@ -139,7 +140,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
         claudeCodeBaseSettings?: ClaudeCodeSettings,
         sessionId?: string,
-        agentSlug?: string
+        agentSlug?: string,
+        conversationId?: string
     ) {
         super();
         this.provider = provider;
@@ -150,6 +152,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         this.claudeCodeBaseSettings = claudeCodeBaseSettings;
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
+        this.conversationId = conversationId;
 
         if (!registry && !claudeCodeProviderFunction) {
             throw new Error(
@@ -161,6 +164,37 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         resolveContextWindow(this.provider, this.model).catch(() => {
             // Silently ignore - context window will be undefined if fetch fails
         });
+    }
+
+    /**
+     * Get trace correlation ID for OpenRouter.
+     * Returns a string combining trace and span IDs for unique request identification.
+     */
+    private getTraceCorrelationId(): string | undefined {
+        const span = trace.getActiveSpan();
+        if (!span) return undefined;
+        const ctx = span.spanContext();
+        return `tenex-${ctx.traceId}-${ctx.spanId}`;
+    }
+
+    /**
+     * Get OpenRouter metadata for request correlation.
+     * Includes OTL trace context plus agent and conversation identifiers.
+     */
+    private getOpenRouterMetadata(): Record<string, string> {
+        const metadata: Record<string, string> = {};
+
+        const span = trace.getActiveSpan();
+        if (span) {
+            const ctx = span.spanContext();
+            metadata.tenex_trace_id = ctx.traceId;
+            metadata.tenex_span_id = ctx.spanId;
+        }
+
+        if (this.agentSlug) metadata.tenex_agent = this.agentSlug;
+        if (this.conversationId) metadata.tenex_conversation = this.conversationId;
+
+        return metadata;
     }
 
     /**
@@ -331,6 +365,14 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // ✨ Enable full AI SDK telemetry
                 experimental_telemetry: this.getFullTelemetryConfig(),
+
+                providerOptions: {
+                    openrouter: {
+                        usage: { include: true },
+                        user: this.getTraceCorrelationId(),
+                        metadata: this.getOpenRouterMetadata(),
+                    },
+                },
             });
 
             // Check for invalid tool calls and mark span as error
@@ -523,6 +565,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             providerOptions: {
                 openrouter: {
                     usage: { include: true },
+                    user: this.getTraceCorrelationId(),
+                    metadata: this.getOpenRouterMetadata(),
                 },
             },
 
@@ -782,19 +826,24 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     this.emit("session-captured", { sessionId: capturedSessionId });
                 }
 
-                // Extract OpenRouter-specific usage data
-                const openrouterUsage = (
-                    e.providerMetadata?.openrouter as {
-                        usage?: {
-                            cost?: number;
-                            promptTokens?: number;
-                            completionTokens?: number;
-                            totalTokens?: number;
-                            promptTokensDetails?: { cachedTokens?: number };
-                            completionTokensDetails?: { reasoningTokens?: number };
-                        };
-                    }
-                )?.usage;
+                // Extract OpenRouter-specific usage and correlation data
+                const openrouterMetadata = e.providerMetadata?.openrouter as {
+                    id?: string;
+                    usage?: {
+                        cost?: number;
+                        promptTokens?: number;
+                        completionTokens?: number;
+                        totalTokens?: number;
+                        promptTokensDetails?: { cachedTokens?: number };
+                        completionTokensDetails?: { reasoningTokens?: number };
+                    };
+                };
+                const openrouterUsage = openrouterMetadata?.usage;
+
+                // Capture OpenRouter generation ID for trace correlation
+                if (openrouterMetadata?.id) {
+                    trace.getActiveSpan()?.setAttribute("openrouter.generation_id", openrouterMetadata.id);
+                }
 
                 // Extract Claude Code-specific cost data
                 const claudeCodeCostUsd = (
@@ -982,6 +1031,14 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getFullTelemetryConfig(),
+
+            providerOptions: {
+                openrouter: {
+                    usage: { include: true },
+                    user: this.getTraceCorrelationId(),
+                    metadata: this.getOpenRouterMetadata(),
+                },
+            },
         });
     }
 
