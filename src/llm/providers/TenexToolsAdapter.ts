@@ -1,7 +1,7 @@
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
-import { z } from "zod";
+import { z, type ZodRawShape } from "zod";
 
 // Infer the return type since SdkMcpServer is not exported
 type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
@@ -38,19 +38,33 @@ export class TenexToolsAdapter {
 
         // Convert each TENEX tool to an SDK MCP tool
         const sdkTools = localTools.map(([name, tenexTool]) => {
-            // Convert the Zod schema or use a generic one if not available
-            // Note: tenexTool.inputSchema is already a Zod schema compatible with tool()
-            const schema = tenexTool.inputSchema || z.object({}); // Use empty object instead of record
+            // The Claude SDK's tool() function expects a ZodRawShape (plain object like { a: z.number() })
+            // NOT a ZodObject (result of z.object({...})). We need to extract the .shape property.
+            // tenexTool.inputSchema from AI SDK is a ZodObject, so we extract its shape.
+            let rawShape: ZodRawShape = {};
+
+            if (tenexTool.inputSchema) {
+                // Check if it's a ZodObject with a shape property
+                const schema = tenexTool.inputSchema;
+                if (schema && typeof schema === 'object' && 'shape' in schema) {
+                    // It's a ZodObject - extract the raw shape
+                    rawShape = (schema as z.ZodObject<ZodRawShape>).shape;
+                } else if (schema && typeof schema === 'object' && !('_def' in schema)) {
+                    // It might already be a raw shape object (plain object with Zod types)
+                    rawShape = schema as unknown as ZodRawShape;
+                }
+                // If it's some other Zod type, leave rawShape as empty object
+            }
 
             console.log("[TenexToolsAdapter] Converting tool:", {
                 name,
                 hasSchema: !!tenexTool.inputSchema,
                 hasExecute: !!tenexTool.execute,
                 description: tenexTool.description?.substring(0, 100),
+                extractedShapeKeys: Object.keys(rawShape),
             });
 
-            // biome-ignore lint/suspicious/noExplicitAny: SDK type variance workaround
-            return tool(name, tenexTool.description || `Execute ${name}`, schema as any, async (args, extra) => {
+            return tool(name, tenexTool.description || `Execute ${name}`, rawShape, async (args, extra) => {
                 try {
                     console.log(`[TenexToolsAdapter] Executing tool ${name}`, {
                         args: JSON.stringify(args).substring(0, 200),
