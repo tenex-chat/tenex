@@ -6,6 +6,7 @@ import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
 import { AgentMetadataStore } from "@/services/agents";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
+import type { MCPConfig } from "@/llm/providers/types";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -30,6 +31,14 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
     // Process tools using pure functions
     const validToolNames = processAgentTools(storedAgent.tools || [], storedAgent.slug);
 
+    // Build agent-specific MCP config from stored mcpServers
+    const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
+        ? {
+            enabled: true,
+            servers: storedAgent.mcpServers,
+        }
+        : undefined;
+
     const agent: AgentInstance = {
         name: storedAgent.name,
         pubkey,
@@ -42,11 +51,15 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
         tools: validToolNames,
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
+        mcpServers: storedAgent.mcpServers,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
         },
         createLLMService: (options) => {
+            // Merge passed mcpConfig with agent's own mcpConfig (passed config takes precedence)
+            const mergedMcpConfig = options?.mcpConfig || agentMcpConfig;
+
             return config.createLLMService(
                 agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
                 {
@@ -54,6 +67,8 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
                     agentName: storedAgent.name,
                     sessionId: options?.sessionId,
                     workingDirectory: options?.workingDirectory ?? registry.getBasePath(),
+                    mcpConfig: mergedMcpConfig,
+                    conversationId: options?.conversationId,
                 }
             );
         },

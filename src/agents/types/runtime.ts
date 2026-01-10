@@ -1,5 +1,6 @@
 import type { AgentMetadataStore } from "@/services/agents";
 import type { LLMService } from "@/llm/service";
+import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
@@ -30,11 +31,17 @@ export interface AgentInstance {
     slug: string;
     useAISDKAgent?: boolean; // Feature flag: use AI SDK Agent class instead of traditional AgentExecutor
     maxAgentSteps?: number; // Maximum steps for AI SDK Agent agentic loop (default: 10)
+    /** Agent-specific MCP server configurations */
+    mcpServers?: Record<string, MCPServerConfig>;
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;
         sessionId?: string;
         workingDirectory?: string;
+        /** MCP configuration to pass to the provider */
+        mcpConfig?: MCPConfig;
+        /** Conversation ID for OpenRouter correlation */
+        conversationId?: string;
     }): LLMService;
     sign(event: NDKEvent): Promise<void>;
 }

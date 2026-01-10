@@ -124,6 +124,8 @@ export class LLMServiceFactory {
             workingDirectory?: string;
             /** MCP configuration - passed from services layer to providers */
             mcpConfig?: MCPConfig;
+            /** Conversation ID for OpenRouter correlation */
+            conversationId?: string;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -187,7 +189,8 @@ export class LLMServiceFactory {
                 modelResult.providerFunction as (model: string, options?: ClaudeCodeSettings) => LanguageModel,
                 modelResult.agentSettings as ClaudeCodeSettings,
                 context?.sessionId,
-                agentSlug
+                agentSlug,
+                context?.conversationId
             );
         }
 
@@ -203,7 +206,8 @@ export class LLMServiceFactory {
             undefined,
             undefined,
             context?.sessionId,
-            agentSlug
+            agentSlug,
+            context?.conversationId
         );
     }
 
