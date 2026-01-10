@@ -335,6 +335,123 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         });
     }
 
+    private prepareMessagesForRequest(messages: ModelMessage[]): ModelMessage[] {
+        let processedMessages = messages;
+        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
+            processedMessages = convertSystemMessagesForResume(messages);
+        }
+
+        return this.addCacheControl(processedMessages);
+    }
+
+    private getInvalidToolCalls(
+        steps: StepResult<Record<string, AISdkTool>>[]
+    ): Array<{ toolName: string; error: string }> {
+        const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
+
+        for (const step of steps) {
+            if (step.toolCalls) {
+                for (const toolCall of step.toolCalls) {
+                    // Check if this is a dynamic tool call that's invalid
+                    if (
+                        "dynamic" in toolCall &&
+                        toolCall.dynamic === true &&
+                        toolCall.invalid === true &&
+                        toolCall.error
+                    ) {
+                        const error =
+                            typeof toolCall.error === "object" &&
+                            toolCall.error !== null &&
+                            "name" in toolCall.error
+                                ? (toolCall.error as { name: string }).name
+                                : "Unknown error";
+                        invalidToolCalls.push({
+                            toolName: toolCall.toolName,
+                            error,
+                        });
+                    }
+                }
+            }
+        }
+
+        return invalidToolCalls;
+    }
+
+    private recordInvalidToolCalls(
+        steps: StepResult<Record<string, AISdkTool>>[],
+        logContext: "complete" | "response"
+    ): void {
+        const activeSpan = trace.getActiveSpan();
+        if (!activeSpan) {
+            return;
+        }
+
+        const invalidToolCalls = this.getInvalidToolCalls(steps);
+        if (invalidToolCalls.length === 0) {
+            return;
+        }
+
+        const logSuffix = logContext === "complete" ? "complete()" : "response";
+
+        activeSpan.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: `Invalid tool calls: ${invalidToolCalls.map((tc) => tc.toolName).join(", ")}`,
+        });
+        activeSpan.setAttribute("error", true);
+        activeSpan.setAttribute("error.type", "AI_InvalidToolCall");
+        activeSpan.setAttribute("error.invalid_tool_count", invalidToolCalls.length);
+        activeSpan.setAttribute(
+            "error.invalid_tools",
+            invalidToolCalls.map((tc) => tc.toolName).join(", ")
+        );
+
+        for (const invalidTool of invalidToolCalls) {
+            activeSpan.addEvent("invalid_tool_call", {
+                "tool.name": invalidTool.toolName,
+                "error.type": invalidTool.error,
+            });
+        }
+
+        logger.error(`[LLMService] Invalid tool calls detected in ${logSuffix}`, {
+            invalidToolCalls,
+            model: this.model,
+            provider: this.provider,
+        });
+    }
+
+    private emitSessionCapturedFromMetadata(
+        providerMetadata: Record<string, unknown> | undefined,
+        recordSpanEvent: boolean
+    ): void {
+        if (this.provider === "claudeCode") {
+            const sessionId = (
+                providerMetadata?.["claude-code"] as { sessionId?: string } | undefined
+            )?.sessionId;
+            if (sessionId) {
+                if (recordSpanEvent) {
+                    trace.getActiveSpan()?.addEvent("llm.session_captured", {
+                        "session.id": sessionId,
+                    });
+                }
+                this.emit("session-captured", { sessionId });
+            }
+        }
+
+        if (this.provider === "codexCli") {
+            const sessionId = (
+                providerMetadata?.["codex-cli"] as { sessionId?: string } | undefined
+            )?.sessionId;
+            if (sessionId) {
+                if (recordSpanEvent) {
+                    trace.getActiveSpan()?.addEvent("llm.session_captured", {
+                        "session.id": sessionId,
+                    });
+                }
+                this.emit("session-captured", { sessionId });
+            }
+        }
+    }
+
     async complete(
         messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
@@ -346,14 +463,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();
 
-        // Convert system messages for Claude Code/Codex CLI resume sessions
-        let processedMessages = messages;
-        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
-            processedMessages = convertSystemMessagesForResume(messages);
-        }
-
-        // Add provider-specific cache control
-        processedMessages = this.addCacheControl(processedMessages);
+        const processedMessages = this.prepareMessagesForRequest(messages);
 
         try {
             const result = await generateText({
@@ -375,91 +485,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 },
             });
 
-            // Check for invalid tool calls and mark span as error
-            const activeSpan = trace.getActiveSpan();
-            if (activeSpan && result.steps) {
-                const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
-
-                for (const step of result.steps) {
-                    if (step.toolCalls) {
-                        for (const toolCall of step.toolCalls) {
-                            // Check if this is a dynamic tool call that's invalid
-                            if (
-                                "dynamic" in toolCall &&
-                                toolCall.dynamic === true &&
-                                toolCall.invalid === true &&
-                                toolCall.error
-                            ) {
-                                const error =
-                                    typeof toolCall.error === "object" &&
-                                    toolCall.error !== null &&
-                                    "name" in toolCall.error
-                                        ? (toolCall.error as { name: string }).name
-                                        : "Unknown error";
-                                invalidToolCalls.push({
-                                    toolName: toolCall.toolName,
-                                    error,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                if (invalidToolCalls.length > 0) {
-                    activeSpan.setStatus({
-                        code: SpanStatusCode.ERROR,
-                        message: `Invalid tool calls: ${invalidToolCalls.map((tc) => tc.toolName).join(", ")}`,
-                    });
-                    activeSpan.setAttribute("error", true);
-                    activeSpan.setAttribute("error.type", "AI_InvalidToolCall");
-                    activeSpan.setAttribute("error.invalid_tool_count", invalidToolCalls.length);
-                    activeSpan.setAttribute(
-                        "error.invalid_tools",
-                        invalidToolCalls.map((tc) => tc.toolName).join(", ")
-                    );
-
-                    for (const invalidTool of invalidToolCalls) {
-                        activeSpan.addEvent("invalid_tool_call", {
-                            "tool.name": invalidTool.toolName,
-                            "error.type": invalidTool.error,
-                        });
-                    }
-
-                    logger.error("[LLMService] Invalid tool calls detected in complete()", {
-                        invalidToolCalls,
-                        model: this.model,
-                        provider: this.provider,
-                    });
-                }
-            }
-
-            // Capture session ID from provider metadata if using Claude Code or Codex CLI
-            if (
-                this.provider === "claudeCode" &&
-                result.providerMetadata?.["claude-code"]?.sessionId
-            ) {
-                const capturedSessionId = result.providerMetadata["claude-code"]
-                    .sessionId as string;
-                trace.getActiveSpan()?.addEvent("llm.session_captured", {
-                    "session.id": capturedSessionId,
-                });
-                // Emit session ID for storage by the executor
-                this.emit("session-captured", { sessionId: capturedSessionId });
-            }
-
-            // Capture session ID from provider metadata if using Codex CLI
-            if (
-                this.provider === "codexCli" &&
-                result.providerMetadata?.["codex-cli"]?.sessionId
-            ) {
-                const capturedSessionId = result.providerMetadata["codex-cli"]
-                    .sessionId as string;
-                trace.getActiveSpan()?.addEvent("llm.session_captured", {
-                    "session.id": capturedSessionId,
-                });
-                // Emit session ID for storage by the executor
-                this.emit("session-captured", { sessionId: capturedSessionId });
-            }
+            this.recordInvalidToolCalls(result.steps ?? [], "complete");
+            this.emitSessionCapturedFromMetadata(
+                result.providerMetadata as Record<string, unknown> | undefined,
+                true
+            );
 
             // Record if reasoning was extracted
             if ("reasoning" in result && result.reasoning) {
@@ -510,14 +540,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     ): Promise<void> {
         const model = this.getLanguageModel(messages);
 
-        // Convert system messages for Claude Code/Codex CLI resume sessions
-        let processedMessages = messages;
-        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
-            processedMessages = convertSystemMessagesForResume(messages);
-        }
-
-        // Add provider-specific cache control
-        processedMessages = this.addCacheControl(processedMessages);
+        const processedMessages = this.prepareMessagesForRequest(messages);
 
         const startTime = Date.now();
 
@@ -736,70 +759,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private createFinishHandler(): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
         return async (e) => {
             try {
-                // Check for invalid tool calls and mark span as error
-                const activeSpan = trace.getActiveSpan();
-                if (activeSpan) {
-                    const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
-
-                    for (const step of e.steps) {
-                        if (step.toolCalls) {
-                            for (const toolCall of step.toolCalls) {
-                                // Check if this is a dynamic tool call that's invalid
-                                if (
-                                    "dynamic" in toolCall &&
-                                    toolCall.dynamic === true &&
-                                    toolCall.invalid === true &&
-                                    toolCall.error
-                                ) {
-                                    const error =
-                                        typeof toolCall.error === "object" &&
-                                        toolCall.error !== null &&
-                                        "name" in toolCall.error
-                                            ? (toolCall.error as { name: string }).name
-                                            : "Unknown error";
-                                    invalidToolCalls.push({
-                                        toolName: toolCall.toolName,
-                                        error,
-                                    });
-                                }
-                            }
-                        }
-                    }
-
-                    if (invalidToolCalls.length > 0) {
-                        // Mark span as error
-                        activeSpan.setStatus({
-                            code: SpanStatusCode.ERROR,
-                            message: `Invalid tool calls: ${invalidToolCalls.map((tc) => tc.toolName).join(", ")}`,
-                        });
-
-                        // Add error attributes
-                        activeSpan.setAttribute("error", true);
-                        activeSpan.setAttribute("error.type", "AI_InvalidToolCall");
-                        activeSpan.setAttribute(
-                            "error.invalid_tool_count",
-                            invalidToolCalls.length
-                        );
-                        activeSpan.setAttribute(
-                            "error.invalid_tools",
-                            invalidToolCalls.map((tc) => tc.toolName).join(", ")
-                        );
-
-                        // Add span event for each invalid tool
-                        for (const invalidTool of invalidToolCalls) {
-                            activeSpan.addEvent("invalid_tool_call", {
-                                "tool.name": invalidTool.toolName,
-                                "error.type": invalidTool.error,
-                            });
-                        }
-
-                        logger.error("[LLMService] Invalid tool calls detected in response", {
-                            invalidToolCalls,
-                            model: this.model,
-                            provider: this.provider,
-                        });
-                    }
-                }
+                this.recordInvalidToolCalls(e.steps, "response");
 
                 // For streaming, use cached content only. Don't fall back to e.text.
                 // When cachedContentForComplete is empty, it means all content was already
@@ -807,24 +767,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 // Falling back to e.text would cause duplicate publishing.
                 const finalMessage = this.cachedContentForComplete;
 
-                if (
-                    this.provider === "claudeCode" &&
-                    e.providerMetadata?.["claude-code"]?.sessionId
-                ) {
-                    const capturedSessionId = e.providerMetadata["claude-code"].sessionId as string;
-                    // Emit session ID for storage by the executor
-                    this.emit("session-captured", { sessionId: capturedSessionId });
-                }
-
-                // Capture session ID for Codex CLI
-                if (
-                    this.provider === "codexCli" &&
-                    e.providerMetadata?.["codex-cli"]?.sessionId
-                ) {
-                    const capturedSessionId = e.providerMetadata["codex-cli"].sessionId as string;
-                    // Emit session ID for storage by the executor
-                    this.emit("session-captured", { sessionId: capturedSessionId });
-                }
+                this.emitSessionCapturedFromMetadata(
+                    e.providerMetadata as Record<string, unknown> | undefined,
+                    false
+                );
 
                 // Extract OpenRouter-specific usage and correlation data
                 const openrouterMetadata = e.providerMetadata?.openrouter as {
