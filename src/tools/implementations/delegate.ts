@@ -29,7 +29,7 @@ const delegationItemSchema = z.object({
     .describe("Git branch name for worktree isolation"),
   pair: pairConfigSchema
     .optional()
-    .describe("Enable real-time pairing supervision. You will receive periodic checkpoint updates about the delegated agent's progress."),
+    .describe("Enable real-time pairing supervision. IMPORTANT: Only use pairing when (1) your role explicitly involves monitoring other agents, or (2) the user explicitly requested progress monitoring/reporting. Do NOT use pairing for routine delegations - it adds unnecessary overhead and interrupts the delegated agent's workflow."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
