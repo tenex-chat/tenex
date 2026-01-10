@@ -229,7 +229,7 @@ describe("Delegation tools - RAL isolation", () => {
             expect(result.__stopExecution).toBe(true);
         });
 
-        it("should block delegation when current RAL has pending delegations", async () => {
+        it("should allow delegation even when current RAL has pending delegations", async () => {
             const agentPubkey = "agent-pubkey-123";
 
             // Create a RAL with pending delegations
@@ -244,7 +244,7 @@ describe("Delegation tools - RAL isolation", () => {
                 },
             ]);
 
-            // Context with this RAL number should block new delegation
+            // Context with this RAL number should still allow new delegation
             const context = createMockContext(ralNumber);
             const delegateTool = createDelegateTool(context);
 
@@ -254,14 +254,10 @@ describe("Delegation tools - RAL isolation", () => {
                 ],
             };
 
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Cannot create new delegation while waiting for existing delegation");
-                // The error shows truncated pubkey, so just check for the prefix
-                expect(error.message).toContain("some-oth");
-            }
+            // Should succeed - multiple pending delegations are now allowed
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.__stopExecution).toBe(true);
         });
 
         // NOTE: Test "should require ralNumber in context" removed - ralNumber is now required by ToolExecutionContext type

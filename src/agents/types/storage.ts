@@ -1,3 +1,5 @@
+import type { MCPServerConfig } from "@/llm/providers/types";
+
 /**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
@@ -9,6 +11,8 @@ export interface StoredAgentData {
     useCriteria?: string;
     llmConfig?: string;
     tools?: string[];
+    /** Agent-specific MCP server configurations */
+    mcpServers?: Record<string, MCPServerConfig>;
 }
 
 /**

@@ -50,22 +50,7 @@ async function executeDelegate(
     throw new Error("At least one delegation is required");
   }
 
-  // Check if there are already pending delegations in the CURRENT RAL execution
-  // This prevents creating new delegations during checkpoint responses
   const ralRegistry = RALRegistry.getInstance();
-  const pendingDelegationsForRal = ralRegistry.getConversationPendingDelegations(
-    context.agent.pubkey, context.conversationId, context.ralNumber
-  );
-  if (pendingDelegationsForRal.length > 0) {
-    const pendingRecipients = pendingDelegationsForRal
-      .map(d => d.recipientPubkey.substring(0, 8))
-      .join(", ");
-    throw new Error(
-      `Cannot create new delegation while waiting for existing delegation(s) to: ${pendingRecipients}. ` +
-      "Use delegate_followup to send guidance, or wait for the delegation to complete."
-    );
-  }
-
   const pendingDelegations: PendingDelegation[] = [];
   const failedRecipients: string[] = [];
 
