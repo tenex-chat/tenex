@@ -16,7 +16,6 @@ import {
     extractReasoningMiddleware,
     generateObject,
     generateText,
-    smoothStream,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -521,12 +520,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getFullTelemetryConfig(),
 
-            // Smooth streaming with 15ms delay and line-based chunking
-            experimental_transform: smoothStream({
-                delayInMs: 15,
-                chunking: "line",
-            }),
-
             providerOptions: {
                 openrouter: {
                     usage: { include: true },
@@ -563,6 +556,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         }
 
         // Emit raw-chunk event for consumers (e.g., local streaming)
+        logger.debug("[LLMService] emitting raw-chunk", { chunkType: chunk.type });
         this.emit("raw-chunk", { chunk: event.chunk });
 
         // Emit chunk-type-change event BEFORE processing the new chunk
