@@ -75,12 +75,49 @@ const DELEGATION_TOOLS = ["delegate", "delegate_followup", "ask", "delegate_cros
  */
 const ADDRESSABLE_EVENT_TOOLS = ["report_write"];
 
+/**
+ * Check if a tool is a delegation tool that needs delayed publishing.
+ * This includes both direct tool names and MCP-wrapped versions (e.g., mcp__tenex__delegate).
+ */
 function isDelegationTool(toolName: string): boolean {
-    return DELEGATION_TOOLS.includes(toolName);
+    // Check direct match first
+    if (DELEGATION_TOOLS.includes(toolName)) {
+        return true;
+    }
+
+    // Check for MCP-wrapped delegation tools (e.g., mcp__tenex__delegate)
+    // Extract the actual tool name from MCP format: mcp__<server>__<tool>
+    if (toolName.startsWith("mcp__")) {
+        const parts = toolName.split("__");
+        if (parts.length >= 3) {
+            const actualToolName = parts.slice(2).join("__"); // Handle tools with __ in their name
+            return DELEGATION_TOOLS.includes(actualToolName);
+        }
+    }
+
+    return false;
 }
 
+/**
+ * Check if a tool publishes addressable events that need delayed publishing.
+ * This includes both direct tool names and MCP-wrapped versions.
+ */
 function isAddressableEventTool(toolName: string): boolean {
-    return ADDRESSABLE_EVENT_TOOLS.includes(toolName);
+    // Check direct match first
+    if (ADDRESSABLE_EVENT_TOOLS.includes(toolName)) {
+        return true;
+    }
+
+    // Check for MCP-wrapped tools (e.g., mcp__tenex__report_write)
+    if (toolName.startsWith("mcp__")) {
+        const parts = toolName.split("__");
+        if (parts.length >= 3) {
+            const actualToolName = parts.slice(2).join("__");
+            return ADDRESSABLE_EVENT_TOOLS.includes(actualToolName);
+        }
+    }
+
+    return false;
 }
 
 function needsDelayedPublishing(toolName: string): boolean {
@@ -354,15 +391,20 @@ export class ToolExecutionTracker {
 
             if (isDelegationTool(execution.toolName)) {
                 // Extract event IDs from result.pendingDelegations for delegation tools
+                // For MCP-wrapped tools (via TenexToolsAdapter), the original result may be
+                // stored in _tenexOriginalResult to preserve the StopExecutionSignal structure
+                const effectiveResult = (result as { _tenexOriginalResult?: unknown })?._tenexOriginalResult ?? result;
                 const pendingDelegations = (
-                    result as { pendingDelegations?: Array<{ delegationConversationId: string }> }
+                    effectiveResult as { pendingDelegations?: Array<{ delegationConversationId: string }> }
                 )?.pendingDelegations;
                 referencedEventIds =
                     pendingDelegations?.map((d) => d.delegationConversationId).filter((id): id is string => !!id) ?? [];
             } else if (isAddressableEventTool(execution.toolName)) {
                 // Extract addressable event references from result.referencedAddressableEvents
                 // Format: "30023:pubkey:d-tag" for NDKArticle
-                const addressableRefs = (result as { referencedAddressableEvents?: string[] })?.referencedAddressableEvents;
+                // For MCP-wrapped tools, check _tenexOriginalResult first
+                const effectiveResult = (result as { _tenexOriginalResult?: unknown })?._tenexOriginalResult ?? result;
+                const addressableRefs = (effectiveResult as { referencedAddressableEvents?: string[] })?.referencedAddressableEvents;
                 referencedAddressableEvents = addressableRefs?.filter((ref): ref is string => !!ref) ?? [];
             }
 

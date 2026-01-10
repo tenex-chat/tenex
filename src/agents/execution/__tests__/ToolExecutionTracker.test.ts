@@ -644,6 +644,174 @@ describe("ToolExecutionTracker", () => {
             const execution = tracker.getExecution("normal-tool");
             expect(execution?.toolEventId).toBe("mock-event-id-123");
         });
+
+        it("should return null for MCP-wrapped delegate tool (mcp__tenex__delegate)", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "mcp-delegate-call",
+                toolName: "mcp__tenex__delegate",
+                args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return null for MCP-wrapped delegation tools
+            expect(result).toBeNull();
+
+            // Should NOT have published yet
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+
+            // Should still be tracking
+            expect(tracker.isTracking("mcp-delegate-call")).toBe(true);
+
+            // Should have empty toolEventId
+            const execution = tracker.getExecution("mcp-delegate-call");
+            expect(execution?.toolEventId).toBe("");
+        });
+
+        it("should return null for MCP-wrapped ask tool (mcp__tenex__ask)", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "mcp-ask-call",
+                toolName: "mcp__tenex__ask",
+                args: { content: "Question?" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should return null for MCP-wrapped delegate_followup tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "mcp-followup-call",
+                toolName: "mcp__tenex__delegate_followup",
+                args: { message: "Continue" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should return null for MCP-wrapped delegate_crossproject tool", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "mcp-crossproject-call",
+                toolName: "mcp__tenex__delegate_crossproject",
+                args: { content: "Cross-project", projectId: "proj", agentSlug: "agent" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            expect(result).toBeNull();
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+        });
+
+        it("should publish with referenced event IDs on completion for MCP-wrapped delegate", async () => {
+            // Track MCP-wrapped delegation tool
+            await tracker.trackExecution({
+                toolCallId: "mcp-delegate-complete",
+                toolName: "mcp__tenex__delegate",
+                args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Simulate result with pendingDelegations
+            const delegationResult = {
+                __stopExecution: true,
+                pendingDelegations: [
+                    { delegationConversationId: "mcp-delegation-event-123", recipientPubkey: "pubkey1", prompt: "Do X" },
+                ],
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "mcp-delegate-complete",
+                result: delegationResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should have published with referencedEventIds (q-tags)
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    toolName: "mcp__tenex__delegate",
+                    referencedEventIds: ["mcp-delegation-event-123"],
+                }),
+                mockEventContext
+            );
+
+            // toolEventId should be updated
+            const execution = tracker.getExecution("mcp-delegate-complete");
+            expect(execution?.toolEventId).toBe("mock-event-id-123");
+        });
+
+        it("should extract pendingDelegations from _tenexOriginalResult for MCP-wrapped ask tool", async () => {
+            // Track MCP-wrapped ask tool
+            await tracker.trackExecution({
+                toolCallId: "mcp-ask-complete",
+                toolName: "mcp__tenex__ask",
+                args: { title: "Question", context: "Context", questions: [] },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Simulate result from TenexToolsAdapter with _tenexOriginalResult
+            // This is how MCP-wrapped tools preserve StopExecutionSignal structure
+            const mcpWrappedResult = {
+                content: [{ type: "text", text: "..." }],
+                _tenexOriginalResult: {
+                    __stopExecution: true,
+                    pendingDelegations: [
+                        { delegationConversationId: "ask-event-id-456", recipientPubkey: "owner", senderPubkey: "agent", prompt: "Question", type: "ask" },
+                    ],
+                },
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "mcp-ask-complete",
+                result: mcpWrappedResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should have published with referencedEventIds (q-tags) extracted from _tenexOriginalResult
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    toolName: "mcp__tenex__ask",
+                    referencedEventIds: ["ask-event-id-456"],
+                }),
+                mockEventContext
+            );
+
+            // toolEventId should be updated
+            const execution = tracker.getExecution("mcp-ask-complete");
+            expect(execution?.toolEventId).toBe("mock-event-id-123");
+        });
+
+        it("should not affect non-tenex MCP tools", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "other-mcp-tool",
+                toolName: "mcp__github__create_issue",
+                args: { title: "Test" },
+                toolsObject: mockToolsObject,
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return the event (not null) - this is not a delegation tool
+            expect(result).not.toBeNull();
+            expect(result?.id).toBe("mock-event-id-123");
+
+            // Should have published immediately
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalled();
+        });
     });
 
     describe("Addressable event tool delayed publishing (report_write)", () => {
@@ -768,6 +936,60 @@ describe("ToolExecutionTracker", () => {
                 expect.objectContaining({
                     referencedEventIds: [],
                     referencedAddressableEvents: ["30023:pubkey:test"],
+                }),
+                mockEventContext
+            );
+        });
+
+        it("should return null for MCP-wrapped report_write tool (mcp__tenex__report_write)", async () => {
+            const result = await tracker.trackExecution({
+                toolCallId: "mcp-report-write-call",
+                toolName: "mcp__tenex__report_write",
+                args: { slug: "test-report", title: "Test", summary: "Summary", content: "Content" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            // Should return null for MCP-wrapped addressable event tools
+            expect(result).toBeNull();
+
+            // Should NOT have published yet
+            expect(mockAgentPublisher.toolUse).not.toHaveBeenCalled();
+
+            // Should still be tracking
+            expect(tracker.isTracking("mcp-report-write-call")).toBe(true);
+        });
+
+        it("should publish with referencedAddressableEvents on completion for MCP-wrapped report_write", async () => {
+            await tracker.trackExecution({
+                toolCallId: "mcp-report-complete",
+                toolName: "mcp__tenex__report_write",
+                args: { slug: "test", title: "Test", summary: "Summary", content: "Content" },
+                toolsObject: {},
+                agentPublisher: mockAgentPublisher,
+                eventContext: mockEventContext,
+            });
+
+            const reportResult = {
+                success: true,
+                articleId: "nostr:naddr1...",
+                slug: "test",
+                message: "Published",
+                referencedAddressableEvents: ["30023:agent-pubkey:test"],
+            };
+
+            await tracker.completeExecution({
+                toolCallId: "mcp-report-complete",
+                result: reportResult,
+                error: false,
+                agentPubkey: "agent-pubkey",
+            });
+
+            expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    toolName: "mcp__tenex__report_write",
+                    referencedAddressableEvents: ["30023:agent-pubkey:test"],
                 }),
                 mockEventContext
             );
