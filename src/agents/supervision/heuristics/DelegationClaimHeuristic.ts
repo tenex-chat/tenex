@@ -1,3 +1,4 @@
+import { isDelegateToolName } from "@/agents/tool-names";
 import type { CorrectionAction, Heuristic, HeuristicDetection, PostCompletionContext, VerificationResult } from "../types";
 
 export class DelegationClaimHeuristic implements Heuristic<PostCompletionContext> {
@@ -28,9 +29,7 @@ export class DelegationClaimHeuristic implements Heuristic<PostCompletionContext
     }
 
     // Check if delegate tool was actually called
-    const delegateToolCalled = context.toolCallsMade.some(t =>
-      t === "delegate" || t === "mcp__tenex__delegate"
-    );
+    const delegateToolCalled = context.toolCallsMade.some((toolName) => isDelegateToolName(toolName));
 
     if (delegateToolCalled) {
       return { triggered: false };

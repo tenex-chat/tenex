@@ -1,3 +1,4 @@
+import { isDelegateToolName } from "@/agents/tool-names";
 import type { CorrectionAction, Heuristic, HeuristicDetection, PostCompletionContext, VerificationResult } from "../types";
 
 export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
@@ -12,9 +13,7 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
 
     // Silent = no content AND no tool calls that would produce output
     // Exception: delegate calls are ok since agent is waiting for delegation
-    const delegateCalls = context.toolCallsMade.filter(t =>
-      t === "delegate" || t.includes("delegate")
-    );
+    const delegateCalls = context.toolCallsMade.filter((toolName) => isDelegateToolName(toolName));
     const hasOnlyDelegateCalls = hasToolCalls && delegateCalls.length === context.toolCallsMade.length;
 
     const isSilent = !hasMeaningfulContent && !hasOnlyDelegateCalls;
