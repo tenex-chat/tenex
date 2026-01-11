@@ -23,8 +23,13 @@ export class ClaudeCodeToolsAdapter {
         tools: Record<string, AISdkTool>,
         _context: { agentName?: string } // Execution context
     ): SdkMcpServer | undefined {
-        // Filter out MCP tools - they're handled separately
-        const localTools = Object.entries(tools).filter(([name]) => !name.startsWith("mcp__"));
+        // Filter out tools that Claude Code has its own version of:
+        // - fs_* (Claude Code has Read, Write, Edit, Glob, Grep)
+        // - todo_* (Claude Code has TodoWrite)
+        const localTools = Object.entries(tools).filter(([name]) =>
+            !name.startsWith("fs_") &&
+            !name.startsWith("todo_")
+        );
 
         console.log("[ClaudeCodeToolsAdapter] Input tools analysis:", {
             totalTools: Object.keys(tools).length,
