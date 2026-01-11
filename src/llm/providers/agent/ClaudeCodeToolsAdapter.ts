@@ -8,10 +8,13 @@ import { z, type ZodRawShape } from "zod";
 type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
 
 /**
- * Converts TENEX tools to Claude Code SDK MCP tools
- * Follows Single Responsibility: Only handles tool conversion
+ * Converts TENEX tools to Claude Code SDK MCP server format.
+ *
+ * This adapter is EXCLUSIVE to Claude Code - it uses createSdkMcpServer from
+ * the Claude Agent SDK which creates in-process MCP servers that only Claude Code
+ * can consume. Other providers (like Codex CLI) require different MCP formats.
  */
-export class TenexToolsAdapter {
+export class ClaudeCodeToolsAdapter {
     /**
      * Convert TENEX tools to SDK MCP tools for Claude Code
      * Only converts non-MCP tools (MCP tools are handled separately)
@@ -23,7 +26,7 @@ export class TenexToolsAdapter {
         // Filter out MCP tools - they're handled separately
         const localTools = Object.entries(tools).filter(([name]) => !name.startsWith("mcp__"));
 
-        console.log("[TenexToolsAdapter] Input tools analysis:", {
+        console.log("[ClaudeCodeToolsAdapter] Input tools analysis:", {
             totalTools: Object.keys(tools).length,
             allToolNames: Object.keys(tools),
             localToolsCount: localTools.length,
@@ -33,7 +36,7 @@ export class TenexToolsAdapter {
         });
 
         if (localTools.length === 0) {
-            console.log("[TenexToolsAdapter] No local tools to convert - returning undefined");
+            console.log("[ClaudeCodeToolsAdapter] No local tools to convert - returning undefined");
             return undefined;
         }
 
@@ -57,7 +60,7 @@ export class TenexToolsAdapter {
                 // If it's some other Zod type, leave rawShape as empty object
             }
 
-            console.log("[TenexToolsAdapter] Converting tool:", {
+            console.log("[ClaudeCodeToolsAdapter] Converting tool:", {
                 name,
                 hasSchema: !!tenexTool.inputSchema,
                 hasExecute: !!tenexTool.execute,
@@ -134,7 +137,7 @@ export class TenexToolsAdapter {
                         content: [{ type: "text", text: String(result) }],
                     };
                 } catch (error) {
-                    logger.error(`[TenexToolsAdapter] Error executing tool ${name}:`, error);
+                    logger.error(`[ClaudeCodeToolsAdapter] Error executing tool ${name}:`, error);
                     return {
                         content: [
                             {
@@ -148,7 +151,7 @@ export class TenexToolsAdapter {
             });
         });
 
-        console.log("[TenexToolsAdapter] Created SDK MCP server with tools:", {
+        console.log("[ClaudeCodeToolsAdapter] Created SDK MCP server with tools:", {
             serverName: "tenex",
             toolCount: sdkTools.length,
             toolNames: localTools.map(([name]) => name),
@@ -161,14 +164,14 @@ export class TenexToolsAdapter {
                 tools: sdkTools,
             });
 
-            logger.info("[TenexToolsAdapter] SDK MCP server created successfully", {
+            logger.info("[ClaudeCodeToolsAdapter] SDK MCP server created successfully", {
                 serverName: "tenex",
                 toolCount: sdkTools.length,
             });
 
             return server;
         } catch (error) {
-            logger.warn("[TenexToolsAdapter] Could not create SDK MCP server:", error);
+            logger.warn("[ClaudeCodeToolsAdapter] Could not create SDK MCP server:", error);
             return undefined;
         }
     }

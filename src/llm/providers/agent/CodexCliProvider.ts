@@ -14,14 +14,15 @@ import type {
     ProviderRuntimeContext,
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
-import { TenexToolsAdapter } from "../TenexToolsAdapter";
 
 /**
  * Codex CLI provider implementation
+ *
+ * NOTE: TENEX tools are not yet available for Codex CLI. Unlike Claude Code which
+ * supports in-process SDK MCP servers, Codex CLI only supports stdio/http transports.
+ * A future implementation will expose TENEX tools via a stdio MCP server process.
  */
 export class CodexCliProvider extends AgentProvider {
-    private enableTenexTools = true;
-
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
         "codex-cli",
         "Codex CLI",
@@ -44,14 +45,6 @@ export class CodexCliProvider extends AgentProvider {
     }
 
     /**
-     * Initialize with TENEX tools setting
-     */
-    async initialize(config: ProviderInitConfig): Promise<void> {
-        this.enableTenexTools = config.options?.enableTenexTools !== false;
-        await super.initialize(config);
-    }
-
-    /**
      * Create the Codex CLI provider function
      */
     protected createProviderFunction(_config: ProviderInitConfig): AgentProviderFunction {
@@ -67,41 +60,24 @@ export class CodexCliProvider extends AgentProvider {
         context: ProviderRuntimeContext,
         _modelId: string
     ): CodexCliSettings {
-        // Extract tool names from the provided tools
-        const toolNames = context.tools ? Object.keys(context.tools) : [];
-        const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
-
         trace.getActiveSpan()?.addEvent("llm_factory.creating_codex_cli", {
             "agent.name": context.agentName ?? "",
             "session.id": context.sessionId ?? "",
-            "tools.count": regularTools.length,
-            "tenex_tools.enabled": this.enableTenexTools,
         });
 
-        // Create SDK MCP server for local TENEX tools if enabled
-        const tenexSdkServer =
-            this.enableTenexTools && regularTools.length > 0 && context.tools
-                ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
-                : undefined;
+        // Build mcpServers configuration from context (stdio servers only)
+        const mcpServersConfig: Record<string, {
+            transport: "stdio";
+            command: string;
+            args?: string[];
+            env?: Record<string, string>;
+        }> = {};
 
-        // Build mcpServers configuration
-        // CodexCliSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
-        // biome-ignore lint/suspicious/noExplicitAny: CodexCliSettings.mcpServers accepts varied server types
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mcpServersConfig: Record<string, any> = {};
-
-        // Add TENEX tools wrapper if enabled
-        if (tenexSdkServer) {
-            mcpServersConfig.tenex = tenexSdkServer;
-        }
-
-        // Add MCP servers from context (passed from services layer)
         const mcpConfig = context.mcpConfig;
         if (mcpConfig?.enabled && mcpConfig.servers) {
             for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {
-                // Codex CLI uses 'transport' instead of 'type'
                 mcpServersConfig[serverName] = {
-                    transport: "stdio" as const,
+                    transport: "stdio",
                     command: serverConfig.command,
                     args: serverConfig.args,
                     env: serverConfig.env,
@@ -114,7 +90,6 @@ export class CodexCliProvider extends AgentProvider {
             });
         }
 
-        // Build the settings
         const settings: CodexCliSettings = {
             allowNpx: true,
             skipGitRepoCheck: true,
@@ -131,7 +106,6 @@ export class CodexCliProvider extends AgentProvider {
             },
         };
 
-        // Handle session resumption if the provider supports it
         if (context.sessionId) {
             (settings as CodexCliSettings & { resume?: string }).resume = context.sessionId;
         }
