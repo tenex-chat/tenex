@@ -26,6 +26,9 @@
 // Export types
 export * from "./types";
 
+// Export provider ID constants
+export { PROVIDER_IDS, type ProviderId } from "./provider-ids";
+
 // Export base classes
 export * from "./base";
 

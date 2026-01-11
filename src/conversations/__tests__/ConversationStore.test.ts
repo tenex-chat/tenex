@@ -402,6 +402,82 @@ describe("ConversationStore", () => {
         });
     });
 
+    describe("Delta Message Building", () => {
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+        });
+
+        it("buildMessagesForRalAfterIndex respects visibility rules", async () => {
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "u0",
+                messageType: "text",
+            });
+
+            const ral1 = store.createRal(AGENT1_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral: ral1,
+                content: "a1",
+                messageType: "text",
+            });
+            store.completeRal(AGENT1_PUBKEY, ral1);
+
+            const ralAgent2 = store.createRal(AGENT2_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT2_PUBKEY,
+                ral: ralAgent2,
+                content: "other text",
+                messageType: "text",
+            });
+            store.addMessage({
+                pubkey: AGENT2_PUBKEY,
+                ral: ralAgent2,
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_2",
+                    toolName: "fs_read",
+                    input: { path: "/tmp/test" },
+                }] as ToolCallPart[],
+            });
+
+            const ral2 = store.createRal(AGENT1_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral: ral2,
+                content: "a2",
+                messageType: "text",
+            });
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "u1",
+                messageType: "text",
+            });
+
+            const messages = await store.buildMessagesForRalAfterIndex(AGENT1_PUBKEY, ral2, 1);
+
+            expect(messages).toHaveLength(3);
+            expect(messages[0].content).toContain("other text");
+            expect(messages[1].content).toContain("a2");
+            expect(messages[2].content).toContain("u1");
+        });
+
+        it("buildMessagesForRalAfterIndex returns empty when index exceeds length", async () => {
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "hello",
+                messageType: "text",
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRalAfterIndex(AGENT1_PUBKEY, ral, 99);
+
+            expect(messages).toHaveLength(0);
+        });
+    });
+
     describe("Injection Queue", () => {
         beforeEach(() => {
             store.load(PROJECT_ID, CONVERSATION_ID);

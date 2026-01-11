@@ -25,6 +25,7 @@ import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
+import { PROVIDER_IDS } from "./providers/provider-ids";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import {
     compileMessagesForClaudeCode,
@@ -265,15 +266,12 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             if (this.sessionId) {
                 // When resuming, add the resume option
                 options.resume = this.sessionId;
-            } else if (messages && this.provider === "claudeCode") {
-                // Only Claude Code supports customSystemPrompt/appendSystemPrompt
-                // Codex CLI doesn't support these options
-                const { customSystemPrompt, appendSystemPrompt } =
-                    compileMessagesForClaudeCode(messages);
+            } else if (messages && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
+                // Compile messages into systemPrompt format
+                const { systemPrompt } = compileMessagesForClaudeCode(messages);
 
-                options.customSystemPrompt = customSystemPrompt;
-                if (appendSystemPrompt) {
-                    options.appendSystemPrompt = appendSystemPrompt;
+                if (systemPrompt) {
+                    options.systemPrompt = systemPrompt;
                 }
             }
 
@@ -348,8 +346,17 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
     private prepareMessagesForRequest(messages: ModelMessage[]): ModelMessage[] {
         let processedMessages = messages;
-        if ((this.provider === "claudeCode" || this.provider === "codexCli") && this.sessionId) {
-            processedMessages = convertSystemMessagesForResume(messages);
+
+        if (this.provider === PROVIDER_IDS.CLAUDE_CODE || this.provider === PROVIDER_IDS.CODEX_CLI) {
+            if (this.sessionId) {
+                // Resuming session: Convert system messages to user messages
+                // (system messages after conversation start need to be delivered as user messages)
+                processedMessages = convertSystemMessagesForResume(messages);
+            } else {
+                // New session: Filter out system messages (they're in systemPrompt.append)
+                // Only pass user/assistant messages to avoid duplication
+                processedMessages = messages.filter((m) => m.role !== "system");
+            }
         }
 
         return this.addCacheControl(processedMessages);
@@ -434,9 +441,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         providerMetadata: Record<string, unknown> | undefined,
         recordSpanEvent: boolean
     ): void {
-        if (this.provider === "claudeCode") {
+        if (this.provider === PROVIDER_IDS.CLAUDE_CODE) {
             const sessionId = (
-                providerMetadata?.["claude-code"] as { sessionId?: string } | undefined
+                providerMetadata?.[PROVIDER_IDS.CLAUDE_CODE] as { sessionId?: string } | undefined
             )?.sessionId;
             if (sessionId) {
                 if (recordSpanEvent) {
@@ -448,9 +455,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             }
         }
 
-        if (this.provider === "codexCli") {
+        if (this.provider === PROVIDER_IDS.CODEX_CLI) {
             const sessionId = (
-                providerMetadata?.["codex-cli"] as { sessionId?: string } | undefined
+                providerMetadata?.[PROVIDER_IDS.CODEX_CLI] as { sessionId?: string } | undefined
             )?.sessionId;
             if (sessionId) {
                 if (recordSpanEvent) {
@@ -556,8 +563,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         const startTime = Date.now();
 
-        const reviewModel = this.getLanguageModel();
-        const progressMonitor = new ProgressMonitor(reviewModel);
+        // ProgressMonitor is only used for standard providers (not Claude Code/Codex CLI)
+        // Creating a second model with resume for Claude Code can cause session conflicts
+        let progressMonitor: ProgressMonitor | undefined;
+        if (this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_CLI) {
+            const reviewModel = this.getLanguageModel();
+            progressMonitor = new ProgressMonitor(reviewModel);
+        }
 
         const stopWhen = async ({
             steps,
@@ -570,24 +582,28 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 }
             }
 
-            // Then check default progress monitor
-            const toolNames: string[] = [];
-            for (const step of steps) {
-                if (step.toolCalls) {
-                    for (const tc of step.toolCalls) {
-                        toolNames.push(tc.toolName);
+            // Then check default progress monitor (only for standard providers)
+            if (progressMonitor) {
+                const toolNames: string[] = [];
+                for (const step of steps) {
+                    if (step.toolCalls) {
+                        for (const tc of step.toolCalls) {
+                            toolNames.push(tc.toolName);
+                        }
                     }
                 }
+                const shouldContinue = await progressMonitor.check(toolNames);
+                return !shouldContinue;
             }
-            const shouldContinue = await progressMonitor.check(toolNames);
-            return !shouldContinue;
+
+            return false;
         };
 
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            // Don't pass tools for claudeCode/codexCli - they have their own built-in tools that conflict
-            ...(this.provider !== "claudeCode" && this.provider !== "codexCli" && { tools }),
+            // Don't pass tools for claude-code/codex-cli - they have their own built-in tools that conflict
+            ...(this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_CLI && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -805,7 +821,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // Extract Claude Code-specific cost data
                 const claudeCodeCostUsd = (
-                    e.providerMetadata?.["claude-code"] as {
+                    e.providerMetadata?.[PROVIDER_IDS.CLAUDE_CODE] as {
                         costUsd?: number;
                         sessionId?: string;
                         durationMs?: number;

@@ -22,13 +22,12 @@ import type {
     ToolWillExecuteEvent,
 } from "@/llm/service";
 import { streamPublisher } from "@/llm";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { getPubkeyService } from "@/services/PubkeyService";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
@@ -49,6 +48,7 @@ import type {
     TypedToolResult,
 } from "ai";
 import chalk from "chalk";
+import { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { SessionManager } from "./SessionManager";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -794,6 +794,10 @@ export class AgentExecutor {
                 "event.id": responseEvent.id || "",
                 is_completion: !hasPendingDelegations,
             });
+
+            // Advance cursor AFTER response is in ConversationStore.
+            // This ensures the cursor points to the last message the agent knows about.
+            result.messageCompiler.advanceCursor();
         }
 
         return responseEvent;
@@ -853,13 +857,6 @@ export class AgentExecutor {
             });
         }
 
-        // Build conversation messages from ConversationStore (single source of truth)
-        const conversationMessages = await conversationStore.buildMessagesForRal(
-            context.agent.pubkey,
-            ralNumber
-        );
-
-        // Build system prompt with agent identity, context, and instructions
         const projectContext = getProjectContext();
         const conversation = context.getConversation();
         if (!conversation) {
@@ -872,7 +869,33 @@ export class AgentExecutor {
             ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
             : "";
 
-        const systemPromptMessages = await buildSystemPromptMessages({
+        const abortSignal = llmOpsRegistry.registerOperation(context);
+
+        const llmService = context.agent.createLLMService({
+            tools: toolsObject,
+            sessionId,
+            workingDirectory: context.workingDirectory,
+            conversationId: context.conversationId,
+        });
+
+        const messageCompiler = new MessageCompiler(
+            llmService.provider,
+            sessionManager,
+            conversationStore
+        );
+
+        const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+        const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
+        const { messages, counts, mode } = await messageCompiler.compile({
             agent: context.agent,
             project: projectContext.project,
             conversation,
@@ -883,41 +906,18 @@ export class AgentExecutor {
             mcpManager: projectContext.mcpManager,
             agentLessons: projectContext.agentLessons,
             nudgeContent,
+            respondingToPubkey: context.triggeringEvent.pubkey,
+            pendingDelegations,
+            completedDelegations,
+            ralNumber,
         });
-
-        // Combine system prompt with conversation messages
-        const messages: ModelMessage[] = [
-            ...systemPromptMessages.map((sm) => sm.message),
-            ...conversationMessages,
-        ];
-
-        // Append todo list as a late system message (after conversation history)
-        // This ensures the agent sees its current todos near the end of the context
-        const todoContent = await agentTodosFragment.template({
-            conversation,
-            agentPubkey: context.agent.pubkey,
-        });
-        if (todoContent) {
-            messages.push({
-                role: "system",
-                content: todoContent,
-            });
-        }
 
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
             "ral.number": ralNumber,
-            "message.count": messages.length,
-            "system_prompt.count": systemPromptMessages.length,
-            "conversation.count": conversationMessages.length,
-        });
-
-        const abortSignal = llmOpsRegistry.registerOperation(context);
-
-        const llmService = context.agent.createLLMService({
-            tools: toolsObject,
-            sessionId,
-            workingDirectory: context.workingDirectory,
-            conversationId: context.conversationId,
+            "message.count": counts.total,
+            "system_prompt.count": counts.systemPrompt,
+            "conversation.count": counts.conversation,
+            "message.mode": mode,
         });
 
         const agentPublisher = context.agentPublisher;
@@ -979,7 +979,7 @@ export class AgentExecutor {
         llmService.on("complete", (event: CompleteEvent) => {
             // Only set result if no error already occurred
             if (!result) {
-                result = { kind: "complete", event };
+                result = { kind: "complete", event, messageCompiler };
             }
         });
 
@@ -1152,34 +1152,6 @@ export class AgentExecutor {
                     }
                 }
 
-                // Always rebuild messages from ConversationStore - the single source of truth
-                // This ensures injections, tool results, and any other updates are included
-                const conversationMessages = await conversationStore.buildMessagesForRal(
-                    context.agent.pubkey,
-                    ralNumber
-                );
-
-                // Combine system prompt with fresh conversation messages
-                const rebuiltMessages: ModelMessage[] = [
-                    ...systemPromptMessages.map((sm) => sm.message),
-                    ...conversationMessages,
-                ];
-
-                // Re-add todo list (tools may have modified it)
-                const todoContent = await agentTodosFragment.template({
-                    conversation,
-                    agentPubkey: context.agent.pubkey,
-                });
-                if (todoContent) {
-                    rebuiltMessages.push({
-                        role: "system",
-                        content: todoContent,
-                    });
-                }
-
-                // Add response context - tell agent who they're responding to
-                const pubkeyService = getPubkeyService();
-                const respondingToName = await pubkeyService.getName(context.triggeringEvent.pubkey);
                 const pendingDelegations = ralRegistry.getConversationPendingDelegations(
                     context.agent.pubkey,
                     context.conversationId,
@@ -1190,28 +1162,30 @@ export class AgentExecutor {
                     context.conversationId,
                     ralNumber
                 );
-
-                let responseContextContent = `Your response will be sent to @${respondingToName}.`;
-
-                // Collect all delegated agents (both pending and completed)
-                const allDelegatedPubkeys = [
-                    ...pendingDelegations.map(d => d.recipientPubkey),
-                    ...completedDelegations.map(d => d.recipientPubkey),
-                ];
-
-                if (allDelegatedPubkeys.length > 0) {
-                    const delegatedAgentNames = await Promise.all(
-                        allDelegatedPubkeys.map(pk => pubkeyService.getName(pk))
-                    );
-                    const uniqueNames = [...new Set(delegatedAgentNames)];
-                    responseContextContent += `\nYou have delegations to: ${uniqueNames.map(n => `@${n}`).join(", ")}.`;
-                    responseContextContent += "\nIf you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.";
-                }
-
-                rebuiltMessages.push({
-                    role: "system",
-                    content: responseContextContent,
+                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
+                    agent: context.agent,
+                    project: projectContext.project,
+                    conversation,
+                    projectBasePath: context.projectBasePath,
+                    workingDirectory: context.workingDirectory,
+                    currentBranch: context.currentBranch,
+                    availableAgents: Array.from(projectContext.agents.values()),
+                    mcpManager: projectContext.mcpManager,
+                    agentLessons: projectContext.agentLessons,
+                    nudgeContent,
+                    respondingToPubkey: context.triggeringEvent.pubkey,
+                    pendingDelegations,
+                    completedDelegations,
+                    ralNumber,
                 });
+
+                // For Claude Code session resumption (delta mode), returning empty messages
+                // breaks the SDK's session reconstruction. The session already has full context
+                // from the initial call, so we should keep the original messages.
+                if (mode === "delta" && rebuiltMessages.length === 0) {
+                    logger.debug("[AgentExecutor] prepareStep: delta mode with no new messages, keeping original");
+                    return undefined;
+                }
 
                 return { messages: rebuiltMessages };
             };
@@ -1394,7 +1368,7 @@ export class AgentExecutor {
             await flushReasoningBuffer();
         }
 
-        if (!sessionId && llmService.provider === "claude-code" && result?.kind === "complete") {
+        if (!sessionId && llmService.provider === PROVIDER_IDS.CLAUDE_CODE && result?.kind === "complete") {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 

@@ -7,6 +7,7 @@ export type EventFilter = (event: NDKEvent) => boolean;
 export interface SessionData {
     sessionId?: string;
     lastSentEventId?: string;
+    lastSentMessageIndex?: number;
 }
 
 /**
@@ -16,6 +17,7 @@ export interface SessionData {
 export class SessionManager {
     private sessionId?: string;
     private lastSentEventId?: string;
+    private lastSentMessageIndex?: number;
     private storedWorkingDirectory?: string;
 
     constructor(
@@ -36,6 +38,7 @@ export class SessionManager {
         const storedSessionId = metadataStore.get<string>("sessionId");
         this.storedWorkingDirectory = metadataStore.get<string>("workingDirectory");
         this.lastSentEventId = metadataStore.get<string>("lastSentEventId");
+        this.lastSentMessageIndex = metadataStore.get<number>("lastSentMessageIndex");
 
         // Only resume session if workingDirectory matches
         if (storedSessionId && this.storedWorkingDirectory === this.workingDirectory) {
@@ -45,6 +48,7 @@ export class SessionManager {
                 agent: this.agent.name,
                 conversationId: this.conversationId.substring(0, 8),
                 lastSentEventId: this.lastSentEventId || "NONE",
+                lastSentMessageIndex: this.lastSentMessageIndex ?? "NONE",
                 workingDirectory: this.workingDirectory,
             });
         } else if (storedSessionId) {
@@ -56,6 +60,7 @@ export class SessionManager {
                 agent: this.agent.name,
                 conversationId: this.conversationId.substring(0, 8),
             });
+            this.lastSentMessageIndex = undefined;
         }
     }
 
@@ -66,25 +71,33 @@ export class SessionManager {
         return {
             sessionId: this.sessionId,
             lastSentEventId: this.lastSentEventId,
+            lastSentMessageIndex: this.lastSentMessageIndex,
         };
     }
 
     /**
      * Store session ID, last sent event ID, and working directory
      */
-    saveSession(sessionId: string, lastSentEventId: string): void {
+    saveSession(sessionId: string, lastSentEventId: string, lastSentMessageIndex?: number): void {
         const metadataStore = this.agent.createMetadataStore(this.conversationId);
         metadataStore.set("sessionId", sessionId);
         metadataStore.set("lastSentEventId", lastSentEventId);
+        if (lastSentMessageIndex !== undefined) {
+            metadataStore.set("lastSentMessageIndex", lastSentMessageIndex);
+        }
         metadataStore.set("workingDirectory", this.workingDirectory);
 
         // Update local state
         this.sessionId = sessionId;
         this.lastSentEventId = lastSentEventId;
+        if (lastSentMessageIndex !== undefined) {
+            this.lastSentMessageIndex = lastSentMessageIndex;
+        }
 
         logger.info("[SessionManager] 💾 Stored session ID and last sent event", {
             sessionId,
             lastSentEventId: lastSentEventId.substring(0, 8),
+            lastSentMessageIndex: lastSentMessageIndex ?? "NONE",
             agent: this.agent.name,
             conversationId: this.conversationId.substring(0, 8),
             workingDirectory: this.workingDirectory,
@@ -102,6 +115,22 @@ export class SessionManager {
 
         logger.info("[SessionManager] 📝 Stored lastSentEventId", {
             lastSentEventId: lastSentEventId.substring(0, 8),
+            agent: this.agent.name,
+            conversationId: this.conversationId.substring(0, 8),
+        });
+    }
+
+    /**
+     * Store the last sent conversation message index
+     */
+    saveLastSentMessageIndex(lastSentMessageIndex: number): void {
+        const metadataStore = this.agent.createMetadataStore(this.conversationId);
+        metadataStore.set("lastSentMessageIndex", lastSentMessageIndex);
+
+        this.lastSentMessageIndex = lastSentMessageIndex;
+
+        logger.info("[SessionManager] 📝 Stored lastSentMessageIndex", {
+            lastSentMessageIndex,
             agent: this.agent.name,
             conversationId: this.conversationId.substring(0, 8),
         });

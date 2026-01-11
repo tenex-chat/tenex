@@ -875,14 +875,15 @@ export class ConversationStore {
         return { role, content } as ModelMessage;
     }
 
-    async buildMessagesForRal(
+    private async buildMessagesFromEntries(
+        entries: ConversationEntry[],
         agentPubkey: string,
-        ralNumber: number
+        ralNumber: number,
+        activeRals: Set<number>
     ): Promise<ModelMessage[]> {
-        const activeRals = new Set(this.getActiveRals(agentPubkey));
         const result: ModelMessage[] = [];
 
-        for (const entry of this.state.messages) {
+        for (const entry of entries) {
             // User messages (no RAL) - include with derived role
             if (!entry.ral) {
                 result.push(await this.entryToMessage(entry, agentPubkey));
@@ -910,6 +911,30 @@ export class ConversationStore {
         }
 
         return result;
+    }
+
+    async buildMessagesForRal(
+        agentPubkey: string,
+        ralNumber: number
+    ): Promise<ModelMessage[]> {
+        const activeRals = new Set(this.getActiveRals(agentPubkey));
+        return this.buildMessagesFromEntries(this.state.messages, agentPubkey, ralNumber, activeRals);
+    }
+
+    async buildMessagesForRalAfterIndex(
+        agentPubkey: string,
+        ralNumber: number,
+        afterIndex: number
+    ): Promise<ModelMessage[]> {
+        const activeRals = new Set(this.getActiveRals(agentPubkey));
+        const startIndex = Math.max(afterIndex + 1, 0);
+
+        if (startIndex >= this.state.messages.length) {
+            return [];
+        }
+
+        const entries = this.state.messages.slice(startIndex);
+        return this.buildMessagesFromEntries(entries, agentPubkey, ralNumber, activeRals);
     }
 
     // Metadata Operations
