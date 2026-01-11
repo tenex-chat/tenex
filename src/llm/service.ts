@@ -32,7 +32,7 @@ import {
     convertSystemMessagesForResume,
 } from "./utils/claudeCodePromptCompiler";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
-import { calculateCumulativeUsage, type StepWithProviderMetadata } from "./utils/usage";
+import { calculateCumulativeUsage } from "./utils/usage";
 
 /**
  * Content delta event
@@ -205,7 +205,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      * Called from prepareStep to make usage available for tool-will-execute events.
      * Extracts accurate usage from providerMetadata.openrouter.usage when available.
      */
-    updateUsageFromSteps(steps: StepWithProviderMetadata[]): void {
+    updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
         this.currentStepUsage = calculateCumulativeUsage(steps);
     }
 
