@@ -1,3 +1,4 @@
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -12,13 +13,13 @@ export class ProviderConfigUI {
      */
     static getProviderDisplayName(provider: string): string {
         const names: Record<string, string> = {
-            openrouter: "OpenRouter (300+ models)",
-            anthropic: "Anthropic (Claude)",
-            openai: "OpenAI (GPT)",
-            ollama: "Ollama (Local models)",
-            claudeCode: "Claude Code",
-            "gemini-cli": "Gemini CLI (via GCloud)",
-            codexCli: "Codex CLI (GPT-5.1/5.2)",
+            [PROVIDER_IDS.OPENROUTER]: "OpenRouter (300+ models)",
+            [PROVIDER_IDS.ANTHROPIC]: "Anthropic (Claude)",
+            [PROVIDER_IDS.OPENAI]: "OpenAI (GPT)",
+            [PROVIDER_IDS.OLLAMA]: "Ollama (Local models)",
+            [PROVIDER_IDS.CLAUDE_CODE]: "Claude Code",
+            [PROVIDER_IDS.GEMINI_CLI]: "Gemini CLI (via GCloud)",
+            [PROVIDER_IDS.CODEX_CLI]: "Codex CLI (GPT-5.1/5.2)",
         };
         return names[provider] || provider;
     }
@@ -30,7 +31,7 @@ export class ProviderConfigUI {
         provider: string,
         currentConfig?: TenexLLMs
     ): Promise<{ apiKey: string }> {
-        if (provider === "claudeCode" || provider === "gemini-cli" || provider === "codexCli") {
+        if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_CLI) {
             // Claude Code, Gemini CLI, and Codex CLI don't require an API key
             console.log(
                 chalk.green(
@@ -39,7 +40,7 @@ export class ProviderConfigUI {
             );
             return { apiKey: "none" }; // Doesn't use API keys
         }
-        if (provider === "ollama") {
+        if (provider === PROVIDER_IDS.OLLAMA) {
             // For Ollama, ask for base URL instead of API key
             const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";
             const { ollamaConfig } = await inquirer.prompt([
