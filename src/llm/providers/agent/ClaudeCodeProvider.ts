@@ -126,7 +126,7 @@ export class ClaudeCodeProvider extends AgentProvider {
                 CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
             },
             mcpServers: mcpServersConfig,
-            disallowedTools: [],
+            disallowedTools: ["AskUserQuestion"],
             logger: {
                 warn: (message: string) => logger.warn("[ClaudeCode]", message),
                 error: (message: string) => logger.error("[ClaudeCode]", message),
