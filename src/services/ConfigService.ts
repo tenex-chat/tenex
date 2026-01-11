@@ -33,7 +33,7 @@ export type TenexSubdir =
 /**
  * Centralized configuration service for TENEX
  * Handles loading and saving of all configuration files
- * All configurations are stored in ~/.tenex (no project-level configs except mcp.json)
+ * All configurations are stored in ~/.tenex
  */
 export class ConfigService {
     private cache = new Map<string, { data: unknown; timestamp: number }>();
