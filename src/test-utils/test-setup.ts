@@ -15,7 +15,7 @@ import { ProviderRegistry } from "@/llm/providers/registry/ProviderRegistry";
 /**
  * Reset all singletons to ensure clean state between tests
  */
-function resetSingletons() {
+function resetSingletons(): void {
     // Reset RALRegistry singleton
     // @ts-expect-error - accessing private static for testing
     RALRegistry.instance = undefined;

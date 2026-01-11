@@ -5,7 +5,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { config } from "@/services/ConfigService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -238,8 +238,6 @@ async function createAuthEvent(
     description: string,
     context: ToolExecutionContext
 ): Promise<NDKEvent> {
-    const { NDKEvent } = await import("@nostr-dev-kit/ndk");
-
     const event = new NDKEvent();
     event.kind = 24242;
     event.content = description;

@@ -7,6 +7,7 @@ import type { ReportInfo } from "@/services/reports/ReportService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
+import { nip19 } from "nostr-tools";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -393,7 +394,6 @@ export class ProjectContext {
         // If it's an npub, try to decode it
         if (report.author.startsWith("npub1")) {
             try {
-                const { nip19 } = require("nostr-tools");
                 const decoded = nip19.decode(report.author);
                 if (decoded.type === "npub") {
                     return decoded.data as string;

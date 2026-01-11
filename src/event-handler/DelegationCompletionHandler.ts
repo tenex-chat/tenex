@@ -84,6 +84,7 @@ export async function handleDelegationCompletion(
                         )
                         .map((msg) => ({
                             senderPubkey: msg.pubkey,
+                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                             recipientPubkey: msg.targetedPubkeys![0], // Primary recipient
                             content: msg.content,
                             timestamp: msg.timestamp ?? Date.now(),
@@ -175,6 +176,7 @@ export async function handleDelegationCompletion(
         });
 
         span.addEvent("completion_recorded", {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             "delegation.event_id": delegationEventId!, // Non-null when location is set
             "responder.pubkey": event.pubkey,
             "response.length": event.content?.length || 0,
@@ -182,6 +184,7 @@ export async function handleDelegationCompletion(
         span.setStatus({ code: SpanStatusCode.OK });
 
         logger.info("[handleDelegationCompletion] Recorded delegation completion", {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             delegationEventId: delegationEventId!.substring(0, 8),
             agentSlug,
             conversationId: location.conversationId.substring(0, 8),

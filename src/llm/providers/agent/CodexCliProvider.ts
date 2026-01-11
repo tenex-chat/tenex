@@ -87,6 +87,7 @@ export class CodexCliProvider extends AgentProvider {
         // Build mcpServers configuration
         // CodexCliSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
         // biome-ignore lint/suspicious/noExplicitAny: CodexCliSettings.mcpServers accepts varied server types
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpServersConfig: Record<string, any> = {};
 
         // Add TENEX tools wrapper if enabled

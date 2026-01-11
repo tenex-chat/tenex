@@ -33,7 +33,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
-import type { ToolRegistryContext } from "@/tools/types";
+import type { AISdkTool, ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -41,6 +41,7 @@ import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/ap
 import type {
     Tool as CoreTool,
     ModelMessage,
+    StepResult,
     ToolCallPart,
     ToolResultPart,
     ToolSet,
@@ -508,6 +509,7 @@ export class AgentExecutor {
             };
 
             // Preserve non-enumerable properties like getHumanReadableContent
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const toolWithCustomProps = tool as any;
             if (toolWithCustomProps.getHumanReadableContent) {
                 Object.defineProperty(wrappedTools[toolName], "getHumanReadableContent", {
@@ -771,7 +773,7 @@ export class AgentExecutor {
             // events in executeStreaming. Publishing empty content would be noise.
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
-                    { content: completionEvent.message },
+                    { content: completionEvent.message, usage: completionEvent.usage },
                     eventContext
                 );
             }
@@ -928,7 +930,7 @@ export class AgentExecutor {
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
                 await agentPublisher.conversation(
-                    { content: reasoningBuffer, isReasoning: true },
+                    { content: reasoningBuffer, isReasoning: true, usage: llmService.getCurrentStepUsage() },
                     eventContext
                 );
                 reasoningBuffer = "";
@@ -943,7 +945,10 @@ export class AgentExecutor {
         // See: src/llm/service.ts chunk-type-change handler
         const flushContentBuffer = async (): Promise<void> => {
             if (contentBuffer.trim().length > 0) {
-                await agentPublisher.conversation({ content: contentBuffer }, eventContext);
+                await agentPublisher.conversation(
+                    { content: contentBuffer, usage: llmService.getCurrentStepUsage() },
+                    eventContext
+                );
                 contentBuffer = "";
             }
         };
@@ -1091,6 +1096,18 @@ export class AgentExecutor {
                     text: string;
                     reasoningText?: string;
                     usage?: { inputTokens?: number; outputTokens?: number };
+                    providerMetadata?: {
+                        openrouter?: {
+                            usage?: {
+                                promptTokens?: number;
+                                completionTokens?: number;
+                                totalTokens?: number;
+                                cost?: number;
+                                promptTokensDetails?: { cachedTokens?: number };
+                                completionTokensDetails?: { reasoningTokens?: number };
+                            };
+                        };
+                    };
                 }>;
             }): Promise<{ messages?: ModelMessage[] } | undefined> => {
                 // Pass steps to LLM service for usage tracking (makes usage available for tool events)
@@ -1199,7 +1216,7 @@ export class AgentExecutor {
                 return { messages: rebuiltMessages };
             };
 
-            const onStopCheck = async (steps: any[]): Promise<boolean> => {
+            const onStopCheck = async (steps: StepResult<Record<string, AISdkTool>>[]): Promise<boolean> => {
                 if (steps.length === 0) return false;
 
                 const lastStep = steps[steps.length - 1];

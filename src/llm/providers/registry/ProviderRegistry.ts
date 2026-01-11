@@ -41,6 +41,7 @@ export class ProviderRegistry {
     private providers: Map<string, ILLMProvider> = new Map();
     private registrations: Map<string, ProviderRegistration> = new Map();
     // biome-ignore lint/suspicious/noExplicitAny: AI SDK registry types are complex
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private aiSdkRegistry: ProviderRegistryProvider<any, any> | null = null;
     private initialized = false;
 
@@ -212,6 +213,7 @@ export class ProviderRegistry {
      */
     private buildAiSdkRegistry(span: Span): void {
         // biome-ignore lint/suspicious/noExplicitAny: AI SDK provider types vary
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const standardProviders: Record<string, any> = {};
 
         for (const [providerId, provider] of this.providers) {
@@ -255,6 +257,7 @@ export class ProviderRegistry {
      * Used for standard providers that use createProviderRegistry
      */
     // biome-ignore lint/suspicious/noExplicitAny: AI SDK registry types are complex
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getAiSdkRegistry(): ProviderRegistryProvider<any, any> {
         if (!this.aiSdkRegistry) {
             throw new Error("ProviderRegistry not initialized. Call initialize() first.");

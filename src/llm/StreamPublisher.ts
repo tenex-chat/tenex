@@ -28,6 +28,7 @@ export class StreamPublisher {
             chunkType: (chunk.data as { type?: string })?.type,
         });
         if (connected) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             this.transport!.write(chunk);
         }
     }

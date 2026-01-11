@@ -31,7 +31,7 @@ import {
     convertSystemMessagesForResume,
 } from "./utils/claudeCodePromptCompiler";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
-import { calculateCumulativeUsage } from "./utils/usage";
+import { calculateCumulativeUsage, type StepWithProviderMetadata } from "./utils/usage";
 
 /**
  * Content delta event
@@ -113,6 +113,7 @@ export interface RawChunkEvent {
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export class LLMService extends EventEmitter<Record<string, any>> {
     public readonly provider: string;
     public readonly model: string;
@@ -132,6 +133,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
 
     constructor(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         private readonly registry: ProviderRegistryProvider<any, any> | null,
         provider: string,
         model: string,
@@ -200,9 +202,18 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     /**
      * Update cumulative usage from completed steps.
      * Called from prepareStep to make usage available for tool-will-execute events.
+     * Extracts accurate usage from providerMetadata.openrouter.usage when available.
      */
-    updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
+    updateUsageFromSteps(steps: StepWithProviderMetadata[]): void {
         this.currentStepUsage = calculateCumulativeUsage(steps);
+    }
+
+    /**
+     * Get cumulative usage from previous completed steps.
+     * Returns undefined if no steps have completed yet.
+     */
+    getCurrentStepUsage(): LanguageModelUsageWithCostUsd | undefined {
+        return this.currentStepUsage;
     }
 
     /**
@@ -459,6 +470,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             temperature?: number;
             maxTokens?: number;
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ): Promise<GenerateTextResult<Record<string, AISdkTool>, any>> {
         const model = this.getLanguageModel(messages);
         const startTime = Date.now();

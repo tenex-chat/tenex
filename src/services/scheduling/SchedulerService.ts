@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
+import { getNDK } from "@/nostr/ndkClient";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -173,14 +174,8 @@ export class SchedulerService {
             // Try to get NDK instance if not already set
             if (!this.ndk) {
                 logger.warn("NDK not available in SchedulerService, attempting to get instance");
-                try {
-                    const { getNDK } = await import("@/nostr/ndkClient");
-                    this.ndk = getNDK();
-                    if (!this.ndk) {
-                        throw new Error("NDK instance not available");
-                    }
-                } catch (ndkError) {
-                    logger.error("Failed to get NDK instance:", ndkError);
+                this.ndk = getNDK();
+                if (!this.ndk) {
                     throw new Error("SchedulerService not properly initialized - NDK unavailable");
                 }
             }

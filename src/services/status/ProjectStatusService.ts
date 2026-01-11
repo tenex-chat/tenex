@@ -1,6 +1,7 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
+import { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
 import type { StatusIntent } from "@/nostr/AgentEventEncoder";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
@@ -11,10 +12,13 @@ import {
     isProjectContextInitialized,
 } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
+import { getAllToolNames } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
+import { getDefaultBranchName } from "@/utils/git/initializeGitRepo";
+import { listWorktrees } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { join } from "path";
 
 /**
@@ -224,7 +228,6 @@ export class ProjectStatusService {
             // Sign and publish with TENEX backend private key
             try {
                 const backendPrivateKey = await config.ensureBackendPrivateKey();
-                const { NDKPrivateKeySigner } = await import("@nostr-dev-kit/ndk");
                 const backendSigner = new NDKPrivateKeySigner(backendPrivateKey);
 
                 await event.sign(backendSigner, { pTags: false });
@@ -329,11 +332,7 @@ export class ProjectStatusService {
             const projectCtx = this.projectContext || getProjectContext();
             const toolAgentMap = new Map<string, Set<string>>();
 
-            // Import the delegate tools, core tools, and context-injected tools from the single source of truth
-            const { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } = await import("@/agents/constants");
-
             // First, add ALL tool names from the registry (except excluded tools)
-            const { getAllToolNames } = await import("@/tools/registry");
             const allToolNames = getAllToolNames();
             for (const toolName of allToolNames) {
                 // Skip delegate tools, core tools, and context-injected tools from TenexProjectStatus events
@@ -393,10 +392,12 @@ export class ProjectStatusService {
                 // so we need to add them here based on what's in agentTools
                 for (const toolName of agentTools) {
                     if (toolName.startsWith("mcp__")) {
-                        if (!toolAgentMap.has(toolName)) {
-                            toolAgentMap.set(toolName, new Set());
+                        let agentSet = toolAgentMap.get(toolName);
+                        if (!agentSet) {
+                            agentSet = new Set();
+                            toolAgentMap.set(toolName, agentSet);
                         }
-                        toolAgentMap.get(toolName)!.add(agentSlug);
+                        agentSet.add(agentSlug);
                     }
                 }
             }
@@ -419,9 +420,6 @@ export class ProjectStatusService {
 
     private async gatherWorktreeInfo(intent: StatusIntent, projectPath: string): Promise<void> {
         try {
-            const { listWorktrees } = await import("@/utils/git/worktree");
-            const { getDefaultBranchName } = await import("@/utils/git/initializeGitRepo");
-
             // Get all worktrees
             const worktrees = await listWorktrees(projectPath);
 

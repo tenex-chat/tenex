@@ -68,6 +68,7 @@ export class RAGService {
         schema?: Record<string, unknown>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return this.operations.createCollection(name, schema as any);
     }
 

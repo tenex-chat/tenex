@@ -2,6 +2,7 @@ import type { AgentConfig, AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { config } from "@/services/ConfigService";
 import { getLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { logger } from "@/utils/logger";
 import { context as otelContext, propagation, trace, SpanStatusCode, type Context } from "@opentelemetry/api";
@@ -304,6 +305,7 @@ export class AgentPublisher {
             }
 
             // Add question/multiselect tags
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             for (const q of config.questions!) {
                 if (q.type === "question") {
                     const tag = ["question", q.title, q.question];
@@ -460,8 +462,6 @@ export class AgentPublisher {
      * Reads agent associations from AgentStorage instead of maintaining a separate registry.
      */
     private static async publishProjectAgentSnapshot(projectTag: string): Promise<void> {
-        const { config } = await import("@/services/ConfigService");
-
         // Get all agents for this project from AgentStorage
         const agents = await agentStorage.getProjectAgents(projectTag);
         const tenexNsec = await config.ensureBackendPrivateKey();

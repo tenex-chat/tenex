@@ -1,5 +1,6 @@
 import { ConversationStore, type ConversationMetadata } from "../ConversationStore";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -26,7 +27,6 @@ async function fetchReferencedArticle(
         const [, pubkey, ...dTagParts] = parts;
         const dTag = dTagParts.join(":"); // Handle d-tags that contain colons
 
-        const { getNDK } = await import("@/nostr/ndkClient");
         const ndk = getNDK();
         const filter = {
             kinds: [30023],
@@ -199,7 +199,6 @@ export class ConversationResolver {
             reply_target_id: replyTargetId,
         });
 
-        const { getNDK } = await import("@/nostr/ndkClient");
         const ndk = getNDK();
 
         // Fetch the reply target event and any events that also reply to it

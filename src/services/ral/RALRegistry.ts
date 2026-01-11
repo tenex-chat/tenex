@@ -67,7 +67,10 @@ export class RALRegistry {
     return `${key}:${ralNumber}`;
   }
 
-  private getOrCreateConversationDelegations(key: string) {
+  private getOrCreateConversationDelegations(key: string): {
+    pending: Map<string, PendingDelegation>;
+    completed: Map<string, CompletedDelegation>;
+  } {
     let delegations = this.conversationDelegations.get(key);
     if (!delegations) {
       delegations = { pending: new Map(), completed: new Map() };
