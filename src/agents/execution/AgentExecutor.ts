@@ -773,7 +773,7 @@ export class AgentExecutor {
             // events in executeStreaming. Publishing empty content would be noise.
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
-                    { content: completionEvent.message, usage: completionEvent.usage },
+                    { content: completionEvent.message },
                     eventContext
                 );
             }
@@ -781,7 +781,7 @@ export class AgentExecutor {
             // Final completion - use complete() (kind:1, with p-tag)
             // Always publish completion even if empty to mark conversation as complete
             responseEvent = await agentPublisher.complete(
-                { content: completionEvent.message, usage: completionEvent.usage },
+                { content: completionEvent.message },
                 eventContext
             );
         }
@@ -930,7 +930,7 @@ export class AgentExecutor {
         const flushReasoningBuffer = async (): Promise<void> => {
             if (reasoningBuffer.trim().length > 0) {
                 await agentPublisher.conversation(
-                    { content: reasoningBuffer, isReasoning: true, usage: llmService.getCurrentStepUsage() },
+                    { content: reasoningBuffer, isReasoning: true },
                     eventContext
                 );
                 reasoningBuffer = "";
@@ -946,7 +946,7 @@ export class AgentExecutor {
         const flushContentBuffer = async (): Promise<void> => {
             if (contentBuffer.trim().length > 0) {
                 await agentPublisher.conversation(
-                    { content: contentBuffer, usage: llmService.getCurrentStepUsage() },
+                    { content: contentBuffer },
                     eventContext
                 );
                 contentBuffer = "";
