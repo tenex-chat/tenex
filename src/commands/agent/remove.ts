@@ -1,6 +1,7 @@
 import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
 import { confirm } from "@inquirer/prompts";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { Command } from "commander";
 
 export const agentRemoveCommand = new Command("remove")
@@ -24,7 +25,6 @@ export const agentRemoveCommand = new Command("remove")
             }
 
             // Get pubkey from nsec for removal
-            const { NDKPrivateKeySigner } = await import("@nostr-dev-kit/ndk");
             const signer = new NDKPrivateKeySigner(agent.nsec);
             const pubkey = signer.pubkey;
 

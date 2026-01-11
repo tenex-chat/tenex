@@ -1,17 +1,21 @@
 import { NDKKind } from "@/nostr/kinds";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
-import { type NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
+import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationStore } from "../conversations/ConversationStore";
+import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
+import { RALRegistry } from "@/services/ral";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
+import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
+import { AgentRouter } from "./AgentRouter";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
 
 const IGNORED_EVENT_KINDS = [
@@ -303,9 +307,6 @@ export class EventHandler {
         let agentsBlocked = 0;
         let ralsAborted = 0;
 
-        // Import RALRegistry and AgentRouter dynamically to avoid circular dependencies
-        const { RALRegistry } = await import("../services/ral");
-        const { AgentRouter } = await import("./AgentRouter");
         const projectCtx = getProjectContext();
         const stopTracer = trace.getTracer("tenex.event-handler");
 
@@ -392,9 +393,6 @@ export class EventHandler {
     }
 
     private async handleLessonEvent(event: NDKEvent): Promise<void> {
-        const { NDKAgentLesson } = await import("@/events/NDKAgentLesson");
-        const { shouldTrustLesson } = await import("@/utils/lessonTrust");
-
         const lesson = NDKAgentLesson.from(event);
 
         // Check if we should trust this lesson
@@ -437,8 +435,6 @@ export class EventHandler {
     }
 
     private async handleReportEvent(event: NDKEvent): Promise<void> {
-        const { NDKArticle } = await import("@nostr-dev-kit/ndk");
-
         try {
             const projectCtx = getProjectContext();
 

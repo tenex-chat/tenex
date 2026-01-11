@@ -2,10 +2,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance } from "@/agents/types";
+import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { Lockfile } from "@/utils/lockfile";
+import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -492,9 +494,6 @@ export class Daemon {
         });
 
         try {
-            const { NDKAgentLesson } = await import("@/events/NDKAgentLesson");
-            const { shouldTrustLesson } = await import("@/utils/lessonTrust");
-
             const lesson = NDKAgentLesson.from(event);
             span.setAttribute("lesson.title", lesson.title || "untitled");
 

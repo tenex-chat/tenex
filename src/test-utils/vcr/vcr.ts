@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import type {
     LanguageModelV2,
     LanguageModelV2CallOptions,
@@ -61,6 +62,7 @@ export class VCR {
             );
         }
 
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         const vcr = this;
 
         return {

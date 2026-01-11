@@ -486,6 +486,7 @@ export class MCPManager {
 
         try {
             // Type assertion for experimental MCP feature not yet in AI SDK types
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (entry.client as any).subscribeResource(resourceUri);
             trace.getActiveSpan()?.addEvent("mcp.resource_subscribed", {
                 "server.name": serverName,
@@ -518,6 +519,7 @@ export class MCPManager {
 
         try {
             // Type assertion for experimental MCP feature not yet in AI SDK types
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (entry.client as any).unsubscribeResource(resourceUri);
             trace.getActiveSpan()?.addEvent("mcp.resource_unsubscribed", {
                 "server.name": serverName,
@@ -552,6 +554,7 @@ export class MCPManager {
         }
 
         // Type assertion for experimental MCP feature not yet in AI SDK types
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (entry.client as any).onResourceUpdated(handler);
         trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {
             "server.name": serverName,

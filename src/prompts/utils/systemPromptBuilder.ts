@@ -141,7 +141,6 @@ async function addCoreAgentFragments(
         const runningServers = mcpManager.getRunningServers();
 
         // Fetch resources from all running servers
-        const { logger } = await import("@/utils/logger");
         const resourcesPerServer = await Promise.all(
             runningServers.map(async (serverName: string) => {
                 try {

@@ -309,6 +309,7 @@ export class MockLLMService implements LLMService {
             if (this.config.debug && mockResponse.response) {
                 conversationalLogger.logAgentResponse(agentName, {
                     content: mockResponse.response.content,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     toolCalls: mockResponse.response.toolCalls as any,
                     phase,
                     reason: "Mock response matched",
@@ -322,6 +323,7 @@ export class MockLLMService implements LLMService {
         if (this.config.debug) {
             conversationalLogger.logAgentResponse("unknown", {
                 content: this.config.defaultResponse?.content || "Default mock response",
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 toolCalls: this.config.defaultResponse?.toolCalls as any,
                 reason: "No matching response found, using default",
             });

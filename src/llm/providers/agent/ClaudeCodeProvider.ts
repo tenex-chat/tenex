@@ -100,6 +100,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Build mcpServers configuration
         // ClaudeCodeSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
         // biome-ignore lint/suspicious/noExplicitAny: ClaudeCodeSettings.mcpServers accepts varied server types
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpServersConfig: Record<string, any> = {};
 
         // Add TENEX tools wrapper if enabled

@@ -47,10 +47,10 @@ export class TenexToolsAdapter {
             if (tenexTool.inputSchema) {
                 // Check if it's a ZodObject with a shape property
                 const schema = tenexTool.inputSchema;
-                if (schema && typeof schema === 'object' && 'shape' in schema) {
+                if (schema && typeof schema === "object" && "shape" in schema) {
                     // It's a ZodObject - extract the raw shape
                     rawShape = (schema as z.ZodObject<ZodRawShape>).shape;
-                } else if (schema && typeof schema === 'object' && !('_def' in schema)) {
+                } else if (schema && typeof schema === "object" && !("_def" in schema)) {
                     // It might already be a raw shape object (plain object with Zod types)
                     rawShape = schema as unknown as ZodRawShape;
                 }
@@ -81,8 +81,9 @@ export class TenexToolsAdapter {
                     // Execute the TENEX tool
                     // If extra contains execution context, pass it; otherwise use minimal fallback
                     let result;
-                    if (extra && typeof extra === 'object') {
+                    if (extra && typeof extra === "object") {
                         // Try to use the extra context from Claude Code
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         result = await tenexTool.execute(args, extra as any);
                     } else {
                         // Fallback to minimal context (should rarely happen)

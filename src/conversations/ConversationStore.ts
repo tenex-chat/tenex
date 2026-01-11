@@ -526,6 +526,7 @@ export class ConversationStore {
     }
 
     private ensureDirectory(): void {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const dir = join(this.basePath, this.projectId!, "conversations");
         if (!existsSync(dir)) {
             mkdirSync(dir, { recursive: true });
@@ -557,6 +558,7 @@ export class ConversationStore {
             this.eventIdSet = new Set(
                 this.state.messages
                     .filter((m) => m.eventId)
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                     .map((m) => m.eventId!)
             );
             // Rebuild blockedAgents set

@@ -2,6 +2,8 @@ import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
+import { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
@@ -10,6 +12,7 @@ import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
+import { PairingManager } from "@/services/pairing";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -132,7 +135,6 @@ export class ProjectRuntime {
             await this.reconcileOrphanedRals();
 
             // Initialize pairing manager for real-time delegation supervision
-            const { PairingManager } = await import("@/services/pairing");
             const pairingManager = new PairingManager(async (agentPubkey, conversationId) => {
                 await this.triggerAgentForCheckpoint(agentPubkey, conversationId);
             });
@@ -356,9 +358,6 @@ export class ProjectRuntime {
             });
 
             // Create execution context and execute
-            const { createExecutionContext } = await import("@/agents/execution/ExecutionContextFactory");
-            const { AgentExecutor } = await import("@/agents/execution/AgentExecutor");
-
             const executionContext = await createExecutionContext({
                 agent,
                 conversationId,

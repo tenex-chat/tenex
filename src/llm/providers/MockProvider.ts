@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
 import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
