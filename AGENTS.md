@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-TENEX is a Bun CLI with its runtime entry in `src/tenex.ts`; core domains live in `src/agents`, `src/commands`, `src/conversations`, `src/daemon`, `src/events`, `src/llm`, `src/nostr`, `src/prompts`, `src/services`, and `src/tools`, all accessed with the `@/` alias. Scripts covering builds, telemetry, and compatibility reside in `scripts/`, supporting tooling lives under `tools/` (including the trace viewer), bundled output lands in `dist/`, and e2e docs live in `tests/` and `E2E_TESTING_ARCHITECTURE.md`.
+TENEX is a Bun CLI with its runtime entry in `src/tenex.ts`; core domains live in `src/agents`, `src/commands`, `src/conversations`, `src/daemon`, `src/events`, `src/llm`, `src/nostr`, `src/prompts`, `src/services`, and `src/tools`, all accessed with the `@/` alias. Scripts covering builds, telemetry, and compatibility reside in `scripts/`, supporting tooling lives under `tools/`, bundled output lands in `dist/`, and e2e docs live in `tests/` and `E2E_TESTING_ARCHITECTURE.md`.
 
 ## System Inventory & Code Organization
 Use `MODULE_INVENTORY.md` as the canonical map of components, services, and utilities. Consult it before writing code to confirm where work belongs, and update it in the same PR whenever a module’s responsibility shifts. If conventions are fuzzy, log the situation in the \"Mixed Patterns\" section so follow-up refactors are tracked. Follow the domain-first placement rules captured there (thin commands, orchestration in `src/services`, pure helpers in `src/lib`, tools hosting all IO) and call out any exception inside the PR description in addition to the inventory.

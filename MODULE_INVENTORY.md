@@ -92,7 +92,7 @@ Use this section to understand each service’s scope and dependencies:
 
 ### Tools for Tests & Scripts
 - **`src/test-utils`**: Mock LLM providers, nostr fixtures, and scenario harnesses shared by unit tests. Any new reusable fixture belongs here to avoid duplicating test helpers.
-- **`scripts/` + `tools/` (root)**: Build scripts, telemetry helpers, and CLI-adjacent automation. Document additions here when they influence runtime organization.
+- **`scripts/` (root)**: Build scripts, telemetry helpers, and CLI-adjacent automation. Place supporting tooling under `tools/` when needed, and document additions here when they influence runtime organization.
 
 ## Organization Guidelines
 
