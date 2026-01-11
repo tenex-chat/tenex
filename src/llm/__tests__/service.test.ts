@@ -162,13 +162,13 @@ describe("LLMService", () => {
             const claudeCodeProvider = createMockClaudeCodeProvider();
             const service = new LLMService(
                 null,
-                "claudeCode",
+                "claude-code",
                 "claude-3",
                 undefined,
                 undefined,
                 claudeCodeProvider
             );
-            expect(service.provider).toBe("claudeCode");
+            expect(service.provider).toBe("claude-code");
         });
 
         test("stores temperature and maxTokens", () => {
@@ -249,7 +249,7 @@ describe("LLMService", () => {
             const claudeCodeProvider = createMockClaudeCodeProvider();
             const service = new LLMService(
                 null,
-                "claudeCode",
+                "claude-code",
                 "claude-3",
                 undefined,
                 undefined,
@@ -278,7 +278,7 @@ describe("LLMService", () => {
             const claudeCodeProvider = createMockClaudeCodeProvider();
             const service = new LLMService(
                 null,
-                "claudeCode",
+                "claude-code",
                 "claude-3",
                 undefined,
                 undefined,
@@ -742,11 +742,11 @@ describe("LLMService stream()", () => {
         expect(callArgs.maxOutputTokens).toBe(2000);
     });
 
-    test("does not pass tools for claudeCode provider", async () => {
+    test("does not pass tools for claude-code provider", async () => {
         const claudeCodeProvider = createMockClaudeCodeProvider();
         const service = new LLMService(
             null,
-            "claudeCode",
+            "claude-code",
             "claude-3",
             undefined,
             undefined,
@@ -893,11 +893,11 @@ describe("LLMService stream()", () => {
         expect(completeEvent.usage.totalTokens).toBe(300); // Calculated fallback
     });
 
-    test("emits session-captured for claudeCode with session metadata", async () => {
+    test("emits session-captured for claude-code with session metadata", async () => {
         const claudeCodeProvider = createMockClaudeCodeProvider();
         const service = new LLMService(
             null,
-            "claudeCode",
+            "claude-code",
             "claude-3",
             undefined,
             undefined,
@@ -935,7 +935,7 @@ describe("LLMService stream()", () => {
         const claudeCodeProvider = createMockClaudeCodeProvider();
         const service = new LLMService(
             null,
-            "claudeCode",
+            "claude-code",
             "claude-3",
             undefined,
             undefined,

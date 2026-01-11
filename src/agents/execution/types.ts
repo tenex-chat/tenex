@@ -1,5 +1,6 @@
 import type { ModelMessage, Tool as CoreTool } from "ai";
 import type { AgentInstance } from "@/agents/types";
+import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { CompleteEvent } from "@/llm/service";
@@ -60,7 +61,7 @@ export interface StandaloneAgentContext {
  * - 'error-handled': Stream error occurred and was already published to user
  */
 export type StreamExecutionResult =
-    | { kind: "complete"; event: CompleteEvent; aborted?: boolean }
+    | { kind: "complete"; event: CompleteEvent; aborted?: boolean; messageCompiler: MessageCompiler }
     | { kind: "error-handled" };
 
 /**

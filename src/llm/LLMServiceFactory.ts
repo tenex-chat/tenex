@@ -22,6 +22,7 @@ import {
     type ProviderInitConfig,
     type ProviderRuntimeContext,
 } from "./providers";
+import { PROVIDER_IDS } from "./providers/provider-ids";
 
 /**
  * Factory for creating LLM services with proper provider initialization
@@ -68,7 +69,7 @@ export class LLMServiceFactory {
 
                 // Also ensure agent providers are initialized (they don't need API keys)
                 // Add them with empty configs if not already present
-                const agentProviders = ["claude-code", "codex-cli", "gemini-cli"];
+                const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_CLI, PROVIDER_IDS.GEMINI_CLI];
                 for (const providerId of agentProviders) {
                     if (!configs[providerId]) {
                         configs[providerId] = {
@@ -149,20 +150,6 @@ export class LLMServiceFactory {
             mcpConfig: context?.mcpConfig,
             enableTenexTools: this.enableTenexTools,
         };
-
-        console.log("[LLMServiceFactory] Creating service with context:", {
-            config: {
-                provider: actualProvider,
-                model: config.model,
-            },
-            agentName: context?.agentName,
-            toolCount: Object.keys(context?.tools || {}).length,
-            toolNames: Object.keys(context?.tools || {}),
-            enableTenexTools: this.enableTenexTools,
-            hasMcpConfig: !!context?.mcpConfig,
-            mcpEnabled: context?.mcpConfig?.enabled,
-            mcpServerCount: Object.keys(context?.mcpConfig?.servers || {}).length,
-        });
 
         // Get the provider from the registry
         const provider = providerRegistry.getProvider(actualProvider);

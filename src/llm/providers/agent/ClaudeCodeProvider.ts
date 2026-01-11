@@ -73,16 +73,6 @@ export class ClaudeCodeProvider extends AgentProvider {
         const toolNames = context.tools ? Object.keys(context.tools) : [];
         const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
 
-        console.log("[ClaudeCodeProvider] Tool analysis:", {
-            agentName: context.agentName,
-            totalToolNames: toolNames.length,
-            regularTools: regularTools.length,
-            toolNames,
-            regularToolNames: regularTools,
-            enableTenexTools: this.enableTenexTools,
-            hasToolsContext: !!context.tools,
-        });
-
         trace.getActiveSpan()?.addEvent("llm_factory.creating_claude_code", {
             "agent.name": context.agentName ?? "",
             "session.id": context.sessionId ?? "",
@@ -106,20 +96,6 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Add TENEX tools wrapper if enabled
         if (tenexSdkServer) {
             mcpServersConfig.tenex = tenexSdkServer;
-            console.log("[ClaudeCodeProvider] Added TENEX SDK MCP server to mcpServersConfig", {
-                serverName: "tenex",
-                toolCount: regularTools.length,
-            });
-        } else {
-            console.log("[ClaudeCodeProvider] TENEX SDK MCP server NOT added", {
-                reason: !this.enableTenexTools ? "enableTenexTools is false" :
-                        regularTools.length === 0 ? "no regular tools" :
-                        !context.tools ? "context.tools is undefined" :
-                        "unknown",
-                enableTenexTools: this.enableTenexTools,
-                regularToolsCount: regularTools.length,
-                hasToolsContext: !!context.tools,
-            });
         }
 
         // Add MCP servers from context (passed from services layer)
@@ -138,19 +114,7 @@ export class ClaudeCodeProvider extends AgentProvider {
                 "mcp.server_count": Object.keys(mcpConfig.servers).length,
                 "mcp.servers": Object.keys(mcpConfig.servers).join(", "),
             });
-
-            console.log("[ClaudeCodeProvider] Added external MCP servers from context", {
-                serverCount: Object.keys(mcpConfig.servers).length,
-                serverNames: Object.keys(mcpConfig.servers),
-            });
         }
-
-        console.log("[ClaudeCodeProvider] Final mcpServersConfig:", {
-            totalServers: Object.keys(mcpServersConfig).length,
-            serverNames: Object.keys(mcpServersConfig),
-            hasTenexServer: !!mcpServersConfig.tenex,
-            hasExternalServers: Object.keys(mcpServersConfig).some(name => name !== "tenex"),
-        });
 
         // Build the settings
         const settings: ClaudeCodeSettings = {

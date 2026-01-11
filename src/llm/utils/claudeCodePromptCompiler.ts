@@ -36,63 +36,64 @@ function extractTextContent(content: ModelMessage["content"]): string {
 }
 
 /**
- * Compiles messages for Claude Code when NOT resuming.
- * Extracts first system message as customSystemPrompt,
- * compiles remaining messages (preserving order) as appendSystemPrompt.
+ * System prompt type for Claude Code.
+ * Can be a string for custom system prompt, or use preset with append for
+ * Claude Code's built-in instructions plus custom content.
+ */
+export type ClaudeCodeSystemPrompt = string | {
+    type: 'preset';
+    preset: 'claude_code';
+    append?: string;
+};
+
+/**
+ * Compiles system messages for Claude Code's systemPrompt.append.
+ * Uses the new systemPrompt API (replacing deprecated customSystemPrompt/appendSystemPrompt).
+ *
+ * IMPORTANT: Only system messages are included in systemPrompt.append.
+ * User/assistant messages are passed separately via the messages array to streamText().
+ * This separation is critical for session resumption to work correctly - if conversation
+ * history is duplicated in both systemPrompt.append AND messages, it creates a session
+ * state that can't be reconstructed on resume.
  *
  * Note: Multimodal content (images) is converted to text descriptions since
  * Claude Code uses a text-based prompt compilation approach.
  */
 export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
-    customSystemPrompt?: string;
-    appendSystemPrompt?: string;
+    systemPrompt?: ClaudeCodeSystemPrompt;
 } {
     if (messages.length === 0) {
-        return { customSystemPrompt: undefined, appendSystemPrompt: undefined };
+        return { systemPrompt: undefined };
     }
 
-    // Find first system message for customSystemPrompt
-    const firstSystemIndex = messages.findIndex((m) => m.role === "system");
-    const customSystemPrompt =
-        firstSystemIndex !== -1
-            ? typeof messages[firstSystemIndex].content === "string"
-                ? messages[firstSystemIndex].content
-                : extractTextContent(messages[firstSystemIndex].content)
-            : undefined;
+    // Extract only system messages - user/assistant go in messages array
+    const systemMessages = messages.filter((m) => m.role === "system");
 
-    // Compile ALL remaining messages (after first system) preserving order
+    if (systemMessages.length === 0) {
+        return { systemPrompt: undefined };
+    }
+
+    // Combine all system messages into the append content
     const appendParts: string[] = [];
 
-    if (firstSystemIndex !== -1 && messages.length > firstSystemIndex + 1) {
-        appendParts.push("=== Conversation History ===\n\n");
-
-        // Process all messages after the first system message, preserving order
-        for (let i = firstSystemIndex + 1; i < messages.length; i++) {
-            const msg = messages[i];
-            const roleLabel =
-                msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
-            const textContent = extractTextContent(msg.content);
-            appendParts.push(`${roleLabel}: ${textContent}\n\n`);
-        }
-
-        appendParts.push("=== End History ===\n");
-    } else if (firstSystemIndex === -1 && messages.length > 0) {
-        // No system message found, include all messages
-        appendParts.push("=== Conversation History ===\n\n");
-
-        for (const msg of messages) {
-            const roleLabel =
-                msg.role === "system" ? "[System]" : msg.role === "user" ? "[User]" : "[Assistant]";
-            const textContent = extractTextContent(msg.content);
-            appendParts.push(`${roleLabel}: ${textContent}\n\n`);
-        }
-
-        appendParts.push("=== End History ===\n");
+    for (const msg of systemMessages) {
+        const content =
+            typeof msg.content === "string"
+                ? msg.content
+                : extractTextContent(msg.content);
+        appendParts.push(content);
     }
 
-    const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("") : undefined;
+    const appendContent = appendParts.join("\n\n");
 
-    return { customSystemPrompt, appendSystemPrompt };
+    // Use Claude Code's built-in preset with our system content appended
+    return {
+        systemPrompt: {
+            type: 'preset',
+            preset: 'claude_code',
+            append: appendContent,
+        },
+    };
 }
 
 /**
