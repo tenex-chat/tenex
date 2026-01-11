@@ -44,9 +44,6 @@ export {
 // Export agent providers
 export { ClaudeCodeProvider, CodexCliProvider } from "./agent";
 
-// Export TenexToolsAdapter
-export { TenexToolsAdapter } from "./TenexToolsAdapter";
-
 // Import for registration
 import type { ProviderRegistration } from "./types";
 import { OpenRouterProvider } from "./standard/OpenRouterProvider";

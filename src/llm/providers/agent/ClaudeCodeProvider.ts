@@ -14,7 +14,7 @@ import type {
     ProviderRuntimeContext,
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
-import { TenexToolsAdapter } from "../TenexToolsAdapter";
+import { ClaudeCodeToolsAdapter } from "./ClaudeCodeToolsAdapter";
 
 /**
  * Claude Code provider implementation
@@ -94,7 +94,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Create SDK MCP server for local TENEX tools if enabled
         const tenexSdkServer =
             this.enableTenexTools && regularTools.length > 0 && context.tools
-                ? TenexToolsAdapter.createSdkMcpServer(context.tools, context)
+                ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools, context)
                 : undefined;
 
         // Build mcpServers configuration
