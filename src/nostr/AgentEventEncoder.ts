@@ -23,6 +23,7 @@ export interface CompletionIntent {
 export interface ConversationIntent {
     content: string;
     isReasoning?: boolean;
+    usage?: LanguageModelUsageWithCostUsd;
 }
 
 export interface DelegationIntent {
