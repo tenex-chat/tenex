@@ -176,6 +176,12 @@ services/
 
 ---
 
+### Supporting Tooling
+
+Standalone developer tooling or auxiliary CLIs should live under `tools/` at the repo root. Treat each tool as isolated (own `package.json`/`tsconfig.json`) and document additions in `MODULE_INVENTORY.md`.
+
+---
+
 ## Naming Conventions
 
 ### Services
