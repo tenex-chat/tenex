@@ -7,15 +7,16 @@
 
 import { beforeEach, afterEach } from "bun:test";
 
-// Import singletons that need to be reset
-import { RALRegistry } from "@/services/ral/RALRegistry";
-import { ConversationStore } from "@/conversations/ConversationStore";
-import { ProviderRegistry } from "@/llm/providers/registry/ProviderRegistry";
-
 /**
  * Reset all singletons to ensure clean state between tests
  */
-function resetSingletons(): void {
+async function resetSingletons(): Promise<void> {
+    const [{ RALRegistry }, { ConversationStore }, { ProviderRegistry }] = await Promise.all([
+        import("@/services/ral/RALRegistry"),
+        import("@/conversations/ConversationStore"),
+        import("@/llm/providers/registry/ProviderRegistry"),
+    ]);
+
     // Reset RALRegistry singleton
     // @ts-expect-error - accessing private static for testing
     RALRegistry.instance = undefined;
@@ -32,12 +33,12 @@ function resetSingletons(): void {
 }
 
 // Register global hooks
-beforeEach(() => {
-    resetSingletons();
+beforeEach(async () => {
+    await resetSingletons();
 });
 
-afterEach(() => {
-    resetSingletons();
+afterEach(async () => {
+    await resetSingletons();
 });
 
 // Export for tests that need to manually reset
