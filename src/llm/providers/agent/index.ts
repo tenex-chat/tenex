@@ -5,4 +5,6 @@
  */
 
 export { ClaudeCodeProvider } from "./ClaudeCodeProvider";
-export { CodexCliProvider } from "./CodexCliProvider";
+export { ClaudeCodeToolsAdapter } from "./ClaudeCodeToolsAdapter";
+export { CodexAppServerProvider } from "./CodexAppServerProvider";
+export { CodexAppServerToolsAdapter } from "./CodexAppServerToolsAdapter";

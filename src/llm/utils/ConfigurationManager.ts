@@ -1,9 +1,11 @@
 import type { LLMConfiguration, TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { AISdkProvider } from "../types";
 import { ModelSelector } from "./ModelSelector";
 import { ProviderConfigUI } from "./ProviderConfigUI";
+import { listCodexModels, formatCodexModel } from "./codex-models";
 
 /**
  * Manages LLM configuration CRUD operations
@@ -36,10 +38,17 @@ export class ConfigurationManager {
 
         // Select model based on provider
         let model: string;
+        let reasoningEffort: string | undefined;
+
         if (provider === "openrouter") {
             model = await ModelSelector.selectOpenRouterModel();
         } else if (provider === "ollama") {
             model = await ModelSelector.selectOllamaModel();
+        } else if (provider === PROVIDER_IDS.CODEX_APP_SERVER) {
+            // For Codex, show available models with reasoning efforts
+            const result = await ConfigurationManager.selectCodexModel();
+            model = result.model;
+            reasoningEffort = result.reasoningEffort;
         } else {
             const { inputModel } = await inquirer.prompt([
                 {
@@ -109,6 +118,7 @@ export class ConfigurationManager {
 
         if (temperature) config.temperature = Number.parseFloat(temperature);
         if (maxTokens) config.maxTokens = Number.parseInt(maxTokens);
+        if (reasoningEffort) config.reasoningEffort = reasoningEffort as LLMConfiguration["reasoningEffort"];
 
         llmsConfig.configurations[name] = config;
 
@@ -266,6 +276,69 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Supervision model set to "${name}"`));
     }
 
+    /**
+     * Select a Codex model and reasoning effort interactively
+     */
+    private static async selectCodexModel(): Promise<{ model: string; reasoningEffort?: string }> {
+        console.log(chalk.cyan("\nFetching available Codex models..."));
+
+        try {
+            const models = await listCodexModels();
+
+            if (models.length === 0) {
+                console.log(chalk.yellow("No models found. Using default."));
+                return { model: "gpt-5.1-codex-max" };
+            }
+
+            // Show models with details
+            console.log(chalk.bold("\nAvailable Codex Models:"));
+            for (const model of models) {
+                console.log(chalk.gray(formatCodexModel(model)));
+            }
+            console.log("");
+
+            // Select model
+            const { model } = await inquirer.prompt([
+                {
+                    type: "list",
+                    name: "model",
+                    message: "Select model:",
+                    choices: models.map((m) => ({
+                        name: m.isDefault ? `${m.displayName} (default)` : m.displayName,
+                        value: m.id,
+                    })),
+                },
+            ]);
+
+            // Find selected model to get its reasoning efforts
+            const selectedModel = models.find((m) => m.id === model);
+            if (!selectedModel || selectedModel.supportedReasoningEfforts.length === 0) {
+                return { model };
+            }
+
+            // Select reasoning effort
+            const { reasoningEffort } = await inquirer.prompt([
+                {
+                    type: "list",
+                    name: "reasoningEffort",
+                    message: "Select reasoning effort:",
+                    choices: [
+                        { name: "Use model default", value: undefined },
+                        ...selectedModel.supportedReasoningEfforts.map((e) => ({
+                            name: e === selectedModel.defaultReasoningEffort ? `${e} (default)` : e,
+                            value: e,
+                        })),
+                    ],
+                },
+            ]);
+
+            return { model, reasoningEffort };
+        } catch (error) {
+            console.log(chalk.yellow(`Could not fetch models: ${error}. Using default.`));
+            return { model: "gpt-5.1-codex-max" };
+        }
+    }
+
     private static getDefaultModelForProvider(provider: AISdkProvider): string {
         const defaults: Record<AISdkProvider, string> = {
             openrouter: "openai/gpt-4",
@@ -274,7 +347,7 @@ export class ConfigurationManager {
             ollama: "llama3.1:8b",
             "claude-code": "claude-3-5-sonnet-20241022",
             "gemini-cli": "gemini-2.0-flash-exp",
-            "codex-cli": "gpt-5.1-codex",
+            "codex-app-server": "gpt-5.1-codex-max",
         };
         return defaults[provider] || "";
     }

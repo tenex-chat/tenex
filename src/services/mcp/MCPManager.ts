@@ -10,17 +10,17 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { config as configService } from "@/services/ConfigService";
-import type { Tool as CoreTool } from "ai";
 import {
     type experimental_MCPClient,
     experimental_createMCPClient,
 } from "@ai-sdk/mcp";
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 
-// Extract individual resource types from the MCPClient method return types
+// Extract types from the MCPClient method return types
 type experimental_MCPResource = Awaited<ReturnType<experimental_MCPClient["listResources"]>>["resources"][number];
 type experimental_MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
 type experimental_MCPReadResourceResult = Awaited<ReturnType<experimental_MCPClient["readResource"]>>;
+type MCPToolSet = Awaited<ReturnType<experimental_MCPClient["tools"]>>;
 
 interface MCPClientEntry {
     client: experimental_MCPClient;
@@ -34,7 +34,7 @@ export class MCPManager {
     private isInitialized = false;
     private metadataPath?: string;
     private workingDirectory?: string;
-    private cachedTools: Record<string, CoreTool<unknown, unknown>> = {};
+    private cachedTools: MCPToolSet = {};
 
     /**
      * Initialize MCP manager with project paths
@@ -194,7 +194,7 @@ export class MCPManager {
     }
 
     private async refreshToolCache(): Promise<void> {
-        const tools: Record<string, CoreTool<unknown, unknown>> = {};
+        const tools: MCPToolSet = {};
 
         for (const [serverName, entry] of this.clients) {
             try {
@@ -204,13 +204,7 @@ export class MCPManager {
                 // Namespace the tools with server name
                 for (const [toolName, tool] of Object.entries(serverTools)) {
                     const namespacedName = `mcp__${serverName}__${toolName}`;
-
-                    // The tools from experimental_MCPClient are already CoreTool instances
-                    // We just need to ensure they have the correct structure
-                    // CoreTool should have: description, parameters (as zod schema), and execute function
-
-                    // Store the tool with type assertion for MCP client compatibility
-                    tools[namespacedName] = tool as CoreTool<unknown, unknown>;
+                    tools[namespacedName] = tool;
                 }
 
                 trace.getActiveSpan()?.addEvent("mcp.tools_discovered", {
@@ -242,7 +236,7 @@ export class MCPManager {
     /**
      * Get all cached MCP tools as an object keyed by tool name
      */
-    getCachedTools(): Record<string, CoreTool<unknown, unknown>> {
+    getCachedTools(): MCPToolSet {
         return this.cachedTools;
     }
 

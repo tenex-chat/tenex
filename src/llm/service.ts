@@ -345,7 +345,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private prepareMessagesForRequest(messages: ModelMessage[]): ModelMessage[] {
         let processedMessages = messages;
 
-        if (this.provider === PROVIDER_IDS.CLAUDE_CODE || this.provider === PROVIDER_IDS.CODEX_CLI) {
+        if (this.provider === PROVIDER_IDS.CLAUDE_CODE || this.provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             if (this.sessionId) {
                 // Resuming session: Convert system messages to user messages
                 // (system messages after conversation start need to be delivered as user messages)
@@ -453,9 +453,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             }
         }
 
-        if (this.provider === PROVIDER_IDS.CODEX_CLI) {
+        if (this.provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             const sessionId = (
-                providerMetadata?.[PROVIDER_IDS.CODEX_CLI] as { sessionId?: string } | undefined
+                providerMetadata?.[PROVIDER_IDS.CODEX_APP_SERVER] as { sessionId?: string } | undefined
             )?.sessionId;
             if (sessionId) {
                 if (recordSpanEvent) {
@@ -494,7 +494,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // ProgressMonitor is only used for standard providers (not Claude Code/Codex CLI)
         // Creating a second model with resume for Claude Code can cause session conflicts
         let progressMonitor: ProgressMonitor | undefined;
-        if (this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_CLI) {
+        if (this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_APP_SERVER) {
             const reviewModel = this.getLanguageModel();
             progressMonitor = new ProgressMonitor(reviewModel);
         }
@@ -530,8 +530,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            // Don't pass tools for claude-code/codex-cli - they have their own built-in tools that conflict
-            ...(this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_CLI && { tools }),
+            // Don't pass tools for agent providers - they have their own built-in tools that conflict
+            ...(this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_APP_SERVER && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
