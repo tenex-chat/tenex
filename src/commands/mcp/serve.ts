@@ -232,7 +232,7 @@ export async function startServer(): Promise<void> {
                     }
 
                     logger.info(`[TenexMCP] Executing tool: ${name}`, {
-                        args: JSON.stringify(args).substring(0, 200),
+                        args: args ? JSON.stringify(args).substring(0, 200) : "(no args)",
                     });
 
                     // Execute the tool
