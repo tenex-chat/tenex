@@ -1,4 +1,5 @@
 import type { ToolExecutionContext } from "@/tools/types";
+import { PendingDelegationsRegistry } from "@/services/ral";
 import { ReportService } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -71,6 +72,13 @@ async function executeReportWrite(
         memorize,
         agent: context.agent.name,
     });
+
+    // Register with PendingDelegationsRegistry for a-tag correlation
+    PendingDelegationsRegistry.registerAddressable(
+        context.agent.pubkey,
+        context.conversationId,
+        result.addressableRef
+    );
 
     return {
         success: true,
