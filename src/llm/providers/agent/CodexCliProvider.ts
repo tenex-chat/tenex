@@ -14,13 +14,13 @@ import type {
     ProviderRuntimeContext,
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
+import { TenexStdioMcpServer } from "./TenexStdioMcpServer";
 
 /**
  * Codex CLI provider implementation
  *
- * NOTE: TENEX tools are not yet available for Codex CLI. Unlike Claude Code which
- * supports in-process SDK MCP servers, Codex CLI only supports stdio/http transports.
- * A future implementation will expose TENEX tools via a stdio MCP server process.
+ * TENEX tools are exposed via a stdio MCP server process spawned with the agent's context.
+ * This allows Codex CLI agents to use delegation, conversation, and other TENEX functionality.
  */
 export class CodexCliProvider extends AgentProvider {
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
@@ -65,6 +65,18 @@ export class CodexCliProvider extends AgentProvider {
             "session.id": context.sessionId ?? "",
         });
 
+        // Extract tool names from the provided tools
+        const toolNames = context.tools ? Object.keys(context.tools) : [];
+        const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
+
+        console.log("[CodexCliProvider] Tool analysis:", {
+            agentName: context.agentName,
+            totalToolNames: toolNames.length,
+            regularTools: regularTools.length,
+            toolNames,
+            regularToolNames: regularTools,
+        });
+
         // Build mcpServers configuration from context (stdio servers only)
         const mcpServersConfig: Record<string, {
             transport: "stdio";
@@ -72,6 +84,16 @@ export class CodexCliProvider extends AgentProvider {
             args?: string[];
             env?: Record<string, string>;
         }> = {};
+
+        // Create TENEX stdio MCP server if we have TENEX tools
+        const tenexStdioServer = TenexStdioMcpServer.create(context, regularTools);
+        if (tenexStdioServer) {
+            mcpServersConfig.tenex = tenexStdioServer;
+            console.log("[CodexCliProvider] Added TENEX stdio MCP server to mcpServersConfig", {
+                serverName: "tenex",
+                toolCount: regularTools.length,
+            });
+        }
 
         const mcpConfig = context.mcpConfig;
         if (mcpConfig?.enabled && mcpConfig.servers) {

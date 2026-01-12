@@ -16,6 +16,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 ### Command Layer (`src/commands`)
 - **`agent/`**: User-facing subcommands for listing/removing/operating agents. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
+- **`mcp/`**: MCP server management commands. `serve.ts` spawns stdio-based MCP servers that expose TENEX tools to external providers (like Codex CLI). Server loads tool registry, converts Zod schemas to JSON Schema, and handles stdio transport via `@modelcontextprotocol/sdk`. Launched by `CodexCliProvider` with context via environment variables.
 - **`setup/`**: Guided onboarding flows for LLM and embed providers (ties into `ConfigService`, `llm/LLMServiceFactory`, and `services/mcp`).
 - **`vcr/`**: CLI for the VCR tooling (record, list, clean, extract) used in testing workflows.
 
@@ -44,7 +45,9 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 ### LLM Layer (`src/llm`)
 - **Services & Factories**: `LLMServiceFactory`, `service.ts`, and `LLMConfigEditor` manage provider initialization, request pipelines, and CLI editing tasks.
 - **Selection & Middleware**: `utils/ModelSelector`, `middleware/flight-recorder`, and `chunk-validators` coordinate model choice and response validation.
-- **Providers**: `providers/base`, `providers/standard`, `providers/agent`, and `providers/registry` house adapters for Claude, OpenRouter, Ollama, Codex CLI, Gemini CLI, and mock providers.
+- **Providers**: `providers/base`, `providers/standard`, `providers/agent`, and `providers/registry` house adapters for Claude, OpenRouter, Ollama, Codex CLI, Gemini CLI, and mock providers. Agent providers (Claude Code, Codex CLI) use specialized adapters:
+  - **`ClaudeCodeToolsAdapter.ts`**: Converts TENEX tools to SDK MCP format for Claude Code (in-process, via `createSdkMcpServer`).
+  - **`TenexStdioMcpServer.ts`**: Generates stdio MCP server config for Codex CLI. Creates subprocess launch config with tool list and execution context (projectId, agentId, conversationId, workingDirectory, currentBranch) passed via environment variables. Spawned by `CodexCliProvider` to expose TENEX tools.
 - **Guideline**: Agents and services never talk to provider SDKs directly—use this module to ensure credentials, retries, and middleware are consistent.
 
 ### Prompts (`src/prompts`)
