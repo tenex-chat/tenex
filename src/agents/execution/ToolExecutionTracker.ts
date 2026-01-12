@@ -58,6 +58,7 @@ import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agen
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import { PendingDelegationsRegistry } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -328,15 +329,11 @@ export class ToolExecutionTracker {
             let referencedAddressableEvents: string[] = [];
 
             if (isDelegateToolName(execution.toolName)) {
-                // Extract event IDs from result.pendingDelegations for delegation tools
-                // For MCP-wrapped tools (via TenexToolsAdapter), the original result may be
-                // stored in _tenexOriginalResult to preserve the StopExecutionSignal structure
-                const effectiveResult = (result as { _tenexOriginalResult?: unknown })?._tenexOriginalResult ?? result;
-                const pendingDelegations = (
-                    effectiveResult as { pendingDelegations?: Array<{ delegationConversationId: string }> }
-                )?.pendingDelegations;
-                referencedEventIds =
-                    pendingDelegations?.map((d) => d.delegationConversationId).filter((id): id is string => !!id) ?? [];
+                // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
+                const conversationId = execution.eventContext?.conversationId;
+                if (conversationId) {
+                    referencedEventIds = PendingDelegationsRegistry.consume(agentPubkey, conversationId);
+                }
             } else if (isAddressableEventTool(execution.toolName)) {
                 // Extract addressable event references from result.referencedAddressableEvents
                 // Format: "30023:pubkey:d-tag" for NDKArticle

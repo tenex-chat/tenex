@@ -2,6 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
+import { PendingDelegationsRegistry } from "@/services/ral";
 import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -108,6 +109,9 @@ async function executeDelegateCrossProject(
 
     await context.agent.sign(chatEvent);
     await chatEvent.publish();
+
+    // Register with PendingDelegationsRegistry for q-tag correlation
+    PendingDelegationsRegistry.register(context.agent.pubkey, context.conversationId, chatEvent.id);
 
     return {
         __stopExecution: true,
