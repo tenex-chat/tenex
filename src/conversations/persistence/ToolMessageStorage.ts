@@ -94,7 +94,7 @@ export class ToolMessageStorage {
     }
 
     /**
-     * Load tool messages from storage
+     * Load tool messages from storage by event ID
      */
     async load(eventId: string): Promise<ModelMessage[] | null> {
         try {

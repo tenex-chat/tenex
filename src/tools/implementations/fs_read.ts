@@ -30,7 +30,7 @@ const readPathSchema = z.object({
     tool: z
         .string()
         .optional()
-        .describe("Event ID of a tool execution to read its result. When provided, 'path' is ignored and the tool's output is returned."),
+        .describe("Event ID of a tool execution to read its result. When provided, 'path' is ignored and the tool's output is returned. Useful for retrieving truncated tool results."),
 });
 
 /**
