@@ -9,6 +9,7 @@ import {
     createCodexAppServer,
     type CodexAppServerSettings,
     type Session,
+    type McpServerConfigOrSdk,
 } from "ai-sdk-provider-codex-app-server";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -18,7 +19,7 @@ import type {
     ProviderRuntimeContext,
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
-import { TenexStdioMcpServer } from "./TenexStdioMcpServer";
+import { CodexAppServerToolsAdapter } from "./CodexAppServerToolsAdapter";
 
 /**
  * Codex App Server provider implementation
@@ -87,24 +88,24 @@ export class CodexAppServerProvider extends AgentProvider {
             regularTools: regularTools.length,
         });
 
-        // Build mcpServers configuration
-        const mcpServersConfig: Record<string, {
-            transport: "stdio";
-            command: string;
-            args?: string[];
-            env?: Record<string, string>;
-        }> = {};
+        // Build mcpServers configuration - can include SdkMcpServer for in-process tools
+        const mcpServersConfig: Record<string, McpServerConfigOrSdk> = {};
 
-        // Create TENEX stdio MCP server if we have TENEX tools
-        const tenexStdioServer = TenexStdioMcpServer.create(context, regularTools);
-        if (tenexStdioServer) {
-            mcpServersConfig.tenex = tenexStdioServer;
-            logger.debug("[CodexAppServerProvider] Added TENEX stdio MCP server", {
-                toolCount: regularTools.length,
-            });
+        // Create TENEX SDK MCP server if we have TENEX tools
+        if (context.tools && regularTools.length > 0) {
+            const tenexServer = CodexAppServerToolsAdapter.createSdkMcpServer(
+                context.tools,
+                { agentName: context.agentName }
+            );
+            if (tenexServer) {
+                mcpServersConfig.tenex = tenexServer;
+                logger.debug("[CodexAppServerProvider] Added TENEX SDK MCP server", {
+                    toolCount: regularTools.length,
+                });
+            }
         }
 
-        // Add configured MCP servers
+        // Add configured MCP servers (stdio format)
         const mcpConfig = context.mcpConfig;
         if (mcpConfig?.enabled && mcpConfig.servers) {
             for (const [serverName, serverConfig] of Object.entries(mcpConfig.servers)) {

@@ -74,7 +74,7 @@
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "ai": "^6.0.27",
     "ai-sdk-provider-claude-code": "^3.2.1",
-    "ai-sdk-provider-codex-app-server": "1.0.2",
+    "ai-sdk-provider-codex-app-server": "1.1.2",
     "ai-sdk-provider-codex-cli": "^1.0.4",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "apache-arrow": "^21.1.0",
