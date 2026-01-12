@@ -45,7 +45,7 @@ export {
 } from "./standard";
 
 // Export agent providers
-export { ClaudeCodeProvider, CodexCliProvider } from "./agent";
+export { ClaudeCodeProvider, CodexAppServerProvider } from "./agent";
 
 // Import for registration
 import type { ProviderRegistration } from "./types";
@@ -55,7 +55,7 @@ import { OpenAIProvider } from "./standard/OpenAIProvider";
 import { OllamaProvider } from "./standard/OllamaProvider";
 import { GeminiCliProvider } from "./standard/GeminiCliProvider";
 import { ClaudeCodeProvider } from "./agent/ClaudeCodeProvider";
-import { CodexCliProvider } from "./agent/CodexCliProvider";
+import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
 import { providerRegistry } from "./registry";
 
 /**
@@ -92,8 +92,8 @@ export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
         metadata: ClaudeCodeProvider.METADATA,
     },
     {
-        Provider: CodexCliProvider,
-        metadata: CodexCliProvider.METADATA,
+        Provider: CodexAppServerProvider,
+        metadata: CodexAppServerProvider.METADATA,
     },
 ];
 
