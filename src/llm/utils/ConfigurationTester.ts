@@ -1,3 +1,4 @@
+import type { CompleteEvent, ContentEvent, StreamErrorEvent } from "@/llm/service";
 import { config as configService } from "@/services/ConfigService";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
@@ -44,25 +45,40 @@ export class ConfigurationTester {
             const service = llmServiceFactory.createService(llmConfig);
 
             console.log(chalk.cyan("📡 Sending test message..."));
-            const result = await service.complete(
-                [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
-                {},
-                {
-                    temperature: llmConfig.temperature,
-                    maxTokens: llmConfig.maxTokens,
-                }
-            );
+            const handleContent = (event: ContentEvent): void => {
+                process.stdout.write(chalk.cyan(event.delta));
+            };
+            service.on("content", handleContent);
 
-            console.log(chalk.green("\n✅ Test successful!"));
-            const resultText = "text" in result ? result.text : "";
-            console.log(chalk.white("Response: ") + chalk.cyan(resultText));
+            const completePromise = new Promise<CompleteEvent>((resolve) => {
+                service.once("complete", resolve);
+            });
+            const errorPromise = new Promise<never>((_resolve, reject) => {
+                service.once("stream-error", (event: StreamErrorEvent) => {
+                    reject(event.error);
+                });
+            });
+
+            const completion = Promise.race([completePromise, errorPromise]);
+
+            console.log(chalk.white("Response: "));
+            const [, completeEvent] = await Promise.all([
+                service.stream(
+                    [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
+                    {}
+                ),
+                completion,
+            ]);
+
+            process.stdout.write("\n");
+            console.log(chalk.green("✅ Test successful!"));
 
             // Show usage stats if available
-            if ("usage" in result && result.usage) {
-                const usage = result.usage;
-                const inputTokens = "inputTokens" in usage ? usage.inputTokens : "?";
-                const outputTokens = "outputTokens" in usage ? usage.outputTokens : "?";
-                const totalTokens = "totalTokens" in usage ? usage.totalTokens : "?";
+            if (completeEvent.usage) {
+                const usage = completeEvent.usage;
+                const inputTokens = usage.inputTokens ?? "?";
+                const outputTokens = usage.outputTokens ?? "?";
+                const totalTokens = usage.totalTokens ?? "?";
                 console.log(
                     chalk.gray(`\nTokens: ${inputTokens} + ${outputTokens} = ${totalTokens}`)
                 );

@@ -1,18 +1,8 @@
-import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 import { LLMService } from "../service";
 
 // Mock the AI SDK functions
-const mockGenerateText = mock(() =>
-    Promise.resolve({
-        text: "Hello, world!",
-        steps: [],
-        toolCalls: [],
-        usage: { inputTokens: 10, outputTokens: 20 },
-        finishReason: "stop",
-    })
-);
-
 const mockStreamText = mock(() => ({
     textStream: (async function* () {
         yield "Hello";
@@ -22,7 +12,6 @@ const mockStreamText = mock(() => ({
 }));
 
 mock.module("ai", () => ({
-    generateText: mockGenerateText,
     streamText: mockStreamText,
     generateObject: mock(() =>
         Promise.resolve({
@@ -141,7 +130,6 @@ describe("LLMService", () => {
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
-        mockGenerateText.mockClear();
         mockStreamText.mockClear();
     });
 
@@ -173,68 +161,8 @@ describe("LLMService", () => {
 
         test("stores temperature and maxTokens", () => {
             const service = new LLMService(mockRegistry, "openrouter", "gpt-4", 0.7, 1000);
-            // These are private, but we can verify they're used in complete()
+            // These are private, but instantiation should succeed.
             expect(service).toBeDefined();
-        });
-    });
-
-    describe("complete()", () => {
-        test("calls generateText with correct parameters", async () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", 0.5, 2000);
-
-            const messages: ModelMessage[] = [
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-            const tools = {};
-
-            await service.complete(messages, tools);
-
-            expect(mockGenerateText).toHaveBeenCalled();
-            const callArgs = mockGenerateText.mock.calls[0][0];
-            expect(callArgs.messages).toEqual(messages);
-            expect(callArgs.tools).toEqual(tools);
-            expect(callArgs.temperature).toBe(0.5);
-            expect(callArgs.maxOutputTokens).toBe(2000);
-        });
-
-        test("uses option overrides for temperature and maxTokens", async () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", 0.5, 2000);
-
-            const messages: ModelMessage[] = [
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await service.complete(messages, {}, { temperature: 0.9, maxTokens: 500 });
-
-            const callArgs = mockGenerateText.mock.calls[0][0];
-            expect(callArgs.temperature).toBe(0.9);
-            expect(callArgs.maxOutputTokens).toBe(500);
-        });
-
-        test("returns the generateText result", async () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
-
-            const messages: ModelMessage[] = [
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            const result = await service.complete(messages, {});
-
-            expect(result.text).toBe("Hello, world!");
-            expect(result.finishReason).toBe("stop");
-        });
-
-        test("throws on generateText error", async () => {
-            mockGenerateText.mockImplementationOnce(() =>
-                Promise.reject(new Error("API Error"))
-            );
-
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
-            const messages: ModelMessage[] = [
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await expect(service.complete(messages, {})).rejects.toThrow("API Error");
         });
     });
 
@@ -260,47 +188,6 @@ describe("LLMService", () => {
         });
     });
 
-    describe("event emission", () => {
-        test("emits session-captured event for Claude Code with session metadata", async () => {
-            mockGenerateText.mockImplementationOnce(() =>
-                Promise.resolve({
-                    text: "Response",
-                    steps: [],
-                    toolCalls: [],
-                    usage: { inputTokens: 10, outputTokens: 20 },
-                    finishReason: "stop",
-                    providerMetadata: {
-                        "claude-code": { sessionId: "test-session-123" },
-                    },
-                })
-            );
-
-            const claudeCodeProvider = createMockClaudeCodeProvider();
-            const service = new LLMService(
-                null,
-                "claude-code",
-                "claude-3",
-                undefined,
-                undefined,
-                claudeCodeProvider
-            );
-
-            const sessionCapturedSpy = mock(() => {});
-            service.on("session-captured", sessionCapturedSpy);
-
-            const messages: ModelMessage[] = [
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await service.complete(messages, {});
-
-            expect(sessionCapturedSpy).toHaveBeenCalled();
-            expect(sessionCapturedSpy.mock.calls[0][0]).toEqual({
-                sessionId: "test-session-123",
-            });
-        });
-    });
-
     describe("cache control", () => {
         test("adds cache control for Anthropic with large system messages", async () => {
             const service = new LLMService(mockRegistry, "anthropic", "claude-3");
@@ -312,9 +199,9 @@ describe("LLMService", () => {
                 { role: "user", content: [{ type: "text", text: "Hello" }] },
             ];
 
-            await service.complete(messages, {});
+            await service.stream(messages, {});
 
-            const callArgs = mockGenerateText.mock.calls[0][0];
+            const callArgs = mockStreamText.mock.calls[0][0];
             const systemMessage = callArgs.messages[0];
 
             expect(systemMessage.providerOptions).toEqual({
@@ -332,9 +219,9 @@ describe("LLMService", () => {
                 { role: "user", content: [{ type: "text", text: "Hello" }] },
             ];
 
-            await service.complete(messages, {});
+            await service.stream(messages, {});
 
-            const callArgs = mockGenerateText.mock.calls[0][0];
+            const callArgs = mockStreamText.mock.calls[0][0];
             const systemMessage = callArgs.messages[0];
 
             expect(systemMessage.providerOptions).toBeUndefined();
@@ -349,9 +236,9 @@ describe("LLMService", () => {
                 { role: "user", content: [{ type: "text", text: "Hello" }] },
             ];
 
-            await service.complete(messages, {});
+            await service.stream(messages, {});
 
-            const callArgs = mockGenerateText.mock.calls[0][0];
+            const callArgs = mockStreamText.mock.calls[0][0];
             const systemMessage = callArgs.messages[0];
 
             expect(systemMessage.providerOptions).toBeUndefined();
@@ -366,9 +253,9 @@ describe("LLMService", () => {
                 { role: "user", content: [{ type: "text", text: "Hello" }] },
             ];
 
-            await service.complete(messages, {});
+            await service.stream(messages, {});
 
-            const callArgs = mockGenerateText.mock.calls[0][0];
+            const callArgs = mockStreamText.mock.calls[0][0];
             const systemMessage = callArgs.messages[0];
 
             expect(systemMessage.providerOptions).toEqual({
@@ -698,12 +585,10 @@ describe("LLMService telemetry configuration", () => {
 
 describe("LLMService stream()", () => {
     let mockRegistry: ProviderRegistryProvider<string, string>;
-    let capturedOnChunk: ((event: { chunk: any }) => void) | undefined;
     let capturedOnFinish: ((e: any) => Promise<void>) | undefined;
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
-        capturedOnChunk = undefined;
         capturedOnFinish = undefined;
 
         // Clear mock calls from previous tests
@@ -711,7 +596,6 @@ describe("LLMService stream()", () => {
 
         // Override mock to capture callbacks
         mockStreamText.mockImplementation((options: any) => {
-            capturedOnChunk = options.onChunk;
             capturedOnFinish = options.onFinish;
 
             return {
@@ -762,23 +646,6 @@ describe("LLMService stream()", () => {
 
         const callArgs = mockStreamText.mock.calls[0][0];
         expect(callArgs.tools).toBeUndefined();
-    });
-
-    test("applies cache control for anthropic provider", async () => {
-        const service = new LLMService(mockRegistry, "anthropic", "claude-3");
-
-        const largeSystemContent = "x".repeat(5000);
-        const messages: ModelMessage[] = [
-            { role: "system", content: largeSystemContent },
-            { role: "user", content: [{ type: "text", text: "Hello" }] },
-        ];
-
-        await service.stream(messages, {});
-
-        const callArgs = mockStreamText.mock.calls[0][0];
-        expect(callArgs.messages[0].providerOptions).toEqual({
-            anthropic: { cacheControl: { type: "ephemeral" } },
-        });
     });
 
     test("emits complete event via onFinish callback", async () => {

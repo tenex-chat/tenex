@@ -4,7 +4,6 @@ import { logger } from "@/utils/logger";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
-    type GenerateTextResult,
     type LanguageModel,
     type LanguageModelMiddleware,
     type LanguageModelUsage,
@@ -15,7 +14,6 @@ import {
     type TextStreamPart,
     extractReasoningMiddleware,
     generateObject,
-    generateText,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -467,76 +465,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 }
                 this.emit("session-captured", { sessionId });
             }
-        }
-    }
-
-    async complete(
-        messages: ModelMessage[],
-        tools: Record<string, AISdkTool>,
-        options?: {
-            temperature?: number;
-            maxTokens?: number;
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ): Promise<GenerateTextResult<Record<string, AISdkTool>, any>> {
-        const model = this.getLanguageModel(messages);
-        const startTime = Date.now();
-
-        const processedMessages = this.prepareMessagesForRequest(messages);
-
-        try {
-            const result = await generateText({
-                model,
-                messages: processedMessages,
-                tools,
-                temperature: options?.temperature ?? this.temperature,
-                maxOutputTokens: options?.maxTokens ?? this.maxTokens,
-
-                // ✨ Enable full AI SDK telemetry
-                experimental_telemetry: this.getFullTelemetryConfig(),
-
-                providerOptions: {
-                    openrouter: {
-                        usage: { include: true },
-                        user: this.getTraceCorrelationId(),
-                        metadata: this.getOpenRouterMetadata(),
-                    },
-                },
-            });
-
-            this.recordInvalidToolCalls(result.steps ?? [], "complete");
-            this.emitSessionCapturedFromMetadata(
-                result.providerMetadata as Record<string, unknown> | undefined,
-                true
-            );
-
-            // Record if reasoning was extracted
-            if ("reasoning" in result && result.reasoning) {
-                trace.getActiveSpan()?.addEvent("llm.reasoning_extracted", {
-                    "reasoning.length": result.reasoning.length,
-                    "text.length": result.text?.length || 0,
-                });
-            }
-
-            const duration = Date.now() - startTime;
-
-            trace.getActiveSpan()?.addEvent("llm.complete_response", {
-                "llm.model": `${this.provider}:${this.model}`,
-                "llm.duration_ms": duration,
-                "llm.tool_call_count": result.toolCalls?.length || 0,
-                "llm.response_length": result.text?.length || 0,
-            });
-
-            return result;
-        } catch (error) {
-            const duration = Date.now() - startTime;
-
-            logger.error("[LLMService] Complete failed", {
-                model: `${this.provider}:${this.model}`,
-                duration,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            throw error;
         }
     }
 
