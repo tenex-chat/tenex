@@ -6,7 +6,8 @@
 
 import { dynamicToolService } from "@/services/DynamicToolService";
 import type { Tool as CoreTool } from "ai";
-import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext } from "./types";
+import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext, MCPToolContext } from "./types";
+import { logger } from "@/utils/logger";
 import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
@@ -101,6 +102,16 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
 };
 
 /**
+ * Tools that require conversation context to function.
+ * These are filtered out when no conversation is available (e.g., MCP context).
+ */
+const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
+    "todo_add",
+    "todo_update",
+    "conversation_get", // Needs conversation for current-conversation optimization
+]);
+
+/**
  * Registry of tool factories.
  * All tools receive ToolExecutionContext - tools that don't need
  * agentPublisher/ralNumber simply ignore those fields.
@@ -187,9 +198,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Pairing tools
     stop_pairing: createStopPairingTool,
 
-    // Todo tools
-    todo_add: createTodoAddTool,
-    todo_update: createTodoUpdateTool,
+    // Todo tools - require ConversationToolContext (filtered out when no conversation)
+    todo_add: createTodoAddTool as ToolFactory,
+    todo_update: createTodoUpdateTool as ToolFactory,
 
     // Web tools
     web_fetch: createWebFetchTool,
@@ -264,14 +275,17 @@ const TODO_TOOLS: ToolName[] = ["todo_add", "todo_update"];
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
- * @param context - Full registry context for the tools
+ * @param context - Registry context (full or MCP partial)
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
     names: string[],
-    context: ToolRegistryContext
+    context: ToolRegistryContext | MCPToolContext
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
+
+    // Check if conversation is available
+    const hasConversation = 'conversationStore' in context && context.conversationStore !== undefined;
 
     // Separate regular tools, dynamic tools, and MCP tools
     const regularTools: ToolName[] = [];
@@ -282,14 +296,19 @@ export function getToolsObject(
         if (name.startsWith("mcp__")) {
             mcpToolNames.push(name);
         } else if (name in toolFactories) {
+            // Filter out conversation-required tools when no conversation available
+            if (CONVERSATION_REQUIRED_TOOLS.has(name as ToolName) && !hasConversation) {
+                logger.debug(`Filtering out tool '${name}' - requires conversation context`);
+                continue;
+            }
             regularTools.push(name as ToolName);
         } else if (dynamicToolService.isDynamicTool(name)) {
             dynamicToolNames.push(name);
         }
     }
 
-    // Auto-inject alpha tools when in alpha mode
-    if (context.alphaMode) {
+    // Auto-inject alpha tools when in alpha mode (only for full registry context)
+    if ('alphaMode' in context && context.alphaMode) {
         for (const alphaToolName of ALPHA_TOOLS) {
             if (!regularTools.includes(alphaToolName)) {
                 regularTools.push(alphaToolName);
@@ -297,8 +316,8 @@ export function getToolsObject(
         }
     }
 
-    // Auto-inject pairing tools when there are active pairings
-    if (context.hasActivePairings) {
+    // Auto-inject pairing tools when there are active pairings (only for full registry context)
+    if ('hasActivePairings' in context && context.hasActivePairings) {
         for (const pairingToolName of PAIRING_TOOLS) {
             if (!regularTools.includes(pairingToolName)) {
                 regularTools.push(pairingToolName);
@@ -315,18 +334,18 @@ export function getToolsObject(
         }
     }
 
-    // Add regular tools
+    // Add regular tools (cast to ToolExecutionContext - filtered tools won't need conversation)
     for (const name of regularTools) {
-        const tool = getTool(name, context);
+        const tool = getTool(name, context as ToolExecutionContext);
         if (tool) {
             // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
             tools[name] = tool;
         }
     }
 
-    // Add dynamic tools
-    if (dynamicToolNames.length > 0) {
-        const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
+    // Add dynamic tools (only for full registry context)
+    if (dynamicToolNames.length > 0 && 'conversationStore' in context) {
+        const dynamicTools = dynamicToolService.getDynamicToolsObject(context as ToolExecutionContext);
         for (const name of dynamicToolNames) {
             if (dynamicTools[name]) {
                 tools[name] = dynamicTools[name];
@@ -336,8 +355,8 @@ export function getToolsObject(
         }
     }
 
-    // Add only requested MCP tools
-    if (mcpToolNames.length > 0 && context.mcpManager) {
+    // Add only requested MCP tools (only for full registry context)
+    if (mcpToolNames.length > 0 && 'mcpManager' in context && context.mcpManager) {
         try {
             const allMcpTools = context.mcpManager.getCachedTools();
             for (const name of mcpToolNames) {

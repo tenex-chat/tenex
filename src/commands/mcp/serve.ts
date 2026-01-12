@@ -7,10 +7,12 @@
  * Environment variables:
  * - TENEX_PROJECT_ID: Project identifier
  * - TENEX_AGENT_ID: Agent identifier/pubkey
- * - TENEX_CONVERSATION_ID: Conversation ID for conversation-scoped tools
  * - TENEX_WORKING_DIRECTORY: Project's working directory for file operations
  * - TENEX_CURRENT_BRANCH: Current git branch
  * - TENEX_TOOLS: Comma-separated list of tool names to expose
+ *
+ * Note: Conversation-scoped tools (todo_*, conversation_get for current conversation)
+ * are not supported via MCP - only tools that work without conversation context.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -24,12 +26,11 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AISdkTool } from "@/tools/types";
 import { getToolsObject } from "@/tools/registry";
-import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
 import { isStopExecutionSignal } from "@/services/ral/types";
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
-import type { ToolRegistryContext, ToolExecutionContext } from "@/tools/types";
+import type { MCPToolContext } from "@/tools/types";
 
 /**
  * Load context from environment variables
@@ -37,21 +38,18 @@ import type { ToolRegistryContext, ToolExecutionContext } from "@/tools/types";
 function loadContextFromEnv(): {
     projectId: string;
     agentId: string;
-    conversationId: string;
     workingDirectory: string;
     currentBranch: string;
     toolNames: string[];
 } {
     const projectId = process.env.TENEX_PROJECT_ID;
     const agentId = process.env.TENEX_AGENT_ID;
-    const conversationId = process.env.TENEX_CONVERSATION_ID;
     const workingDirectory = process.env.TENEX_WORKING_DIRECTORY;
     const currentBranch = process.env.TENEX_CURRENT_BRANCH;
     const toolNamesStr = process.env.TENEX_TOOLS;
 
     if (!projectId) throw new Error("TENEX_PROJECT_ID environment variable is required");
     if (!agentId) throw new Error("TENEX_AGENT_ID environment variable is required");
-    if (!conversationId) throw new Error("TENEX_CONVERSATION_ID environment variable is required");
     if (!workingDirectory) throw new Error("TENEX_WORKING_DIRECTORY environment variable is required");
     if (!currentBranch) throw new Error("TENEX_CURRENT_BRANCH environment variable is required");
     if (!toolNamesStr) throw new Error("TENEX_TOOLS environment variable is required");
@@ -59,7 +57,6 @@ function loadContextFromEnv(): {
     return {
         projectId,
         agentId,
-        conversationId,
         workingDirectory,
         currentBranch,
         toolNames: toolNamesStr.split(",").map((t) => t.trim()),
@@ -158,22 +155,20 @@ export async function startServer(): Promise<void> {
             toolNames: context.toolNames,
         });
 
-        // Build minimal ToolRegistryContext
-        const conversationStore = await ConversationStore.getOrLoad(context.conversationId);
-
-        // Create execution context stub
-        const executionContext: Partial<ToolExecutionContext> = {
-            conversationId: context.conversationId,
+        // Create MCP context (explicitly lacks conversation)
+        const mcpContext: MCPToolContext = {
             projectBasePath: context.workingDirectory,
             workingDirectory: context.workingDirectory,
             currentBranch: context.currentBranch,
+            getConversation: () => undefined,
+            // These are required by ToolExecutionContext but not available in MCP
+            agent: undefined as any, // Tools that need agent will fail at runtime
+            agentPublisher: undefined as any,
+            ralNumber: 0,
         };
 
-        // Get tools from registry
-        const toolsObject = getToolsObject(context.toolNames, {
-            ...executionContext,
-            conversationStore,
-        } as ToolRegistryContext);
+        // Get tools from registry (conversation-required tools are filtered out)
+        const toolsObject = getToolsObject(context.toolNames, mcpContext);
 
         logger.info("[TenexMCP] Loaded tools:", {
             count: Object.keys(toolsObject).length,

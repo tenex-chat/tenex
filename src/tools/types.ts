@@ -127,18 +127,36 @@ export interface ExecutionEnvironment {
 export interface ToolExecutionContext extends ExecutionEnvironment {
     agentPublisher: AgentPublisher;
     ralNumber: number;
+}
+
+/**
+ * Extended context for tools that require conversation state.
+ * Tools like todo_add, todo_update, conversation_get (current conversation) need this.
+ */
+export interface ConversationToolContext extends ToolExecutionContext {
     getConversation: () => ConversationStore;
+    conversationStore: ConversationStore;
 }
 
 /**
  * Full registry context for tool selection/injection logic.
  * Used by getToolsObject() during actual execution.
+ * Extends ConversationToolContext because normal execution always has a conversation.
  */
-export interface ToolRegistryContext extends ToolExecutionContext {
+export interface ToolRegistryContext extends ConversationToolContext {
     alphaMode?: boolean;
     hasActivePairings?: boolean;
     mcpManager?: MCPManager;
-    conversationStore: ConversationStore;
+}
+
+/**
+ * Context for MCP tool execution - explicitly lacks conversation.
+ * Tools requiring conversation are filtered out when this context is used.
+ */
+export interface MCPToolContext extends Omit<ToolExecutionContext, 'getConversation' | 'conversationId' | 'triggeringEvent'> {
+    getConversation: () => undefined;
+    conversationId?: undefined;
+    triggeringEvent?: undefined;
 }
 
 export interface ToolError {
@@ -158,7 +176,12 @@ export interface ToolExecutionResult {
 }
 
 /**
- * Tool factory signature - all tools receive ToolExecutionContext.
- * Tools that don't need agentPublisher/ralNumber can ignore those fields.
+ * Tool factory for tools that work without conversation context (MCP-safe).
  */
 export type ToolFactory = (context: ToolExecutionContext) => AISdkTool<unknown, unknown>;
+
+/**
+ * Tool factory for tools that require conversation context.
+ * These tools are filtered out when no conversation is available (e.g., MCP).
+ */
+export type ConversationToolFactory = (context: ConversationToolContext) => AISdkTool<unknown, unknown>;
