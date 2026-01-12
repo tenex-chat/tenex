@@ -79,6 +79,8 @@ export interface LLMConfiguration {
     temperature?: number;
     maxTokens?: number;
     topP?: number;
+    /** Reasoning effort level (for codex-app-server provider) */
+    reasoningEffort?: "none" | "low" | "medium" | "high";
     [key: string]: unknown; // Allow additional provider-specific settings
 }
 
@@ -105,6 +107,7 @@ export const LLMConfigurationSchema = z
         temperature: z.number().optional(),
         maxTokens: z.number().optional(),
         topP: z.number().optional(),
+        reasoningEffort: z.enum(["none", "low", "medium", "high"]).optional(),
     })
     .passthrough(); // Allow additional properties
 

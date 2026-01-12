@@ -127,6 +127,7 @@ export class CodexAppServerProvider extends AgentProvider {
             mcpServers: mcpServersConfig,
             approvalMode: "on-failure",
             sandboxMode: "workspace-write",
+            reasoningEffort: context.reasoningEffort,
             verbose: false,
             logger: {
                 warn: (message: string) => logger.warn("[CodexAppServer]", message),
@@ -138,9 +139,11 @@ export class CodexAppServerProvider extends AgentProvider {
                 this.currentSession = session;
                 logger.info("[CodexAppServerProvider] Session created", {
                     threadId: session.threadId,
+                    reasoningEffort: context.reasoningEffort,
                 });
                 trace.getActiveSpan()?.addEvent("codex_app_server.session_created", {
                     "session.threadId": session.threadId,
+                    "reasoning.effort": context.reasoningEffort ?? "default",
                 });
             },
         };

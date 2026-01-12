@@ -108,6 +108,8 @@ export interface ProviderRuntimeContext {
     mcpConfig?: MCPConfig;
     /** Whether TENEX tools should be enabled */
     enableTenexTools?: boolean;
+    /** Reasoning effort level (for codex-app-server) */
+    reasoningEffort?: "none" | "low" | "medium" | "high";
 }
 
 /**
