@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import { PendingDelegationsRegistry } from "@/services/ral";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 import { ToolExecutionTracker } from "../ToolExecutionTracker";
@@ -84,6 +85,7 @@ describe("ToolExecutionTracker", () => {
 
     afterEach(() => {
         mockStore.mockClear();
+        PendingDelegationsRegistry.clear();
     });
 
     describe("trackExecution", () => {
@@ -531,6 +533,9 @@ describe("ToolExecutionTracker", () => {
                 eventContext: mockEventContext,
             });
 
+            // Register with PendingDelegationsRegistry (simulates what AgentPublisher.delegate() does)
+            PendingDelegationsRegistry.register("agent-pubkey", mockEventContext.conversationId, "delegation-event-123");
+
             // Simulate result with pendingDelegations from delegate tool
             const delegationResult = {
                 __stopExecution: true,
@@ -548,7 +553,7 @@ describe("ToolExecutionTracker", () => {
                 agentPubkey: "agent-pubkey",
             });
 
-            // Should have published with referencedEventIds
+            // Should have published with referencedEventIds from registry
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 expect.objectContaining({
                     toolName: "delegate",
@@ -571,6 +576,10 @@ describe("ToolExecutionTracker", () => {
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
+
+            // Register with PendingDelegationsRegistry (simulates what AgentPublisher.delegate() does)
+            PendingDelegationsRegistry.register("agent-pubkey", mockEventContext.conversationId, "delegation-1");
+            PendingDelegationsRegistry.register("agent-pubkey", mockEventContext.conversationId, "delegation-2");
 
             const delegationResult = {
                 __stopExecution: true,
@@ -722,13 +731,13 @@ describe("ToolExecutionTracker", () => {
                 eventContext: mockEventContext,
             });
 
-            // Simulate result with pendingDelegations
-            const delegationResult = {
-                __stopExecution: true,
-                pendingDelegations: [
-                    { delegationConversationId: "mcp-delegation-event-123", recipientPubkey: "pubkey1", prompt: "Do X" },
-                ],
-            };
+            // Register with PendingDelegationsRegistry (simulates what AgentPublisher.delegate() does)
+            // This is the key fix: MCP result transformation strips pendingDelegations,
+            // but we now get event IDs from the registry which was populated at publish time
+            PendingDelegationsRegistry.register("agent-pubkey", mockEventContext.conversationId, "mcp-delegation-event-123");
+
+            // Simulate MCP-transformed result (Claude Code SDK strips _tenexOriginalResult)
+            const delegationResult = [{ type: "text", text: "..." }];
 
             await tracker.completeExecution({
                 toolCallId: "mcp-delegate-complete",
@@ -737,7 +746,7 @@ describe("ToolExecutionTracker", () => {
                 agentPubkey: "agent-pubkey",
             });
 
-            // Should have published with referencedEventIds (q-tags)
+            // Should have published with referencedEventIds from registry (q-tags)
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 expect.objectContaining({
                     toolName: "mcp__tenex__delegate",
@@ -751,7 +760,7 @@ describe("ToolExecutionTracker", () => {
             expect(execution?.toolEventId).toBe("mock-event-id-123");
         });
 
-        it("should extract pendingDelegations from _tenexOriginalResult for MCP-wrapped ask tool", async () => {
+        it("should get event IDs from registry for MCP-wrapped ask tool (fixes MCP stripping issue)", async () => {
             // Track MCP-wrapped ask tool
             await tracker.trackExecution({
                 toolCallId: "mcp-ask-complete",
@@ -762,17 +771,13 @@ describe("ToolExecutionTracker", () => {
                 eventContext: mockEventContext,
             });
 
-            // Simulate result from TenexToolsAdapter with _tenexOriginalResult
-            // This is how MCP-wrapped tools preserve StopExecutionSignal structure
-            const mcpWrappedResult = {
-                content: [{ type: "text", text: "..." }],
-                _tenexOriginalResult: {
-                    __stopExecution: true,
-                    pendingDelegations: [
-                        { delegationConversationId: "ask-event-id-456", recipientPubkey: "owner", senderPubkey: "agent", prompt: "Question", type: "ask" },
-                    ],
-                },
-            };
+            // Register with PendingDelegationsRegistry (simulates what AgentPublisher.ask() does)
+            // This is the key fix: MCP result transformation (Claude Code SDK) strips everything,
+            // but we now get event IDs from the registry which was populated at publish time
+            PendingDelegationsRegistry.register("agent-pubkey", mockEventContext.conversationId, "ask-event-id-456");
+
+            // Simulate MCP-transformed result (Claude Code SDK strips _tenexOriginalResult)
+            const mcpWrappedResult = [{ type: "text", text: "..." }];
 
             await tracker.completeExecution({
                 toolCallId: "mcp-ask-complete",
@@ -781,7 +786,7 @@ describe("ToolExecutionTracker", () => {
                 agentPubkey: "agent-pubkey",
             });
 
-            // Should have published with referencedEventIds (q-tags) extracted from _tenexOriginalResult
+            // Should have published with referencedEventIds (q-tags) from registry
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 expect.objectContaining({
                     toolName: "mcp__tenex__ask",
