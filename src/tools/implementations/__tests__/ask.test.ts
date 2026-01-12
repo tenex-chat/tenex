@@ -102,6 +102,7 @@ describe("Ask Tool - Multi-question support", () => {
 
     mockAgentInstance = {
       slug: "test-agent",
+      pubkey: "test-agent-pubkey",
       sign: mock((_event: NDKEvent) => Promise.resolve()),
       projectTag: "31933:testpubkey:test-project",
     } as unknown as AgentInstance;
