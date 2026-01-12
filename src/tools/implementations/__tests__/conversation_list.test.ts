@@ -229,6 +229,10 @@ describe("conversation_list Tool", () => {
         instantiatedStores.length = 0;
     });
 
+    afterAll(() => {
+        mock.restore();
+    });
+
     describe("Default behavior (no projectId provided)", () => {
         it("should default to current project using ConversationStore.getProjectId()", async () => {
             const tool = createConversationListTool(mockContext);

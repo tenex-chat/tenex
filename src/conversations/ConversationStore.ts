@@ -33,6 +33,7 @@ export interface ConversationEntry {
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
+    suppressAttribution?: boolean; // Skip [@sender -> @recipient] prefix for system-style messages
 }
 
 export interface Injection {
@@ -40,6 +41,7 @@ export interface Injection {
     role: "user" | "system";
     content: string;
     queuedAt: number;
+    suppressAttribution?: boolean;
 }
 
 export interface ConversationMetadata {
@@ -786,6 +788,7 @@ export class ConversationStore {
                 // If injection role is "user", it's targeted to this agent
                 // If "system", it's a broadcast
                 targetedPubkeys: injection.role === "user" ? [agentPubkey] : undefined,
+                suppressAttribution: injection.suppressAttribution,
             });
         }
 
@@ -867,7 +870,9 @@ export class ConversationStore {
         }
 
         // Text message - add attribution prefix
-        const formattedContent = await this.formatWithAttribution(entry, entry.content);
+        const formattedContent = entry.suppressAttribution
+            ? entry.content
+            : await this.formatWithAttribution(entry, entry.content);
 
         // Convert to multimodal format if content contains image URLs
         // This allows the AI SDK to fetch and process images automatically

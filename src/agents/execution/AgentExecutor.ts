@@ -185,7 +185,8 @@ export class AgentExecutor {
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber,
-                            resultsMessage
+                            resultsMessage,
+                            { suppressAttribution: true }
                         );
                     }
 
@@ -869,6 +870,7 @@ export class AgentExecutor {
                     content: injection.content,
                     messageType: "text",
                     targetedPubkeys: [context.agent.pubkey],
+                    suppressAttribution: injection.suppressAttribution,
                 });
             }
 
@@ -1162,6 +1164,7 @@ export class AgentExecutor {
                             content: injection.content,
                             messageType: "text",
                             targetedPubkeys: [context.agent.pubkey],
+                            suppressAttribution: injection.suppressAttribution,
                         });
                     }
 

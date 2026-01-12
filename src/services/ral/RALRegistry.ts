@@ -1,7 +1,10 @@
 import { trace } from "@opentelemetry/api";
 import { getPubkeyService } from "@/services/PubkeyService";
+import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { logger } from "@/utils/logger";
 import type {
+  InjectionResult,
+  InjectionRole,
   RALRegistryEntry,
   PendingDelegation,
   CompletedDelegation,
@@ -436,17 +439,97 @@ export class RALRegistry {
   }
 
   /**
+   * Queue a message for injection and abort streaming runs if needed.
+   */
+  injectMessage(params: {
+    agentPubkey: string;
+    conversationId: string;
+    message: string;
+    role?: InjectionRole;
+  }): InjectionResult {
+    const {
+      agentPubkey,
+      conversationId,
+      message,
+      role = "user",
+    } = params;
+    const activeRal = this.getState(agentPubkey, conversationId);
+
+    if (!activeRal) {
+      return {
+        queued: false,
+        aborted: false,
+      };
+    }
+
+    this.queueMessage(agentPubkey, conversationId, activeRal.ralNumber, role, message);
+
+    const messageLength = message.length;
+    let aborted = false;
+
+    if (activeRal.isStreaming) {
+      aborted = llmOpsRegistry.stopByAgentAndConversation(
+        agentPubkey,
+        conversationId,
+        INJECTION_ABORT_REASON
+      );
+
+      trace.getActiveSpan()?.addEvent("ral.injection_streaming", {
+        "ral.id": activeRal.id,
+        "ral.number": activeRal.ralNumber,
+        "injection.length": messageLength,
+        aborted,
+      });
+
+      if (aborted) {
+        logger.info("[RALRegistry] Aborted streaming execution for injection", {
+          agentPubkey: agentPubkey.substring(0, 8),
+          conversationId: conversationId.substring(0, 8),
+          ralNumber: activeRal.ralNumber,
+          injectionLength: messageLength,
+        });
+      }
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.injection_queued", {
+      "ral.id": activeRal.id,
+      "ral.number": activeRal.ralNumber,
+      "injection.role": role,
+      "injection.length": messageLength,
+      "ral.is_streaming": activeRal.isStreaming,
+    });
+
+    return {
+      activeRal,
+      queued: true,
+      aborted,
+    };
+  }
+
+  /**
    * Queue a system message for injection into a specific RAL
    */
-  queueSystemMessage(agentPubkey: string, conversationId: string, ralNumber: number, message: string): void {
-    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message);
+  queueSystemMessage(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    message: string,
+    options?: { suppressAttribution?: boolean }
+  ): void {
+    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message, options);
   }
 
   /**
    * Queue a user message for injection into a specific RAL
    */
-  queueUserMessage(agentPubkey: string, conversationId: string, ralNumber: number, message: string): void {
-    this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message);
+  queueUserMessage(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    message: string,
+    options?: { suppressAttribution?: boolean }
+  ): void {
+    this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
 
   /**
@@ -457,7 +540,8 @@ export class RALRegistry {
     conversationId: string,
     ralNumber: number,
     role: "system" | "user",
-    message: string
+    message: string,
+    options?: { suppressAttribution?: boolean }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -481,6 +565,7 @@ export class RALRegistry {
       role,
       content: message,
       queuedAt: Date.now(),
+      suppressAttribution: options?.suppressAttribution,
     });
   }
 
