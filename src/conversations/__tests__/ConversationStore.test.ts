@@ -713,6 +713,23 @@ describe("ConversationStore", () => {
             expect(messages[0].content).toBe("[@transparent] Announcement to all");
         });
 
+        it("should skip attribution prefix when suppressAttribution is true", async () => {
+            store.addMessage({
+                pubkey: PABLO_PK,
+                content: "# DELEGATION COMPLETED",
+                messageType: "text",
+                targetedPubkeys: [TRANSPARENT_PK],
+                suppressAttribution: true,
+            });
+            store.ensureRalActive(TRANSPARENT_PK, 1);
+
+            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toBe("# DELEGATION COMPLETED");
+        });
+
         it("should prefix message TO agent from user with [@sender -> @self]", async () => {
             // Pablo sends message to Transparent
             store.addMessage({

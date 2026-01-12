@@ -1,6 +1,16 @@
 /** Role types that can be used for message injection */
 export type InjectionRole = "user" | "system";
 
+/** Result of injecting a message into an active RAL */
+export interface InjectionResult {
+  /** The active RAL entry, if found */
+  activeRal?: RALRegistryEntry;
+  /** Whether the message was queued for injection */
+  queued: boolean;
+  /** Whether an active streaming run was aborted */
+  aborted: boolean;
+}
+
 export type DelegationType = "standard" | "followup" | "external" | "ask";
 
 // ============================================================================
@@ -86,6 +96,7 @@ export interface QueuedInjection {
   role: InjectionRole;
   content: string;
   queuedAt: number;
+  suppressAttribution?: boolean;
 }
 
 export interface RALRegistryEntry {
