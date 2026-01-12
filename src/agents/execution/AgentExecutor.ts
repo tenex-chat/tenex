@@ -27,7 +27,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";
-import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
@@ -548,8 +548,23 @@ export class AgentExecutor {
             return undefined;
         }
 
-        // Execution was aborted by stop signal - publish stopped message, skip supervision
+        // Execution was aborted - check reason
         if (result.aborted) {
+            // Check if this was an injection abort (mid-execution message arrived)
+            // If so, return silently - a new execution will be spawned that includes the injection
+            if (result.abortReason === INJECTION_ABORT_REASON) {
+                trace.getActiveSpan()?.addEvent("executor.aborted_for_injection", {
+                    "ral.number": ralNumber,
+                    "agent.slug": context.agent.slug,
+                });
+                logger.info("[AgentExecutor] Execution aborted for injection - silent return", {
+                    agent: context.agent.slug,
+                    ralNumber,
+                });
+                return undefined;
+            }
+
+            // User-initiated stop - publish stopped message
             const eventContext = createEventContext(context);
             const responseEvent = await agentPublisher.complete(
                 { content: "Manually stopped by user" },
@@ -876,6 +891,15 @@ export class AgentExecutor {
             sessionId,
             workingDirectory: context.workingDirectory,
             conversationId: context.conversationId,
+            // Register Query object for mid-stream message injection (Claude Code only)
+            onQueryCreated: (query) => {
+                ralRegistry.registerQuery(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber,
+                    query as import("ai-sdk-provider-claude-code").Query
+                );
+            },
         });
 
         const messageCompiler = new MessageCompiler(
@@ -1392,9 +1416,11 @@ export class AgentExecutor {
             throw new Error("LLM stream completed without emitting complete or stream-error event");
         }
 
-        // Set aborted flag if stop signal was triggered
-        if (result.kind === "complete") {
-            result.aborted = abortSignal.aborted;
+        // Set aborted flag and reason if stop signal was triggered
+        if (result.kind === "complete" && abortSignal.aborted) {
+            result.aborted = true;
+            // AbortSignal.reason contains the reason passed to abort()
+            result.abortReason = typeof abortSignal.reason === "string" ? abortSignal.reason : undefined;
         }
 
         return result;
