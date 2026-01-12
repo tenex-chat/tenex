@@ -412,9 +412,6 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "followup", parentContext);
 
-        // Register with PendingDelegationsRegistry for q-tag correlation
-        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
-
         return event.id;
     }
 
