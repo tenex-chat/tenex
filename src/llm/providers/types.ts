@@ -109,7 +109,7 @@ export interface ProviderRuntimeContext {
     /** Whether TENEX tools should be enabled */
     enableTenexTools?: boolean;
     /** Reasoning effort level (for codex-app-server) */
-    reasoningEffort?: "none" | "low" | "medium" | "high";
+    reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
 }
 
 /**

@@ -127,7 +127,8 @@ export class CodexAppServerProvider extends AgentProvider {
             mcpServers: mcpServersConfig,
             approvalMode: "on-failure",
             sandboxMode: "workspace-write",
-            reasoningEffort: context.reasoningEffort,
+            // Cast needed: package types don't include 'xhigh' but API supports it
+            reasoningEffort: context.reasoningEffort as CodexAppServerSettings["reasoningEffort"],
             verbose: false,
             logger: {
                 warn: (message: string) => logger.warn("[CodexAppServer]", message),

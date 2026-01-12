@@ -149,7 +149,7 @@ export class LLMServiceFactory {
             workingDirectory: context?.workingDirectory,
             mcpConfig: context?.mcpConfig,
             enableTenexTools: this.enableTenexTools,
-            reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" }).reasoningEffort,
+            reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" }).reasoningEffort,
         };
 
         // Get the provider from the registry
