@@ -891,15 +891,6 @@ export class AgentExecutor {
             sessionId,
             workingDirectory: context.workingDirectory,
             conversationId: context.conversationId,
-            // Register Query object for mid-stream message injection (Claude Code only)
-            onQueryCreated: (query) => {
-                ralRegistry.registerQuery(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber,
-                    query as import("ai-sdk-provider-claude-code").Query
-                );
-            },
         });
 
         const messageCompiler = new MessageCompiler(

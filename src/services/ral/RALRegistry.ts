@@ -1,7 +1,6 @@
 import { trace } from "@opentelemetry/api";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
-import type { Query } from "ai-sdk-provider-claude-code";
 import type {
   RALRegistryEntry,
   PendingDelegation,
@@ -40,9 +39,6 @@ export class RALRegistry {
 
   /** Abort controllers keyed by "key:ralNumber" */
   private abortControllers: Map<string, AbortController> = new Map();
-
-  /** Query objects keyed by "key:ralNumber" - for Claude Code mid-stream injection via streamInput() */
-  private queryObjects: Map<string, Query> = new Map();
 
   /** Delegations keyed by "agentPubkey:conversationId" - persists beyond RAL lifetime */
   private conversationDelegations: Map<string, {
@@ -541,35 +537,6 @@ export class RALRegistry {
     this.abortControllers.set(this.makeAbortKey(key, ralNumber), controller);
   }
 
-  /**
-   * Register a Query object for a specific RAL.
-   * Used for Claude Code agents to enable mid-stream message injection via query.streamInput().
-   */
-  registerQuery(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number,
-    query: Query
-  ): void {
-    const key = this.makeKey(agentPubkey, conversationId);
-    this.queryObjects.set(this.makeAbortKey(key, ralNumber), query);
-    trace.getActiveSpan()?.addEvent("ral.query_registered", {
-      "ral.number": ralNumber,
-    });
-  }
-
-  /**
-   * Get the Query object for a specific RAL.
-   * Returns undefined if no Query is registered (non-Claude-Code providers).
-   */
-  getQuery(
-    agentPubkey: string,
-    conversationId: string,
-    ralNumber: number
-  ): Query | undefined {
-    const key = this.makeKey(agentPubkey, conversationId);
-    return this.queryObjects.get(this.makeAbortKey(key, ralNumber));
-  }
 
   /**
    * Clear a specific RAL.
@@ -590,7 +557,6 @@ export class RALRegistry {
     rals.delete(ralNumber);
     const abortKey = this.makeAbortKey(key, ralNumber);
     this.abortControllers.delete(abortKey);
-    this.queryObjects.delete(abortKey);
 
     // Clean up empty conversation entries
     if (rals.size === 0) {
@@ -876,7 +842,6 @@ export class RALRegistry {
     this.delegationToRal.clear();
     this.ralIdToLocation.clear();
     this.abortControllers.clear();
-    this.queryObjects.clear();
     this.conversationDelegations.clear();
   }
 }
