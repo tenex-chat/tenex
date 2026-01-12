@@ -15,7 +15,7 @@ import { logger } from "../utils/logger";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
-import { AgentRouter } from "./AgentRouter";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
 
 const IGNORED_EVENT_KINDS = [

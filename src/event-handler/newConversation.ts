@@ -11,7 +11,7 @@ import { TagExtractor } from "../nostr/TagExtractor";
 import { getProjectContext } from "@/services/projects";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
-import { AgentRouter } from "./AgentRouter";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 
 /**
  * Fetch a kind 30023 (NDKArticle) from an a-tag reference.

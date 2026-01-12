@@ -195,6 +195,36 @@ describe("ConversationStore", () => {
             expect(messages[0].role).toBe("user");
         });
 
+        it("should keep only the latest delegation completion injection per RAL", async () => {
+            const ral = store.createRal(AGENT1_PUBKEY);
+
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                ral,
+                content: "# DELEGATION COMPLETED\n\nfirst update",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PUBKEY],
+            });
+
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                ral,
+                content: "# DELEGATION COMPLETED\n\nsecond update",
+                messageType: "text",
+                targetedPubkeys: [AGENT1_PUBKEY],
+            });
+
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const completionMessages = messages.filter(
+                (message) =>
+                    typeof message.content === "string" &&
+                    message.content.includes("# DELEGATION COMPLETED")
+            );
+
+            expect(completionMessages).toHaveLength(1);
+            expect(completionMessages[0].content).toContain("second update");
+        });
+
         it("should include all messages from same agent completed RALs", async () => {
             // RAL 1 - completed
             store.createRal(AGENT1_PUBKEY);

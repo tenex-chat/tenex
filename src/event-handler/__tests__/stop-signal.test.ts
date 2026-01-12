@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
-import { AgentRouter } from "../AgentRouter";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import type { ProjectContext } from "@/services/projects";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
