@@ -20,6 +20,7 @@ import {
     type LessonIntent,
     type ToolUseIntent,
 } from "./AgentEventEncoder";
+import { PendingDelegationsRegistry } from "@/services/ral";
 
 /**
  * Configuration for delegation events.
@@ -277,6 +278,9 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "delegation", parentContext);
 
+        // Register with PendingDelegationsRegistry for q-tag correlation
+        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
+
         return event.id;
     }
 
@@ -362,6 +366,9 @@ export class AgentPublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "ask", parentContext);
 
+        // Register with PendingDelegationsRegistry for q-tag correlation
+        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
+
         return event.id;
     }
 
@@ -404,6 +411,9 @@ export class AgentPublisher {
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "followup", parentContext);
+
+        // Register with PendingDelegationsRegistry for q-tag correlation
+        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
 
         return event.id;
     }
