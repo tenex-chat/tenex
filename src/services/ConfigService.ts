@@ -275,6 +275,8 @@ export class ConfigService {
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Callback invoked when Query object is created (Claude Code only) */
+            onQueryCreated?: (query: unknown) => void;
         }
     ): LLMService {
         const llmConfig = this.getLLMConfig(configName);

@@ -2,6 +2,12 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import { logger } from "@/utils/logger";
 import { EventEmitter } from "tseep";
 
+/**
+ * Constant used as the abort reason when aborting for mid-execution injection.
+ * Allows AgentExecutor to distinguish injection aborts from user-initiated stops.
+ */
+export const INJECTION_ABORT_REASON = "INJECTION_ABORT";
+
 // Store essential operation metadata
 export interface LLMOperation {
     id: string;
@@ -142,6 +148,35 @@ export class LLMOperationsRegistry {
         }
 
         return stopped;
+    }
+
+    /**
+     * Stop operations for a specific agent in a conversation.
+     * Used to abort streaming execution when mid-stream injection arrives.
+     *
+     * @param agentPubkey - The agent's public key
+     * @param conversationId - The conversation (root event) ID
+     * @param reason - Reason for the abort (passed to AbortController)
+     * @returns Whether an operation was aborted
+     */
+    stopByAgentAndConversation(agentPubkey: string, conversationId: string, reason?: string): boolean {
+        for (const operation of this.operations.values()) {
+            if (
+                operation.agentPubkey === agentPubkey &&
+                operation.conversationId === conversationId &&
+                !operation.abortController.signal.aborted
+            ) {
+                operation.abortController.abort(reason);
+                logger.info("[LLMOpsRegistry] Stopped operation for injection", {
+                    operationId: operation.id.substring(0, 8),
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    conversationId: conversationId.substring(0, 8),
+                    reason,
+                });
+                return true;
+            }
+        }
+        return false;
     }
 
     getActiveOperationsCount(): number {

@@ -127,6 +127,8 @@ export class LLMServiceFactory {
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Callback invoked when Query object is created (Claude Code only) */
+            onQueryCreated?: (query: unknown) => void;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -149,6 +151,7 @@ export class LLMServiceFactory {
             workingDirectory: context?.workingDirectory,
             mcpConfig: context?.mcpConfig,
             enableTenexTools: this.enableTenexTools,
+            onQueryCreated: context?.onQueryCreated,
         };
 
         // Get the provider from the registry
