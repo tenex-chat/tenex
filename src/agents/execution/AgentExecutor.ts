@@ -579,9 +579,14 @@ export class AgentExecutor {
 
         const completionEvent = result.event;
 
-        // Determine if we should wait for more delegations
-        // Use context.hasPendingDelegations (captured at completion time) for delegation completions
-        // This avoids race conditions where pendingDelegations array is modified by concurrent completions
+        // Determine if we should wait for more delegations.
+        // We intentionally keep a snapshot of "started with pending delegations" for delegation
+        // completion runs. That snapshot is stable across concurrent completions, and prevents
+        // a race where another delegation finishes mid-run and temporarily empties the shared
+        // pending list, which would incorrectly trigger a completion publish.
+        // HOWEVER, we must also honor delegations created *during* this run (e.g., ask/delegate),
+        // or we'll incorrectly publish a completion even though we've just spawned new work.
+        // The rule: wait if we started with pending delegations OR there are currently any.
         const ralRegistry = RALRegistry.getInstance();
 
         // Get pending delegations from conversation storage
@@ -591,11 +596,12 @@ export class AgentExecutor {
             ralNumber
         );
 
-        // For non-delegation-completion executions, check current pending count
-        // For delegation completions, use the flag captured at completion time
-        const hasPendingDelegations = context.isDelegationCompletion
-            ? context.hasPendingDelegations
-            : currentPendingDelegations.length > 0;
+        // For non-delegation-completion executions, this reduces to "current pending > 0".
+        // For delegation-completion executions, we combine the snapshot with the live list.
+        const startedWithPendingDelegations = Boolean(
+            context.isDelegationCompletion && context.hasPendingDelegations
+        );
+        const hasPendingDelegations = startedWithPendingDelegations || currentPendingDelegations.length > 0;
 
         // If agent generated no meaningful response and we're waiting for delegations, don't publish anything
         // This handles the case where the agent only called delegate() without outputting any text
@@ -1394,13 +1400,20 @@ export class AgentExecutor {
             context.conversationId,
             ralNumber
         );
+        const startedWithPendingDelegations = Boolean(
+            context.isDelegationCompletion && context.hasPendingDelegations
+        );
 
-        if (finalPendingDelegations.length === 0) {
+        if (finalPendingDelegations.length === 0 && !startedWithPendingDelegations) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
 
             // Complete RAL in ConversationStore and persist
             conversationStore.completeRal(context.agent.pubkey, ralNumber);
             await conversationStore.save();
+        } else if (finalPendingDelegations.length === 0 && startedWithPendingDelegations) {
+            trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
+                "ral.number": ralNumber,
+            });
         }
 
         if (!result) {
