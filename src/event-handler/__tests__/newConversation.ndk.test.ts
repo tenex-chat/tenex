@@ -2,7 +2,7 @@
  * Integration tests for handleNewConversation using NDK test utilities
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import {
     TENEXTestFixture,
     type TestUserName,
@@ -104,10 +104,6 @@ describe("handleNewConversation with NDK utilities", () => {
                 }
             },
         }));
-    });
-
-    afterEach(() => {
-        mock.restore();
     });
 
     describe("with properly signed events", () => {

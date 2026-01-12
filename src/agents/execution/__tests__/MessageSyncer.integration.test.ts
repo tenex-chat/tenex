@@ -13,7 +13,7 @@
  * Run with: bun test src/agents/execution/__tests__/MessageSyncer.integration.test.ts
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 import { mkdirSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -26,6 +26,7 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
+import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { config } from "@/services/ConfigService";
 import { AgentMetadataStore } from "@/services/agents/AgentMetadataStore";
 import { ProjectContext, projectContextStore } from "@/services/projects";
@@ -33,7 +34,10 @@ import { RALRegistry } from "@/services/ral";
 import { initializeGitRepository } from "@/utils/git";
 import { initNDK, shutdownNDK } from "@/nostr/ndkClient";
 
-describe("MessageSyncer E2E - Tool Error Handling", () => {
+const describeIntegration =
+    process.env.TENEX_E2E_REAL_LLM === "true" ? describe : describe.skip;
+
+describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
     const testDir = join(tmpdir(), `tenex-e2e-${Date.now()}`);
     const projectPath = join(testDir, "project");
     const metadataPath = join(testDir, "metadata");
@@ -43,6 +47,9 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
     let agentSigner: NDKPrivateKeySigner;
     let userSigner: NDKPrivateKeySigner;
     let ndk: NDK;
+    let testAgent: AgentInstance;
+    let agentPubkey: string;
+    let defaultLlm = "anthropic:claude-sonnet-4-20250514";
 
     beforeAll(async () => {
         // Create test directories
@@ -52,8 +59,20 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
         // Initialize git repo
         await initializeGitRepository(projectPath);
 
-        // Load real config from ~/.tenex/
-        await config.loadConfig();
+        // Load real config from ~/.tenex/ when available
+        const hasConfigService =
+            typeof config.loadConfig === "function" &&
+            typeof config.getConfig === "function" &&
+            typeof config.createLLMService === "function";
+
+        if (hasConfigService) {
+            const loadedConfig = await config.loadConfig();
+            const availableProviders = llmServiceFactory.getAvailableProviders();
+            if (availableProviders.length === 0) {
+                throw new Error("No available LLM providers for TENEX_E2E_REAL_LLM run.");
+            }
+            defaultLlm = loadedConfig.llms.default || defaultLlm;
+        }
 
         // Initialize NDK for nostr event publishing
         await initNDK();
@@ -63,7 +82,7 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
         userSigner = NDKPrivateKeySigner.generate();
         ndk = new NDK();
 
-        const agentPubkey = (await agentSigner.user()).pubkey;
+        agentPubkey = (await agentSigner.user()).pubkey;
 
         // Create a minimal project event
         const projectEvent = new NDKEvent(ndk);
@@ -78,12 +97,8 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
         // Create agent registry with a test agent that uses configured LLM
         const agentRegistry = new AgentRegistry(projectPath, metadataPath);
 
-        // Get the default LLM config from loaded config
-        const llmConfigs = config.getConfig().llms;
-        const defaultLlm = llmConfigs?.default || "anthropic:claude-sonnet-4-20250514";
-
         // Create a proper AgentInstance
-        const testAgent: AgentInstance = {
+        testAgent = {
             name: "test-agent",
             slug: "test",
             pubkey: agentPubkey,
@@ -95,14 +110,13 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
             createMetadataStore: (conversationId: string) => {
                 return new AgentMetadataStore(conversationId, "test", metadataPath);
             },
-            createLLMService: (options) => {
-                return config.createLLMService(defaultLlm, {
+            createLLMService: (options) =>
+                config.createLLMService(defaultLlm, {
                     tools: options?.tools ?? {},
                     agentName: "test-agent",
                     sessionId: options?.sessionId,
                     workingDirectory: options?.workingDirectory ?? projectPath,
-                });
-            },
+                }),
             sign: async (event: NDKEvent) => {
                 await event.sign(agentSigner, { pTags: false });
             },
@@ -131,6 +145,12 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
         await shutdownNDK();
         if (existsSync(testDir)) {
             rmSync(testDir, { recursive: true, force: true });
+        }
+    });
+
+    beforeEach(() => {
+        if (agentPubkey) {
+            ConversationStore.initialize(metadataPath, [agentPubkey]);
         }
     });
 
@@ -163,7 +183,7 @@ describe("MessageSyncer E2E - Tool Error Handling", () => {
         // Create execution context
         const context = await projectContextStore.run(projectContext, async () => {
             return await createExecutionContext({
-                agent: projectContext.agents.get("test")!,
+                agent: testAgent,
                 conversationId,
                 projectBasePath: projectPath,
                 triggeringEvent: event,

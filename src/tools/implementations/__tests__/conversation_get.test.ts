@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
+import { config } from "@/services/ConfigService";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -17,19 +18,6 @@ mock.module("@/services/PubkeyService", () => ({
     getPubkeyService: () => ({
         getNameSync: (pk: string) => pk.slice(0, 8),
     }),
-}));
-
-// Mock config
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        loadConfig: mock(() => Promise.resolve({
-            llms: {
-                default: null,
-                summarization: null,
-                configurations: {},
-            },
-        })),
-    },
 }));
 
 // Mock llmServiceFactory
@@ -67,32 +55,22 @@ const mockGetConversation = mock(() => mockConversationData ? {
     getAllMessages: mockGetAllMessages,
     getMessageCount: mockGetMessageCount,
 } : null);
-
-mock.module("@/conversations/ConversationStore", () => ({
-    ConversationStore: {
-        get: mock((id: string) => {
-            if (mockConversationData?.id === id) {
-                return {
-                    id: mockConversationData.id,
-                    title: mockConversationData.title,
-                    metadata: mockConversationData.metadata,
-                    executionTime: mockConversationData.executionTime,
-                    getAllMessages: mockGetAllMessages,
-                    getMessageCount: mockGetMessageCount,
-                };
-            }
-            return null;
-        }),
-    },
-}));
-
 import { createConversationGetTool } from "../conversation_get";
 
 describe("conversation_get Tool", () => {
     let mockContext: ToolExecutionContext;
     let mockAgent: AgentInstance;
+    let loadConfigSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        loadConfigSpy = spyOn(config, "loadConfig").mockResolvedValue({
+            llms: {
+                default: null,
+                summarization: null,
+                configurations: {},
+            },
+        });
+
         mockAgent = {
             name: "test-agent",
             pubkey: "mock-agent-pubkey",
@@ -106,6 +84,10 @@ describe("conversation_get Tool", () => {
 
         // Reset conversation data
         mockConversationData = null;
+    });
+
+    afterEach(() => {
+        loadConfigSpy.mockRestore();
     });
 
     describe("Tool Results Filtering", () => {
@@ -516,6 +498,7 @@ describe("conversation_get Tool", () => {
         it("should return error when conversation not found", async () => {
             mockConversationData = null;
             mockGetConversation.mockReturnValue(null);
+            mockContext.conversationId = "non-existent";
 
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({ conversationId: "non-existent" });
