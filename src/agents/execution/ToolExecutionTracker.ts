@@ -328,19 +328,15 @@ export class ToolExecutionTracker {
             let referencedEventIds: string[] = [];
             let referencedAddressableEvents: string[] = [];
 
-            if (isDelegateToolName(execution.toolName)) {
-                // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
-                const conversationId = execution.eventContext?.conversationId;
-                if (conversationId) {
+            const conversationId = execution.eventContext?.conversationId;
+            if (conversationId) {
+                if (isDelegateToolName(execution.toolName)) {
+                    // Consume delegation event IDs from registry (registered in AgentPublisher.ask/delegate)
                     referencedEventIds = PendingDelegationsRegistry.consume(agentPubkey, conversationId);
+                } else if (isAddressableEventTool(execution.toolName)) {
+                    // Consume addressable event references from registry (registered in report_write tool)
+                    referencedAddressableEvents = PendingDelegationsRegistry.consumeAddressable(agentPubkey, conversationId);
                 }
-            } else if (isAddressableEventTool(execution.toolName)) {
-                // Extract addressable event references from result.referencedAddressableEvents
-                // Format: "30023:pubkey:d-tag" for NDKArticle
-                // For MCP-wrapped tools, check _tenexOriginalResult first
-                const effectiveResult = (result as { _tenexOriginalResult?: unknown })?._tenexOriginalResult ?? result;
-                const addressableRefs = (effectiveResult as { referencedAddressableEvents?: string[] })?.referencedAddressableEvents;
-                referencedAddressableEvents = addressableRefs?.filter((ref): ref is string => !!ref) ?? [];
             }
 
             // Publish the delayed tool use event with references

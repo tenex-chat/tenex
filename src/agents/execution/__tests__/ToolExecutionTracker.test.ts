@@ -855,7 +855,14 @@ describe("ToolExecutionTracker", () => {
                 eventContext: mockEventContext,
             });
 
-            // Simulate result with referencedAddressableEvents from report_write tool
+            // Register with PendingDelegationsRegistry (simulates what report_write tool does)
+            PendingDelegationsRegistry.registerAddressable(
+                "agent-pubkey-123",
+                mockEventContext.conversationId,
+                "30023:agent-pubkey-123:test-report"
+            );
+
+            // Simulate result from report_write tool
             const reportWriteResult = {
                 success: true,
                 articleId: "nostr:naddr1...",
@@ -871,7 +878,7 @@ describe("ToolExecutionTracker", () => {
                 agentPubkey: "agent-pubkey-123",
             });
 
-            // Should have published with referencedAddressableEvents
+            // Should have published with referencedAddressableEvents from registry
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 expect.objectContaining({
                     toolName: "report_write",
@@ -920,6 +927,9 @@ describe("ToolExecutionTracker", () => {
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
+
+            // Register with PendingDelegationsRegistry (simulates what report_write tool does)
+            PendingDelegationsRegistry.registerAddressable("agent-pubkey", mockEventContext.conversationId, "30023:pubkey:test");
 
             const reportWriteResult = {
                 success: true,
@@ -976,13 +986,13 @@ describe("ToolExecutionTracker", () => {
                 eventContext: mockEventContext,
             });
 
-            const reportResult = {
-                success: true,
-                articleId: "nostr:naddr1...",
-                slug: "test",
-                message: "Published",
-                referencedAddressableEvents: ["30023:agent-pubkey:test"],
-            };
+            // Register with PendingDelegationsRegistry (simulates what report_write tool does)
+            // This is the key fix: MCP result transformation strips referencedAddressableEvents,
+            // but we now get them from the registry which was populated at publish time
+            PendingDelegationsRegistry.registerAddressable("agent-pubkey", mockEventContext.conversationId, "30023:agent-pubkey:test");
+
+            // Simulate MCP-transformed result (Claude Code SDK strips custom properties)
+            const reportResult = [{ type: "text", text: "Report published" }];
 
             await tracker.completeExecution({
                 toolCallId: "mcp-report-complete",
