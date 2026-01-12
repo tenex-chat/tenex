@@ -11,6 +11,7 @@ import { config } from "@/services/ConfigService";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext, type ProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
+import type { RALRegistryEntry } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
@@ -513,62 +514,13 @@ export class AgentDispatchService {
                     "ral.number": activeRal?.ralNumber ?? 0,
                 });
 
-                if (activeRal && activeRal.isStreaming) {
-                    ralRegistry.queueUserMessage(
-                        targetAgent.pubkey,
-                        conversationId,
-                        activeRal.ralNumber,
-                        event.content
-                    );
-
-                    const aborted = llmOpsRegistry.stopByAgentAndConversation(
-                        targetAgent.pubkey,
-                        conversationId,
-                        INJECTION_ABORT_REASON
-                    );
-
-                    if (aborted) {
-                        trace.getActiveSpan()?.addEvent("reply.aborted_for_injection", {
-                            "agent.slug": targetAgent.slug,
-                            "ral.number": activeRal.ralNumber,
-                            "message.length": event.content.length,
-                        });
-                        logger.info("[reply] Aborted streaming execution for injection", {
-                            agent: targetAgent.slug,
-                            ralNumber: activeRal.ralNumber,
-                            injectionLength: event.content.length,
-                        });
-                        agentSpan.addEvent("dispatch.injection_stream_abort", {
-                            "message.length": event.content.length,
-                        });
-                    } else {
-                        trace.getActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
-                            "agent.slug": targetAgent.slug,
-                            "ral.number": activeRal.ralNumber,
-                            "message.length": event.content.length,
-                        });
-                        agentSpan.addEvent("dispatch.injection_stream_queue_only", {
-                            "message.length": event.content.length,
-                        });
-                    }
-                }
-
-                if (activeRal && !activeRal.isStreaming) {
-                    ralRegistry.queueUserMessage(
-                        targetAgent.pubkey,
-                        conversationId,
-                        activeRal.ralNumber,
-                        event.content
-                    );
-                    trace.getActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
-                        "agent.slug": targetAgent.slug,
-                        "ral.number": activeRal.ralNumber,
-                        "message.length": event.content.length,
-                    });
-                    agentSpan.addEvent("dispatch.injection_resumption", {
-                        "message.length": event.content.length,
-                    });
-                }
+                this.handleDeliveryInjection({
+                    activeRal,
+                    agent: targetAgent,
+                    conversationId,
+                    message: event.content,
+                    agentSpan,
+                });
 
                 let triggeringEventForContext = event;
                 const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
@@ -612,5 +564,78 @@ export class AgentDispatchService {
         });
 
         await Promise.all(executionPromises);
+    }
+
+    private handleDeliveryInjection(params: {
+        activeRal: RALRegistryEntry | undefined;
+        agent: AgentInstance;
+        conversationId: string;
+        message: string;
+        agentSpan: ReturnType<typeof tracer.startSpan>;
+    }): void {
+        const {
+            activeRal,
+            agent,
+            conversationId,
+            message,
+            agentSpan,
+        } = params;
+
+        if (!activeRal) {
+            return;
+        }
+
+        const ralRegistry = RALRegistry.getInstance();
+        const messageLength = message.length;
+
+        ralRegistry.queueUserMessage(
+            agent.pubkey,
+            conversationId,
+            activeRal.ralNumber,
+            message
+        );
+
+        if (activeRal.isStreaming) {
+            const aborted = llmOpsRegistry.stopByAgentAndConversation(
+                agent.pubkey,
+                conversationId,
+                INJECTION_ABORT_REASON
+            );
+
+            if (aborted) {
+                trace.getActiveSpan()?.addEvent("reply.aborted_for_injection", {
+                    "agent.slug": agent.slug,
+                    "ral.number": activeRal.ralNumber,
+                    "message.length": messageLength,
+                });
+                logger.info("[reply] Aborted streaming execution for injection", {
+                    agent: agent.slug,
+                    ralNumber: activeRal.ralNumber,
+                    injectionLength: messageLength,
+                });
+                agentSpan.addEvent("dispatch.injection_stream_abort", {
+                    "message.length": messageLength,
+                });
+            } else {
+                trace.getActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
+                    "agent.slug": agent.slug,
+                    "ral.number": activeRal.ralNumber,
+                    "message.length": messageLength,
+                });
+                agentSpan.addEvent("dispatch.injection_stream_queue_only", {
+                    "message.length": messageLength,
+                });
+            }
+            return;
+        }
+
+        trace.getActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
+            "agent.slug": agent.slug,
+            "ral.number": activeRal.ralNumber,
+            "message.length": messageLength,
+        });
+        agentSpan.addEvent("dispatch.injection_resumption", {
+            "message.length": messageLength,
+        });
     }
 }
