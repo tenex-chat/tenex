@@ -1099,6 +1099,10 @@ export class ConversationStore {
         // Only store kind:1 (text) events in conversations
         if (event.kind !== 1) return;
 
+        // Skip tool announcement events (e.g., "Executing: ls -la", "Reading /path/to/file")
+        // These are redundant since tool calls/results are stored directly via ToolMessageStorage
+        if (event.tagValue("tool")) return;
+
         // Skip if already added
         if (this.hasEventId(event.id)) return;
 
