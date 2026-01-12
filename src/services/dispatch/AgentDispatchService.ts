@@ -18,6 +18,7 @@ import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
 
 const tracer = trace.getTracer("tenex.dispatch");
+// Coalesce back-to-back delegation completions so we resume once with a stable snapshot.
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
 
 interface DispatchContext {
