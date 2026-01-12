@@ -10,6 +10,7 @@ import { AgentEventDecoder } from "../nostr/AgentEventDecoder";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "../services/ral";
+import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "../utils/logger";
 import { AgentRouter } from "./AgentRouter";
@@ -295,7 +296,56 @@ async function handleReplyLogic(
 
         // Check if we should inject into an active execution instead of starting a new one
         if (activeRal && activeRal.isStreaming) {
-            // RAL is actively streaming - inject message for next prepareStep
+            // RAL is actively streaming - try to inject message directly via Query.streamInput()
+            // This is the preferred method for Claude Code agents as it doesn't require aborting
+            const query = ralRegistry.getQuery(
+                targetAgent.pubkey,
+                conversation.id,
+                activeRal.ralNumber
+            );
+
+            if (query) {
+                // Claude Code agent - use streamInput() for true mid-stream injection
+                // This injects the message into the active stream without aborting
+                try {
+                    // Create async iterable that yields the user message
+                    const messageStream = (async function* () {
+                        yield {
+                            type: "user" as const,
+                            message: {
+                                role: "user" as const,
+                                content: event.content,
+                            },
+                            parent_tool_use_id: null,
+                            session_id: "", // SDK will use the current session
+                        };
+                    })();
+
+                    await query.streamInput(messageStream);
+
+                    trace.getActiveSpan()?.addEvent("reply.stream_input_injected", {
+                        "agent.slug": targetAgent.slug,
+                        "ral.number": activeRal.ralNumber,
+                        "message.length": event.content.length,
+                    });
+                    logger.info("[reply] Injected message via streamInput", {
+                        agent: targetAgent.slug,
+                        ralNumber: activeRal.ralNumber,
+                        injectionLength: event.content.length,
+                    });
+
+                    // Successfully injected - don't spawn a new execution
+                    return;
+                } catch (streamInputError) {
+                    // streamInput() failed - fall back to queue + abort approach
+                    logger.warn("[reply] streamInput failed, falling back to abort", {
+                        agent: targetAgent.slug,
+                        error: formatAnyError(streamInputError),
+                    });
+                }
+            }
+
+            // Non-Claude-Code agent OR streamInput() failed - use queue + abort fallback
             ralRegistry.queueUserMessage(
                 targetAgent.pubkey,
                 conversation.id,
@@ -303,12 +353,35 @@ async function handleReplyLogic(
                 event.content
             );
 
-            trace.getActiveSpan()?.addEvent("reply.message_injected", {
-                "agent.slug": targetAgent.slug,
-                "ral.number": activeRal.ralNumber,
-                "message.length": event.content.length,
-            });
-            return; // Don't spawn new execution - active one will process on next step
+            // Abort the current stream via LLMOperationsRegistry (which owns the abort controller)
+            // Pass INJECTION_ABORT_REASON so AgentExecutor knows not to publish "stopped" message
+            const aborted = llmOpsRegistry.stopByAgentAndConversation(
+                targetAgent.pubkey,
+                conversation.id,
+                INJECTION_ABORT_REASON
+            );
+
+            if (aborted) {
+                trace.getActiveSpan()?.addEvent("reply.aborted_for_injection", {
+                    "agent.slug": targetAgent.slug,
+                    "ral.number": activeRal.ralNumber,
+                    "message.length": event.content.length,
+                });
+                logger.info("[reply] Aborted streaming execution for injection", {
+                    agent: targetAgent.slug,
+                    ralNumber: activeRal.ralNumber,
+                    injectionLength: event.content.length,
+                });
+            } else {
+                trace.getActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
+                    "agent.slug": targetAgent.slug,
+                    "ral.number": activeRal.ralNumber,
+                    "message.length": event.content.length,
+                });
+            }
+
+            // Don't return - fall through to spawn a new execution that will pick up
+            // the injection from the queue. The aborted execution will silently terminate.
         }
 
         // RAL either doesn't exist or isn't streaming (waiting for delegation).
