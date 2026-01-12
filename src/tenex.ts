@@ -11,6 +11,7 @@ import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
 import { setupCommand } from "./commands/setup/index";
 import { createVCRCommand } from "./commands/vcr/index";
+import { createMCPCommand } from "./commands/mcp/index";
 import { initNDK } from "./nostr/ndkClient";
 
 const program = new Command();
@@ -22,6 +23,7 @@ program.addCommand(agentCommand);
 program.addCommand(daemonCommand);
 program.addCommand(setupCommand);
 program.addCommand(createVCRCommand());
+program.addCommand(createMCPCommand());
 
 // Initialize NDK before parsing commands
 export async function main(): Promise<void> {
