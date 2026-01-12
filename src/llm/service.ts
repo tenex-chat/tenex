@@ -772,6 +772,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     message: finalMessage,
                     steps: e.steps,
                     usage: {
+                        // Include model ID so downstream EventContext uses the actual model,
+                        // not the config name fallback (prevents mismatched llm-model tags).
+                        model: this.model,
                         inputTokens,
                         outputTokens,
                         totalTokens,
