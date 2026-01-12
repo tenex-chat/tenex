@@ -9,6 +9,7 @@ import { conversationalLogger } from "../conversational-logger";
 import type { MockLLMConfig, MockLLMResponse } from "./types";
 
 export class MockLLMService implements LLMService {
+    public provider = "mock";
     private config: MockLLMConfig;
     private responses: MockLLMResponse[] = [];
     private requestHistory: Array<{

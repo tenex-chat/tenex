@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "../AgentPublisher";
 import { getNDK } from "../ndkClient";
+import { config } from "@/services/ConfigService";
 
 // Mock the NDK client
 mock.module("../ndkClient", () => ({
@@ -28,15 +29,6 @@ mock.module("@/services/AgentsRegistryService", () => ({
     },
 }));
 
-// Mock ConfigService
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mock(() => ({})),
-        getWhitelistedPubkeys: mock(() => []),
-        ensureBackendPrivateKey: mock(() => Promise.resolve("a".repeat(64))),
-    },
-}));
-
 // Mock agentStorage
 mock.module("@/agents/AgentStorage", () => ({
     agentStorage: {
@@ -48,6 +40,11 @@ mock.module("@/agents/AgentStorage", () => ({
 describe("AgentPublisher - Agent Metadata in Kind:0", () => {
     let mockPublish: any;
     let mockSign: any;
+    let publishSpy: ReturnType<typeof spyOn>;
+    let signSpy: ReturnType<typeof spyOn>;
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
+    let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
     let capturedEvents: NDKEvent[] = [];
 
     beforeEach(() => {
@@ -57,12 +54,24 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
         mockPublish = mock();
         mockSign = mock();
 
-        spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
+        publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
             capturedEvents.push(this);
             return mockPublish();
         });
 
-        spyOn(NDKEvent.prototype, "sign").mockImplementation(mockSign);
+        signSpy = spyOn(NDKEvent.prototype, "sign").mockImplementation(mockSign);
+
+        getConfigSpy = spyOn(config, "getConfig").mockReturnValue({});
+        getWhitelistedPubkeysSpy = spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
+        ensureBackendPrivateKeySpy = spyOn(config, "ensureBackendPrivateKey").mockResolvedValue("a".repeat(64));
+    });
+
+    afterEach(() => {
+        publishSpy.mockRestore();
+        signSpy.mockRestore();
+        getConfigSpy.mockRestore();
+        getWhitelistedPubkeysSpy.mockRestore();
+        ensureBackendPrivateKeySpy.mockRestore();
     });
 
     // Helper to get the kind:0 event from captured events

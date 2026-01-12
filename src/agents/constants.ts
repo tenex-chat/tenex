@@ -22,6 +22,7 @@ export const DELEGATE_TOOLS: ToolName[] = [
     "ask",
     "delegate",
     "delegate_crossproject",
+    "delegate_followup",
 ] as const;
 
 

@@ -1,7 +1,12 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
+import * as executionContextFactoryModule from "@/agents/execution/ExecutionContextFactory";
+import * as delegationCompletionHandlerModule from "@/services/dispatch/DelegationCompletionHandler";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
+import { config } from "@/services/ConfigService";
+import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
+import { createWorktree, listWorktrees } from "@/utils/git/worktree";
 
 // Mock dependencies
 const loggerMocks = {
@@ -60,11 +65,6 @@ mock.module("@/conversations/services/ConversationResolver", () => ({
 // because it pollutes other tests. Instead, we use spyOn for specific methods
 // or work with the real implementation.
 
-// Mock DelegationCompletionHandler
-mock.module("@/services/dispatch/DelegationCompletionHandler", () => ({
-    handleDelegationCompletion: mock(() => Promise.resolve({})),
-}));
-
 // Mock AgentRouter
 mock.module("@/services/dispatch/AgentRouter", () => ({
     AgentRouter: {
@@ -105,25 +105,58 @@ mock.module("@/conversations/services/ConversationSummarizer", () => ({
     },
 }));
 
-// Mock createExecutionContext
-mock.module("@/agents/execution/ExecutionContextFactory", () => ({
-    createExecutionContext: mock(() => Promise.resolve({})),
-}));
-
 // Mock ConfigService
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mock(() => ({
-            whitelistedPubkeys: [],
-        })),
-    },
-}));
+const createExecutionContextMock = async (params: any) => {
+    const branchTag = params.triggeringEvent?.tags?.find((tag: string[]) => tag[0] === "branch")?.[1];
+    let workingDirectory = params.projectBasePath;
+    let currentBranch = "master";
+
+    try {
+        if (branchTag) {
+            const worktrees = await listWorktrees(params.projectBasePath);
+            const matchingWorktree = worktrees.find((wt) => wt.branch === branchTag);
+
+            if (matchingWorktree) {
+                workingDirectory = matchingWorktree.path;
+                currentBranch = branchTag;
+            } else {
+                const baseBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+                workingDirectory = await createWorktree(params.projectBasePath, branchTag, baseBranch);
+                currentBranch = branchTag;
+            }
+        } else {
+            currentBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+        }
+    } catch {
+        workingDirectory = params.projectBasePath;
+    }
+
+    return {
+        agent: params.agent,
+        conversationId: params.conversationId,
+        projectBasePath: params.projectBasePath,
+        workingDirectory,
+        currentBranch,
+        triggeringEvent: params.triggeringEvent,
+        agentPublisher: params.agentPublisher,
+        isDelegationCompletion: params.isDelegationCompletion,
+        hasPendingDelegations: params.hasPendingDelegations,
+        debug: params.debug,
+        alphaMode: false,
+        mcpManager: params.mcpManager,
+        getConversation: () => undefined,
+    };
+};
 
 describe("Delegation Event Filtering Bug", () => {
     let handleChatMessage: typeof import("../reply").handleChatMessage;
     let ConversationStore: typeof import("@/conversations/ConversationStore").ConversationStore;
     let mockAgentExecutor: AgentExecutor;
     let mockProjectContext: any;
+    let addEventSpy: ReturnType<typeof spyOn>;
+    let createExecutionContextSpy: ReturnType<typeof spyOn>;
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let handleDelegationCompletionSpy: ReturnType<typeof spyOn>;
 
     beforeEach(async () => {
         if (!handleChatMessage) {
@@ -135,7 +168,14 @@ describe("Delegation Event Filtering Bug", () => {
         // Initialize ConversationStore to avoid "must be called before getOrLoad" errors
         ConversationStore.initialize("/tmp/test-metadata");
         // Mock addEvent to avoid actual file I/O
-        spyOn(ConversationStore, "addEvent").mockResolvedValue(undefined);
+        addEventSpy = spyOn(ConversationStore, "addEvent").mockResolvedValue(undefined);
+        createExecutionContextSpy = spyOn(executionContextFactoryModule, "createExecutionContext")
+            .mockImplementation(createExecutionContextMock);
+        getConfigSpy = spyOn(config, "getConfig").mockReturnValue({
+            whitelistedPubkeys: [],
+        });
+        handleDelegationCompletionSpy = spyOn(delegationCompletionHandlerModule, "handleDelegationCompletion")
+            .mockResolvedValue({ recorded: false });
 
         // Create mock agent executor
         mockAgentExecutor = {
@@ -181,6 +221,13 @@ describe("Delegation Event Filtering Bug", () => {
                 tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
             },
         };
+    });
+
+    afterEach(() => {
+        addEventSpy?.mockRestore();
+        createExecutionContextSpy?.mockRestore();
+        getConfigSpy?.mockRestore();
+        handleDelegationCompletionSpy?.mockRestore();
     });
 
     it("delegation event from Execution Coordinator to claude-code DOES trigger claude-code execution", async () => {

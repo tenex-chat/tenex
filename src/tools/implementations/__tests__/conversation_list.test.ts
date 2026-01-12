@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock, afterEach } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 
@@ -12,124 +12,155 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-// Store mock implementations for ConversationStore
-const mockGetOrLoad = mock();
-const mockLoad = mock();
-const mockGetAllMessages = mock();
-const mockGetLastActivityTime = mock();
-
-// Mock ConversationStore instance factory
-const createMockConversationStore = (
-    id: string,
-    overrides: {
-        messages?: Array<{ timestamp: number }>;
-        metadata?: Record<string, unknown>;
-        lastActivityTime?: number;
-    } = {}
-) => {
-    const messages = overrides.messages ?? [
-        { timestamp: 1700000000 },
-        { timestamp: 1700001000 },
-    ];
-    const metadata = overrides.metadata ?? {
-        title: `Conversation ${id}`,
-        summary: `Summary for ${id}`,
-        phase: "execution",
-        statusLabel: "active",
-        statusCurrentActivity: "Working",
-    };
-    const lastActivityTime = overrides.lastActivityTime ?? messages[messages.length - 1]?.timestamp ?? 0;
-
-    return {
-        id,
-        getAllMessages: () => messages,
-        getLastActivityTime: () => lastActivityTime,
-        metadata,
-        title: metadata.title,
-        phase: metadata.phase,
-    };
-};
-
-// Track instantiated stores for the "new ConversationStore" path
-const instantiatedStores: Array<{ basePath: string; loadedWith?: { projectId: string; conversationId: string } }> = [];
-
-mock.module("@/conversations/ConversationStore", () => {
-    const MockConversationStore = class {
-        private basePath: string;
-        private projectId: string | null = null;
-        private conversationId: string | null = null;
-        private mockStore: ReturnType<typeof createMockConversationStore> | null = null;
-
-        constructor(basePath: string) {
-            this.basePath = basePath;
-            instantiatedStores.push({ basePath });
-        }
-
-        load(projectId: string, conversationId: string) {
-            this.projectId = projectId;
-            this.conversationId = conversationId;
-            // Track the load call
-            const storeEntry = instantiatedStores.find(s => s.basePath === this.basePath && !s.loadedWith);
-            if (storeEntry) {
-                storeEntry.loadedWith = { projectId, conversationId };
-            }
-            // Call the mock to allow test customization
-            mockLoad(projectId, conversationId);
-            // Create a mock store based on the IDs
-            this.mockStore = createMockConversationStore(conversationId, mockStoreOverrides[`${projectId}:${conversationId}`] ?? {});
-        }
-
-        get id() {
-            return this.conversationId;
-        }
-
-        getAllMessages() {
-            return this.mockStore?.getAllMessages() ?? [];
-        }
-
-        getLastActivityTime() {
-            return this.mockStore?.getLastActivityTime() ?? 0;
-        }
-
-        get metadata() {
-            return this.mockStore?.metadata ?? {};
-        }
-
-        get title() {
-            return this.mockStore?.title;
-        }
-
-        get phase() {
-            return this.mockStore?.phase;
-        }
-    };
-
-    return {
-        ConversationStore: Object.assign(MockConversationStore, {
-            getProjectId: mock(() => "current-project"),
-            getBasePath: mock(() => "/mock/base/path"),
-            listProjectIdsFromDisk: mock(() => ["current-project"]),
-            listConversationIdsFromDisk: mock(() => ["conv1"]),
-            listConversationIdsFromDiskForProject: mock((projectId: string) => {
-                if (projectId === "current-project") return ["conv1"];
-                if (projectId === "other-project") return ["conv2"];
-                return [];
-            }),
-            getOrLoad: mockGetOrLoad,
-        }),
-    };
-});
-
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
 import { createConversationListTool } from "../conversation_list";
 
-// Store overrides for customizing mock stores per test
-let mockStoreOverrides: Record<string, {
+type StoreOverrides = {
     messages?: Array<{ timestamp: number }>;
     metadata?: Record<string, unknown>;
     lastActivityTime?: number;
-}> = {};
+};
+
+// Track instantiated stores for the "new ConversationStore" path
+const instantiatedStores: Array<{ basePath: string; loadedWith?: { projectId: string; conversationId: string } }> = [];
+const inMemoryStores = new Map<string, ConversationStore>();
+let mockProjectId: string | null = "current-project";
+let mockBasePath = "/mock/base/path";
+let mockStoreOverrides: Record<string, StoreOverrides> = {};
+
+const mockGetProjectId = mock(() => mockProjectId);
+const mockGetBasePath = mock(() => mockBasePath);
+const mockListProjectIdsFromDisk = mock(() => [mockProjectId ?? "current-project"]);
+const mockListConversationIdsFromDisk = mock(() => ["conv1"]);
+const mockListConversationIdsFromDiskForProject = mock((projectId: string) => {
+    if (projectId === "current-project") return ["conv1"];
+    if (projectId === "other-project") return ["conv2"];
+    return [];
+});
+
+const buildMessages = (overrides: StoreOverrides) => {
+    if (overrides.messages && overrides.messages.length > 0) return overrides.messages;
+    if (typeof overrides.lastActivityTime === "number") {
+        return [{ timestamp: overrides.lastActivityTime }];
+    }
+    return [
+        { timestamp: 1700000000 },
+        { timestamp: 1700001000 },
+    ];
+};
+
+const buildMetadata = (conversationId: string, overrides: StoreOverrides) => {
+    const defaults = {
+        title: `Conversation ${conversationId}`,
+        summary: `Summary for ${conversationId}`,
+        phase: "execution",
+        statusLabel: "active",
+        statusCurrentActivity: "Working",
+    };
+
+    return { ...defaults, ...(overrides.metadata ?? {}) };
+};
+
+const applyStateToStore = (
+    store: ConversationStore,
+    conversationId: string,
+    projectId: string,
+    overrides: StoreOverrides
+) => {
+    const messages = buildMessages(overrides);
+    const metadata = buildMetadata(conversationId, overrides);
+
+    const state = {
+        activeRal: {},
+        nextRalNumber: {},
+        injections: [],
+        messages: messages.map((message, index) => ({
+            pubkey: "user-pubkey",
+            content: "",
+            messageType: "text",
+            timestamp: message.timestamp,
+            eventId: `event-${projectId}-${conversationId}-${index}`,
+        })),
+        metadata,
+        agentTodos: {},
+        todoNudgedAgents: [],
+        todoRemindedAgents: [],
+        blockedAgents: [],
+        executionTime: {
+            totalSeconds: 0,
+            isActive: false,
+            lastUpdated: Date.now(),
+        },
+    };
+
+    const storeData = store as unknown as {
+        state?: typeof state;
+        conversationId?: string;
+        eventIdSet?: Set<string>;
+        blockedAgentsSet?: Set<string>;
+    };
+
+    storeData.state = state;
+    storeData.conversationId = conversationId;
+    storeData.eventIdSet = new Set();
+    storeData.blockedAgentsSet = new Set();
+};
+
+const createMockConversationStore = (
+    id: string,
+    overrides: StoreOverrides = {},
+    projectId = mockProjectId ?? "current-project"
+) => {
+    const store = new ConversationStore(mockBasePath);
+    applyStateToStore(store, id, projectId, overrides);
+    return store;
+};
+
+const getOrCreateStore = (conversationId: string, projectId = mockProjectId ?? "current-project") => {
+    const existing = inMemoryStores.get(conversationId);
+    if (existing) return existing;
+    const store = createMockConversationStore(
+        conversationId,
+        mockStoreOverrides[`${projectId}:${conversationId}`] ?? {},
+        projectId
+    );
+    inMemoryStores.set(conversationId, store);
+    return store;
+};
+
+const loadImplementation = function (this: ConversationStore, projectId: string, conversationId: string) {
+    applyStateToStore(
+        this,
+        conversationId,
+        projectId,
+        mockStoreOverrides[`${projectId}:${conversationId}`] ?? {}
+    );
+
+    const basePath = (this as unknown as { basePath?: string }).basePath ?? mockBasePath;
+    instantiatedStores.push({ basePath, loadedWith: { projectId, conversationId } });
+};
+
+const mockGetOrLoad = mock((conversationId: string) => getOrCreateStore(conversationId));
+const mockLoad = mock(loadImplementation);
+
+const originalGetProjectId = ConversationStore.getProjectId;
+const originalGetBasePath = ConversationStore.getBasePath;
+const originalListProjectIdsFromDisk = ConversationStore.listProjectIdsFromDisk;
+const originalListConversationIdsFromDisk = ConversationStore.listConversationIdsFromDisk;
+const originalListConversationIdsFromDiskForProject = ConversationStore.listConversationIdsFromDiskForProject;
+const originalGetOrLoad = ConversationStore.getOrLoad;
+const originalLoad = ConversationStore.prototype.load;
+
+afterAll(() => {
+    ConversationStore.getProjectId = originalGetProjectId;
+    ConversationStore.getBasePath = originalGetBasePath;
+    ConversationStore.listProjectIdsFromDisk = originalListProjectIdsFromDisk;
+    ConversationStore.listConversationIdsFromDisk = originalListConversationIdsFromDisk;
+    ConversationStore.listConversationIdsFromDiskForProject = originalListConversationIdsFromDiskForProject;
+    ConversationStore.getOrLoad = originalGetOrLoad;
+    ConversationStore.prototype.load = originalLoad;
+});
 
 describe("conversation_list Tool", () => {
     let mockContext: ExecutionContext;
@@ -141,8 +172,7 @@ describe("conversation_list Tool", () => {
         (logger.warn as ReturnType<typeof mock>).mockReset();
         (logger.error as ReturnType<typeof mock>).mockReset();
         (logger.debug as ReturnType<typeof mock>).mockReset();
-        mockGetOrLoad.mockReset();
-        mockLoad.mockReset();
+        inMemoryStores.clear();
 
         // Clear tracked instantiated stores
         instantiatedStores.length = 0;
@@ -150,21 +180,36 @@ describe("conversation_list Tool", () => {
         // Reset store overrides
         mockStoreOverrides = {};
 
-        // Reset static method mocks to defaults
-        (ConversationStore.getProjectId as ReturnType<typeof mock>).mockReturnValue("current-project");
-        (ConversationStore.getBasePath as ReturnType<typeof mock>).mockReturnValue("/mock/base/path");
-        (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["current-project"]);
-        (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1"]);
-        (ConversationStore.listConversationIdsFromDiskForProject as ReturnType<typeof mock>).mockImplementation((projectId: string) => {
+        mockProjectId = "current-project";
+        mockBasePath = "/mock/base/path";
+
+        mockGetProjectId.mockReset();
+        mockGetProjectId.mockImplementation(() => mockProjectId);
+        mockGetBasePath.mockReset();
+        mockGetBasePath.mockImplementation(() => mockBasePath);
+        mockListProjectIdsFromDisk.mockReset();
+        mockListProjectIdsFromDisk.mockImplementation(() => [mockProjectId ?? "current-project"]);
+        mockListConversationIdsFromDisk.mockReset();
+        mockListConversationIdsFromDisk.mockImplementation(() => ["conv1"]);
+        mockListConversationIdsFromDiskForProject.mockReset();
+        mockListConversationIdsFromDiskForProject.mockImplementation((projectId: string) => {
             if (projectId === "current-project") return ["conv1"];
             if (projectId === "other-project") return ["conv2"];
             return [];
         });
 
-        // Setup mock getOrLoad to return mock conversation stores
-        mockGetOrLoad.mockImplementation((id: string) => {
-            return createMockConversationStore(id, mockStoreOverrides[`current-project:${id}`] ?? {});
-        });
+        mockGetOrLoad.mockReset();
+        mockGetOrLoad.mockImplementation((id: string) => getOrCreateStore(id));
+        mockLoad.mockReset();
+        mockLoad.mockImplementation(loadImplementation);
+
+        ConversationStore.getProjectId = mockGetProjectId as typeof ConversationStore.getProjectId;
+        ConversationStore.getBasePath = mockGetBasePath as typeof ConversationStore.getBasePath;
+        ConversationStore.listProjectIdsFromDisk = mockListProjectIdsFromDisk as typeof ConversationStore.listProjectIdsFromDisk;
+        ConversationStore.listConversationIdsFromDisk = mockListConversationIdsFromDisk as typeof ConversationStore.listConversationIdsFromDisk;
+        ConversationStore.listConversationIdsFromDiskForProject = mockListConversationIdsFromDiskForProject as typeof ConversationStore.listConversationIdsFromDiskForProject;
+        ConversationStore.getOrLoad = mockGetOrLoad as typeof ConversationStore.getOrLoad;
+        ConversationStore.prototype.load = mockLoad as typeof ConversationStore.prototype.load;
 
         // Setup mock agent
         mockAgent = {
