@@ -49,9 +49,16 @@ mock.module("@/services/projects", () => ({
 }));
 
 // Mock OpenTelemetry - needed for trace context injection
+const mockContext = {
+    getValue: () => undefined,
+    setValue: () => mockContext,
+    deleteValue: () => mockContext,
+};
+
 mock.module("@opentelemetry/api", () => ({
+    ROOT_CONTEXT: mockContext,
     context: {
-        active: mock(() => ({})),
+        active: mock(() => mockContext),
         with: mock((_ctx: unknown, fn: () => unknown) => fn()),
     },
     propagation: {
@@ -64,10 +71,15 @@ mock.module("@opentelemetry/api", () => ({
             ),
         })),
         getActiveSpan: mock(() => null),
+        setSpan: mock(() => mockContext),
     },
     SpanStatusCode: {
         OK: 1,
         ERROR: 2,
+    },
+    TraceFlags: {
+        NONE: 0,
+        SAMPLED: 1,
     },
 }));
 
@@ -95,6 +107,7 @@ describe("AgentPublisher - Delegation Tag", () => {
         // Create mock AgentInstance with minimal required properties
         mockAgentInstance = {
             slug: "test-agent",
+            pubkey: "test-agent-pubkey",
             sign: mock((_event: NDKEvent) => Promise.resolve()),
             projectTag: "31933:testpubkey:test-project",
         } as unknown as AgentInstance;

@@ -46,9 +46,16 @@ mock.module("@/services/projects", () => ({
   isProjectContextInitialized: mock(() => true),
 }));
 
+const mockContext = {
+  getValue: () => undefined,
+  setValue: () => mockContext,
+  deleteValue: () => mockContext,
+};
+
 mock.module("@opentelemetry/api", () => ({
+  ROOT_CONTEXT: mockContext,
   context: {
-    active: mock(() => ({})),
+    active: mock(() => mockContext),
     with: mock((_ctx: unknown, fn: () => unknown) => fn()),
   },
   propagation: {
@@ -61,10 +68,15 @@ mock.module("@opentelemetry/api", () => ({
       ),
     })),
     getActiveSpan: mock(() => null),
+    setSpan: mock(() => mockContext),
   },
   SpanStatusCode: {
     OK: 1,
     ERROR: 2,
+  },
+  TraceFlags: {
+    NONE: 0,
+    SAMPLED: 1,
   },
 }));
 

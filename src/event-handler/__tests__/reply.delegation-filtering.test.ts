@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
-import { handleChatMessage } from "../reply";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
-import { ConversationStore } from "@/conversations/ConversationStore";
 
 // Mock dependencies
 const loggerMocks = {
@@ -15,35 +13,6 @@ const loggerMocks = {
 
 mock.module("@/utils/logger", () => ({
     logger: loggerMocks,
-}));
-
-// Mock OpenTelemetry - comprehensive to avoid polluting other tests
-const mockSpan = {
-    addEvent: mock(() => {}),
-    setAttribute: mock(() => {}),
-    setStatus: mock(() => {}),
-    end: mock(() => {}),
-    isRecording: () => true,
-    recordException: mock(() => {}),
-    updateName: mock(() => {}),
-    setAttributes: mock(() => {}),
-    spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
-};
-
-mock.module("@opentelemetry/api", () => ({
-    trace: {
-        getActiveSpan: () => mockSpan,
-        setSpan: (_ctx: any, _span: any) => ({}),
-        getTracer: () => ({
-            startSpan: () => mockSpan,
-            startActiveSpan: (_name: string, fn: (span: typeof mockSpan) => any) => fn(mockSpan),
-        }),
-    },
-    SpanStatusCode: { ERROR: 2, OK: 1 },
-    context: {
-        active: () => ({}),
-        with: (_ctx: any, fn: () => any) => fn(),
-    },
 }));
 
 // Mock AgentEventDecoder
@@ -151,10 +120,18 @@ mock.module("@/services/ConfigService", () => ({
 }));
 
 describe("Delegation Event Filtering Bug", () => {
+    let handleChatMessage: typeof import("../reply").handleChatMessage;
+    let ConversationStore: typeof import("@/conversations/ConversationStore").ConversationStore;
     let mockAgentExecutor: AgentExecutor;
     let mockProjectContext: any;
 
-    beforeEach(() => {
+    beforeEach(async () => {
+        if (!handleChatMessage) {
+            ({ handleChatMessage } = await import("../reply"));
+        }
+        if (!ConversationStore) {
+            ({ ConversationStore } = await import("@/conversations/ConversationStore"));
+        }
         // Initialize ConversationStore to avoid "must be called before getOrLoad" errors
         ConversationStore.initialize("/tmp/test-metadata");
         // Mock addEvent to avoid actual file I/O

@@ -4,6 +4,7 @@ import { handleError } from "../error-handler";
 const mockLogger = {
     error: mock(() => {}),
     warn: mock(() => {}),
+    info: mock(() => {}),
     debug: mock(() => {}),
 };
 

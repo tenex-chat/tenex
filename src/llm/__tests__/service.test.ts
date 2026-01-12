@@ -46,18 +46,26 @@ const mockSpan = {
     setAttributes: mock(() => {}),
     spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
 };
+const mockContext = {
+    getValue: () => undefined,
+    setValue: () => mockContext,
+    deleteValue: () => mockContext,
+};
 
 mock.module("@opentelemetry/api", () => ({
+    ROOT_CONTEXT: mockContext,
     trace: {
         getActiveSpan: () => mockSpan,
         getTracer: () => ({
             startSpan: () => mockSpan,
             startActiveSpan: (_name: string, fn: (span: typeof mockSpan) => any) => fn(mockSpan),
         }),
+        setSpan: () => mockContext,
     },
     SpanStatusCode: { ERROR: 2, OK: 1 },
+    TraceFlags: { NONE: 0, SAMPLED: 1 },
     context: {
-        active: () => ({}),
+        active: () => mockContext,
         with: (_ctx: any, fn: () => any) => fn(),
     },
 }));

@@ -14,13 +14,27 @@ import { RALRegistry } from "@/services/ral";
 import type { RALRegistryEntry } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
 
 const tracer = trace.getTracer("tenex.dispatch");
 // Coalesce back-to-back delegation completions so we resume once with a stable snapshot.
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
+const getSafeContext = () => {
+    const activeContext = otelContext.active();
+    // Defensive fallback for test mocks or non-standard context managers.
+    return typeof (activeContext as { getValue?: unknown }).getValue === "function"
+        ? activeContext
+        : ROOT_CONTEXT;
+};
+const getSafeActiveSpan = () => {
+    try {
+        return trace.getActiveSpan();
+    } catch {
+        return undefined;
+    }
+};
 
 interface DispatchContext {
     agentExecutor: AgentExecutor;
@@ -59,7 +73,7 @@ export class AgentDispatchService {
                     "event.content_length": event.content?.length ?? 0,
                 },
             },
-            otelContext.active()
+            getSafeContext()
         );
 
         try {
@@ -95,7 +109,7 @@ export class AgentDispatchService {
             "routing.is_from_agent": isFromAgent,
         });
 
-        trace.getActiveSpan()?.addEvent("reply.message_received", {
+        getSafeActiveSpan()?.addEvent("reply.message_received", {
             "event.id": event.id ?? "",
             "event.pubkey": event.pubkey?.substring(0, 8) ?? "",
             "message.preview": event.content.substring(0, 100),
@@ -109,7 +123,7 @@ export class AgentDispatchService {
         });
 
         if (!isDirectedToSystem && isFromAgent) {
-            trace.getActiveSpan()?.addEvent("reply.agent_event_not_directed", {
+            getSafeActiveSpan()?.addEvent("reply.agent_event_not_directed", {
                 "event.id": event.id ?? "",
             });
             span.addEvent("dispatch.agent_event_not_directed");
@@ -119,14 +133,14 @@ export class AgentDispatchService {
 
             if (result.conversation) {
                 await ConversationStore.addEvent(result.conversation.id, event);
-                trace.getActiveSpan()?.addEvent("reply.added_to_history", {
+                getSafeActiveSpan()?.addEvent("reply.added_to_history", {
                     "conversation.id": result.conversation.id,
                 });
                 span.addEvent("dispatch.agent_event_added_to_history", {
                     "conversation.id": result.conversation.id,
                 });
             } else {
-                trace.getActiveSpan()?.addEvent("reply.no_conversation_found", {
+                getSafeActiveSpan()?.addEvent("reply.no_conversation_found", {
                     "event.id": event.id ?? "",
                 });
                 span.addEvent("dispatch.agent_event_no_conversation");
@@ -156,7 +170,7 @@ export class AgentDispatchService {
         }
 
         if (AgentEventDecoder.isDelegationCompletion(event)) {
-            const activeSpan = trace.getActiveSpan();
+            const activeSpan = getSafeActiveSpan();
             activeSpan?.addEvent("reply.completion_dropped_no_waiting_ral", {
                 "event.id": event.id ?? "",
                 "event.pubkey": event.pubkey.substring(0, 8),
@@ -193,7 +207,7 @@ export class AgentDispatchService {
         });
 
         if (!isNew && event.id && conversation.hasEventId(event.id)) {
-            trace.getActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
+            getSafeActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
                 "event.id": event.id,
                 "conversation.id": conversation.id,
             });
@@ -221,7 +235,7 @@ export class AgentDispatchService {
                     error: formatAnyError(error),
                 });
             });
-            trace.getActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
+            getSafeActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
                 "conversation.id": conversation.id,
             });
             span.addEvent("dispatch.initial_metadata_scheduled", {
@@ -234,7 +248,7 @@ export class AgentDispatchService {
         if (whitelist.has(event.pubkey)) {
             const { unblocked } = AgentRouter.unblockAgent(event, conversation, projectCtx, whitelist);
             if (unblocked) {
-                trace.getActiveSpan()?.addEvent("reply.agent_unblocked_by_whitelist", {
+                getSafeActiveSpan()?.addEvent("reply.agent_unblocked_by_whitelist", {
                     "event.pubkey": event.pubkey.substring(0, 8),
                 });
                 span.addEvent("dispatch.agent_unblocked", {
@@ -243,10 +257,10 @@ export class AgentDispatchService {
             }
         }
 
-        trace.getActiveSpan()?.addEvent("reply.before_agent_routing");
+        getSafeActiveSpan()?.addEvent("reply.before_agent_routing");
         const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx, conversation);
 
-        const activeSpan = trace.getActiveSpan();
+        const activeSpan = getSafeActiveSpan();
         if (activeSpan) {
             const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
             activeSpan.addEvent("agent_routing", {
@@ -292,7 +306,7 @@ export class AgentDispatchService {
                     await summarizer.summarizeAndPublish(conversation);
                 }
             );
-            trace.getActiveSpan()?.addEvent("reply.summarization_scheduled", {
+            getSafeActiveSpan()?.addEvent("reply.summarization_scheduled", {
                 "conversation.id": conversation.id,
                 "debounced": true,
             });
@@ -317,7 +331,7 @@ export class AgentDispatchService {
                     "delegation.conversation_id": delegationTarget.conversationId,
                 },
             },
-            trace.setSpan(otelContext.active(), parentSpan)
+            trace.setSpan(getSafeContext(), parentSpan)
         );
 
         try {
@@ -367,7 +381,7 @@ export class AgentDispatchService {
                 const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
                 if (originalEvent) {
                     triggeringEventForContext = originalEvent;
-                    trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
+                    getSafeActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
                         "original.event_id": resumableRal.originalTriggeringEventId,
                         "completion.event_id": event.id || "",
                     });
@@ -377,7 +391,7 @@ export class AgentDispatchService {
                 }
             }
 
-            trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
+            getSafeActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
                 "delegation.agent_slug": delegationTarget.agent.slug,
                 "delegation.original_conversation_id": delegationTarget.conversationId,
             });
@@ -490,7 +504,7 @@ export class AgentDispatchService {
             parentSpan,
         } = params;
         const ralRegistry = RALRegistry.getInstance();
-        const dispatchContext = trace.setSpan(otelContext.active(), parentSpan);
+        const dispatchContext = trace.setSpan(getSafeContext(), parentSpan);
 
         const executionPromises = targetAgents.map(async (targetAgent) => {
             const agentSpan = tracer.startSpan(
@@ -529,7 +543,7 @@ export class AgentDispatchService {
                     const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
                     if (originalEvent) {
                         triggeringEventForContext = originalEvent;
-                        trace.getActiveSpan()?.addEvent("reply.restored_original_trigger", {
+                        getSafeActiveSpan()?.addEvent("reply.restored_original_trigger", {
                             "agent.slug": targetAgent.slug,
                             "original.event_id": resumableRal.originalTriggeringEventId,
                             "resumption.event_id": event.id || "",
@@ -603,7 +617,7 @@ export class AgentDispatchService {
             );
 
             if (aborted) {
-                trace.getActiveSpan()?.addEvent("reply.aborted_for_injection", {
+                getSafeActiveSpan()?.addEvent("reply.aborted_for_injection", {
                     "agent.slug": agent.slug,
                     "ral.number": activeRal.ralNumber,
                     "message.length": messageLength,
@@ -617,7 +631,7 @@ export class AgentDispatchService {
                     "message.length": messageLength,
                 });
             } else {
-                trace.getActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
+                getSafeActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
                     "agent.slug": agent.slug,
                     "ral.number": activeRal.ralNumber,
                     "message.length": messageLength,
@@ -629,7 +643,7 @@ export class AgentDispatchService {
             return;
         }
 
-        trace.getActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
+        getSafeActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
             "agent.slug": agent.slug,
             "ral.number": activeRal.ralNumber,
             "message.length": messageLength,
