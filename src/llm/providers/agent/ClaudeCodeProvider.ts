@@ -133,8 +133,6 @@ export class ClaudeCodeProvider extends AgentProvider {
                 info: (message: string) => logger.info("[ClaudeCode]", message),
                 debug: (message: string) => logger.debug("[ClaudeCode]", message),
             },
-            // Pass through onQueryCreated callback for mid-stream message injection
-            onQueryCreated: context.onQueryCreated,
         };
 
         // Handle session resumption

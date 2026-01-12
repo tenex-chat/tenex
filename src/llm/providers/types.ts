@@ -108,11 +108,6 @@ export interface ProviderRuntimeContext {
     mcpConfig?: MCPConfig;
     /** Whether TENEX tools should be enabled */
     enableTenexTools?: boolean;
-    /**
-     * Callback invoked when a Query object is created (Claude Code only).
-     * Used to capture the Query for mid-stream message injection via streamInput().
-     */
-    onQueryCreated?: (query: unknown) => void;
 }
 
 /**

@@ -296,56 +296,8 @@ async function handleReplyLogic(
 
         // Check if we should inject into an active execution instead of starting a new one
         if (activeRal && activeRal.isStreaming) {
-            // RAL is actively streaming - try to inject message directly via Query.streamInput()
-            // This is the preferred method for Claude Code agents as it doesn't require aborting
-            const query = ralRegistry.getQuery(
-                targetAgent.pubkey,
-                conversation.id,
-                activeRal.ralNumber
-            );
-
-            if (query) {
-                // Claude Code agent - use streamInput() for true mid-stream injection
-                // This injects the message into the active stream without aborting
-                try {
-                    // Create async iterable that yields the user message
-                    const messageStream = (async function* () {
-                        yield {
-                            type: "user" as const,
-                            message: {
-                                role: "user" as const,
-                                content: event.content,
-                            },
-                            parent_tool_use_id: null,
-                            session_id: "", // SDK will use the current session
-                        };
-                    })();
-
-                    await query.streamInput(messageStream);
-
-                    trace.getActiveSpan()?.addEvent("reply.stream_input_injected", {
-                        "agent.slug": targetAgent.slug,
-                        "ral.number": activeRal.ralNumber,
-                        "message.length": event.content.length,
-                    });
-                    logger.info("[reply] Injected message via streamInput", {
-                        agent: targetAgent.slug,
-                        ralNumber: activeRal.ralNumber,
-                        injectionLength: event.content.length,
-                    });
-
-                    // Successfully injected - don't spawn a new execution
-                    return;
-                } catch (streamInputError) {
-                    // streamInput() failed - fall back to queue + abort approach
-                    logger.warn("[reply] streamInput failed, falling back to abort", {
-                        agent: targetAgent.slug,
-                        error: formatAnyError(streamInputError),
-                    });
-                }
-            }
-
-            // Non-Claude-Code agent OR streamInput() failed - use queue + abort fallback
+            // RAL is actively streaming - queue the message and abort the current execution
+            // The aborted execution will restart and pick up the queued message from context
             ralRegistry.queueUserMessage(
                 targetAgent.pubkey,
                 conversation.id,
