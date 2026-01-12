@@ -10,7 +10,7 @@ describe("Tool Registry", () => {
         it("should return tool when exists", () => {
             const tool = getTool("fs_read", mockContext);
             expect(tool).toBeDefined();
-            expect(tool?.description).toContain("Read a file or directory");
+            expect(tool?.description).toContain("Read a file");
         });
 
         it("should return undefined for non-existent tool", () => {
@@ -62,7 +62,7 @@ describe("Tool Registry", () => {
             const tools = getAllTools(mockContext);
             const toolDescriptions = tools.map((t) => t.description);
 
-            expect(toolDescriptions.some(d => d.includes("Read a file or directory"))).toBe(true);
+            expect(toolDescriptions.some(d => d.includes("Read a file"))).toBe(true);
             expect(toolDescriptions.some(d => d.includes("shell") || d.includes("command"))).toBe(true);
             expect(toolDescriptions.some(d => d.includes("delegate"))).toBe(true);
         });

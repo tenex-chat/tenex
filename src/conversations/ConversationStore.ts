@@ -21,6 +21,7 @@ import type { TodoItem } from "@/services/ral/types";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
+import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
 
 export type MessageType = "text" | "tool-call" | "tool-result";
 
@@ -857,7 +858,8 @@ export class ConversationStore {
      */
     private async entryToMessage(
         entry: ConversationEntry,
-        viewingAgentPubkey: string
+        viewingAgentPubkey: string,
+        truncationContext?: TruncationContext
     ): Promise<ModelMessage> {
         const role = this.deriveRole(entry, viewingAgentPubkey);
 
@@ -866,7 +868,11 @@ export class ConversationStore {
         }
 
         if (entry.messageType === "tool-result" && entry.toolData) {
-            return { role: "tool", content: entry.toolData as ToolResultPart[] };
+            // Apply truncation for buried tool results to save context
+            const toolData = truncationContext
+                ? processToolResult(entry.toolData as ToolResultPart[], truncationContext)
+                : (entry.toolData as ToolResultPart[]);
+            return { role: "tool", content: toolData };
         }
 
         // Text message - add attribution prefix
@@ -885,7 +891,8 @@ export class ConversationStore {
         entries: ConversationEntry[],
         agentPubkey: string,
         ralNumber: number,
-        activeRals: Set<number>
+        activeRals: Set<number>,
+        indexOffset: number = 0
     ): Promise<ModelMessage[]> {
         const result: ModelMessage[] = [];
         const delegationCompletionPrefix = "# DELEGATION COMPLETED";
@@ -907,6 +914,7 @@ export class ConversationStore {
         }
 
         let prunedDelegationCompletions = 0;
+        const totalMessages = this.state.messages.length;
 
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
@@ -919,9 +927,17 @@ export class ConversationStore {
                 }
             }
 
+            // Create truncation context for tool result processing
+            // indexOffset is used when processing a slice of messages (e.g., buildMessagesForRalAfterIndex)
+            const truncationContext: TruncationContext = {
+                currentIndex: indexOffset + i,
+                totalMessages,
+                eventId: entry.eventId,
+            };
+
             // User messages (no RAL) - include with derived role
             if (!entry.ral) {
-                result.push(await this.entryToMessage(entry, agentPubkey));
+                result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
                 continue;
             }
 
@@ -929,18 +945,18 @@ export class ConversationStore {
             if (entry.pubkey === agentPubkey) {
                 if (entry.ral === ralNumber) {
                     // Current RAL - include
-                    result.push(await this.entryToMessage(entry, agentPubkey));
+                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
                 } else if (activeRals.has(entry.ral)) {
                     // Other active RAL - skip to avoid message duplication
                     continue;
                 } else {
                     // Completed RAL - include all
-                    result.push(await this.entryToMessage(entry, agentPubkey));
+                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
                 }
             } else {
                 // Other agent's message - only include text content
                 if (entry.messageType === "text" && entry.content) {
-                    result.push(await this.entryToMessage(entry, agentPubkey));
+                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
                 }
             }
         }
@@ -976,7 +992,8 @@ export class ConversationStore {
         }
 
         const entries = this.state.messages.slice(startIndex);
-        return this.buildMessagesFromEntries(entries, agentPubkey, ralNumber, activeRals);
+        // Pass startIndex as offset so truncation context knows the true position
+        return this.buildMessagesFromEntries(entries, agentPubkey, ralNumber, activeRals, startIndex);
     }
 
     // Metadata Operations
