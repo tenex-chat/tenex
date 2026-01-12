@@ -5,4 +5,4 @@
  */
 
 export { ClaudeCodeProvider } from "./ClaudeCodeProvider";
-export { CodexCliProvider } from "./CodexCliProvider";
+export { CodexAppServerProvider } from "./CodexAppServerProvider";

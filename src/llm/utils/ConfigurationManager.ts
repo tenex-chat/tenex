@@ -274,7 +274,7 @@ export class ConfigurationManager {
             ollama: "llama3.1:8b",
             "claude-code": "claude-3-5-sonnet-20241022",
             "gemini-cli": "gemini-2.0-flash-exp",
-            "codex-cli": "gpt-5.1-codex",
+            "codex-app-server": "gpt-5.1-codex-max",
         };
         return defaults[provider] || "";
     }

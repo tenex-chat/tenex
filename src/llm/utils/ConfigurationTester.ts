@@ -35,7 +35,7 @@ export class ConfigurationTester {
         console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
 
         try {
-            // Load full config (needed for MCP server configs in claude-code/codex-cli providers)
+            // Load full config (needed for MCP server configs in agent providers)
             await configService.loadConfig();
 
             // Initialize providers before testing
@@ -127,7 +127,7 @@ export class ConfigurationTester {
         });
 
         try {
-            // Load full config (needed for MCP server configs in claude-code/codex-cli providers)
+            // Load full config (needed for MCP server configs in agent providers)
             await configService.loadConfig();
 
             // Initialize providers before testing
