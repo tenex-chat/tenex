@@ -7,6 +7,12 @@
 import { dynamicToolService } from "@/services/DynamicToolService";
 import type { Tool as CoreTool } from "ai";
 import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext, MCPToolContext } from "./types";
+
+// Helper to coerce MCP tool types without triggering TypeScript infinite recursion
+// The MCP SDK returns tools with compatible structure but different generic params
+function asTool<T>(tool: T): CoreTool<unknown, unknown> {
+    return tool as CoreTool<unknown, unknown>;
+}
 import { logger } from "@/utils/logger";
 import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
@@ -361,7 +367,7 @@ export function getToolsObject(
             const allMcpTools = context.mcpManager.getCachedTools();
             for (const name of mcpToolNames) {
                 if (allMcpTools[name]) {
-                    tools[name] = allMcpTools[name];
+                    tools[name] = asTool(allMcpTools[name]);
                 }
             }
         } catch (error) {

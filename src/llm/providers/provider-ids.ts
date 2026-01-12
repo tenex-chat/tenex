@@ -7,7 +7,7 @@
 
 export const PROVIDER_IDS = {
     CLAUDE_CODE: "claude-code",
-    CODEX_CLI: "codex-cli",
+    CODEX_APP_SERVER: "codex-app-server",
     GEMINI_CLI: "gemini-cli",
     OPENROUTER: "openrouter",
     ANTHROPIC: "anthropic",
