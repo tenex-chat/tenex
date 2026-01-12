@@ -5,7 +5,7 @@
  * Todos are stored on the Conversation object and persisted with it.
  */
 
-import type { ToolExecutionContext } from "@/tools/types";
+import type { ConversationToolContext } from "@/tools/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { TodoItem, TodoStatus } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
@@ -151,21 +151,9 @@ interface TodoAddOutput {
 
 async function executeTodoAdd(
     input: TodoAddInput,
-    context: ToolExecutionContext
+    context: ConversationToolContext
 ): Promise<TodoAddOutput> {
     const conversation = context.getConversation();
-    if (!conversation) {
-        return {
-            success: false,
-            added: [],
-            duplicates: [],
-            totalItems: 0,
-            debug: {
-                conversationId: "no-conversation",
-                agentPubkey: context.agent.pubkey,
-            },
-        };
-    }
 
     const result = addTodosToConversation(
         conversation,
@@ -192,7 +180,7 @@ async function executeTodoAdd(
     };
 }
 
-export function createTodoAddTool(context: ToolExecutionContext): AISdkTool {
+export function createTodoAddTool(context: ConversationToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Add one or more todo items to track tasks. Each item requires an id (unique identifier), " +
@@ -254,18 +242,9 @@ interface TodoUpdateOutput {
 
 async function executeTodoUpdate(
     input: TodoUpdateInput,
-    context: ToolExecutionContext
+    context: ConversationToolContext
 ): Promise<TodoUpdateOutput> {
     const conversation = context.getConversation();
-    if (!conversation) {
-        return {
-            success: false,
-            updated: [],
-            notFound: [],
-            errors: ["No conversation context available"],
-            pendingCount: 0,
-        };
-    }
 
     const result = updateTodoStatusInConversation(
         conversation,
@@ -290,7 +269,7 @@ async function executeTodoUpdate(
     };
 }
 
-export function createTodoUpdateTool(context: ToolExecutionContext): AISdkTool {
+export function createTodoUpdateTool(context: ConversationToolContext): AISdkTool {
     const aiTool = tool({
         description:
             "Update the status of todo items. Use 'in_progress' when starting work, 'done' when complete, " +

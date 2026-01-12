@@ -15,7 +15,6 @@ describe("MCP serve command", () => {
         it("loads required environment variables", () => {
             process.env.TENEX_PROJECT_ID = "test-project";
             process.env.TENEX_AGENT_ID = "agent-123";
-            process.env.TENEX_CONVERSATION_ID = "conv-456";
             process.env.TENEX_WORKING_DIRECTORY = "/tmp/test";
             process.env.TENEX_CURRENT_BRANCH = "main";
             process.env.TENEX_TOOLS = "delegate,ask,conversation_get";
@@ -29,7 +28,6 @@ describe("MCP serve command", () => {
         it("throws error when TENEX_PROJECT_ID is missing", () => {
             delete process.env.TENEX_PROJECT_ID;
             process.env.TENEX_AGENT_ID = "agent-123";
-            process.env.TENEX_CONVERSATION_ID = "conv-456";
             process.env.TENEX_WORKING_DIRECTORY = "/tmp/test";
             process.env.TENEX_CURRENT_BRANCH = "main";
             process.env.TENEX_TOOLS = "delegate";
@@ -106,7 +104,6 @@ describe("MCP serve command", () => {
                 env: {
                     TENEX_PROJECT_ID: "project-123",
                     TENEX_AGENT_ID: "agent-abc",
-                    TENEX_CONVERSATION_ID: "conv-xyz",
                     TENEX_WORKING_DIRECTORY: "/home/user/project",
                     TENEX_CURRENT_BRANCH: "develop",
                     TENEX_TOOLS: "delegate,ask",
@@ -128,7 +125,6 @@ describe("MCP serve command", () => {
                 env: {
                     TENEX_PROJECT_ID: "project-123",
                     TENEX_AGENT_ID: "agent-abc",
-                    TENEX_CONVERSATION_ID: "conv-xyz",
                     TENEX_WORKING_DIRECTORY: "/home/user/project",
                     TENEX_CURRENT_BRANCH: "develop",
                     TENEX_TOOLS: "delegate,ask",
@@ -137,7 +133,6 @@ describe("MCP serve command", () => {
 
             expect(config.env).toHaveProperty("TENEX_PROJECT_ID");
             expect(config.env).toHaveProperty("TENEX_AGENT_ID");
-            expect(config.env).toHaveProperty("TENEX_CONVERSATION_ID");
             expect(config.env).toHaveProperty("TENEX_WORKING_DIRECTORY");
             expect(config.env).toHaveProperty("TENEX_CURRENT_BRANCH");
             expect(config.env).toHaveProperty("TENEX_TOOLS");

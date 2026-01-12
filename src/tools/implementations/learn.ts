@@ -56,13 +56,12 @@ async function executeLessonLearn(
         hashtags,
     };
 
-    // Get conversation for the event context
-    const conversation = context.getConversation();
-
     // Create event context
+    // Note: encodeLesson only uses addStandardTags which needs model/ralNumber
+    // rootEvent.id is not used by lesson encoding
     const eventContext: EventContext = {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: { id: conversation.getRootEventId() ?? context.triggeringEvent.id },
+        rootEvent: {},
         conversationId: context.conversationId,
         model: context.agent.llmConfig,
         ralNumber: context.ralNumber,

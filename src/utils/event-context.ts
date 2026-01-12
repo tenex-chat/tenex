@@ -3,14 +3,15 @@ import type { ToolExecutionContext } from "@/tools/types";
 
 /**
  * Create EventContext for publishing events.
- * Requires ToolExecutionContext which guarantees ralNumber is available.
+ * Handles missing conversation context gracefully (e.g., in MCP context).
  */
 export function createEventContext(context: ToolExecutionContext, model?: string): EventContext {
-    const conversation = context.getConversation();
+    const conversation = context.getConversation?.();
+    const rootEventId = conversation?.getRootEventId() ?? context.triggeringEvent?.id;
 
     return {
         triggeringEvent: context.triggeringEvent,
-        rootEvent: { id: conversation.getRootEventId() ?? context.triggeringEvent.id },
+        rootEvent: rootEventId ? { id: rootEventId } : {},
         conversationId: context.conversationId,
         model: model ?? context.agent.llmConfig,
         ralNumber: context.ralNumber,
