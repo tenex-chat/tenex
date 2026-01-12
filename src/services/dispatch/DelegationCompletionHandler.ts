@@ -153,8 +153,8 @@ export async function handleDelegationCompletion(
         // Get the target agent for logging
         const projectCtx = getProjectContext();
 
-        // Note: We don't spawn an execution here - the normal event routing in reply.ts
-        // handles that via delegationTarget detection. This handler just records the completion.
+        // Note: We don't spawn an execution here - AgentDispatchService handles that
+        // via delegationTarget detection. This handler just records the completion.
 
         // Get counts from conversation storage
         const pendingDelegations = ralRegistry.getConversationPendingDelegations(

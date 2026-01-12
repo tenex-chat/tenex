@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { AgentRouter } from "../AgentRouter";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 
 /**
  * Reproduction Test for Cross-Project Routing Issue

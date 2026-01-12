@@ -35,7 +35,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Event Handling & Workflow Orchestration
 - **`src/events`**: Typed schemas, utils, and constants for every event TENEX produces or consumes (Nostr kinds, internal telemetry events). Treat as a contract; modifications require updates to this file.
-- **`src/event-handler`**: Domain orchestrators triggered by incoming Nostr events. `AgentRouter`, `newConversation`, `reply`, and `DelegationCompletionHandler` decode events using `nostr/AgentEventDecoder`, resolve participants via `agents/` + `conversations/services`, then kick work to execution pipelines.
+- **`src/event-handler`**: Domain orchestrators triggered by incoming Nostr events. `newConversation` and `reply` decode events using `nostr/AgentEventDecoder`, resolve participants via `agents/` + `conversations/services`, then delegate routing/execution to `services/dispatch`.
 
 ### Nostr Integration (`src/nostr`)
 - **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, and `kinds.ts` encapsulate event creation.
@@ -65,7 +65,8 @@ Use this section to understand each service’s scope and dependencies:
 | Service | Location | Responsibility & Key Dependencies |
 | --- | --- | --- |
 | `ConfigService` (+ `config/`) | `src/services/ConfigService.ts` | **Centralized configuration service** - Loads, validates, and caches config files from `~/.tenex/` (global only: `config.json`, `llms.json`; project-level: `mcp.json` only). Exports `config` instance (no singleton pattern). Provides `getConfigPath(subdir?)` and `getProjectsBase()` for centralized path construction. Initializes providers via `llm/LLMServiceFactory`. All modules must import `{ config }` from `@/services/ConfigService` - never construct `~/.tenex` paths manually. |
-| `RALRegistry` | `src/services/ral/RALRegistry.ts` | Tracks active RALs, pending/completed delegations, queued injections, and stop-signal aborts. Used by `AgentExecutor`, `DelegationCompletionHandler`, and delegation tools. |
+| `AgentDispatchService` (+ `dispatch/`) | `src/services/dispatch/AgentDispatchService.ts` | Orchestrates chat message routing, delegation completion handling, injection strategy, and agent execution. Hosts `AgentRouter` + `DelegationCompletionHandler` for routing and completion bookkeeping. |
+| `RALRegistry` | `src/services/ral/RALRegistry.ts` | Tracks active RALs, pending/completed delegations, queued injections, and stop-signal aborts. Used by `AgentExecutor`, `services/dispatch/DelegationCompletionHandler`, and delegation tools. |
 | `PairingManager` | `src/services/pairing/` | Supervises delegated agents by subscribing to tool/output events and injecting checkpoint messages into the supervisor’s RAL. |
 | `DynamicToolService` | `src/services/DynamicToolService.ts` | Watches `~/.tenex/tools`, compiles TS tool factories, and exposes them to the tool registry. Uses Bun file APIs and `agents/execution` contexts. |
 | `EmbeddingProvider` | `src/services/embedding/` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |

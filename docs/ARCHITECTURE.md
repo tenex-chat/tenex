@@ -146,6 +146,10 @@ Services should be organized by domain, with related code grouped together:
 
 ```
 services/
+├── dispatch/             # Chat routing + delegation dispatch
+│   ├── AgentDispatchService.ts
+│   ├── AgentRouter.ts
+│   └── DelegationCompletionHandler.ts
 ├── ral/                  # Delegation/RAL state
 │   ├── RALRegistry.ts
 │   ├── types.ts

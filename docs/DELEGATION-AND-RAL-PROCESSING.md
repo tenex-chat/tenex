@@ -10,8 +10,9 @@ This document describes how delegation and RAL (Reason-Act Loop) state is tracke
 | `src/services/ral/types.ts` | RAL, delegation, and injection type definitions |
 | `src/agents/execution/AgentExecutor.ts` | Executes agents, handles stop signals, and resumes RALs |
 | `src/agents/execution/ToolExecutionTracker.ts` | Publishes tool-use events and records delegation references |
-| `src/event-handler/DelegationCompletionHandler.ts` | Records delegation completions when responses arrive |
-| `src/event-handler/reply.ts` | Queues injections or spawns new executions based on RAL state |
+| `src/services/dispatch/DelegationCompletionHandler.ts` | Records delegation completions when responses arrive |
+| `src/services/dispatch/AgentDispatchService.ts` | Queues injections or spawns new executions based on RAL state |
+| `src/event-handler/reply.ts` | Delegates incoming chat events to the dispatch service |
 | `src/nostr/AgentPublisher.ts` | Publishes delegation, completion, ask, and tool-use events |
 | `src/nostr/AgentEventEncoder.ts` | Defines event tags and shared encoding logic |
 | `src/services/pairing/PairingManager.ts` | Supervises delegated agents and injects checkpoints |

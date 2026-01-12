@@ -1,0 +1,615 @@
+import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
+import type { AgentInstance } from "@/agents/types";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationResolver } from "@/conversations/services/ConversationResolver";
+import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
+import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
+import { formatAnyError } from "@/lib/error-formatter";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { config } from "@/services/ConfigService";
+import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
+import { getProjectContext, type ProjectContext } from "@/services/projects";
+import { RALRegistry } from "@/services/ral";
+import { logger } from "@/utils/logger";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
+import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
+
+const tracer = trace.getTracer("tenex.dispatch");
+const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
+
+interface DispatchContext {
+    agentExecutor: AgentExecutor;
+}
+
+interface DelegationTarget {
+    agent: AgentInstance;
+    conversationId: string;
+}
+
+export class AgentDispatchService {
+    private static instance: AgentDispatchService;
+    private readonly delegationDebounceState = new Map<
+        string,
+        { timeout: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void }
+    >();
+    private readonly delegationDebounceSequence = new Map<string, number>();
+
+    private constructor() {}
+
+    static getInstance(): AgentDispatchService {
+        if (!AgentDispatchService.instance) {
+            AgentDispatchService.instance = new AgentDispatchService();
+        }
+        return AgentDispatchService.instance;
+    }
+
+    async dispatch(event: NDKEvent, context: DispatchContext): Promise<void> {
+        const span = tracer.startSpan(
+            "tenex.dispatch.chat_message",
+            {
+                attributes: {
+                    "event.id": event.id ?? "",
+                    "event.pubkey": event.pubkey ?? "",
+                    "event.kind": event.kind ?? 0,
+                    "event.content_length": event.content?.length ?? 0,
+                },
+            },
+            otelContext.active()
+        );
+
+        try {
+            await this.handleChatMessage(event, context, span);
+            span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            logger.error("Failed to route reply", {
+                error: formatAnyError(error),
+                eventId: event.id,
+            });
+        } finally {
+            span.end();
+        }
+    }
+
+    private async handleChatMessage(
+        event: NDKEvent,
+        { agentExecutor }: DispatchContext,
+        span: ReturnType<typeof tracer.startSpan>
+    ): Promise<void> {
+        const projectCtx = getProjectContext();
+
+        const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(event, projectCtx.agents);
+        const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
+
+        span.setAttributes({
+            "routing.is_directed_to_system": isDirectedToSystem,
+            "routing.is_from_agent": isFromAgent,
+        });
+
+        trace.getActiveSpan()?.addEvent("reply.message_received", {
+            "event.id": event.id ?? "",
+            "event.pubkey": event.pubkey?.substring(0, 8) ?? "",
+            "message.preview": event.content.substring(0, 100),
+            "routing.is_directed_to_system": isDirectedToSystem,
+            "routing.is_from_agent": isFromAgent,
+        });
+
+        span.addEvent("dispatch.message_received", {
+            "routing.is_directed_to_system": isDirectedToSystem,
+            "routing.is_from_agent": isFromAgent,
+        });
+
+        if (!isDirectedToSystem && isFromAgent) {
+            trace.getActiveSpan()?.addEvent("reply.agent_event_not_directed", {
+                "event.id": event.id ?? "",
+            });
+            span.addEvent("dispatch.agent_event_not_directed");
+
+            const resolver = new ConversationResolver();
+            const result = await resolver.resolveConversationForEvent(event);
+
+            if (result.conversation) {
+                await ConversationStore.addEvent(result.conversation.id, event);
+                trace.getActiveSpan()?.addEvent("reply.added_to_history", {
+                    "conversation.id": result.conversation.id,
+                });
+                span.addEvent("dispatch.agent_event_added_to_history", {
+                    "conversation.id": result.conversation.id,
+                });
+            } else {
+                trace.getActiveSpan()?.addEvent("reply.no_conversation_found", {
+                    "event.id": event.id ?? "",
+                });
+                span.addEvent("dispatch.agent_event_no_conversation");
+            }
+            return;
+        }
+
+        await this.handleReplyLogic(event, agentExecutor, projectCtx, span);
+    }
+
+    private async handleReplyLogic(
+        event: NDKEvent,
+        agentExecutor: AgentExecutor,
+        projectCtx: ProjectContext,
+        span: ReturnType<typeof tracer.startSpan>
+    ): Promise<void> {
+        const delegationResult = await handleDelegationCompletion(event);
+        const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
+
+        if (delegationTarget) {
+            span.addEvent("dispatch.delegation_completion_routed", {
+                "delegation.agent_slug": delegationTarget.agent.slug,
+                "delegation.conversation_id": delegationTarget.conversationId,
+            });
+            await this.handleDelegationResponse(event, delegationTarget, agentExecutor, projectCtx, span);
+            return;
+        }
+
+        if (AgentEventDecoder.isDelegationCompletion(event)) {
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.addEvent("reply.completion_dropped_no_waiting_ral", {
+                "event.id": event.id ?? "",
+                "event.pubkey": event.pubkey.substring(0, 8),
+            });
+            activeSpan?.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: "Delegation completion dropped: no waiting RAL found. This indicates a delegation registration bug.",
+            });
+            logger.error("[reply] Delegation completion dropped - no waiting RAL", {
+                eventId: event.id,
+                eventPubkey: event.pubkey.substring(0, 8),
+            });
+            span.addEvent("dispatch.delegation_completion_dropped");
+            return;
+        }
+
+        const conversationResolver = new ConversationResolver();
+        const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(event);
+
+        if (!conversation) {
+            logger.error("No conversation found or created for event", {
+                eventId: event.id,
+                replyTarget: AgentEventDecoder.getReplyTarget(event),
+            });
+            span.addEvent("dispatch.conversation_missing", {
+                "event.id": event.id ?? "",
+            });
+            return;
+        }
+
+        span.setAttributes({
+            "conversation.id": conversation.id,
+            "conversation.is_new": isNew,
+        });
+
+        if (!isNew && event.id && conversation.hasEventId(event.id)) {
+            trace.getActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
+                "event.id": event.id,
+                "conversation.id": conversation.id,
+            });
+            span.addEvent("dispatch.duplicate_event_skipped", {
+                "conversation.id": conversation.id,
+            });
+
+            if (!AgentEventDecoder.isAgentInternalMessage(event)) {
+                await ConversationStore.addEvent(conversation.id, event);
+            }
+            return;
+        }
+
+        if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
+            await ConversationStore.addEvent(conversation.id, event);
+        }
+
+        if (isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
+            metadataDebounceManager.markFirstPublishDone(conversation.id);
+
+            const summarizer = new ConversationSummarizer(projectCtx);
+            summarizer.summarizeAndPublish(conversation).catch((error) => {
+                logger.error("Failed to generate initial metadata for new conversation", {
+                    conversationId: conversation.id,
+                    error: formatAnyError(error),
+                });
+            });
+            trace.getActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
+                "conversation.id": conversation.id,
+            });
+            span.addEvent("dispatch.initial_metadata_scheduled", {
+                "conversation.id": conversation.id,
+            });
+        }
+
+        const whitelistedPubkeys = config.getConfig().whitelistedPubkeys ?? [];
+        const whitelist = new Set(whitelistedPubkeys);
+        if (whitelist.has(event.pubkey)) {
+            const { unblocked } = AgentRouter.unblockAgent(event, conversation, projectCtx, whitelist);
+            if (unblocked) {
+                trace.getActiveSpan()?.addEvent("reply.agent_unblocked_by_whitelist", {
+                    "event.pubkey": event.pubkey.substring(0, 8),
+                });
+                span.addEvent("dispatch.agent_unblocked", {
+                    "event.pubkey": event.pubkey.substring(0, 8),
+                });
+            }
+        }
+
+        trace.getActiveSpan()?.addEvent("reply.before_agent_routing");
+        const targetAgents = AgentRouter.resolveTargetAgents(event, projectCtx, conversation);
+
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+            activeSpan.addEvent("agent_routing", {
+                "routing.mentioned_pubkeys_count": mentionedPubkeys.length,
+                "routing.resolved_agent_count": targetAgents.length,
+                "routing.agent_names": targetAgents.map((a) => a.name).join(", "),
+                "routing.agent_roles": targetAgents.map((a) => a.role).join(", "),
+            });
+        }
+
+        span.addEvent("dispatch.routing_complete", {
+            "routing.resolved_agent_count": targetAgents.length,
+        });
+        span.setAttributes({
+            "routing.target_agent_count": targetAgents.length,
+        });
+
+        if (targetAgents.length === 0) {
+            activeSpan?.addEvent("reply.no_target_agents", {
+                "event.id": event.id ?? "",
+            });
+            span.addEvent("dispatch.no_target_agents");
+            return;
+        }
+
+        metadataDebounceManager.onAgentStart(conversation.id);
+
+        await this.dispatchToAgents({
+            targetAgents,
+            event,
+            conversationId: conversation.id,
+            projectCtx,
+            agentExecutor,
+            parentSpan: span,
+        });
+
+        if (!AgentEventDecoder.isAgentInternalMessage(event)) {
+            metadataDebounceManager.schedulePublish(
+                conversation.id,
+                false,
+                async () => {
+                    const summarizer = new ConversationSummarizer(projectCtx);
+                    await summarizer.summarizeAndPublish(conversation);
+                }
+            );
+            trace.getActiveSpan()?.addEvent("reply.summarization_scheduled", {
+                "conversation.id": conversation.id,
+                "debounced": true,
+            });
+            span.addEvent("dispatch.summarization_scheduled", {
+                "conversation.id": conversation.id,
+            });
+        }
+    }
+
+    private async handleDelegationResponse(
+        event: NDKEvent,
+        delegationTarget: DelegationTarget,
+        agentExecutor: AgentExecutor,
+        projectCtx: ProjectContext,
+        parentSpan: ReturnType<typeof tracer.startSpan>
+    ): Promise<void> {
+        const span = tracer.startSpan(
+            "tenex.dispatch.delegation_response",
+            {
+                attributes: {
+                    "delegation.agent_slug": delegationTarget.agent.slug,
+                    "delegation.conversation_id": delegationTarget.conversationId,
+                },
+            },
+            trace.setSpan(otelContext.active(), parentSpan)
+        );
+
+        try {
+            const ralRegistry = RALRegistry.getInstance();
+            const activeRal = ralRegistry.getState(
+                delegationTarget.agent.pubkey,
+                delegationTarget.conversationId
+            );
+
+            if (activeRal?.isStreaming) {
+                const aborted = llmOpsRegistry.stopByAgentAndConversation(
+                    delegationTarget.agent.pubkey,
+                    delegationTarget.conversationId,
+                    INJECTION_ABORT_REASON
+                );
+
+                span.addEvent("dispatch.delegation_stream_abort", {
+                    "ral.number": activeRal.ralNumber,
+                    "aborted": aborted,
+                });
+
+                if (aborted) {
+                    logger.info("[dispatch] Aborted streaming execution for delegation completion", {
+                        agent: delegationTarget.agent.slug,
+                        ralNumber: activeRal.ralNumber,
+                    });
+                }
+            }
+            const debounceKey = `${delegationTarget.agent.pubkey}:${delegationTarget.conversationId}`;
+            const debounceSequence = await this.waitForDelegationDebounce(debounceKey, span);
+            if (this.delegationDebounceSequence.get(debounceKey) !== debounceSequence) {
+                span.addEvent("dispatch.delegation_debounce_skipped", {
+                    "debounce.sequence": debounceSequence,
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return;
+            }
+            this.delegationDebounceSequence.delete(debounceKey);
+            const resumableRal = ralRegistry.findResumableRAL(
+                delegationTarget.agent.pubkey,
+                delegationTarget.conversationId
+            );
+
+            let triggeringEventForContext = event;
+
+            if (resumableRal?.originalTriggeringEventId) {
+                const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
+                if (originalEvent) {
+                    triggeringEventForContext = originalEvent;
+                    trace.getActiveSpan()?.addEvent("reply.restored_original_trigger_for_delegation", {
+                        "original.event_id": resumableRal.originalTriggeringEventId,
+                        "completion.event_id": event.id || "",
+                    });
+                    span.addEvent("dispatch.delegation_restored_trigger", {
+                        "original.event_id": resumableRal.originalTriggeringEventId,
+                    });
+                }
+            }
+
+            trace.getActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
+                "delegation.agent_slug": delegationTarget.agent.slug,
+                "delegation.original_conversation_id": delegationTarget.conversationId,
+            });
+
+            const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                delegationTarget.agent.pubkey,
+                delegationTarget.conversationId,
+                resumableRal?.ralNumber
+            );
+            const hasPendingDelegations = pendingDelegations.length > 0;
+
+            span.setAttributes({
+                "delegation.pending_count": pendingDelegations.length,
+            });
+
+            const executionContext = await createExecutionContext({
+                agent: delegationTarget.agent,
+                conversationId: delegationTarget.conversationId,
+                projectBasePath: projectCtx.agentRegistry.getBasePath(),
+                triggeringEvent: triggeringEventForContext,
+                isDelegationCompletion: true,
+                hasPendingDelegations,
+                mcpManager: projectCtx.mcpManager,
+            });
+
+            metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
+
+            await agentExecutor.execute(executionContext);
+
+            metadataDebounceManager.schedulePublish(
+                delegationTarget.conversationId,
+                false,
+                async () => {
+                    const summarizer = new ConversationSummarizer(projectCtx);
+                    const originalConversation = ConversationStore.get(delegationTarget.conversationId);
+                    if (originalConversation) {
+                        await summarizer.summarizeAndPublish(originalConversation);
+                    }
+                }
+            );
+
+            span.setStatus({ code: SpanStatusCode.OK });
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: (error as Error).message,
+            });
+            throw error;
+        } finally {
+            span.end();
+        }
+    }
+
+    private async waitForDelegationDebounce(
+        key: string,
+        span: ReturnType<typeof tracer.startSpan>
+    ): Promise<number> {
+        const nextSequence = (this.delegationDebounceSequence.get(key) ?? 0) + 1;
+        this.delegationDebounceSequence.set(key, nextSequence);
+
+        let state = this.delegationDebounceState.get(key);
+        if (!state) {
+            let resolveFn: (() => void) | undefined;
+            const promise = new Promise<void>((resolve) => {
+                resolveFn = resolve;
+            });
+            const timeout = setTimeout(() => {
+                this.delegationDebounceState.delete(key);
+                resolveFn?.();
+            }, DELEGATION_COMPLETION_DEBOUNCE_MS);
+            state = {
+                timeout,
+                promise,
+                resolve: resolveFn ?? (() => {}),
+            };
+            this.delegationDebounceState.set(key, state);
+        } else {
+            const activeState = state;
+            clearTimeout(activeState.timeout);
+            activeState.timeout = setTimeout(() => {
+                this.delegationDebounceState.delete(key);
+                activeState.resolve();
+            }, DELEGATION_COMPLETION_DEBOUNCE_MS);
+        }
+
+        span.addEvent("dispatch.delegation_debounce_scheduled", {
+            "debounce.ms": DELEGATION_COMPLETION_DEBOUNCE_MS,
+            "debounce.sequence": nextSequence,
+        });
+
+        await state.promise;
+        return nextSequence;
+    }
+
+    private async dispatchToAgents(params: {
+        targetAgents: AgentInstance[];
+        event: NDKEvent;
+        conversationId: string;
+        projectCtx: ProjectContext;
+        agentExecutor: AgentExecutor;
+        parentSpan: ReturnType<typeof tracer.startSpan>;
+    }): Promise<void> {
+        const {
+            targetAgents,
+            event,
+            conversationId,
+            projectCtx,
+            agentExecutor,
+            parentSpan,
+        } = params;
+        const ralRegistry = RALRegistry.getInstance();
+        const dispatchContext = trace.setSpan(otelContext.active(), parentSpan);
+
+        const executionPromises = targetAgents.map(async (targetAgent) => {
+            const agentSpan = tracer.startSpan(
+                "tenex.dispatch.agent",
+                {
+                    attributes: {
+                        "agent.slug": targetAgent.slug,
+                        "agent.pubkey": targetAgent.pubkey,
+                        "conversation.id": conversationId,
+                    },
+                },
+                dispatchContext
+            );
+
+            try {
+                const activeRal = ralRegistry.getState(targetAgent.pubkey, conversationId);
+
+                agentSpan.setAttributes({
+                    "ral.is_active": !!activeRal,
+                    "ral.is_streaming": activeRal?.isStreaming ?? false,
+                    "ral.number": activeRal?.ralNumber ?? 0,
+                });
+
+                if (activeRal && activeRal.isStreaming) {
+                    ralRegistry.queueUserMessage(
+                        targetAgent.pubkey,
+                        conversationId,
+                        activeRal.ralNumber,
+                        event.content
+                    );
+
+                    const aborted = llmOpsRegistry.stopByAgentAndConversation(
+                        targetAgent.pubkey,
+                        conversationId,
+                        INJECTION_ABORT_REASON
+                    );
+
+                    if (aborted) {
+                        trace.getActiveSpan()?.addEvent("reply.aborted_for_injection", {
+                            "agent.slug": targetAgent.slug,
+                            "ral.number": activeRal.ralNumber,
+                            "message.length": event.content.length,
+                        });
+                        logger.info("[reply] Aborted streaming execution for injection", {
+                            agent: targetAgent.slug,
+                            ralNumber: activeRal.ralNumber,
+                            injectionLength: event.content.length,
+                        });
+                        agentSpan.addEvent("dispatch.injection_stream_abort", {
+                            "message.length": event.content.length,
+                        });
+                    } else {
+                        trace.getActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
+                            "agent.slug": targetAgent.slug,
+                            "ral.number": activeRal.ralNumber,
+                            "message.length": event.content.length,
+                        });
+                        agentSpan.addEvent("dispatch.injection_stream_queue_only", {
+                            "message.length": event.content.length,
+                        });
+                    }
+                }
+
+                if (activeRal && !activeRal.isStreaming) {
+                    ralRegistry.queueUserMessage(
+                        targetAgent.pubkey,
+                        conversationId,
+                        activeRal.ralNumber,
+                        event.content
+                    );
+                    trace.getActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
+                        "agent.slug": targetAgent.slug,
+                        "ral.number": activeRal.ralNumber,
+                        "message.length": event.content.length,
+                    });
+                    agentSpan.addEvent("dispatch.injection_resumption", {
+                        "message.length": event.content.length,
+                    });
+                }
+
+                let triggeringEventForContext = event;
+                const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
+
+                if (resumableRal?.originalTriggeringEventId) {
+                    const originalEvent = ConversationStore.getCachedEvent(resumableRal.originalTriggeringEventId);
+                    if (originalEvent) {
+                        triggeringEventForContext = originalEvent;
+                        trace.getActiveSpan()?.addEvent("reply.restored_original_trigger", {
+                            "agent.slug": targetAgent.slug,
+                            "original.event_id": resumableRal.originalTriggeringEventId,
+                            "resumption.event_id": event.id || "",
+                        });
+                        agentSpan.addEvent("dispatch.restored_original_trigger", {
+                            "original.event_id": resumableRal.originalTriggeringEventId,
+                        });
+                    }
+                }
+
+                const executionContext = await createExecutionContext({
+                    agent: targetAgent,
+                    conversationId,
+                    projectBasePath: projectCtx.agentRegistry.getBasePath(),
+                    triggeringEvent: triggeringEventForContext,
+                    mcpManager: projectCtx.mcpManager,
+                });
+
+                await agentExecutor.execute(executionContext);
+
+                agentSpan.setStatus({ code: SpanStatusCode.OK });
+            } catch (error) {
+                agentSpan.recordException(error as Error);
+                agentSpan.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: (error as Error).message,
+                });
+                throw error;
+            } finally {
+                agentSpan.end();
+            }
+        });
+
+        await Promise.all(executionPromises);
+    }
+}

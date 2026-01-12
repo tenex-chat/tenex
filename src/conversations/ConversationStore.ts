@@ -15,6 +15,7 @@ import { writeFile } from "fs/promises";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
+import { trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
 import { getPubkeyService } from "@/services/PubkeyService";
@@ -882,8 +883,37 @@ export class ConversationStore {
         activeRals: Set<number>
     ): Promise<ModelMessage[]> {
         const result: ModelMessage[] = [];
+        const delegationCompletionPrefix = "# DELEGATION COMPLETED";
+        const latestDelegationCompletionIndexByRal = new Map<number, number>();
+        const getDelegationCompletionRal = (entry: ConversationEntry): number | undefined => {
+            if (entry.messageType !== "text") return undefined;
+            if (typeof entry.ral !== "number") return undefined;
+            if (!entry.content.trimStart().startsWith(delegationCompletionPrefix)) return undefined;
+            if (!(entry.targetedPubkeys?.includes(agentPubkey) ?? false)) return undefined;
+            return entry.ral;
+        };
 
-        for (const entry of entries) {
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            const ral = getDelegationCompletionRal(entry);
+            if (ral !== undefined) {
+                latestDelegationCompletionIndexByRal.set(ral, i);
+            }
+        }
+
+        let prunedDelegationCompletions = 0;
+
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            const ral = getDelegationCompletionRal(entry);
+            if (ral !== undefined) {
+                const latestIndex = latestDelegationCompletionIndexByRal.get(ral);
+                if (latestIndex !== undefined && latestIndex !== i) {
+                    prunedDelegationCompletions += 1;
+                    continue;
+                }
+            }
+
             // User messages (no RAL) - include with derived role
             if (!entry.ral) {
                 result.push(await this.entryToMessage(entry, agentPubkey));
@@ -908,6 +938,13 @@ export class ConversationStore {
                     result.push(await this.entryToMessage(entry, agentPubkey));
                 }
             }
+        }
+
+        if (prunedDelegationCompletions > 0) {
+            trace.getActiveSpan?.()?.addEvent("conversation.delegation_completion_pruned", {
+                "delegation.pruned_count": prunedDelegationCompletions,
+                "delegation.kept_count": latestDelegationCompletionIndexByRal.size,
+            });
         }
 
         return result;

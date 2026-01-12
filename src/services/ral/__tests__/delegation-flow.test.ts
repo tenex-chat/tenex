@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, mock } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
-import { handleDelegationCompletion } from "@/event-handler/DelegationCompletionHandler";
+import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Mock getProjectContext

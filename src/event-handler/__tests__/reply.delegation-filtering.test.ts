@@ -13,7 +13,7 @@ const loggerMocks = {
     debug: mock(() => {}),
 };
 
-mock.module("../../utils/logger", () => ({
+mock.module("@/utils/logger", () => ({
     logger: loggerMocks,
 }));
 
@@ -33,6 +33,7 @@ const mockSpan = {
 mock.module("@opentelemetry/api", () => ({
     trace: {
         getActiveSpan: () => mockSpan,
+        setSpan: (_ctx: any, _span: any) => ({}),
         getTracer: () => ({
             startSpan: () => mockSpan,
             startActiveSpan: (_name: string, fn: (span: typeof mockSpan) => any) => fn(mockSpan),
@@ -46,7 +47,7 @@ mock.module("@opentelemetry/api", () => ({
 }));
 
 // Mock AgentEventDecoder
-mock.module("../../nostr/AgentEventDecoder", () => ({
+mock.module("@/nostr/AgentEventDecoder", () => ({
     AgentEventDecoder: {
         isDirectedToSystem: mock((event: any, systemAgents: any) => {
             const pTags = event.tags?.filter((tag: any) => tag[0] === "p") || [];
@@ -67,7 +68,7 @@ mock.module("../../nostr/AgentEventDecoder", () => ({
 }));
 
 // Mock ConversationResolver and ConversationStore
-mock.module("../../conversations/services/ConversationResolver", () => ({
+mock.module("@/conversations/services/ConversationResolver", () => ({
     ConversationResolver: class {
         async resolveConversationForEvent(event: any) {
             return {
@@ -91,12 +92,12 @@ mock.module("../../conversations/services/ConversationResolver", () => ({
 // or work with the real implementation.
 
 // Mock DelegationCompletionHandler
-mock.module("../../event-handler/DelegationCompletionHandler", () => ({
+mock.module("@/services/dispatch/DelegationCompletionHandler", () => ({
     handleDelegationCompletion: mock(() => Promise.resolve({})),
 }));
 
 // Mock AgentRouter
-mock.module("../../event-handler/AgentRouter", () => ({
+mock.module("@/services/dispatch/AgentRouter", () => ({
     AgentRouter: {
         resolveDelegationTarget: mock(() => null),
         unblockAgent: mock(() => ({ unblocked: false })),
@@ -119,7 +120,7 @@ mock.module("../../event-handler/AgentRouter", () => ({
 // with the test-setup.ts preload resetting it before each test.
 
 // Mock MetadataDebounceManager
-mock.module("../../conversations/services/MetadataDebounceManager", () => ({
+mock.module("@/conversations/services/MetadataDebounceManager", () => ({
     metadataDebounceManager: {
         markFirstPublishDone: mock(() => {}),
         onAgentStart: mock(() => {}),
@@ -128,7 +129,7 @@ mock.module("../../conversations/services/MetadataDebounceManager", () => ({
 }));
 
 // Mock ConversationSummarizer
-mock.module("../../conversations/services/ConversationSummarizer", () => ({
+mock.module("@/conversations/services/ConversationSummarizer", () => ({
     ConversationSummarizer: class {
         constructor(projectCtx: any) {}
         async summarizeAndPublish(conversation: any) {}
@@ -136,7 +137,7 @@ mock.module("../../conversations/services/ConversationSummarizer", () => ({
 }));
 
 // Mock createExecutionContext
-mock.module("../../agents/execution/ExecutionContextFactory", () => ({
+mock.module("@/agents/execution/ExecutionContextFactory", () => ({
     createExecutionContext: mock(() => Promise.resolve({})),
 }));
 
