@@ -25,7 +25,7 @@
         "@opentelemetry/semantic-conventions": "^1.38.0",
         "ai": "^6.0.27",
         "ai-sdk-provider-claude-code": "^3.2.1",
-        "ai-sdk-provider-codex-app-server": "^1.0.1",
+        "ai-sdk-provider-codex-app-server": "1.0.2",
         "ai-sdk-provider-codex-cli": "^1.0.4",
         "ai-sdk-provider-gemini-cli": "^2.0.1",
         "apache-arrow": "^21.1.0",
@@ -933,7 +933,7 @@
 
     "ai-sdk-provider-claude-code": ["ai-sdk-provider-claude-code@3.2.1", "", { "dependencies": { "@ai-sdk/provider": "^3.0.0", "@ai-sdk/provider-utils": "^4.0.1", "@anthropic-ai/claude-agent-sdk": "^0.2.1" }, "peerDependencies": { "zod": "^4.0.0" } }, "sha512-oNVO8bzk4surnG784ZwuB+pxQ/PPgxgvoXDrIyWr1b0u+iD+/9EtL1lwMeKuSLxKn7BF/MrPAgGWb+gftlXVXw=="],
 
-    "ai-sdk-provider-codex-app-server": ["ai-sdk-provider-codex-app-server@1.0.1", "", { "dependencies": { "@ai-sdk/provider": "^3.0.2", "@ai-sdk/provider-utils": "^2.2.0", "zod": "^3.0.0 || ^4.0.0" } }, "sha512-z+D/ySidIas4R4udxzg9mij1fY/0tSYWUcURbcX6NdxxmrowxXo5Ka3usy5cDN3Cshixh6e7gORFcDjSSm0/ow=="],
+    "ai-sdk-provider-codex-app-server": ["ai-sdk-provider-codex-app-server@1.0.2", "", { "dependencies": { "@ai-sdk/provider": "^3.0.2", "@ai-sdk/provider-utils": "^2.2.0", "zod": "^3.0.0 || ^4.0.0" } }, "sha512-wqQ7Y48zSf0A/Od59q6cNUBqEtSIUnGh21pwKCmXfTaQ6BQV08apqYYDIMn/Z4GymErYnwFa9kTGQIV1ve+2OA=="],
 
     "ai-sdk-provider-codex-cli": ["ai-sdk-provider-codex-cli@1.0.4", "", { "dependencies": { "@ai-sdk/provider": "^3.0.0", "@ai-sdk/provider-utils": "^4.0.1", "jsonc-parser": "^3.3.1" }, "optionalDependencies": { "@openai/codex": "^0.77.0" }, "peerDependencies": { "zod": "^3.0.0 || ^4.0.0" } }, "sha512-MgvrWWbH4rs44vdryQF5EnxdS7UVYxXkD2CPiH+ucV/3je/DMCgIySHHmsf/6wcDZ8zmPT1ZmVgHTdMWubZeIg=="],
 
