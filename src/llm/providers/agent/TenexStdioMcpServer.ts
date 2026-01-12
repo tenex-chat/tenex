@@ -19,7 +19,8 @@ interface StdioMCPServerConfig {
 
 /**
  * Creates a stdio MCP server configuration for TENEX tools
- * The configuration spawns `tenex mcp serve` with context passed via environment variables
+ * The configuration spawns a subprocess running the same executable with `mcp serve` subcommand,
+ * passing context via environment variables.
  */
 export class TenexStdioMcpServer {
     /**
@@ -83,10 +84,12 @@ export class TenexStdioMcpServer {
         });
 
         // Create the stdio MCP server configuration
+        // Use the current executable (process.argv[0] + process.argv[1]) instead of hard-coding "tenex"
+        // This ensures we spawn the same runtime and script that's currently executing
         const config: StdioMCPServerConfig = {
             transport: "stdio",
-            command: "tenex",
-            args: ["mcp", "serve"],
+            command: process.argv[0],  // node or bun binary
+            args: [process.argv[1], "mcp", "serve"],  // script path + subcommand
             env: {
                 TENEX_PROJECT_ID: projectId,
                 TENEX_AGENT_ID: agentId,
