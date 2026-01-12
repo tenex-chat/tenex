@@ -11,10 +11,8 @@ import { z } from "zod";
 const conversationGetSchema = z.object({
     conversationId: z
         .string()
-        .optional()
-        .describe(
-            "The conversation ID to retrieve. If omitted, returns the current conversation."
-        ),
+        .min(1, "conversationId is required")
+        .describe("The conversation ID to retrieve."),
     prompt: z
         .string()
         .optional()
@@ -210,7 +208,14 @@ async function executeConversationGet(
     input: ConversationGetInput,
     context: ToolExecutionContext
 ): Promise<ConversationGetOutput> {
-    const targetConversationId = input.conversationId || context.conversationId;
+    if (!input.conversationId) {
+        return {
+            success: false,
+            message: "conversationId is required",
+        };
+    }
+
+    const targetConversationId = input.conversationId;
 
     logger.info("📖 Retrieving conversation", {
         conversationId: targetConversationId,
@@ -351,7 +356,7 @@ ${conversationText}`,
 export function createConversationGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation metadata, execution state, and full message history. If conversationId is omitted, returns the current conversation. Useful for reviewing conversation context, analyzing message history, or accessing conversation metadata like summary, requirements, and plan.",
+            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation metadata, execution state, and full message history. Useful for reviewing conversation context, analyzing message history, or accessing conversation metadata like summary, requirements, and plan.",
 
         inputSchema: conversationGetSchema,
 
@@ -364,7 +369,7 @@ export function createConversationGetTool(context: ToolExecutionContext): AISdkT
         value: ({ conversationId, prompt }: ConversationGetInput) => {
             const target = conversationId
                 ? `conversation: ${conversationId}`
-                : "current conversation";
+                : "conversation (missing id)";
             return prompt
                 ? `Analyzing ${target} with prompt`
                 : `Retrieving ${target}`;

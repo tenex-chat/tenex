@@ -149,7 +149,7 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({});
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             expect(result.success).toBe(true);
             const messages = (result.conversation as any).messages;
@@ -196,7 +196,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             expect(result.success).toBe(true);
             const messages = (result.conversation as any).messages;
@@ -231,7 +234,7 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({});
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             const messages = (result.conversation as any).messages;
             expect(messages[0].content).toBe(JSON.stringify([smallToolData]));
@@ -260,7 +263,7 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({});
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             const messages = (result.conversation as any).messages;
             expect(messages[0].content).toContain("[truncated");
@@ -291,7 +294,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             const messages = (result.conversation as any).messages;
             expect(messages[0].content).toBe(JSON.stringify(smallResultData));
@@ -319,7 +325,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             const messages = (result.conversation as any).messages;
             expect(messages[0].content).toContain("[truncated");
@@ -353,7 +362,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             const messages = (result.conversation as any).messages;
             expect(messages).toHaveLength(6);
@@ -389,7 +401,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             const messages = (result.conversation as any).messages;
 
@@ -434,7 +449,7 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({});
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             // messageCount should reflect original count (3)
             expect((result.conversation as any).messageCount).toBe(3);
@@ -484,7 +499,10 @@ describe("conversation_get Tool", () => {
             };
 
             const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ includeToolResults: true });
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
 
             const messages = (result.conversation as any).messages;
             expect(messages[0].role).toBe("user");      // text without ral
