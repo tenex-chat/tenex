@@ -36,12 +36,14 @@ export class ConversationSummarizer {
                 // Get LLM configuration - use summarization config if set, otherwise default
                 const { llms } = await config.loadConfig();
                 const configName = llms.summarization || llms.default;
-                const summarizationConfig = configName ? llms.configurations[configName] : undefined;
 
-                if (!summarizationConfig) {
+                if (!configName) {
                     console.warn("No LLM configuration available for summarization");
                     return;
                 }
+
+                // Use getLLMConfig to resolve meta models automatically
+                const summarizationConfig = config.getLLMConfig(configName);
 
                 // Create LLM service
                 const llmService = llmServiceFactory.createService(
@@ -82,27 +84,61 @@ export class ConversationSummarizer {
                     [
                         {
                             role: "system",
-                            content: `You are a helpful assistant that generates concise titles, summaries, and status information for technical conversations.
+                            content: `You generate high-signal titles, summaries, status metadata, and category tags for technical conversations.
 
-CRITICAL: Base your summary ONLY on what is explicitly stated in the conversation. Do NOT:
-- Hallucinate success when errors, failures, or problems are mentioned
-- Assume tasks were completed if the conversation shows they failed or are still in progress
-- Invent outcomes that are not clearly stated in the transcript
+                CRITICAL: Base output ONLY on what is explicitly stated in the conversation. Do NOT:
+                - Hallucinate success when errors, failures, or problems are mentioned
+                - Assume tasks were completed if the conversation shows they failed or are still in progress
+                - Invent outcomes not clearly stated in the transcript
 
-Generate a title (~5 words) that captures the main topic or goal.
-Generate a summary (2-3 sentences) highlighting key decisions, progress, and current status. If errors occurred, mention them.
-Generate a status_label that concisely describes the overall status (e.g., "Researching", "In Progress", "Blocked", "Completed", "Failed", "Planning"). You are not limited to these examples—choose the most appropriate label.
-Generate a status_current_activity that is consistent with status_label:
-- If completed: describe the outcome (e.g., "All files created", "Bug fixed")
-- If failed: describe what failed (e.g., "Build failed with errors", "Tests not passing")
-- If in progress: describe the current action (e.g., "Implementing feature X", "Debugging issue")
-- If blocked/waiting: describe what's needed (e.g., "Waiting for user input", "Awaiting approval")
-Focus on what was accomplished or discussed, not on the process. Be truthful about failures and errors.
+                DENSITY RULES (ENFORCE)
+                - Summary max 160 characters (hard limit).
+                - No narrative glue: avoid “ensuring”, “including”, “key features”, “focused on”, “review of”, “in order to”, “now complete”, “ready for testing” (unless explicitly stated).
+                - No redundancy: summary and status_current_activity must not restate the same fact in different words.
 
-CATEGORIES: Assign 1-3 category tags to classify this conversation.
-- Use lowercase, singular nouns only (e.g., "authentication", "storage", "testing")
-- ${categoryListText}
-- If no existing category fits, create a new descriptive one following the format requirements`,
+                TITLE
+                - 3–5 words (hard limit), concrete nouns/verbs, no filler.
+                - Prefer outcome/topic phrasing.
+
+                SUMMARY (1 sentence only)
+                - Changelog style: state facts only (outcome/state, scope, blockers).
+                - For In Progress / Blocked / Waiting: include what is missing or unknown (“Details not provided”).
+                - Do not describe process.
+
+                STATUS
+                - status_label: one of "Researching", "In Progress", "Blocked", "Waiting", "Completed", "Failed", "Planning".
+                - status_current_activity: one dense clause, consistent with status_label.
+                - Do not duplicate the summary.
+
+                CATEGORIES (CANONICAL-FIRST, SEMANTIC)
+                You are given a list of previously used categories below. This list is a CANONICAL SUGGESTION SET, not an allowlist.
+                You must actively judge each candidate (including items from the list) using the rules below.
+
+                Previously used categories:
+                ${categoryListText}
+
+                Selection rules:
+                - Prefer an existing category from the list *only if* it is a good semantic fit.
+                - A valid category must:
+                - Name a stable system concept (component, data model, protocol, UI artifact, subsystem)
+                - Remain meaningful months later without task context
+                - Have high discriminative value (would not apply to most unrelated conversations)
+                - Do NOT select a category just because it exists in the list.
+
+                Creation rules (to avoid fragmentation):
+                - Create a new category ONLY if no existing category fits well.
+                - If creating a new category:
+                - Use a simple, canonical noun form
+                - Avoid re-ordering words that would create near-duplicates
+                - Prefer the most general stable concept (e.g., “agent” over “agent-runtime” unless runtime is explicitly the core topic)
+
+                Rejection rule:
+                - If all plausible categories (including those from the list) are low-signal or process-oriented, output [].
+
+                Before emitting categories, silently verify for each:
+                - It maps to an explicit noun phrase in the transcript
+                - It passes the “6-months later” test
+                - It would not create a near-duplicate of an existing category`,
                         },
                         {
                             role: "user",
@@ -110,24 +146,32 @@ CATEGORIES: Assign 1-3 category tags to classify this conversation.
                         },
                     ],
                     z.object({
-                        title: z.string().describe("A concise title for the conversation (5-10 words)"),
+                        title: z.string().describe("A concise title for the conversation (3-5 words)"),
                         summary: z
                             .string()
-                            .describe("A 2-3 sentence summary of key points and progress"),
+                            .describe(
+                                "A 1-sentence, information-dense summary (<=160 chars) of key facts, scope, and blockers"
+                            ),
                         status_label: z
                             .string()
-                            .describe("A concise status label (e.g., 'In Progress', 'Blocked', 'Completed')"),
+                            .describe(
+                                "A concise status label (e.g., 'In Progress', 'Blocked', 'Waiting', 'Completed', 'Failed')"
+                            ),
                         status_current_activity: z
                             .string()
-                            .describe("Description of current activity or what comes next"),
+                            .describe(
+                                "One dense clause consistent with status_label; no duplication or speculation"
+                            ),
                         categories: z
                             .array(z.string())
                             .max(3)
                             .describe(
-                                "1-3 category tags for classifying the conversation. Use lowercase, singular nouns only (e.g., 'authentication', 'storage', 'testing'). Must be from the existing category list if possible."
+                                "0-3 category tags. Lowercase singular nouns. Prefer canonical list; create new only if necessary; may be empty []."
                             ),
                     })
                 );
+
+
 
                 // Publish metadata event
                 const ndk = getNDK();
