@@ -33,6 +33,11 @@ export interface TenexConfig {
         inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 300000 = 5 minutes)
     };
 
+    // Telemetry configuration
+    telemetry?: {
+        enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -61,6 +66,11 @@ export const TenexConfigSchema = z.object({
             inactivityTimeout: z.number().optional(),
         })
         .optional(),
+    telemetry: z
+        .object({
+            enabled: z.boolean().optional(),
+        })
+        .optional(),
     description: z.string().optional(),
     repoUrl: z.string().optional(),
     projectNaddr: z.string().optional(),
@@ -69,6 +79,38 @@ export const TenexConfigSchema = z.object({
 // =====================================================================================
 // LLM SCHEMA (llms.json)
 // =====================================================================================
+
+/**
+ * Meta model variant configuration
+ * Defines a variant within a meta model that maps to a specific underlying model
+ */
+export interface MetaModelVariant {
+    /** The underlying LLM configuration name to use for this variant */
+    model: string;
+    /** Keywords that trigger this variant (e.g., ["think", "ponder"]) */
+    keywords?: string[];
+    /** Description of when to use this variant - shown in system prompt */
+    description?: string;
+    /** Optional additional system prompt to inject when this variant is active */
+    systemPrompt?: string;
+    /** Priority tier for conflict resolution (higher number = higher priority) */
+    tier?: number;
+}
+
+/**
+ * Meta model configuration
+ * A meta model is a virtual model that dynamically selects from underlying models
+ */
+export interface MetaModelConfiguration {
+    /** Must be "meta" to identify this as a meta model */
+    provider: "meta";
+    /** Map of variant names to their configurations */
+    variants: Record<string, MetaModelVariant>;
+    /** Default variant to use when no keyword matches */
+    default: string;
+    /** Optional description shown in system prompt preamble */
+    description?: string;
+}
 
 /**
  * Individual LLM configuration
@@ -85,6 +127,18 @@ export interface LLMConfiguration {
 }
 
 /**
+ * Type guard to check if a configuration is a meta model
+ */
+export function isMetaModelConfiguration(config: LLMConfiguration | MetaModelConfiguration): config is MetaModelConfiguration {
+    return config.provider === "meta" && "variants" in config;
+}
+
+/**
+ * Any LLM configuration type (standard or meta model)
+ */
+export type AnyLLMConfiguration = LLMConfiguration | MetaModelConfiguration;
+
+/**
  * Main LLM configuration structure
  */
 export interface TenexLLMs {
@@ -94,13 +148,37 @@ export interface TenexLLMs {
             apiKey: string;
         }
     >;
-    configurations: Record<string, LLMConfiguration>;
+    configurations: Record<string, AnyLLMConfiguration>;
     default?: string;
     summarization?: string; // Named config to use for generating summaries (kind 513 events)
     supervision?: string; // Named config to use for agent supervision
 }
 
-export const LLMConfigurationSchema = z
+/**
+ * Schema for meta model variant
+ */
+export const MetaModelVariantSchema = z.object({
+    model: z.string(),
+    keywords: z.array(z.string()).optional(),
+    description: z.string().optional(),
+    systemPrompt: z.string().optional(),
+    tier: z.number().optional(),
+});
+
+/**
+ * Schema for meta model configuration
+ */
+export const MetaModelConfigurationSchema = z.object({
+    provider: z.literal("meta"),
+    variants: z.record(z.string(), MetaModelVariantSchema),
+    default: z.string(),
+    description: z.string().optional(),
+});
+
+/**
+ * Schema for standard LLM configuration
+ */
+export const StandardLLMConfigurationSchema = z
     .object({
         provider: z.string(),
         model: z.string(),
@@ -110,6 +188,14 @@ export const LLMConfigurationSchema = z
         reasoningEffort: z.enum(["none", "low", "medium", "high", "xhigh"]).optional(),
     })
     .passthrough(); // Allow additional properties
+
+/**
+ * Union schema that accepts either standard or meta model configurations
+ */
+export const LLMConfigurationSchema = z.union([
+    MetaModelConfigurationSchema,
+    StandardLLMConfigurationSchema,
+]);
 
 export const TenexLLMsSchema = z.object({
     providers: z
