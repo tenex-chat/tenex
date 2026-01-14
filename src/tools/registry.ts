@@ -5,6 +5,8 @@
  */
 
 import { dynamicToolService } from "@/services/DynamicToolService";
+import { config as configService } from "@/services/ConfigService";
+import { isMetaModelConfiguration } from "@/services/config/types";
 import type { Tool as CoreTool } from "ai";
 import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext, MCPToolContext } from "./types";
 
@@ -75,6 +77,9 @@ import { createWebSearchTool } from "./implementations/web_search";
 // Nostr tools
 import { createNostrFetchTool } from "./implementations/nostr_fetch";
 
+// Meta model tools
+import { createChangeModelTool } from "./implementations/change_model";
+
 /**
  * Metadata about tools that doesn't require instantiation.
  * Tools declare hasSideEffects: false if they are read-only operations.
@@ -115,6 +120,7 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
     "todo_add",
     "todo_update",
     "conversation_get", // Needs conversation for current-conversation optimization
+    "change_model", // Needs conversation to persist variant override
 ]);
 
 /**
@@ -214,6 +220,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Nostr tools
     nostr_fetch: createNostrFetchTool,
+
+    // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
+    change_model: createChangeModelTool as ToolFactory,
 };
 
 /**
@@ -278,6 +287,9 @@ const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 /** Todo tools - for restricted agent execution (reminder mode) */
 const TODO_TOOLS: ToolName[] = ["todo_add", "todo_update"];
 
+/** Meta model tools - auto-injected when agent uses a meta model configuration */
+const META_MODEL_TOOLS: ToolName[] = ["change_model"];
+
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
@@ -337,6 +349,23 @@ export function getToolsObject(
             if (!regularTools.includes(editToolName)) {
                 regularTools.push(editToolName);
             }
+        }
+    }
+
+    // Auto-inject change_model tool when agent uses a meta model configuration
+    // Only inject if we have conversation context (needed for variant override persistence)
+    if (hasConversation && 'agent' in context && context.agent?.llmConfig) {
+        try {
+            const rawConfig = configService.getRawLLMConfig(context.agent.llmConfig);
+            if (isMetaModelConfiguration(rawConfig)) {
+                for (const metaToolName of META_MODEL_TOOLS) {
+                    if (!regularTools.includes(metaToolName)) {
+                        regularTools.push(metaToolName);
+                    }
+                }
+            }
+        } catch {
+            // Config not loaded or not available - skip meta model tool injection
         }
     }
 

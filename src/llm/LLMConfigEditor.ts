@@ -29,6 +29,7 @@ export class LLMConfigEditor {
                 choices: [
                     { name: "Configure provider API keys", value: "providers" },
                     { name: "Add new configuration", value: "add" },
+                    { name: "Create meta model", value: "addMeta" },
                     { name: "Delete configuration", value: "delete" },
                     {
                         name: `Default agents' model: ${llmsConfig.default || "none"}`,
@@ -58,6 +59,7 @@ export class LLMConfigEditor {
         } else {
             // All other actions use ConfigurationManager
             if (action === "add") await ConfigurationManager.add(llmsConfig);
+            if (action === "addMeta") await ConfigurationManager.addMetaModel(llmsConfig);
             if (action === "delete") await ConfigurationManager.delete(llmsConfig);
             if (action === "default") await ConfigurationManager.setDefault(llmsConfig);
             if (action === "summarization") await ConfigurationManager.setSummarizationModel(llmsConfig);

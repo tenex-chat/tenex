@@ -37,6 +37,10 @@ export interface MessageCompilerContext {
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     ralNumber: number;
+    /** System prompt fragment describing available meta model variants */
+    metaModelSystemPrompt?: string;
+    /** Variant-specific system prompt to inject when a meta model variant is active */
+    variantSystemPrompt?: string;
 }
 
 export interface CompiledMessages {
@@ -98,10 +102,28 @@ export class MessageCompiler {
                     const dynamicContextMessages = await this.buildDynamicContextMessages(context);
 
                     messages.push(...systemPromptMessages.map((sm) => sm.message));
+
+                    // Inject meta model system prompts if present
+                    // These describe available model variants and variant-specific instructions
+                    if (context.metaModelSystemPrompt) {
+                        messages.push({
+                            role: "system",
+                            content: context.metaModelSystemPrompt,
+                        });
+                        systemPromptCount++;
+                    }
+                    if (context.variantSystemPrompt) {
+                        messages.push({
+                            role: "system",
+                            content: context.variantSystemPrompt,
+                        });
+                        systemPromptCount++;
+                    }
+
                     messages.push(...conversationMessages);
                     messages.push(...dynamicContextMessages);
 
-                    systemPromptCount = systemPromptMessages.length;
+                    systemPromptCount += systemPromptMessages.length;
                     dynamicContextCount = dynamicContextMessages.length;
                 } else {
                     // In delta mode, only send new conversation messages.
