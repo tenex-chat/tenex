@@ -256,11 +256,11 @@ async function executeConversationGet(
     if (input.prompt) {
         try {
             // Get LLM configuration - use summarization config if set, otherwise default
+            // Use getLLMConfig to resolve meta models automatically
             const { llms } = await config.loadConfig();
             const configName = llms.summarization || llms.default;
-            const llmConfig = configName ? llms.configurations[configName] : undefined;
 
-            if (!llmConfig) {
+            if (!configName) {
                 logger.warn("No LLM configuration available for conversation analysis");
                 return {
                     success: true,
@@ -268,6 +268,8 @@ async function executeConversationGet(
                     message: "No LLM configuration available for prompt processing",
                 };
             }
+
+            const llmConfig = config.getLLMConfig(configName);
 
             // Create LLM service
             const llmService = llmServiceFactory.createService(llmConfig, {

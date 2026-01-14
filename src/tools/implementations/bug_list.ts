@@ -43,10 +43,21 @@ async function summarizeBugConversation(
         })
         .join("\n\n");
 
-    // Get LLM configuration
-    const { llms } = await config.loadConfig();
-    const metadataConfig =
-        llms.configurations.metadata || (llms.default ? llms.configurations[llms.default] : undefined);
+    // Get LLM configuration (prefer 'metadata' config, fallback to default)
+    // Use getLLMConfig to resolve meta models automatically
+    await config.loadConfig();
+    let metadataConfig;
+    try {
+        metadataConfig = config.getLLMConfig("metadata");
+    } catch {
+        // 'metadata' config doesn't exist, try default
+        try {
+            metadataConfig = config.getLLMConfig();
+        } catch {
+            // No LLM configured at all
+            metadataConfig = undefined;
+        }
+    }
 
     if (!metadataConfig) {
         // Fallback if no LLM configured

@@ -37,13 +37,15 @@ export class SupervisorLLMService {
 
             // Prefer supervision config, fall back to default
             const configName = llms.supervision || llms.default;
-            const supervisionConfig = configName ? llms.configurations[configName] : undefined;
 
-            if (!supervisionConfig) {
+            if (!configName) {
                 logger.warn("[SupervisorLLMService] No LLM configuration available for supervision");
                 this.initialized = true;
                 return;
             }
+
+            // Use getLLMConfig to resolve meta models automatically
+            const supervisionConfig = config.getLLMConfig(configName);
 
             // Create LLM service
             this.llmService = llmServiceFactory.createService(supervisionConfig, {
