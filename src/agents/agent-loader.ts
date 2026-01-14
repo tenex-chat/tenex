@@ -60,8 +60,12 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
             // Merge passed mcpConfig with agent's own mcpConfig (passed config takes precedence)
             const mergedMcpConfig = options?.mcpConfig || agentMcpConfig;
 
+            // Use resolved config name if provided (for meta model resolution),
+            // otherwise use the agent's default llmConfig
+            const configName = options?.resolvedConfigName || agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG;
+
             return config.createLLMService(
-                agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+                configName,
                 {
                     tools: options?.tools ?? {},
                     agentName: storedAgent.name,

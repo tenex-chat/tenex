@@ -132,7 +132,11 @@ export class ProviderConfigUI {
                 if (isSummarization) tags.push("summarization");
                 const tagStr = tags.length > 0 ? chalk.gray(` (${tags.join(", ")})`) : "";
 
-                console.log(`  ${marker}${name}${tagStr}: ${config.provider}:${config.model}`);
+                // Handle meta models differently - they don't have a single model
+                const configDisplay = config.provider === "meta"
+                    ? `meta (${Object.keys((config as { variants: Record<string, unknown> }).variants).length} variants)`
+                    : `${config.provider}:${"model" in config ? config.model : "unknown"}`;
+                console.log(`  ${marker}${name}${tagStr}: ${configDisplay}`);
             }
         }
     }

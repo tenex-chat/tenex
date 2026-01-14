@@ -468,6 +468,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         }
     }
 
+    /**
+     * Result type for prepareStep, matching AI SDK v6's PrepareStepResult.
+     * Allows dynamic model switching, tool control, and message overrides per step.
+     */
+    // NOTE: The full AI SDK PrepareStepResult includes: model, toolChoice, activeTools,
+    // system, messages, experimental_context, providerOptions. We expose what we need.
+
     async stream(
         messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
@@ -478,8 +485,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | PromiseLike<{ messages?: ModelMessage[] } | undefined>
-                | { messages?: ModelMessage[] }
+                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined>
+                | { model?: LanguageModel; messages?: ModelMessage[] }
                 | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
@@ -915,6 +922,24 @@ export class LLMService extends EventEmitter<Record<string, any>> {
      */
     getModel(): LanguageModel {
         return this.getLanguageModel();
+    }
+
+    /**
+     * Create a language model instance for dynamic model switching.
+     * Used by AgentExecutor when the change_model tool switches variants mid-run.
+     *
+     * @param provider - The provider ID (e.g., "openrouter", "anthropic")
+     * @param model - The model ID (e.g., "anthropic/claude-3.5-sonnet")
+     * @param registry - The AI SDK provider registry
+     * @returns A LanguageModel instance for use in prepareStep
+     */
+    static createLanguageModelFromRegistry(
+        provider: string,
+        model: string,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        registry: ProviderRegistryProvider<any, any>
+    ): LanguageModel {
+        return registry.languageModel(`${provider}:${model}`);
     }
 
     /**

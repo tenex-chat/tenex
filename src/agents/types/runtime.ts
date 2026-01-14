@@ -42,6 +42,11 @@ export interface AgentInstance {
         mcpConfig?: MCPConfig;
         /** Conversation ID for OpenRouter correlation */
         conversationId?: string;
+        /**
+         * Override the config name to use (for meta model resolution).
+         * If provided, uses this config instead of the agent's llmConfig.
+         */
+        resolvedConfigName?: string;
     }): LLMService;
     sign(event: NDKEvent): Promise<void>;
 }

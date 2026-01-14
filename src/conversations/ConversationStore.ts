@@ -84,6 +84,8 @@ interface ConversationState {
     todoRemindedAgents: string[]; // Agents who have been reminded about incomplete todos
     blockedAgents: string[];
     executionTime: ExecutionTime;
+    /** Meta model variant override per agent - when set, uses this variant instead of keyword detection */
+    metaModelVariantOverride?: Record<string, string>; // agentPubkey -> variantName
 }
 
 export class ConversationStore {
@@ -725,6 +727,67 @@ export class ConversationStore {
 
     hasEventId(eventId: string): boolean {
         return this.eventIdSet.has(eventId);
+    }
+
+    /**
+     * Get the first user message in the conversation (for meta model keyword detection).
+     * Returns the first message from a non-agent pubkey.
+     */
+    getFirstUserMessage(): (ConversationEntry & { id: number }) | undefined {
+        for (let i = 0; i < this.state.messages.length; i++) {
+            const msg = this.state.messages[i];
+            // Skip agent messages and tool messages
+            if (
+                msg.messageType === "text" &&
+                !ConversationStore.agentPubkeys.has(msg.pubkey)
+            ) {
+                return { ...msg, id: i };
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * Update the content of a message by its index.
+     * Used for meta model keyword stripping.
+     */
+    updateMessageContent(messageIndex: number, newContent: string): void {
+        if (messageIndex >= 0 && messageIndex < this.state.messages.length) {
+            this.state.messages[messageIndex].content = newContent;
+        }
+    }
+
+    /**
+     * Get the meta model variant override for a specific agent.
+     * @param agentPubkey - The agent's pubkey
+     * @returns The variant name if set, undefined otherwise
+     */
+    getMetaModelVariantOverride(agentPubkey: string): string | undefined {
+        return this.state.metaModelVariantOverride?.[agentPubkey];
+    }
+
+    /**
+     * Set a meta model variant override for a specific agent.
+     * This variant will be used for subsequent turns instead of keyword detection.
+     * @param agentPubkey - The agent's pubkey
+     * @param variantName - The variant name to use
+     */
+    setMetaModelVariantOverride(agentPubkey: string, variantName: string): void {
+        if (!this.state.metaModelVariantOverride) {
+            this.state.metaModelVariantOverride = {};
+        }
+        this.state.metaModelVariantOverride[agentPubkey] = variantName;
+    }
+
+    /**
+     * Clear the meta model variant override for a specific agent.
+     * This reverts to keyword-based variant detection.
+     * @param agentPubkey - The agent's pubkey
+     */
+    clearMetaModelVariantOverride(agentPubkey: string): void {
+        if (this.state.metaModelVariantOverride) {
+            delete this.state.metaModelVariantOverride[agentPubkey];
+        }
     }
 
     /**

@@ -10,22 +10,25 @@ import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
-import type {
-    ChunkTypeChangeEvent,
-    CompleteEvent,
-    ContentEvent,
-    RawChunkEvent,
-    ReasoningEvent,
-    SessionCapturedEvent,
-    StreamErrorEvent,
-    ToolDidExecuteEvent,
-    ToolWillExecuteEvent,
+import {
+    LLMService,
+    type ChunkTypeChangeEvent,
+    type CompleteEvent,
+    type ContentEvent,
+    type RawChunkEvent,
+    type ReasoningEvent,
+    type SessionCapturedEvent,
+    type StreamErrorEvent,
+    type ToolDidExecuteEvent,
+    type ToolWillExecuteEvent,
 } from "@/llm/service";
 import { streamPublisher } from "@/llm";
+import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
+import { config as configService } from "@/services/ConfigService";
 import { NudgeService } from "@/services/nudge";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
@@ -39,6 +42,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type {
     Tool as CoreTool,
+    LanguageModel,
     ModelMessage,
     StepResult,
     ToolCallPart,
@@ -795,7 +799,7 @@ export class AgentExecutor {
             // events in executeStreaming. Publishing empty content would be noise.
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
-                    { content: completionEvent.message },
+                    { content: completionEvent.message, usage: completionEvent.usage },
                     eventContext
                 );
             }
@@ -803,7 +807,7 @@ export class AgentExecutor {
             // Final completion - use complete() (kind:1, with p-tag)
             // Always publish completion even if empty to mark conversation as complete
             responseEvent = await agentPublisher.complete(
-                { content: completionEvent.message },
+                { content: completionEvent.message, usage: completionEvent.usage },
                 eventContext
             );
         }
@@ -894,11 +898,65 @@ export class AgentExecutor {
 
         const abortSignal = llmOpsRegistry.registerOperation(context);
 
+        // === META MODEL RESOLUTION ===
+        // If the agent's llmConfig is a meta model, resolve which variant to use
+        // Priority: 1) variant override from change_model tool, 2) keywords in first user message
+        let resolvedConfigName: string | undefined;
+        let metaModelSystemPrompt: string | undefined;
+        let variantSystemPrompt: string | undefined;
+
+        if (configService.isMetaModelConfig(context.agent.llmConfig)) {
+            // Check for a variant override set by the change_model tool
+            const variantOverride = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+
+            // Get the first user message from the conversation store for keyword detection
+            // (only used if no override is set)
+            const firstUserMessage = conversationStore.getFirstUserMessage();
+
+            const resolution = configService.resolveMetaModel(
+                context.agent.llmConfig,
+                firstUserMessage?.content,
+                variantOverride // Pass override if set
+            );
+
+            if (resolution.isMetaModel) {
+                resolvedConfigName = resolution.configName;
+                metaModelSystemPrompt = resolution.metaModelSystemPrompt;
+                variantSystemPrompt = resolution.variantSystemPrompt;
+
+                // If keywords were stripped (and no override was used), update the message in the conversation store
+                if (!variantOverride &&
+                    resolution.strippedMessage !== undefined &&
+                    resolution.strippedMessage !== firstUserMessage?.content &&
+                    firstUserMessage) {
+                    conversationStore.updateMessageContent(
+                        firstUserMessage.id,
+                        resolution.strippedMessage
+                    );
+                }
+
+                trace.getActiveSpan()?.addEvent("executor.meta_model_resolved", {
+                    "meta_model.original_config": context.agent.llmConfig,
+                    "meta_model.resolved_config": resolvedConfigName,
+                    "meta_model.variant": resolution.variantName || "default",
+                    "meta_model.used_override": !!variantOverride,
+                });
+            }
+        }
+
+        // Track the current model for dynamic model switching
+        // This is used in prepareStep to detect when change_model tool has switched variants
+        // and to persist the switched model across all subsequent steps
+        let lastUsedVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+        let currentModel: LanguageModel | undefined; // Holds the switched model to persist across steps
+        const isMetaModel = configService.isMetaModelConfig(context.agent.llmConfig);
+
         const llmService = context.agent.createLLMService({
             tools: toolsObject,
             sessionId,
             workingDirectory: context.workingDirectory,
             conversationId: context.conversationId,
+            resolvedConfigName,
         });
 
         const messageCompiler = new MessageCompiler(
@@ -933,6 +991,9 @@ export class AgentExecutor {
             pendingDelegations,
             completedDelegations,
             ralNumber,
+            // Meta model system prompts (only present if agent uses a meta model)
+            metaModelSystemPrompt,
+            variantSystemPrompt,
         });
 
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
@@ -1111,6 +1172,7 @@ export class AgentExecutor {
 
             // prepareStep: async, rebuilds messages from ConversationStore on every step
             // This ensures injections and tool results are always included
+            // Also handles dynamic model switching via change_model tool
             const prepareStep = async (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
@@ -1132,7 +1194,7 @@ export class AgentExecutor {
                         };
                     };
                 }>;
-            }): Promise<{ messages?: ModelMessage[] } | undefined> => {
+            }): Promise<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined> => {
                 // Pass steps to LLM service for usage tracking (makes usage available for tool events)
                 llmService.updateUsageFromSteps(step.steps);
 
@@ -1211,7 +1273,75 @@ export class AgentExecutor {
                     return undefined;
                 }
 
-                return { messages: rebuiltMessages };
+                // === DYNAMIC MODEL SWITCHING ===
+                // Check if the change_model tool has switched variants since the last step
+                // If so, create a new model instance and return it to the AI SDK
+                // IMPORTANT: Once switched, we must continue returning the model on every step,
+                // otherwise AI SDK will fall back to the initial model.
+
+                if (isMetaModel) {
+                    const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+
+                    if (currentVariant !== lastUsedVariant) {
+                        // Variant changed! Resolve to the new configuration
+                        const resolution = configService.resolveMetaModel(
+                            context.agent.llmConfig,
+                            undefined, // No keyword detection, use override
+                            currentVariant
+                        );
+
+                        if (resolution.isMetaModel) {
+                            // Get the resolved LLM configuration
+                            const newLlmConfig = configService.getLLMConfig(resolution.configName);
+
+                            // Create a new language model from the registry
+                            try {
+                                const registry = llmServiceFactory.getRegistry();
+                                const newModel = LLMService.createLanguageModelFromRegistry(
+                                    newLlmConfig.provider,
+                                    newLlmConfig.model,
+                                    registry
+                                );
+
+                                // Log before updating tracking state
+                                const previousVariant = lastUsedVariant;
+
+                                executionSpan?.addEvent("executor.model_switched", {
+                                    "ral.number": ralNumber,
+                                    "meta_model.previous_variant": previousVariant || "default",
+                                    "meta_model.new_variant": currentVariant || "default",
+                                    "meta_model.new_config": resolution.configName,
+                                    "meta_model.new_provider": newLlmConfig.provider,
+                                    "meta_model.new_model": newLlmConfig.model,
+                                });
+
+                                logger.info("[AgentExecutor] Dynamic model switch via change_model tool", {
+                                    agent: context.agent.slug,
+                                    previousVariant: previousVariant || "default",
+                                    newVariant: currentVariant || "default",
+                                    newConfig: resolution.configName,
+                                });
+
+                                // Update tracking state after logging
+                                lastUsedVariant = currentVariant;
+                                // Store the model so we return it on every subsequent step
+                                currentModel = newModel;
+                            } catch (modelError) {
+                                logger.error("[AgentExecutor] Failed to create new model for variant switch", {
+                                    error: formatAnyError(modelError),
+                                    variant: currentVariant,
+                                    config: resolution.configName,
+                                });
+                                // Continue with existing model on error
+                            }
+                        }
+                    }
+                }
+
+                // Always return the current model if we've switched, to persist across all steps
+                return currentModel
+                    ? { model: currentModel, messages: rebuiltMessages }
+                    : { messages: rebuiltMessages };
             };
 
             const onStopCheck = async (steps: StepResult<Record<string, AISdkTool>>[]): Promise<boolean> => {

@@ -60,7 +60,8 @@ export type ToolName =
     | "todo_update"
     | "web_fetch"
     | "web_search"
-    | "nostr_fetch";
+    | "nostr_fetch"
+    | "change_model";
 
 /**
  * AI SDK tool with optional human-readable formatter and side effect declaration.

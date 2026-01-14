@@ -1,4 +1,4 @@
-import type { LLMConfiguration, TenexLLMs } from "@/services/config/types";
+import type { LLMConfiguration, MetaModelConfiguration, MetaModelVariant, TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -140,6 +140,221 @@ export class ConfigurationManager {
                 llmsConfig.default = name;
             }
             console.log(chalk.green(`✅ Configuration "${name}" created`));
+        }
+    }
+
+    /**
+     * Create a meta model configuration with multiple variants
+     */
+    static async addMetaModel(llmsConfig: TenexLLMs): Promise<void> {
+        // Get existing non-meta configurations to use as variants
+        const standardConfigs = Object.keys(llmsConfig.configurations).filter((name) => {
+            const config = llmsConfig.configurations[name];
+            return config.provider !== "meta";
+        });
+
+        if (standardConfigs.length < 2) {
+            console.log(
+                chalk.yellow(
+                    "⚠️  You need at least 2 standard LLM configurations to create a meta model."
+                )
+            );
+            console.log(
+                chalk.gray("   Create more configurations first with 'Add new configuration'.")
+            );
+            return;
+        }
+
+        console.log(chalk.cyan("\n=== Create Meta Model ===\n"));
+        console.log(
+            chalk.gray(
+                "Meta models let you switch between different models using keywords.\n" +
+                    "For example, starting a message with 'ultrathink' can trigger a more powerful model.\n"
+            )
+        );
+
+        // Get meta model name
+        const { metaName } = await inquirer.prompt([
+            {
+                type: "input",
+                name: "metaName",
+                message: "Meta model name:",
+                validate: (input: string) => {
+                    if (!input.trim()) return "Name is required";
+                    if (llmsConfig.configurations[input]) return "Configuration already exists";
+                    return true;
+                },
+            },
+        ]);
+
+        // Get optional description
+        const { description } = await inquirer.prompt([
+            {
+                type: "input",
+                name: "description",
+                message: "Description (shown in system prompt, press enter to skip):",
+            },
+        ]);
+
+        // Create variants
+        const variants: Record<string, MetaModelVariant> = {};
+        let addMoreVariants = true;
+        let variantCount = 0;
+
+        console.log(chalk.cyan("\nNow let's add variants to your meta model.\n"));
+
+        while (addMoreVariants) {
+            variantCount++;
+            console.log(chalk.bold(`\n--- Variant ${variantCount} ---`));
+
+            // Variant name
+            const { variantName } = await inquirer.prompt([
+                {
+                    type: "input",
+                    name: "variantName",
+                    message: "Variant name (e.g., 'fast', 'standard', 'deep'):",
+                    validate: (input: string) => {
+                        if (!input.trim()) return "Name is required";
+                        if (variants[input]) return "Variant already exists";
+                        return true;
+                    },
+                },
+            ]);
+
+            // Select underlying model
+            const { model } = await inquirer.prompt([
+                {
+                    type: "list",
+                    name: "model",
+                    message: "Select underlying model for this variant:",
+                    choices: standardConfigs.map((n) => ({
+                        name: n,
+                        value: n,
+                    })),
+                },
+            ]);
+
+            // Keywords (comma-separated)
+            const { keywordsInput } = await inquirer.prompt([
+                {
+                    type: "input",
+                    name: "keywordsInput",
+                    message: "Trigger keywords (comma-separated, e.g., 'think,ponder'):",
+                },
+            ]);
+
+            const keywords = keywordsInput
+                ? keywordsInput
+                      .split(",")
+                      .map((k: string) => k.trim().toLowerCase())
+                      .filter((k: string) => k.length > 0)
+                : [];
+
+            // Variant description
+            const { variantDescription } = await inquirer.prompt([
+                {
+                    type: "input",
+                    name: "variantDescription",
+                    message: "Variant description (shown in system prompt):",
+                },
+            ]);
+
+            // Tier (priority)
+            const { tier } = await inquirer.prompt([
+                {
+                    type: "number",
+                    name: "tier",
+                    message: "Priority tier (higher = higher priority when keywords conflict):",
+                    default: variantCount,
+                },
+            ]);
+
+            // Optional system prompt
+            const { variantSystemPrompt } = await inquirer.prompt([
+                {
+                    type: "input",
+                    name: "variantSystemPrompt",
+                    message: "Additional system prompt (press enter to skip):",
+                },
+            ]);
+
+            // Create variant
+            const variant: MetaModelVariant = {
+                model,
+            };
+
+            if (keywords.length > 0) variant.keywords = keywords;
+            if (variantDescription) variant.description = variantDescription;
+            if (tier) variant.tier = tier;
+            if (variantSystemPrompt) variant.systemPrompt = variantSystemPrompt;
+
+            variants[variantName] = variant;
+
+            console.log(chalk.green(`✓ Added variant "${variantName}" → ${model}`));
+
+            // Ask if more variants
+            if (variantCount >= 2) {
+                const { addMore } = await inquirer.prompt([
+                    {
+                        type: "confirm",
+                        name: "addMore",
+                        message: "Add another variant?",
+                        default: false,
+                    },
+                ]);
+                addMoreVariants = addMore;
+            } else {
+                console.log(chalk.gray("(Meta models need at least 2 variants)"));
+            }
+        }
+
+        // Select default variant
+        const variantNames = Object.keys(variants);
+        const { defaultVariant } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "defaultVariant",
+                message: "Select default variant (used when no keyword matches):",
+                choices: variantNames.map((n) => ({
+                    name: n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        // Create meta model configuration
+        const metaConfig: MetaModelConfiguration = {
+            provider: "meta",
+            variants,
+            default: defaultVariant,
+        };
+
+        if (description) metaConfig.description = description;
+
+        llmsConfig.configurations[metaName] = metaConfig;
+
+        // Ask if should be set as default
+        const { setAsDefault } = await inquirer.prompt([
+            {
+                type: "confirm",
+                name: "setAsDefault",
+                message: "Set as default configuration?",
+                default: false,
+            },
+        ]);
+
+        if (setAsDefault) {
+            llmsConfig.default = metaName;
+        }
+
+        console.log(chalk.green(`\n✅ Meta model "${metaName}" created with ${variantCount} variants`));
+
+        // Show summary
+        console.log(chalk.cyan("\nVariant summary:"));
+        for (const [name, variant] of Object.entries(variants)) {
+            const keywords = variant.keywords?.length ? ` (triggers: ${variant.keywords.join(", ")})` : "";
+            const isDefault = name === defaultVariant ? chalk.yellow(" [default]") : "";
+            console.log(chalk.gray(`  • ${name} → ${variant.model}${keywords}${isDefault}`));
         }
     }
 
