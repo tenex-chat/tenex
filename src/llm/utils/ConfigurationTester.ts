@@ -1,6 +1,7 @@
 import type { CompleteEvent, ContentEvent, StreamErrorEvent } from "@/llm/service";
 import { config as configService } from "@/services/ConfigService";
 import type { TenexLLMs } from "@/services/config/types";
+import { isMetaModelConfiguration } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { z } from "zod";
@@ -23,20 +24,29 @@ export class ConfigurationTester {
                 type: "list",
                 name: "name",
                 message: "Select configuration to test:",
-                choices: configNames.map((n) => ({
-                    name: n === llmsConfig.default ? `${n} (default)` : n,
-                    value: n,
-                })),
+                choices: configNames.map((n) => {
+                    const cfg = llmsConfig.configurations[n];
+                    const isMeta = isMetaModelConfiguration(cfg);
+                    const label = n === llmsConfig.default ? `${n} (default)` : n;
+                    return {
+                        name: isMeta ? `${label} [meta model]` : label,
+                        value: n,
+                    };
+                }),
             },
         ]);
 
-        const llmConfig = llmsConfig.configurations[name];
-        console.log(chalk.yellow(`\nTesting configuration "${name}"...`));
-        console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
-
         try {
-            // Load full config (needed for MCP server configs in agent providers)
+            // Load full config first (needed for getLLMConfig and MCP server configs)
             await configService.loadConfig();
+
+            // Use getLLMConfig to resolve meta models to their default variant
+            const llmConfig = configService.getLLMConfig(name);
+            const rawConfig = llmsConfig.configurations[name];
+            const isMeta = isMetaModelConfiguration(rawConfig);
+
+            console.log(chalk.yellow(`\nTesting configuration "${name}"${isMeta ? " (meta model - using default variant)" : ""}...`));
+            console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
 
             // Initialize providers before testing
             await llmServiceFactory.initializeProviders(llmsConfig.providers);
@@ -97,7 +107,7 @@ export class ConfigurationTester {
             if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
                 console.log(chalk.yellow("\n💡 Invalid or expired API key"));
             } else if (errorMessage?.includes("404")) {
-                console.log(chalk.yellow(`\n💡 Model '${llmConfig.model}' may not be available`));
+                console.log(chalk.yellow(`\n💡 Model for configuration '${name}' may not be available`));
             } else if (errorMessage?.includes("rate limit")) {
                 console.log(chalk.yellow("\n💡 Rate limit hit. Please wait and try again"));
             }
@@ -110,13 +120,17 @@ export class ConfigurationTester {
      * Test a configuration for summarization using generateObject
      */
     static async testSummarization(llmsConfig: TenexLLMs, configName: string): Promise<void> {
-        const llmConfig = llmsConfig.configurations[configName];
-        if (!llmConfig) {
+        const rawConfig = llmsConfig.configurations[configName];
+        if (!rawConfig) {
             console.log(chalk.red(`❌ Configuration "${configName}" not found`));
             return;
         }
 
-        console.log(chalk.yellow(`\nTesting summarization with "${configName}"...`));
+        // Use getLLMConfig to resolve meta models to their default variant
+        const llmConfig = configService.getLLMConfig(configName);
+        const isMeta = isMetaModelConfiguration(rawConfig);
+
+        console.log(chalk.yellow(`\nTesting summarization with "${configName}"${isMeta ? " (meta model - using default variant)" : ""}...`));
         console.log(chalk.gray(`Provider: ${llmConfig.provider}, Model: ${llmConfig.model}`));
 
         // Schema that mimics what we'd use for kind 513 summaries
