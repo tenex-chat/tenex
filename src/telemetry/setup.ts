@@ -22,28 +22,27 @@ const traceExporter = new OTLPTraceExporter({
     url: exporterUrl,
 });
 
-let collectorAvailable = true;
-
 class ErrorHandlingExporterWrapper implements SpanExporter {
-    private hasLoggedError = false;
+    private disabled = false;
 
     export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
+        // Once disabled, drop all spans silently
+        if (this.disabled) {
+            resultCallback({ code: 0 }); // ExportResultCode.SUCCESS
+            return;
+        }
+
         traceExporter.export(spans, (result) => {
-            if (result.error && collectorAvailable) {
+            if (result.error && !this.disabled) {
                 const errorMessage = result.error?.message || String(result.error);
-                if (errorMessage.includes("ECONNREFUSED") || errorMessage.includes("connect")) {
-                    if (!this.hasLoggedError) {
-                        console.warn(`[Telemetry] ⚠️  Collector not available at ${exporterUrl}`);
-                        console.warn(
-                            "[Telemetry] Traces will be collected locally but not exported"
-                        );
-                        this.hasLoggedError = true;
-                        collectorAvailable = false;
-                    }
-                } else if (!this.hasLoggedError) {
+                const isConnectionError = errorMessage.includes("ECONNREFUSED") || errorMessage.includes("connect");
+                if (isConnectionError) {
+                    console.warn(`[Telemetry] ⚠️  Collector not available at ${exporterUrl}`);
+                } else {
                     console.error("[Telemetry] Export error:", errorMessage);
-                    this.hasLoggedError = true;
                 }
+                console.warn("[Telemetry] Disabling trace export");
+                this.disabled = true;
             }
             resultCallback(result);
         });
@@ -84,7 +83,12 @@ export const sdk = new NodeSDK({
     // NO instrumentation filters - capture all
 });
 
-export function initializeTelemetry(): void {
+export function initializeTelemetry(enabled = true): void {
+    if (!enabled) {
+        console.log("[Telemetry] OpenTelemetry disabled via config");
+        return;
+    }
+
     sdk.start();
     console.log("[Telemetry] OpenTelemetry enabled - capturing ALL traces");
     console.log(
