@@ -26,9 +26,18 @@ export class ClaudeCodeToolsAdapter {
         // Filter out tools that Claude Code has its own version of:
         // - fs_* (Claude Code has Read, Write, Edit, Glob, Grep)
         // - todo_* (Claude Code has TodoWrite)
+        // - web_fetch (Claude Code has WebFetch)
+        // - shell (Claude Code has Bash)
+        // - web_search (Claude Code has WebSearch)
+        const claudeCodeBuiltinTools = new Set([
+            "web_fetch",
+            "shell",
+            "web_search",
+        ]);
         const localTools = Object.entries(tools).filter(([name]) =>
             !name.startsWith("fs_") &&
-            !name.startsWith("todo_")
+            !name.startsWith("todo_") &&
+            !claudeCodeBuiltinTools.has(name)
         );
 
         console.log("[ClaudeCodeToolsAdapter] Input tools analysis:", {
