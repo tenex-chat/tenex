@@ -38,6 +38,8 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "bug_report_add",
     // Pairing tools (injected when hasActivePairings is true)
     "stop_pairing",
+    // Meta model tool (injected when agent uses a meta model configuration)
+    "change_model",
 ];
 
 /**
