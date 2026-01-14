@@ -174,6 +174,10 @@ export class AgentEventEncoder {
             event.tag(["reasoning"]);
         }
 
+        if (intent.usage) {
+            this.addLLMUsageTags(event, intent.usage);
+        }
+
         this.addStandardTags(event, context);
         this.forwardBranchTag(event, context);
 
