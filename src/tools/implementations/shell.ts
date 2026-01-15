@@ -1,4 +1,8 @@
-import { exec, type ExecException } from "node:child_process";
+import { exec, spawn, type ExecException } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { ExecutionConfig } from "@/agents/execution/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
@@ -51,6 +55,34 @@ interface ShellErrorResult {
 }
 
 /**
+ * Structure returned when a shell command is started in the background
+ */
+interface ShellBackgroundResult {
+    type: "background-task";
+    taskId: string;
+    command: string;
+    description: string | null;
+    outputFile: string;
+    message: string;
+}
+
+// Track background tasks
+const backgroundTasks = new Map<string, {
+    pid: number;
+    command: string;
+    description: string | null;
+    outputFile: string;
+    startTime: Date;
+}>();
+
+/**
+ * Generate a unique task ID for background processes
+ */
+function generateTaskId(): string {
+    return Math.random().toString(36).substring(2, 9);
+}
+
+/**
  * Extracts the base command from a shell command string.
  * Handles pipes, redirects, and command chaining.
  */
@@ -84,6 +116,13 @@ function isExpectedNonZeroExit(command: string, exitCode: number): { expected: b
 
 const shellSchema = z.object({
     command: z.string().describe("The shell command to execute"),
+    description: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+            "A clear, concise description of what this command does. For simple commands (5-10 words), for complex commands add more context."
+        ),
     cwd: z
         .string()
         .nullable()
@@ -94,22 +133,30 @@ const shellSchema = z.object({
         .describe(
             `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`
         ),
+    run_in_background: z
+        .boolean()
+        .nullable()
+        .optional()
+        .describe(
+            "Set to true to run the command in the background. Returns immediately with a task ID that can be used to check status later."
+        ),
 });
 
 type ShellInput = z.infer<typeof shellSchema>;
-type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult;
+type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult | ShellBackgroundResult;
 
 /**
  * Core implementation of shell command execution
  * Shared between AI SDK and legacy Tool interfaces
  *
- * Handles three cases:
+ * Handles four cases:
  * 1. Success (exit code 0): Returns stdout + stderr as string
  * 2. Expected non-zero exit (e.g., grep with no matches): Returns structured result, NOT an error
  * 3. Genuine failure: Returns structured error result for LLM recovery
+ * 4. Background execution: Returns task info immediately, output written to file
  */
 async function executeShell(input: ShellInput, context: ToolExecutionContext): Promise<ShellOutput> {
-    const { command, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS } = input;
+    const { command, description, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS, run_in_background } = input;
 
     // Resolve cwd: if provided and relative, resolve against context.workingDirectory
     // If not provided, use context.workingDirectory directly
@@ -126,6 +173,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
     const span = trace.getActiveSpan();
     span?.setAttributes({
         "shell.command": command.substring(0, 200),
+        "shell.description": description || "(not provided)",
         "shell.cwd_param_raw": cwd || "(not provided)",
         "shell.cwd_resolved": workingDir || "(empty)",
         "shell.context.working_directory": context.workingDirectory || "(empty)",
@@ -133,10 +181,13 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         "shell.context.current_branch": context.currentBranch || "(empty)",
         "shell.agent": context.agent.name,
         "shell.timeout": timeout ?? ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS,
+        "shell.run_in_background": run_in_background ?? false,
     });
     span?.addEvent("shell.execute_start", {
         command: command.substring(0, 200),
+        description: description || "(not provided)",
         cwd: workingDir || "(empty)",
+        run_in_background: run_in_background ?? false,
     });
 
     // Validate working directory - fail fast if it's empty
@@ -150,12 +201,82 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
 
     logger.info("Executing shell command", {
         command,
+        description: description || undefined,
         cwd: workingDir,
         contextWorkingDir: context.workingDirectory,
         contextProjectBasePath: context.projectBasePath,
         agent: context.agent.name,
         timeout,
+        runInBackground: run_in_background ?? false,
     });
+
+    // Handle background execution
+    if (run_in_background) {
+        const taskId = generateTaskId();
+        const outputDir = join(tmpdir(), "tenex-shell-tasks");
+        await mkdir(outputDir, { recursive: true });
+        const outputFile = join(outputDir, `${taskId}.output`);
+
+        const child = spawn(command, [], {
+            cwd: workingDir,
+            shell: true,
+            detached: true,
+            stdio: ["ignore", "pipe", "pipe"],
+            env: {
+                ...process.env,
+                PATH: process.env.PATH,
+                HOME: process.env.HOME,
+            },
+        });
+
+        // Write output to file
+        const outputStream = createWriteStream(outputFile);
+        child.stdout?.pipe(outputStream);
+        child.stderr?.pipe(outputStream);
+
+        // Track the background task
+        backgroundTasks.set(taskId, {
+            pid: child.pid!,
+            command: command.substring(0, 200),
+            description: description || null,
+            outputFile,
+            startTime: new Date(),
+        });
+
+        // Unref so parent can exit independently
+        child.unref();
+
+        // Clean up task tracking when process exits
+        child.on("exit", () => {
+            // Keep task info for a while so status can be checked
+            // It will be cleaned up eventually by a cleanup routine
+        });
+
+        span?.addEvent("shell.background_started", {
+            task_id: taskId,
+            output_file: outputFile,
+            pid: child.pid,
+        });
+
+        logger.info("Shell command started in background", {
+            taskId,
+            command: command.substring(0, 200),
+            description: description || undefined,
+            outputFile,
+            pid: child.pid,
+        });
+
+        const result: ShellBackgroundResult = {
+            type: "background-task",
+            taskId,
+            command: command.substring(0, 200),
+            description: description || null,
+            outputFile,
+            message: `Command started in background. Task ID: ${taskId}. Output is being written to: ${outputFile}`,
+        };
+
+        return result;
+    }
 
     try {
         const { stdout, stderr } = await execAsync(command, {
@@ -288,7 +409,7 @@ COMMAND CHAINING:
 - Prefer absolute paths over cd: "pytest /foo/bar/tests" NOT "cd /foo/bar && pytest tests"
 
 WHEN NOT TO USE SHELL:
-- File operations: Use read_path/write_path (NOT cat/echo/sed/awk)
+- File operations: Use fs_read/write_path (NOT cat/echo/sed/awk)
 - Code modifications: Use edit tools directly (NOT sed/awk)
 - File search: Use glob patterns (NOT find/ls)
 - Content search: Use grep tools (NOT grep/rg commands)
@@ -310,8 +431,12 @@ Use for: git operations, npm/build tools, docker, system commands where speciali
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ command }: ShellInput) => {
-            return `Executing: ${command}`;
+        value: ({ command, description, run_in_background }: ShellInput) => {
+            const prefix = run_in_background ? "Running in background: " : "Executing: ";
+            if (description) {
+                return `${prefix}${description} (${command})`;
+            }
+            return `${prefix}${command}`;
         },
         enumerable: false,
         configurable: true,
@@ -319,3 +444,23 @@ Use for: git operations, npm/build tools, docker, system commands where speciali
 
     return aiTool as AISdkTool;
 }
+
+/**
+ * Get information about a background task by its ID
+ */
+export function getBackgroundTaskInfo(taskId: string) {
+    return backgroundTasks.get(taskId);
+}
+
+/**
+ * Get all background tasks
+ */
+export function getAllBackgroundTasks() {
+    return Array.from(backgroundTasks.entries()).map(([id, info]) => ({
+        taskId: id,
+        ...info,
+    }));
+}
+
+// Export types for use in other modules
+export type { ShellBackgroundResult, ShellErrorResult, ShellExpectedNonZeroResult };
