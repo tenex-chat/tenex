@@ -20,7 +20,7 @@ const agentsWriteSchema = z.object({
         .array(z.string())
         .nullable()
         .describe(
-            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
+            "List of tool names available to this agent. All agents automatically get core tools: lesson_get, lesson_learn, fs_read, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list, discover_capabilities, report_write, report_delete. MCP tools use format: mcp__servername__toolname"
         ),
 });
 
@@ -170,7 +170,7 @@ async function executeAgentsWrite(
 export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, read_path, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
+            "Write or update agent configuration and tools. Creates/updates agent definition files in .tenex/agents/. All agents automatically get core tools: lesson_get, lesson_learn, fs_read, reports_list, report_read. Delegation tools (delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Assign additional tools based on responsibilities. Agent activates immediately and becomes available for delegation. Use to create specialized agents for specific tasks or update existing agent configurations. Changes persist across sessions.",
         inputSchema: agentsWriteSchema,
         execute: async (input: AgentsWriteInput) => {
             try {
