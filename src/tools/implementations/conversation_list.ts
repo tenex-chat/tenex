@@ -10,8 +10,8 @@ const conversationListSchema = z.object({
         .string()
         .optional()
         .describe(
-            "Project ID to list conversations from. Use 'all' to list from all projects. " +
-            "If not specified, lists conversations from the current project."
+            "Project ID to list conversations from. Pass 'ALL' to list from all projects. " +
+            "If not specified, lists conversations from the current project only."
         ),
     limit: z
         .number()
@@ -107,7 +107,12 @@ async function executeConversationList(
     const { fromTime, toTime, projectId: requestedProjectId } = input;
 
     const currentProjectId = ConversationStore.getProjectId();
-    const effectiveProjectId = requestedProjectId ?? currentProjectId;
+
+    // Normalize projectId: case-insensitive "all" check
+    const normalizedRequestedProjectId = requestedProjectId?.toLowerCase() === "all" ? "all" : requestedProjectId;
+
+    // Default to current project if not specified (NOT all projects)
+    const effectiveProjectId = normalizedRequestedProjectId ?? currentProjectId;
 
     logger.info("📋 Listing conversations", {
         limit,
@@ -121,7 +126,7 @@ async function executeConversationList(
     let allConversations: LoadedConversation[] = [];
 
     if (effectiveProjectId === "all") {
-        // Load from all projects
+        // Only load from all projects when explicitly requested with "ALL"
         const projectIds = ConversationStore.listProjectIdsFromDisk();
         for (const pid of projectIds) {
             const isCurrentProject = pid === currentProjectId;
@@ -129,7 +134,7 @@ async function executeConversationList(
             allConversations.push(...projectConversations);
         }
     } else if (effectiveProjectId) {
-        // Load from specific project
+        // Load from specific project (current project by default)
         const isCurrentProject = effectiveProjectId === currentProjectId;
         allConversations = loadConversationsForProject(effectiveProjectId, isCurrentProject);
     }
@@ -183,7 +188,7 @@ export function createConversationListTool(context: ToolExecutionContext): AISdk
     Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: ({ projectId, limit, fromTime, toTime }: ConversationListInput) => {
             const parts: string[] = [];
-            if (projectId === "all") {
+            if (projectId?.toLowerCase() === "all") {
                 parts.push("all projects");
             } else if (projectId) {
                 parts.push(`project=${projectId}`);
