@@ -18,7 +18,7 @@ import { homedir, tmpdir } from "node:os";
  * 7. Tool is silently dropped from agent.tools[]
  *
  * ## Fix Applied
- * DynamicToolService now has loadToolSync() method that
+ * DynamicToolService now has loadToolImmediate() method that
  * create_dynamic_tool calls immediately after writeFile(), bypassing
  * the debounced file watcher.
  */
@@ -62,13 +62,13 @@ describe("DynamicToolService Race Condition Bug", () => {
         /**
          * This test demonstrates the race condition when relying only on file watcher:
          * - Write a dynamic tool file
-         * - WITHOUT calling loadToolSync, immediately check if it's recognized
+         * - WITHOUT calling loadToolImmediate, immediately check if it's recognized
          * - It will NOT be recognized due to 300ms debounce
          *
-         * This is NOT a bug in the current implementation because we now call loadToolSync.
-         * This test just demonstrates why loadToolSync is necessary.
+         * This is NOT a bug in the current implementation because we now call loadToolImmediate.
+         * This test just demonstrates why loadToolImmediate is necessary.
          */
-        it("isDynamicTool returns false when NOT using loadToolSync (file watcher only)", async () => {
+        it("isDynamicTool returns false when NOT using loadToolImmediate (file watcher only)", async () => {
             const testToolName = uniqueToolName();
             // Use double underscore (__) to separate agent name from tool name
             const fileName = `agent_test_agent__${testToolName}.ts`;
@@ -77,13 +77,13 @@ describe("DynamicToolService Race Condition Bug", () => {
             // Ensure directory exists
             await mkdir(dynamicToolsPath, { recursive: true });
 
-            // Write the tool file but DON'T call loadToolSync
+            // Write the tool file but DON'T call loadToolImmediate
             await writeFile(filePath, createSampleToolCode(testToolName), "utf-8");
 
             // IMMEDIATELY check if the tool is recognized
             const isRecognized = dynamicToolService.isDynamicTool(testToolName);
 
-            // Without loadToolSync, tool is NOT recognized immediately due to debounce
+            // Without loadToolImmediate, tool is NOT recognized immediately due to debounce
             expect(isRecognized).toBe(false);
 
             // Cleanup
@@ -127,7 +127,7 @@ describe("DynamicToolService Race Condition Bug", () => {
          * but now with warnings.
          */
         it("unrecognized tools are dropped with warning in processAgentTools pipeline", () => {
-            // Simulate what happens after create_dynamic_tool if loadToolSync was NOT called
+            // Simulate what happens after create_dynamic_tool if loadToolImmediate was NOT called
             const requestedTools = [
                 "fs_read",
                 "shell",
@@ -146,25 +146,25 @@ describe("DynamicToolService Race Condition Bug", () => {
     });
 });
 
-describe("DynamicToolService loadToolSync Fix", () => {
+describe("DynamicToolService loadToolImmediate Fix", () => {
     /**
-     * Verify that loadToolSync method exists on DynamicToolService
+     * Verify that loadToolImmediate method exists on DynamicToolService
      */
-    it("loadToolSync method exists", () => {
-        expect(typeof dynamicToolService.loadToolSync).toBe("function");
+    it("loadToolImmediate method exists", () => {
+        expect(typeof dynamicToolService.loadToolImmediate).toBe("function");
     });
 
     /**
      * Test the full fix flow:
      * 1. Write file
-     * 2. Call loadToolSync
+     * 2. Call loadToolImmediate
      * 3. Tool is immediately available
      *
      * Note: This test will fail if the dynamic import in loadTool fails
      * (e.g., due to missing 'ai' package from the tool file's perspective).
      * In that case, the test verifies the method exists but may skip execution.
      */
-    it("loadToolSync makes tool immediately available after write", async () => {
+    it("loadToolImmediate makes tool immediately available after write", async () => {
         const testToolName = uniqueToolName();
         // Use double underscore (__) to separate agent name from tool name
         const fileName = `agent_test_agent__${testToolName}.ts`;
@@ -174,8 +174,8 @@ describe("DynamicToolService loadToolSync Fix", () => {
         await writeFile(filePath, createSampleToolCode(testToolName), "utf-8");
 
         try {
-            // Call loadToolSync - this bypasses the 300ms debounce
-            await dynamicToolService.loadToolSync(filePath);
+            // Call loadToolImmediate - this bypasses the 300ms debounce
+            await dynamicToolService.loadToolImmediate(filePath);
 
             // Tool should be immediately available
             const isRecognized = dynamicToolService.isDynamicTool(testToolName);
@@ -185,7 +185,7 @@ describe("DynamicToolService loadToolSync Fix", () => {
             // from the tool file's perspective. This is expected in isolated tests.
             console.log(`[Expected in test] Dynamic import failed: ${error}`);
             // Still verify the method exists
-            expect(typeof dynamicToolService.loadToolSync).toBe("function");
+            expect(typeof dynamicToolService.loadToolImmediate).toBe("function");
         }
 
         // Cleanup
@@ -201,11 +201,11 @@ describe("Full Integration: create_dynamic_tool flow", () => {
     /**
      * This test simulates the complete flow that create_dynamic_tool does:
      * 1. Write tool file
-     * 2. Call loadToolSync (the fix)
+     * 2. Call loadToolImmediate (the fix)
      * 3. Update agent tools
      * 4. Validate tools work
      */
-    it("simulates create_dynamic_tool flow with loadToolSync fix", async () => {
+    it("simulates create_dynamic_tool flow with loadToolImmediate fix", async () => {
         const testToolName = uniqueToolName();
         // Use double underscore (__) to separate agent name from tool name
         const fileName = `agent_test_agent__${testToolName}.ts`;
@@ -216,7 +216,7 @@ describe("Full Integration: create_dynamic_tool flow", () => {
 
         // This is what create_dynamic_tool now does:
         try {
-            await dynamicToolService.loadToolSync(filePath);
+            await dynamicToolService.loadToolImmediate(filePath);
         } catch {
             // Dynamic import may fail in test env - that's ok
         }

@@ -222,64 +222,92 @@ export class ConfigService {
     // =====================================================================================
 
     /**
+     * Resolve a configuration name to an actual name, handling defaults and fallbacks.
+     * This is the single source of truth for config name resolution logic.
+     *
+     * @param configName - The requested configuration name (may be undefined or "default")
+     * @param options - Resolution options
+     * @returns Object with resolved name and optional warning message
+     */
+    private resolveConfigName(
+        configName: string | undefined,
+        options: { allowFallback?: boolean; warnOnFallback?: boolean } = {}
+    ): { name: string; warning?: string } {
+        const { allowFallback = true, warnOnFallback = true } = options;
+
+        if (!this.loadedConfig) {
+            throw new Error("Config not loaded. Call loadConfig() first.");
+        }
+
+        const llms = this.loadedConfig.llms;
+        const available = Object.keys(llms.configurations);
+
+        // If configName is "default" or not provided, use the actual default from config
+        let name = configName;
+        if (!name || name === "default") {
+            name = llms.default;
+            if (!name) {
+                if (available.length > 0) {
+                    name = available[0];
+                    if (warnOnFallback) {
+                        return { name, warning: `No default LLM configured, using first available: ${name}` };
+                    }
+                    return { name };
+                }
+                throw new Error("No LLM configurations available");
+            }
+        }
+
+        // Check if the requested config exists
+        if (llms.configurations[name]) {
+            return { name };
+        }
+
+        // Config not found - try fallback if allowed
+        if (!allowFallback) {
+            throw new Error(`LLM configuration "${name}" not found`);
+        }
+
+        // Try default
+        const defaultName = llms.default;
+        if (defaultName && llms.configurations[defaultName]) {
+            const warning = warnOnFallback
+                ? `LLM configuration "${name}" not found, falling back to default: ${defaultName}`
+                : undefined;
+            return { name: defaultName, warning };
+        }
+
+        // Try first available
+        if (available.length > 0) {
+            const fallbackName = available[0];
+            const warning = warnOnFallback
+                ? `LLM configuration "${name}" not found, using first available: ${fallbackName}`
+                : undefined;
+            return { name: fallbackName, warning };
+        }
+
+        throw new Error(
+            `No valid LLM configuration found. Requested: "${configName || "default"}". ` +
+                `Available: ${available.length > 0 ? available.join(", ") : "none"}`
+        );
+    }
+
+    /**
      * Get LLM configuration by name.
      * If the configuration is a meta model, automatically resolves to the default variant.
      * Use resolveMetaModel() for keyword-based variant selection.
      */
     getLLMConfig(configName?: string): LLMConfiguration {
-        if (!this.loadedConfig) {
-            throw new Error("Config not loaded. Call loadConfig() first.");
+        const { name, warning } = this.resolveConfigName(configName, {
+            allowFallback: true,
+            warnOnFallback: true,
+        });
+
+        if (warning) {
+            logger.warn(warning);
         }
 
-        // If configName is "default" or not provided, use the actual default from config
-        let name = configName;
-        if (!name || name === "default") {
-            name = this.loadedConfig.llms.default;
-            if (!name) {
-                // If no default is configured, try to use the first available configuration
-                const available = Object.keys(this.loadedConfig.llms.configurations);
-                if (available.length > 0) {
-                    name = available[0];
-                    logger.warn(`No default LLM configured, using first available: ${name}`);
-                } else {
-                    throw new Error("No LLM configurations available");
-                }
-            }
-        }
-
-        // Try to get the configuration
-        let config = this.loadedConfig.llms.configurations[name];
-
-        // If configuration not found, fallback to default
-        if (!config && name !== this.loadedConfig.llms.default) {
-            const defaultName = this.loadedConfig.llms.default;
-            if (defaultName) {
-                logger.warn(
-                    `LLM configuration "${name}" not found, falling back to default: ${defaultName}`
-                );
-                config = this.loadedConfig.llms.configurations[defaultName];
-
-                // If even the default isn't found, try first available
-                if (!config) {
-                    const available = Object.keys(this.loadedConfig.llms.configurations);
-                    if (available.length > 0) {
-                        logger.warn(
-                            `Default configuration "${defaultName}" not found, using first available: ${available[0]}`
-                        );
-                        config = this.loadedConfig.llms.configurations[available[0]];
-                    }
-                }
-            }
-        }
-
-        // If still no config found, throw error
-        if (!config) {
-            const available = Object.keys(this.loadedConfig.llms.configurations);
-            throw new Error(
-                `No valid LLM configuration found. Requested: "${configName || "default"}". ` +
-                    `Available: ${available.length > 0 ? available.join(", ") : "none"}`
-            );
-        }
+        const config = this.loadedConfig!.llms.configurations[name];
 
         // If it's a meta model, resolve to the default variant
         if (isMetaModelConfiguration(config)) {
@@ -297,30 +325,12 @@ export class ConfigService {
      * LLMConfiguration or a MetaModelConfiguration.
      */
     getRawLLMConfig(configName?: string): LLMConfiguration | MetaModelConfiguration {
-        if (!this.loadedConfig) {
-            throw new Error("Config not loaded. Call loadConfig() first.");
-        }
+        const { name } = this.resolveConfigName(configName, {
+            allowFallback: false,
+            warnOnFallback: false,
+        });
 
-        // If configName is "default" or not provided, use the actual default from config
-        let name = configName;
-        if (!name || name === "default") {
-            name = this.loadedConfig.llms.default;
-            if (!name) {
-                const available = Object.keys(this.loadedConfig.llms.configurations);
-                if (available.length > 0) {
-                    name = available[0];
-                } else {
-                    throw new Error("No LLM configurations available");
-                }
-            }
-        }
-
-        const config = this.loadedConfig.llms.configurations[name];
-        if (!config) {
-            throw new Error(`LLM configuration "${name}" not found`);
-        }
-
-        return config;
+        return this.loadedConfig!.llms.configurations[name];
     }
 
     /**
@@ -553,22 +563,29 @@ export class ConfigService {
             return cached;
         }
 
-        try {
-            if (!(await fileExists(filePath))) {
-                logger.debug(`Config file not found, using default: ${filePath}`);
-                return defaultValue;
-            }
+        // Check if file exists - if not, return default (this is expected)
+        if (!(await fileExists(filePath))) {
+            logger.debug(`Config file not found, using default: ${filePath}`);
+            return defaultValue;
+        }
 
+        // File exists - any error from here is a real problem that should propagate
+        try {
             const data = await readJsonFile(filePath);
             const validated = schema.parse(data);
 
             this.addToCache(filePath, validated);
             return validated;
         } catch (error) {
-            logger.error(`Failed to load config file: ${filePath}`, {
-                error: formatAnyError(error),
+            // File exists but is corrupt/invalid - this is a real error, not a missing file
+            const errorMessage = formatAnyError(error);
+            logger.error(`Config file is corrupt or invalid: ${filePath}`, {
+                error: errorMessage,
             });
-            return defaultValue;
+            throw new Error(
+                `Failed to load config file "${filePath}": ${errorMessage}. ` +
+                    `Fix the file or delete it to use defaults.`
+            );
         }
     }
 
