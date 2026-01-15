@@ -115,10 +115,10 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
             // Write the tool file
             await writeFile(filePath, toolCode, "utf-8");
 
-            // Load the tool synchronously to make it immediately available
+            // Load the tool immediately to make it available right away
             // This bypasses the 300ms debounce in the file watcher
             const { dynamicToolService } = await import("@/services/DynamicToolService");
-            await dynamicToolService.loadToolSync(filePath);
+            await dynamicToolService.loadToolImmediate(filePath);
 
             // Inject the new tool into the active execution's tool set
             // This makes it available immediately in the current streaming session

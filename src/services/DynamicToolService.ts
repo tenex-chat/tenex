@@ -131,11 +131,14 @@ export class DynamicToolService {
     }
 
     /**
-     * Synchronously load a dynamic tool immediately after file creation.
+     * Load a dynamic tool immediately after file creation.
      *
      * This method bypasses the debounced file watcher and loads the tool
      * immediately. Used by create_dynamic_tool to ensure the tool is
      * available before agent tools are validated.
+     *
+     * Note: Despite being async, this method loads the tool immediately
+     * (bypassing the 300ms debounce), hence the name "Immediate".
      *
      * @param filePath - Absolute path to the dynamic tool file
      * @returns Promise that resolves when the tool is loaded
@@ -143,10 +146,10 @@ export class DynamicToolService {
      * @example
      * // In create_dynamic_tool after writeFile:
      * await writeFile(filePath, toolCode, "utf-8");
-     * await dynamicToolService.loadToolSync(filePath);
+     * await dynamicToolService.loadToolImmediate(filePath);
      * // Now the tool is immediately available for validation
      */
-    public async loadToolSync(filePath: string): Promise<void> {
+    public async loadToolImmediate(filePath: string): Promise<void> {
         await this.loadTool(filePath);
     }
 
