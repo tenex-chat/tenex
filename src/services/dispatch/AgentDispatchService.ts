@@ -528,13 +528,21 @@ export class AgentDispatchService {
                     "ral.number": activeRal?.ralNumber ?? 0,
                 });
 
-                this.handleDeliveryInjection({
+                const shouldSkipExecution = this.handleDeliveryInjection({
                     activeRal,
                     agent: targetAgent,
                     conversationId,
                     message: event.content,
                     agentSpan,
                 });
+
+                if (shouldSkipExecution) {
+                    // Message was queued for an active streaming execution.
+                    // Don't spawn a new execution - the active one will pick it up.
+                    agentSpan.addEvent("dispatch.execution_skipped_injection_queued");
+                    agentSpan.setStatus({ code: SpanStatusCode.OK });
+                    return;
+                }
 
                 let triggeringEventForContext = event;
                 const resumableRal = ralRegistry.findResumableRAL(targetAgent.pubkey, conversationId);
@@ -580,13 +588,18 @@ export class AgentDispatchService {
         await Promise.all(executionPromises);
     }
 
+    /**
+     * Handle injection of a message into an active RAL.
+     * Returns true if execution should be SKIPPED (message queued for active streaming execution).
+     * Returns false if a new execution should be spawned.
+     */
     private handleDeliveryInjection(params: {
         activeRal: RALRegistryEntry | undefined;
         agent: AgentInstance;
         conversationId: string;
         message: string;
         agentSpan: ReturnType<typeof tracer.startSpan>;
-    }): void {
+    }): boolean {
         const {
             activeRal,
             agent,
@@ -596,7 +609,7 @@ export class AgentDispatchService {
         } = params;
 
         if (!activeRal) {
-            return;
+            return false; // No active RAL, spawn new execution
         }
 
         const ralRegistry = RALRegistry.getInstance();
@@ -618,6 +631,8 @@ export class AgentDispatchService {
             const isClaudeCodeProvider = llmConfig.provider === "claude-code";
 
             if (isClaudeCodeProvider) {
+                // Claude Code SDK doesn't support mid-execution injection.
+                // Abort and let a new execution pick up the queued message.
                 const aborted = llmOpsRegistry.stopByAgentAndConversation(
                     agent.pubkey,
                     conversationId,
@@ -648,29 +663,35 @@ export class AgentDispatchService {
                         "message.length": messageLength,
                     });
                 }
+                // Claude Code: always spawn new execution (aborted or will pick up on restart)
+                return false;
             } else {
                 // Non-Claude-Code provider: just queue the message, don't abort.
                 // The active execution will pick it up on its next prepareStep.
+                // IMPORTANT: Skip spawning a new execution to avoid duplicate completions.
+                // See report: "injection-race-condition-hybrid-fix" for known limitations.
                 getSafeActiveSpan()?.addEvent("reply.message_injected_no_abort", {
                     "agent.slug": agent.slug,
                     "ral.number": activeRal.ralNumber,
                     "message.length": messageLength,
                     "provider": llmConfig.provider,
                 });
-                logger.info("[reply] Queued message for non-Claude-Code provider (no abort)", {
+                logger.info("[reply] Queued message for non-Claude-Code provider (no abort, skipping execution)", {
                     agent: agent.slug,
                     ralNumber: activeRal.ralNumber,
                     injectionLength: messageLength,
                     provider: llmConfig.provider,
                 });
-                agentSpan.addEvent("dispatch.injection_stream_no_abort", {
+                agentSpan.addEvent("dispatch.injection_stream_no_abort_skip_execution", {
                     "message.length": messageLength,
                     "provider": llmConfig.provider,
                 });
+                // Non-Claude: skip execution, trust active execution to pick up injection
+                return true;
             }
-            return;
         }
 
+        // Not streaming (waiting for delegations) - need new execution to wake up
         getSafeActiveSpan()?.addEvent("reply.message_queued_for_resumption", {
             "agent.slug": agent.slug,
             "ral.number": activeRal.ralNumber,
@@ -679,5 +700,6 @@ export class AgentDispatchService {
         agentSpan.addEvent("dispatch.injection_resumption", {
             "message.length": messageLength,
         });
+        return false; // Spawn new execution to wake up the waiting RAL
     }
 }
