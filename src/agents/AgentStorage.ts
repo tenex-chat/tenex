@@ -36,7 +36,7 @@ export interface StoredAgent extends StoredAgentData {
  *   slug: 'my-agent',
  *   name: 'My Agent',
  *   role: 'assistant',
- *   tools: ['read_path', 'shell'],
+ *   tools: ['fs_read', 'shell'],
  *   eventId: 'nostr_event_id',
  *   projects: ['project-dtag']
  * });
@@ -530,7 +530,7 @@ export class AgentStorage {
      *
      * @example
      * // Update tools
-     * const newTools = ['read_path', 'shell', 'agents_write'];
+     * const newTools = ['fs_read', 'shell', 'agents_write'];
      * const success = await agentStorage.updateAgentTools(agentPubkey, newTools);
      *
      * if (success) {

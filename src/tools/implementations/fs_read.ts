@@ -87,9 +87,9 @@ async function executeReadToolResult(eventId: string): Promise<string> {
 }
 
 /**
- * Core implementation of the read_path functionality
+ * Core implementation of the fs_read functionality
  */
-async function executeReadPath(
+async function executeFsRead(
     path: string,
     workingDirectory: string,
     offset?: number,
@@ -175,7 +175,7 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
                 if (!path) {
                     throw new Error("Either 'path' or 'tool' parameter is required");
                 }
-                return await executeReadPath(path, context.workingDirectory, offset, limit, allowOutsideWorkingDirectory);
+                return await executeFsRead(path, context.workingDirectory, offset, limit, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
                 const target = toolEventId ? `tool result ${toolEventId}` : path;
                 throw new Error(`Failed to read ${target}: ${formatAnyError(error)}`);
