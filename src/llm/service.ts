@@ -1,7 +1,6 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import {
     type LanguageModel,
@@ -283,10 +282,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         // Build middleware chain
         const middlewares: LanguageModelMiddleware[] = [];
-
-        // AI SDK DevTools - captures LLM interactions for debugging
-        // View at http://localhost:4983 after running: npx @ai-sdk/devtools
-        middlewares.push(devToolsMiddleware() as LanguageModelMiddleware);
 
         // Flight recorder - records LLM interactions when enabled via 'r' key
         middlewares.push(createFlightRecorderMiddleware());

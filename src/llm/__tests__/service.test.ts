@@ -24,11 +24,6 @@ mock.module("ai", () => ({
     extractReasoningMiddleware: mock(() => ({})),
 }));
 
-// Mock devtools middleware
-mock.module("@ai-sdk/devtools", () => ({
-    devToolsMiddleware: mock(() => ({})),
-}));
-
 // Mock flight recorder
 mock.module("../middleware/flight-recorder", () => ({
     createFlightRecorderMiddleware: mock(() => ({})),

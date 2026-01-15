@@ -89,7 +89,7 @@ Use this section to understand each service’s scope and dependencies:
 - **Guideline**: Keep daemon modules dependent on services + stores, never the other way around.
 
 ### Telemetry & Logging
-- **`src/telemetry`**: OpenTelemetry initialization, exporters, span helpers. Modules needing tracing should import helpers rather than reconfiguring OTel. AI SDK devtools provide LLM interaction tracing via `experimental_telemetry` config.
+- **`src/telemetry`**: OpenTelemetry initialization, exporters, span helpers. Modules needing tracing should import helpers rather than reconfiguring OTel.
 
 ### Utilities & Shared Libraries
 - **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`) and pure utilities (`string.ts`, `error-formatter.ts`, `time.ts`, `json-parser.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
