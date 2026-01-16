@@ -20,8 +20,7 @@ export class ClaudeCodeToolsAdapter {
      * Only converts non-MCP tools (MCP tools are handled separately)
      */
     static createSdkMcpServer(
-        tools: Record<string, AISdkTool>,
-        _context: { agentName?: string } // Execution context
+        tools: Record<string, AISdkTool>
     ): SdkMcpServer | undefined {
         // Filter out tools that Claude Code has its own version of:
         // - fs_* (Claude Code has Read, Write, Edit, Glob, Grep)
@@ -40,17 +39,7 @@ export class ClaudeCodeToolsAdapter {
             !claudeCodeBuiltinTools.has(name)
         );
 
-        console.log("[ClaudeCodeToolsAdapter] Input tools analysis:", {
-            totalTools: Object.keys(tools).length,
-            allToolNames: Object.keys(tools),
-            localToolsCount: localTools.length,
-            localToolNames: localTools.map(([name]) => name),
-            mcpToolsCount: Object.keys(tools).filter(name => name.startsWith("mcp__")).length,
-            agentName: _context.agentName,
-        });
-
         if (localTools.length === 0) {
-            console.log("[ClaudeCodeToolsAdapter] No local tools to convert - returning undefined");
             return undefined;
         }
 
@@ -74,22 +63,8 @@ export class ClaudeCodeToolsAdapter {
                 // If it's some other Zod type, leave rawShape as empty object
             }
 
-            console.log("[ClaudeCodeToolsAdapter] Converting tool:", {
-                name,
-                hasSchema: !!tenexTool.inputSchema,
-                hasExecute: !!tenexTool.execute,
-                description: tenexTool.description?.substring(0, 100),
-                extractedShapeKeys: Object.keys(rawShape),
-            });
-
             return tool(name, tenexTool.description || `Execute ${name}`, rawShape, async (args, extra) => {
                 try {
-                    console.log(`[TenexToolsAdapter] Executing tool ${name}`, {
-                        args: JSON.stringify(args).substring(0, 200),
-                        hasExtra: !!extra,
-                        extraType: typeof extra,
-                    });
-
                     // Check if the tool has an execute method
                     if (!tenexTool.execute) {
                         throw new Error(`Tool ${name} does not have an execute function`);
@@ -111,11 +86,6 @@ export class ClaudeCodeToolsAdapter {
                         });
                     }
 
-                    console.log(`[TenexToolsAdapter] Tool ${name} executed successfully`, {
-                        resultType: typeof result,
-                        resultLength: typeof result === "string" ? result.length : JSON.stringify(result).length,
-                    });
-
                     // Convert result to MCP format
                     // CallToolResult expects: { content: [{ type: "text", text: string }], isError?: boolean }
                     //
@@ -125,10 +95,6 @@ export class ClaudeCodeToolsAdapter {
                     // original result object directly instead of wrapping it in MCP format.
                     // The Claude Code SDK handles this appropriately.
                     if (isStopExecutionSignal(result)) {
-                        console.log(`[TenexToolsAdapter] Tool ${name} returned StopExecutionSignal, preserving structure`, {
-                            hasPendingDelegations: !!result.pendingDelegations,
-                            delegationCount: result.pendingDelegations?.length ?? 0,
-                        });
                         // Return the original result so ToolExecutionTracker can extract pendingDelegations
                         // for q-tags. The MCP format wrapping will show a text message to the LLM.
                         return {
@@ -163,12 +129,6 @@ export class ClaudeCodeToolsAdapter {
                     };
                 }
             });
-        });
-
-        console.log("[ClaudeCodeToolsAdapter] Created SDK MCP server with tools:", {
-            serverName: "tenex",
-            toolCount: sdkTools.length,
-            toolNames: localTools.map(([name]) => name),
         });
 
         // Create and return the SDK MCP server

@@ -128,6 +128,7 @@ export class CodexAppServerProvider extends AgentProvider {
             mcpServers: mcpServersConfig,
             approvalMode: "on-failure",
             sandboxMode: "workspace-write",
+            threadMode: "stateless",
             reasoningEffort: context.reasoningEffort,
             verbose: false,
             logger: {
