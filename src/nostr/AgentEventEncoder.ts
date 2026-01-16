@@ -18,6 +18,8 @@ export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
     summary?: string;
+    /** Accumulated LLM runtime in milliseconds for this execution chain */
+    llmRuntime?: number;
 }
 
 export interface ConversationIntent {
@@ -143,6 +145,11 @@ export class AgentEventEncoder {
 
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
+        }
+
+        // Add LLM runtime tag if available
+        if (intent.llmRuntime !== undefined && intent.llmRuntime > 0) {
+            event.tag(["llm-runtime", intent.llmRuntime.toString(), "ms"]);
         }
 
         this.addStandardTags(event, context);
