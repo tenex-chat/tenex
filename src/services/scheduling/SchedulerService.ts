@@ -6,6 +6,7 @@ import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import * as cron from "node-cron";
+import { CronExpressionParser } from "cron-parser";
 import { logger } from "@/utils/logger";
 import { getProjectContext } from "@/services/projects";
 
@@ -25,6 +26,16 @@ interface ScheduledTask {
 
 // Export the type so it can be used by other modules
 export type { ScheduledTask };
+
+interface CatchUpConfig {
+    gracePeriodMs: number; // How far back to look for missed tasks (default: 24h)
+    delayBetweenTasksMs: number; // Delay between catch-up executions (default: 5s)
+}
+
+const DEFAULT_CATCHUP_CONFIG: CatchUpConfig = {
+    gracePeriodMs: 24 * 60 * 60 * 1000, // 24 hours
+    delayBetweenTasksMs: 5000, // 5 seconds
+};
 
 export class SchedulerService {
     private static instance: SchedulerService;
@@ -55,6 +66,10 @@ export class SchedulerService {
 
         // Load existing tasks
         await this.loadTasks();
+
+        // Check for missed tasks BEFORE starting regular scheduling
+        // This ensures catch-ups happen first and update lastRun
+        await this.checkMissedTasks();
 
         // Start all loaded tasks
         for (const task of this.taskMetadata.values()) {
@@ -151,7 +166,11 @@ export class SchedulerService {
         const cronTask = cron.schedule(
             task.schedule,
             async () => {
-                await this.executeTask(task);
+                try {
+                    await this.executeTask(task);
+                } catch (error) {
+                    logger.error(`Failed to execute scheduled task ${task.id}:`, error);
+                }
             },
             {
                 timezone: "UTC",
@@ -165,34 +184,175 @@ export class SchedulerService {
         });
     }
 
+    /**
+     * Check for tasks that missed their execution window during downtime.
+     * Called once during initialize().
+     */
+    private async checkMissedTasks(catchUpConfig: CatchUpConfig = DEFAULT_CATCHUP_CONFIG): Promise<void> {
+        const now = new Date();
+        const gracePeriodStart = new Date(now.getTime() - catchUpConfig.gracePeriodMs);
+
+        trace.getActiveSpan()?.addEvent("scheduler.catchup_check_started", {
+            "catchup.gracePeriodMs": catchUpConfig.gracePeriodMs,
+            "catchup.gracePeriodStart": gracePeriodStart.toISOString(),
+            "catchup.taskCount": this.taskMetadata.size,
+        });
+
+        logger.info("Checking for missed scheduled tasks", {
+            gracePeriodMs: catchUpConfig.gracePeriodMs,
+            gracePeriodStart: gracePeriodStart.toISOString(),
+            taskCount: this.taskMetadata.size,
+        });
+
+        const missedTasks = this.getMissedTasks(now, gracePeriodStart);
+        await this.executeCatchUpTasks(missedTasks, catchUpConfig.delayBetweenTasksMs);
+    }
+
+    /**
+     * Scan all tasks and return those that missed execution within the grace period.
+     */
+    private getMissedTasks(now: Date, gracePeriodStart: Date): ScheduledTask[] {
+        const missedTasks: ScheduledTask[] = [];
+
+        for (const task of this.taskMetadata.values()) {
+            const missedExecution = this.getMissedExecutionTime(task, now, gracePeriodStart);
+            if (missedExecution) {
+                missedTasks.push(task);
+            }
+        }
+
+        return missedTasks;
+    }
+
+    /**
+     * Check if a task has a missed execution within the grace period.
+     * Returns the missed execution time if within grace period, null otherwise.
+     */
+    private getMissedExecutionTime(task: ScheduledTask, now: Date, gracePeriodStart: Date): Date | null {
+        // Skip tasks that have never run - let normal scheduling handle first run
+        if (!task.lastRun) {
+            logger.debug(`Task ${task.id} has no lastRun, skipping catch-up check`);
+            return null;
+        }
+
+        // Validate lastRun date
+        const lastRunDate = new Date(task.lastRun);
+        if (Number.isNaN(lastRunDate.getTime())) {
+            logger.warn(`Task ${task.id} has invalid lastRun date: ${task.lastRun}, skipping catch-up check`);
+            return null;
+        }
+
+        try {
+            // Parse cron expression starting from lastRun
+            const interval = CronExpressionParser.parse(task.schedule, {
+                currentDate: lastRunDate,
+                tz: "UTC",
+            });
+
+            // Get the next scheduled execution AFTER lastRun
+            const nextScheduledExecution = interval.next().toDate();
+
+            // Check if this execution was missed (it's in the past)
+            if (nextScheduledExecution < now) {
+                // Check if it's within the grace period
+                if (nextScheduledExecution >= gracePeriodStart) {
+                    logger.info(`Task ${task.id} missed execution at ${nextScheduledExecution.toISOString()}`, {
+                        taskId: task.id,
+                        lastRun: task.lastRun,
+                        missedAt: nextScheduledExecution.toISOString(),
+                        schedule: task.schedule,
+                    });
+                    return nextScheduledExecution;
+                } else {
+                    logger.info(`Task ${task.id} missed execution outside grace period, skipping`, {
+                        taskId: task.id,
+                        missedAt: nextScheduledExecution.toISOString(),
+                        gracePeriodStart: gracePeriodStart.toISOString(),
+                    });
+                }
+            }
+        } catch (error) {
+            logger.error(`Failed to parse cron expression for task ${task.id}:`, error);
+        }
+
+        return null;
+    }
+
+    /**
+     * Execute catch-up tasks sequentially with delays between executions.
+     */
+    private async executeCatchUpTasks(tasks: ScheduledTask[], delayBetweenTasksMs: number): Promise<void> {
+        if (tasks.length === 0) {
+            trace.getActiveSpan()?.addEvent("scheduler.catchup_check_completed", {
+                "catchup.missedTasksFound": 0,
+            });
+            logger.info("No missed tasks to catch up");
+            return;
+        }
+
+        trace.getActiveSpan()?.addEvent("scheduler.catchup_execution_started", {
+            "catchup.tasksToExecute": tasks.length,
+        });
+
+        logger.info(`Executing ${tasks.length} catch-up task(s)`);
+
+        for (let i = 0; i < tasks.length; i++) {
+            const task = tasks[i];
+
+            try {
+                logger.info(`Executing catch-up for task ${task.id} (${i + 1}/${tasks.length})`);
+                await this.executeTask(task);
+
+                // Add delay between tasks (except after the last one)
+                if (i < tasks.length - 1) {
+                    await this.delay(delayBetweenTasksMs);
+                }
+            } catch (error) {
+                logger.error(`Catch-up execution failed for task ${task.id}:`, error);
+                // Continue with next task even if one fails
+            }
+        }
+
+        trace.getActiveSpan()?.addEvent("scheduler.catchup_execution_completed", {
+            "catchup.tasksExecuted": tasks.length,
+        });
+
+        logger.info("Catch-up execution completed");
+    }
+
+    private delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Execute a scheduled task. Throws on failure to allow callers to handle errors.
+     * Updates lastRun only AFTER successful publish to ensure failed tasks can be retried.
+     */
     private async executeTask(task: ScheduledTask): Promise<void> {
         trace.getActiveSpan()?.addEvent("scheduler.task_executing", {
             "task.id": task.id,
         });
 
-        try {
-            // Try to get NDK instance if not already set
+        // Try to get NDK instance if not already set
+        if (!this.ndk) {
+            logger.warn("NDK not available in SchedulerService, attempting to get instance");
+            this.ndk = getNDK();
             if (!this.ndk) {
-                logger.warn("NDK not available in SchedulerService, attempting to get instance");
-                this.ndk = getNDK();
-                if (!this.ndk) {
-                    throw new Error("SchedulerService not properly initialized - NDK unavailable");
-                }
+                throw new Error("SchedulerService not properly initialized - NDK unavailable");
             }
-
-            // Update last run time
-            task.lastRun = new Date().toISOString();
-            await this.saveTasks();
-
-            // Publish kind:1 event to trigger the agent (unified conversation format)
-            await this.publishAgentTriggerEvent(task);
-
-            trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
-                "task.id": task.id,
-            });
-        } catch (error: unknown) {
-            logger.error(`Failed to execute scheduled task ${task.id}:`, error);
         }
+
+        // Publish kind:1 event to trigger the agent (unified conversation format)
+        await this.publishAgentTriggerEvent(task);
+
+        // Update last run time ONLY after successful publish
+        // This ensures failed tasks can be retried on next startup
+        task.lastRun = new Date().toISOString();
+        await this.saveTasks();
+
+        trace.getActiveSpan()?.addEvent("scheduler.task_triggered", {
+            "task.id": task.id,
+        });
     }
 
     private async publishAgentTriggerEvent(task: ScheduledTask): Promise<void> {
