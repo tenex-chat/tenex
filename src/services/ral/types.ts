@@ -30,8 +30,6 @@ export interface TodoItem {
   status: TodoStatus;
   /** Required when status='skipped' - explains why item was skipped */
   skipReason?: string;
-  /** System-set instructions passed to delegated agents */
-  delegationInstructions?: string;
   /** Order in the list (0-indexed) */
   position: number;
   /** Timestamp when item was created */

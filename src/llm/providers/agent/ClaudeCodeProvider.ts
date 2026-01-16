@@ -84,7 +84,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Create SDK MCP server for local TENEX tools if enabled
         const tenexSdkServer =
             this.enableTenexTools && regularTools.length > 0 && context.tools
-                ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools, context)
+                ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools)
                 : undefined;
 
         // Build mcpServers configuration
