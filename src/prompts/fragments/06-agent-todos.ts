@@ -21,10 +21,6 @@ function formatTodoItem(item: TodoItem): string {
         line += ` (skipped: ${item.skipReason})`;
     }
 
-    if (item.delegationInstructions) {
-        line += " [has delegation instructions]";
-    }
-
     return line;
 }
 
