@@ -6,6 +6,7 @@ import { OllamaProvider } from "../standard/OllamaProvider";
 import { GeminiCliProvider } from "../standard/GeminiCliProvider";
 import { ClaudeCodeProvider } from "../agent/ClaudeCodeProvider";
 import { CodexCliProvider } from "../agent/CodexCliProvider";
+import { CodexAppServerProvider } from "../agent/CodexAppServerProvider";
 
 describe("Provider Metadata", () => {
     describe("standard providers", () => {
@@ -119,6 +120,6 @@ describe("Provider Registration Array", () => {
         expect(ids).toContain("ollama");
         expect(ids).toContain("gemini-cli");
         expect(ids).toContain("claude-code");
-        expect(ids).toContain("codex-cli");
+        expect(ids).toContain("codex-app-server");
     });
 });
