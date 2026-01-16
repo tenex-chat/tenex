@@ -88,6 +88,8 @@ export interface CompletedDelegation {
   completedAt: number;
   /** Which RAL created this delegation (for provenance tracking) */
   ralNumber: number;
+  /** Total LLM runtime for this delegation chain in milliseconds */
+  llmRuntime?: number;
 }
 
 export interface QueuedInjection {
@@ -117,6 +119,10 @@ export interface RALRegistryEntry {
   traceId?: string;
   /** OTEL span ID of the agent execution span - used as parent for stop spans */
   executionSpanId?: string;
+  /** Accumulated LLM runtime in milliseconds across all streaming sessions */
+  accumulatedRuntime: number;
+  /** Timestamp when current LLM stream started (for calculating duration) */
+  llmStreamStartTime?: number;
 }
 
 export interface StopExecutionSignal {
