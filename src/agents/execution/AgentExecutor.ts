@@ -803,12 +803,8 @@ export class AgentExecutor {
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
-        // Get accumulated LLM runtime for the completion event
-        const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
+        // Use accumulated runtime from result (captured before RAL cleanup in executeStreaming)
+        const accumulatedRuntime = result.accumulatedRuntime;
 
         trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
@@ -1092,8 +1088,9 @@ export class AgentExecutor {
 
         llmService.on("complete", (event: CompleteEvent) => {
             // Only set result if no error already occurred
+            // accumulatedRuntime is set later after stream completes (before RAL cleanup)
             if (!result) {
-                result = { kind: "complete", event, messageCompiler };
+                result = { kind: "complete", event, messageCompiler, accumulatedRuntime: 0 };
             }
         });
 
@@ -1558,6 +1555,13 @@ export class AgentExecutor {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
+        // Capture accumulated runtime BEFORE clearing RAL (it will be gone after clearRAL)
+        const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
         // Clear RAL if execution completed without pending delegations
         // We clear for any terminal finish reason (not just "stop"/"end" - Gemini returns "other")
         const finalPendingDelegations = ralRegistry.getConversationPendingDelegations(
@@ -1590,6 +1594,11 @@ export class AgentExecutor {
             result.aborted = true;
             // AbortSignal.reason contains the reason passed to abort()
             result.abortReason = typeof abortSignal.reason === "string" ? abortSignal.reason : undefined;
+        }
+
+        // Add accumulated runtime to result for use by executeOnce
+        if (result.kind === "complete") {
+            result.accumulatedRuntime = accumulatedRuntime;
         }
 
         return result;

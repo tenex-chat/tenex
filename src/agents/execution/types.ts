@@ -68,6 +68,8 @@ export type StreamExecutionResult =
           /** The reason the execution was aborted (if aborted=true) */
           abortReason?: string;
           messageCompiler: MessageCompiler;
+          /** Accumulated LLM runtime in milliseconds (captured before RAL cleanup) */
+          accumulatedRuntime: number;
       }
     | { kind: "error-handled" };
 
