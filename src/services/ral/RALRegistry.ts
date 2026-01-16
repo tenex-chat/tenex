@@ -179,6 +179,7 @@ export class RALRegistry {
       originalTriggeringEventId,
       traceId: traceContext?.traceId,
       executionSpanId: traceContext?.spanId,
+      accumulatedRuntime: 0,
     };
 
     // Get or create the conversation's RAL map
@@ -260,6 +261,74 @@ export class RALRegistry {
   }
 
   /**
+   * Mark the start of an LLM streaming session.
+   * Call this immediately before llmService.stream() to begin timing.
+   */
+  startLLMStream(agentPubkey: string, conversationId: string, ralNumber: number): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral) {
+      ral.llmStreamStartTime = Date.now();
+      ral.lastActivityAt = ral.llmStreamStartTime;
+
+      trace.getActiveSpan()?.addEvent("ral.llm_stream_started", {
+        "ral.number": ralNumber,
+        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
+      });
+    }
+  }
+
+  /**
+   * Mark the end of an LLM streaming session and accumulate the runtime.
+   * Call this in the finally block after llmService.stream() completes.
+   * @returns The total accumulated runtime in milliseconds
+   */
+  endLLMStream(agentPubkey: string, conversationId: string, ralNumber: number): number {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral && ral.llmStreamStartTime !== undefined) {
+      const now = Date.now();
+      const streamDuration = now - ral.llmStreamStartTime;
+      ral.accumulatedRuntime += streamDuration;
+      ral.llmStreamStartTime = undefined; // Clear the start time
+      ral.lastActivityAt = now;
+
+      trace.getActiveSpan()?.addEvent("ral.llm_stream_ended", {
+        "ral.number": ralNumber,
+        "ral.stream_duration_ms": streamDuration,
+        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
+      });
+
+      return ral.accumulatedRuntime;
+    }
+    return ral?.accumulatedRuntime ?? 0;
+  }
+
+  /**
+   * Get the accumulated LLM runtime for a RAL
+   */
+  getAccumulatedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    return ral?.accumulatedRuntime ?? 0;
+  }
+
+  /**
+   * Add additional runtime to a RAL's accumulated runtime.
+   * Used to merge delegation runtime into the parent's total.
+   */
+  addToAccumulatedRuntime(agentPubkey: string, conversationId: string, ralNumber: number, additionalRuntime: number): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (ral) {
+      ral.accumulatedRuntime += additionalRuntime;
+      ral.lastActivityAt = Date.now();
+
+      trace.getActiveSpan()?.addEvent("ral.runtime_added", {
+        "ral.number": ralNumber,
+        "ral.additional_runtime_ms": additionalRuntime,
+        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
+      });
+    }
+  }
+
+  /**
    * Set pending delegations for a specific RAL (delegation tracking only, not message storage)
    */
   setPendingDelegations(
@@ -322,6 +391,7 @@ export class RALRegistry {
    * @param completion.fullTranscript - Optional rich transcript to use instead of
    *   constructing a synthetic 2-message transcript. Useful for capturing user
    *   interventions and multi-turn exchanges within a delegation.
+   * @param completion.llmRuntime - Optional LLM runtime in milliseconds from the delegation
    */
   recordCompletion(completion: {
     delegationConversationId: string;
@@ -330,6 +400,8 @@ export class RALRegistry {
     completedAt: number;
     /** If provided, use this transcript instead of constructing from prompt + response */
     fullTranscript?: DelegationMessage[];
+    /** LLM runtime in milliseconds from the completed delegation */
+    llmRuntime?: number;
   }): { agentPubkey: string; conversationId: string; ralNumber: number } | undefined {
     const location = this.delegationToRal.get(completion.delegationConversationId);
     if (!location) return undefined;
@@ -421,6 +493,7 @@ export class RALRegistry {
         ralNumber: pendingDelegation.ralNumber,
         transcript,
         completedAt: completion.completedAt,
+        llmRuntime: completion.llmRuntime,
       });
 
       const remainingPending = this.getConversationPendingDelegations(agentPubkey, conversationId, location.ralNumber).length - 1;

@@ -178,6 +178,22 @@ export class AgentExecutor {
                         context.agent.pubkey, context.conversationId, resumableRal.ralNumber
                     );
 
+                    // Calculate MAX llmRuntime from completed delegations
+                    // For parallel delegations, we take the longest one (critical path)
+                    const maxDelegationRuntime = completedDelegations.reduce((max, d) => {
+                        return Math.max(max, d.llmRuntime ?? 0);
+                    }, 0);
+
+                    // Add delegation runtime to parent's accumulated runtime
+                    if (maxDelegationRuntime > 0) {
+                        ralRegistry.addToAccumulatedRuntime(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber,
+                            maxDelegationRuntime
+                        );
+                    }
+
                     // Inject delegation results into the RAL as user message
                     // Include pending delegations so agent knows what's still outstanding
                     const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
@@ -201,6 +217,7 @@ export class AgentExecutor {
                         "ral.number": ralNumber,
                         "delegation.completed_count": completedDelegations.length,
                         "delegation.pending_count": pendingDelegations.length,
+                        "delegation.max_runtime_ms": maxDelegationRuntime,
                     });
                 } else if (injectionRal) {
                     // Resume RAL with queued injections (pairing checkpoint)
@@ -786,9 +803,17 @@ export class AgentExecutor {
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
+        // Get accumulated LLM runtime for the completion event
+        const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
         trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
             has_pending_delegations: hasPendingDelegations,
+            "llm_runtime_ms": accumulatedRuntime,
         });
 
         let responseEvent: NDKEvent | undefined;
@@ -806,8 +831,13 @@ export class AgentExecutor {
         } else {
             // Final completion - use complete() (kind:1, with p-tag)
             // Always publish completion even if empty to mark conversation as complete
+            // Include accumulated LLM runtime in completion event
             responseEvent = await agentPublisher.complete(
-                { content: completionEvent.message, usage: completionEvent.usage },
+                {
+                    content: completionEvent.message,
+                    usage: completionEvent.usage,
+                    llmRuntime: accumulatedRuntime,
+                },
                 eventContext
             );
         }
@@ -1167,8 +1197,9 @@ export class AgentExecutor {
         };
 
         try {
-            // Mark this RAL as streaming
+            // Mark this RAL as streaming and start timing LLM runtime
             ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
+            ralRegistry.startLLMStream(context.agent.pubkey, context.conversationId, ralNumber);
 
             // prepareStep: async, rebuilds messages from ConversationStore on every step
             // This ensures injections and tool results are always included
@@ -1499,7 +1530,8 @@ export class AgentExecutor {
             }
             throw streamError;
         } finally {
-            // Mark as no longer streaming
+            // Mark as no longer streaming and finalize LLM runtime
+            ralRegistry.endLLMStream(context.agent.pubkey, context.conversationId, ralNumber);
             ralRegistry.setStreaming(
                 context.agent.pubkey,
                 context.conversationId,
