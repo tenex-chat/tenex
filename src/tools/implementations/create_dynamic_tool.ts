@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { getTenexBasePath } from "@/constants";
 import { getProjectContext } from "@/services/projects";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -105,7 +105,7 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
             // Determine the file path - must match DynamicToolService's watched path
             // Use double underscore (__) to separate agent name from tool name
             // This allows agent names with underscores to be parsed correctly
-            const dynamicToolsDir = join(homedir(), ".tenex", "tools");
+            const dynamicToolsDir = join(getTenexBasePath(), "tools");
             const fileName = `agent_${context.agent.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}__${name}.ts`;
             const filePath = join(dynamicToolsDir, fileName);
 
@@ -153,6 +153,11 @@ export default create${name.charAt(0).toUpperCase() + name.slice(1)}Tool;`;
                 // Update in storage then reload into registry
                 await agentStorage.updateAgentTools(context.agent.pubkey, updatedTools);
                 await agentRegistry.reloadAgent(context.agent.pubkey);
+
+                // CRITICAL: Update the current execution context's agent.tools
+                // This ensures subsequent RALs (after user reply) see the new tool.
+                // Without this, context.agent remains stale even though registry was updated.
+                context.agent.tools = updatedTools;
 
                 logger.info(
                     `[CreateDynamicTool] Added tool '${name}' to agent '${context.agent.name}'`
