@@ -432,35 +432,4 @@ describe("Ask Tool - Multi-question support", () => {
     });
   });
 
-  describe("Backward compatibility with legacy format", () => {
-    it("should still support legacy tldr/context/suggestions format", async () => {
-      const context = createTestContext();
-
-      // Legacy format (no questions array, uses tldr/context/suggestions)
-      const config: AskConfig = {
-        recipient: "recipient-pubkey",
-        tldr: "Quick question",
-        context: "Full context here",
-        suggestions: ["Yes", "No"],
-      };
-
-      await publisher.ask(config, context);
-
-      expect(capturedEvents.length).toBe(1);
-      const event = capturedEvents[0];
-
-      // Check content format for legacy
-      expect(event.content).toContain("Quick question");
-      expect(event.content).toContain("Full context here");
-
-      // Check for tldr tag (legacy)
-      const tldrTag = event.tags.find((tag) => tag[0] === "tldr");
-      expect(tldrTag).toBeDefined();
-      expect(tldrTag?.[1]).toBe("Quick question");
-
-      // Check for suggestion tags (legacy)
-      const suggestionTags = event.tags.filter((tag) => tag[0] === "suggestion");
-      expect(suggestionTags.length).toBe(2);
-    });
-  });
 });

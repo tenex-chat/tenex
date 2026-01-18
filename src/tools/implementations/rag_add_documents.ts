@@ -4,12 +4,8 @@ import { URL } from "node:url";
 import type { ToolExecutionContext } from "@/tools/types";
 import { type RAGDocument, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
-import {
-    type DocumentMetadata,
-    type ToolResponse,
-    executeToolWithErrorHandling,
-    resolveAndValidatePath,
-} from "@/tools/utils";
+import type { DocumentMetadata } from "@/services/rag/rag-utils";
+import { type ToolResponse, executeToolWithErrorHandling, resolveAndValidatePath } from "@/tools/utils";
 import { tool } from "ai";
 import { z } from "zod";
 

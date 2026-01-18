@@ -13,6 +13,7 @@ import {
 } from "@nostr-dev-kit/ndk";
 import {
     AgentEventEncoder,
+    type AskQuestion,
     type CompletionIntent,
     type ConversationIntent,
     type ErrorIntent,
@@ -35,57 +36,18 @@ export interface DelegateConfig {
 }
 
 /**
- * A single-select question where user picks one option (or provides their own answer).
- */
-export interface SingleSelectQuestion {
-    type: "question";
-    /** Short title for the question (displayed as header) */
-    title: string;
-    /** Full question text */
-    question: string;
-    /** Optional suggestions - if omitted, question is fully open-ended */
-    suggestions?: string[];
-}
-
-/**
- * A multi-select question where user can pick multiple options (or provide their own answer).
- */
-export interface MultiSelectQuestion {
-    type: "multiselect";
-    /** Short title for the question (displayed as header) */
-    title: string;
-    /** Full question text */
-    question: string;
-    /** Optional options - if omitted, question is fully open-ended */
-    options?: string[];
-}
-
-/**
- * Union type for all question types.
- */
-export type AskQuestion = SingleSelectQuestion | MultiSelectQuestion;
-
-/**
  * Configuration for ask events.
- * Supports both legacy format (tldr/context/suggestions) and new multi-question format.
+ * Uses the multi-question format (title + questions).
  */
 export interface AskConfig {
     /** The pubkey of the recipient (usually project owner/human) */
     recipient: string;
     /** Full context explaining why these questions are being asked */
     context: string;
-
-    // New multi-question format
     /** Overall title encompassing all questions */
-    title?: string;
+    title: string;
     /** Array of questions (single-select or multi-select) */
-    questions?: AskQuestion[];
-
-    // Legacy format (backward compatibility)
-    /** @deprecated Use title instead. Short summary of the question */
-    tldr?: string;
-    /** @deprecated Use questions instead. Suggested answers/actions */
-    suggestions?: string[];
+    questions: AskQuestion[];
 }
 
 /**
@@ -285,8 +247,7 @@ export class AgentPublisher {
     }
 
     /**
-     * Publish an ask event.
-     * Supports both legacy format (tldr/suggestions) and new multi-question format (title/questions).
+     * Publish an ask event using the multi-question format.
      */
     async ask(config: AskConfig, context: EventContext): Promise<string> {
         // Capture context before async operations that may lose it
@@ -294,54 +255,26 @@ export class AgentPublisher {
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
+        // Content is just the context (user has no access to conversation history)
+        event.content = config.context;
 
-        // Determine if using new format (has questions array) or legacy format
-        const isNewFormat = config.questions && config.questions.length > 0;
+        // Add title tag
+        event.tags.push(["title", config.title]);
 
-        if (isNewFormat) {
-            // New multi-question format
-            // Content is just the context (user has no access to conversation history)
-            event.content = config.context;
-
-            // Add title tag
-            if (config.title) {
-                event.tags.push(["title", config.title]);
-            }
-
-            // Add question/multiselect tags
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            for (const q of config.questions!) {
-                if (q.type === "question") {
-                    const tag = ["question", q.title, q.question];
-                    if (q.suggestions) {
-                        tag.push(...q.suggestions);
-                    }
-                    event.tags.push(tag);
-                } else if (q.type === "multiselect") {
-                    const tag = ["multiselect", q.title, q.question];
-                    if (q.options) {
-                        tag.push(...q.options);
-                    }
-                    event.tags.push(tag);
+        // Add question/multiselect tags
+        for (const question of config.questions) {
+            if (question.type === "question") {
+                const tag = ["question", question.title, question.question];
+                if (question.suggestions) {
+                    tag.push(...question.suggestions);
                 }
-            }
-        } else {
-            // Legacy format (backward compatibility)
-            event.content = `${config.tldr}\n\n---\n\n${config.context}`;
-
-            // Add TLDR tag
-            if (config.tldr) {
-                event.tags.push(["tldr", config.tldr]);
-            }
-
-            // Add context tag (full version)
-            event.tags.push(["context", config.context]);
-
-            // Add suggestions
-            if (config.suggestions) {
-                for (const suggestion of config.suggestions) {
-                    event.tags.push(["suggestion", suggestion]);
+                event.tags.push(tag);
+            } else if (question.type === "multiselect") {
+                const tag = ["multiselect", question.title, question.question];
+                if (question.options) {
+                    tag.push(...question.options);
                 }
+                event.tags.push(tag);
             }
         }
 

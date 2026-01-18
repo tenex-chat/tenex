@@ -1,5 +1,5 @@
-import type { DocumentMetadata, LanceDBResult, LanceDBStoredDocument } from "@/tools/utils";
-import { calculateRelevanceScore, mapLanceResultToDocument } from "@/tools/utils";
+import type { DocumentMetadata, LanceDBResult, LanceDBStoredDocument } from "@/services/rag/rag-utils";
+import { calculateRelevanceScore, mapLanceResultToDocument } from "@/services/rag/rag-utils";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import type { Table, VectorQuery } from "@lancedb/lancedb";

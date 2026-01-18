@@ -44,9 +44,41 @@ export interface DelegationIntent {
     };
 }
 
-export interface AskIntent {
-    content: string;
+/**
+ * A single-select question where user picks one option (or provides their own answer).
+ */
+export interface SingleSelectQuestion {
+    type: "question";
+    /** Short title for the question (displayed as header) */
+    title: string;
+    /** Full question text */
+    question: string;
+    /** Optional suggestions - if omitted, question is fully open-ended */
     suggestions?: string[];
+}
+
+/**
+ * A multi-select question where user can pick multiple options (or provide their own answer).
+ */
+export interface MultiSelectQuestion {
+    type: "multiselect";
+    /** Short title for the question (displayed as header) */
+    title: string;
+    /** Full question text */
+    question: string;
+    /** Optional options - if omitted, question is fully open-ended */
+    options?: string[];
+}
+
+/**
+ * Union type for all question types.
+ */
+export type AskQuestion = SingleSelectQuestion | MultiSelectQuestion;
+
+export interface AskIntent {
+    title: string;
+    context: string;
+    questions: AskQuestion[];
 }
 
 export interface ErrorIntent {
@@ -274,13 +306,13 @@ export class AgentEventEncoder {
     }
 
     /**
-     * Encode an Ask intent into a kind:1 event with suggestions as tags.
-     * Creates an event that asks a question to the project manager/human user.
+     * Encode an Ask intent into a kind:1 event using the multi-question format.
+     * Creates an event that asks questions to the project manager/human user.
      */
     encodeAsk(intent: AskIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
-        event.content = intent.content;
+        event.content = intent.context;
 
         // Add conversation tags
         this.addConversationTags(event, context);
@@ -293,10 +325,23 @@ export class AgentEventEncoder {
             event.tag(["p", ownerPubkey]);
         }
 
-        // Add suggestions as individual tags if provided
-        if (intent.suggestions && intent.suggestions.length > 0) {
-            for (const suggestion of intent.suggestions) {
-                event.tag(["suggestion", suggestion]);
+        // Add title tag
+        event.tag(["title", intent.title]);
+
+        // Add question/multiselect tags
+        for (const question of intent.questions) {
+            if (question.type === "question") {
+                const tag = ["question", question.title, question.question];
+                if (question.suggestions) {
+                    tag.push(...question.suggestions);
+                }
+                event.tag(tag);
+            } else if (question.type === "multiselect") {
+                const tag = ["multiselect", question.title, question.question];
+                if (question.options) {
+                    tag.push(...question.options);
+                }
+                event.tag(tag);
             }
         }
 
@@ -310,8 +355,8 @@ export class AgentEventEncoder {
         this.forwardBranchTag(event, context);
 
         logger.debug("Encoded ask event", {
-            content: intent.content,
-            suggestions: intent.suggestions,
+            title: intent.title,
+            questionCount: intent.questions.length,
             recipient: ownerPubkey?.substring(0, 8),
         });
 
