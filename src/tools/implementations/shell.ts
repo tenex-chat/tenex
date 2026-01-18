@@ -462,5 +462,63 @@ export function getAllBackgroundTasks() {
     }));
 }
 
+/**
+ * Kill a background task by its ID
+ * @returns Object with success status and message
+ */
+export function killBackgroundTask(taskId: string): { success: boolean; message: string; pid?: number } {
+    const taskInfo = backgroundTasks.get(taskId);
+
+    if (!taskInfo) {
+        return {
+            success: false,
+            message: `No background task found with ID: ${taskId}`,
+        };
+    }
+
+    try {
+        // Send SIGTERM to gracefully terminate the process
+        process.kill(taskInfo.pid, "SIGTERM");
+
+        // Remove from tracking
+        backgroundTasks.delete(taskId);
+
+        logger.info("Background task killed", {
+            taskId,
+            pid: taskInfo.pid,
+            command: taskInfo.command,
+        });
+
+        return {
+            success: true,
+            message: `Successfully terminated background task ${taskId} (PID: ${taskInfo.pid})`,
+            pid: taskInfo.pid,
+        };
+    } catch (error) {
+        // Process might already be dead
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+            // Process doesn't exist anymore, clean up tracking
+            backgroundTasks.delete(taskId);
+            return {
+                success: true,
+                message: `Task ${taskId} was already terminated (PID: ${taskInfo.pid})`,
+                pid: taskInfo.pid,
+            };
+        }
+
+        logger.error("Failed to kill background task", {
+            taskId,
+            pid: taskInfo.pid,
+            error: error instanceof Error ? error.message : String(error),
+        });
+
+        return {
+            success: false,
+            message: `Failed to terminate task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+            pid: taskInfo.pid,
+        };
+    }
+}
+
 // Export types for use in other modules
 export type { ShellBackgroundResult, ShellErrorResult, ShellExpectedNonZeroResult };

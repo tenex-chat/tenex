@@ -55,6 +55,7 @@ import { createCancelScheduledTaskTool } from "./implementations/schedule_task_c
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createShellTool } from "./implementations/shell";
+import { createKillShellTool } from "./implementations/kill_shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 import { createFsWriteTool } from "./implementations/fs_write";
 import { createFsEditTool } from "./implementations/fs_edit";
@@ -182,6 +183,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     conversation_search: createConversationSearchTool,
 
     shell: createShellTool,
+    kill_shell: createKillShellTool,
 
     // Dynamic tool creation
     create_dynamic_tool: createCreateDynamicToolTool,
