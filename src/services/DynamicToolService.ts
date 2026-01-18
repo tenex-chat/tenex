@@ -1,8 +1,8 @@
 import { watch } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { getTenexBasePath } from "@/constants";
 import type { AISdkTool, ExecutionEnvironment } from "@/tools/types";
 import { logger } from "@/utils/logger";
 
@@ -29,7 +29,8 @@ export type DynamicToolFactory = (context: ExecutionEnvironment) => AISdkTool<un
 export class DynamicToolService {
     private static instance: DynamicToolService;
     // Use global location for dynamic tools since it's a singleton
-    private readonly dynamicToolsPath = join(homedir(), ".tenex", "tools");
+    // Respects TENEX_BASE_DIR for instance isolation
+    private readonly dynamicToolsPath = join(getTenexBasePath(), "tools");
     private dynamicTools = new Map<string, DynamicToolFactory>();
     private watcher: ReturnType<typeof watch> | null = null;
     private fileHashes = new Map<string, string>();

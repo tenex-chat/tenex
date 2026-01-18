@@ -1,6 +1,6 @@
-import * as os from "node:os";
+import { homedir } from "node:os";
 import * as path from "node:path";
-import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR } from "@/constants";
+import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MetaModelResolver } from "@/llm/meta";
@@ -66,12 +66,13 @@ export class ConfigService {
     // =====================================================================================
 
     /**
-     * Get a path under the global ~/.tenex directory
+     * Get a path under the global TENEX directory (defaults to ~/.tenex)
+     * Respects TENEX_BASE_DIR environment variable for instance isolation.
      * @param subdir Optional subdirectory (e.g., "agents", "daemon")
      * @returns Full path to the directory or subdirectory
      */
     getConfigPath(subdir?: TenexSubdir | string): string {
-        const basePath = path.join(os.homedir(), TENEX_DIR);
+        const basePath = getTenexBasePath();
         return subdir ? path.join(basePath, subdir) : basePath;
     }
 
@@ -91,7 +92,7 @@ export class ConfigService {
         const config = this.loadedConfig?.config;
         return config?.projectsBase
             ? path.resolve(config.projectsBase)
-            : path.join(os.homedir(), "tenex");
+            : path.join(homedir(), "tenex");
     }
 
     private getConfigFilePath(basePath: string, configFile: ConfigFile): string {

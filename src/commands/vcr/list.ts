@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
 import chalk from "chalk";
+import { getTenexBasePath } from "@/constants";
 
 /**
  * Lists recorded LLM interactions from the flight recorder
@@ -17,7 +17,7 @@ export function createListCommand(): Command {
         .option(
             "--dir <path>",
             "Recordings directory",
-            join(homedir(), ".tenex", "recordings")
+            join(getTenexBasePath(), "recordings")
         )
         .action(async (options) => {
             await listRecordings(options);

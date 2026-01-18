@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
 import chalk from "chalk";
+import { getTenexBasePath } from "@/constants";
 import { hashRequest, type VCRCassette, type VCRInteraction } from "@/test-utils/vcr";
 
 /**
@@ -16,7 +16,7 @@ export function createExtractCommand(): Command {
         .option(
             "--dir <path>",
             "Recordings directory",
-            join(homedir(), ".tenex", "recordings")
+            join(getTenexBasePath(), "recordings")
         )
         .option("--append", "Append to existing cassette instead of replacing")
         .action(async (recording, cassette, options) => {

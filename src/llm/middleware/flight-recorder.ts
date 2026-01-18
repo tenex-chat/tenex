@@ -1,7 +1,7 @@
 import type { LanguageModelMiddleware } from "ai";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
+import { getTenexBasePath } from "@/constants";
 import { recordingState } from "../RecordingState";
 
 type WrapGenerateParams = Parameters<NonNullable<LanguageModelMiddleware["wrapGenerate"]>>[0];
@@ -37,11 +37,12 @@ export interface FlightRecorderConfig {
  * Recording is controlled by the global recordingState - toggle with Ctrl+R in daemon.
  *
  * Recordings are saved to: {baseDir}/YYYY-MM-DD/{timestamp}-{hash}.json
+ * Respects TENEX_BASE_DIR environment variable for instance isolation.
  */
 export function createFlightRecorderMiddleware(
     config: FlightRecorderConfig = {}
 ): LanguageModelMiddleware {
-    const baseDir = config.baseDir || join(homedir(), ".tenex", "recordings");
+    const baseDir = config.baseDir || join(getTenexBasePath(), "recordings");
 
     return {
         specificationVersion: "v3" as const,

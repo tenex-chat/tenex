@@ -1,14 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach, mock } from "bun:test";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
 
 /**
  * Bug Reproduction Test: Dynamic Tool Race Condition
  *
  * ## The Bug
  * When create_dynamic_tool runs:
- * 1. Writes file to ~/.tenex/tools/
+ * 1. Writes file to ${TENEX_BASE_DIR}/tools/ (defaults to ~/.tenex/tools/)
  * 2. DynamicToolService.fs.watch triggers with 300ms debounce
  * 3. updateAgentTools() is called IMMEDIATELY (no wait)
  * 4. reloadAgent() calls createAgentInstance()
@@ -23,12 +22,13 @@ import { homedir, tmpdir } from "node:os";
  * the debounced file watcher.
  */
 
+import { getTenexBasePath } from "@/constants";
 import { dynamicToolService } from "@/services/DynamicToolService";
 import { validateAndSeparateTools, processAgentTools } from "@/agents/tool-normalization";
 import { isValidToolName } from "@/tools/registry";
 
-// Paths
-const dynamicToolsPath = join(homedir(), ".tenex", "tools");
+// Paths - respects TENEX_BASE_DIR environment variable
+const dynamicToolsPath = join(getTenexBasePath(), "tools");
 
 // Helper to create unique tool names for each test
 const uniqueToolName = () => `test_tool_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

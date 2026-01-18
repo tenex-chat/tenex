@@ -7,18 +7,38 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { initializeTelemetry } from "./telemetry/setup";
 
-function isTelemetryEnabled(): boolean {
-    const configPath = join(homedir(), ".tenex", "config.json");
-    if (!existsSync(configPath)) return true; // default: enabled
+/**
+ * Get the base TENEX directory path for early initialization.
+ * Respects TENEX_BASE_DIR environment variable for running multiple isolated instances.
+ * This is a minimal inline version used before other imports are available.
+ */
+function getBasePath(): string {
+    return process.env.TENEX_BASE_DIR || join(homedir(), ".tenex");
+}
+
+interface TelemetryConfig {
+    enabled: boolean;
+    serviceName: string;
+}
+
+function getTelemetryConfig(): TelemetryConfig {
+    const configPath = join(getBasePath(), "config.json");
+    const defaults: TelemetryConfig = { enabled: true, serviceName: "tenex-daemon" };
+
+    if (!existsSync(configPath)) return defaults;
     try {
         const config = JSON.parse(readFileSync(configPath, "utf-8"));
-        return config.telemetry?.enabled !== false;
+        return {
+            enabled: config.telemetry?.enabled !== false,
+            serviceName: config.telemetry?.serviceName || defaults.serviceName,
+        };
     } catch {
-        return true; // default: enabled on parse error
+        return defaults; // default on parse error
     }
 }
 
-initializeTelemetry(isTelemetryEnabled());
+const telemetryConfig = getTelemetryConfig();
+initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName);
 
 import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
