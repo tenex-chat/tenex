@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { readdir, rm, stat } from "fs/promises";
 import { join } from "path";
-import { homedir } from "os";
 import chalk from "chalk";
+import { getTenexBasePath } from "@/constants";
 
 /**
  * Cleans up old flight recordings
@@ -18,7 +18,7 @@ export function createCleanCommand(): Command {
         .option(
             "--dir <path>",
             "Recordings directory",
-            join(homedir(), ".tenex", "recordings")
+            join(getTenexBasePath(), "recordings")
         )
         .option("--dry-run", "Show what would be deleted without deleting")
         .action(async (options) => {

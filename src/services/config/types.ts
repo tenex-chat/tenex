@@ -36,6 +36,7 @@ export interface TenexConfig {
     // Telemetry configuration
     telemetry?: {
         enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
+        serviceName?: string; // OTL trace service name (default: 'tenex-daemon')
     };
 
     // Project fields (optional for global config)
@@ -69,6 +70,7 @@ export const TenexConfigSchema = z.object({
     telemetry: z
         .object({
             enabled: z.boolean().optional(),
+            serviceName: z.string().optional(),
         })
         .optional(),
     description: z.string().optional(),

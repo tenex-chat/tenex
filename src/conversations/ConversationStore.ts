@@ -12,9 +12,9 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "fs";
 import { writeFile } from "fs/promises";
-import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
+import { getTenexBasePath } from "@/constants";
 import { trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
@@ -93,7 +93,7 @@ export class ConversationStore {
     // Global registry of all conversation stores
     private static stores: Map<string, ConversationStore> = new Map();
     private static eventCache: Map<string, NDKEvent> = new Map();
-    private static basePath: string = join(homedir(), ".tenex", "projects");
+    private static basePath: string = join(getTenexBasePath(), "projects");
     private static projectId: string | null = null;
     private static agentPubkeys: Set<string> = new Set();
 
@@ -495,7 +495,7 @@ export class ConversationStore {
     static reset(): void {
         ConversationStore.stores.clear();
         ConversationStore.eventCache.clear();
-        ConversationStore.basePath = join(homedir(), ".tenex", "projects");
+        ConversationStore.basePath = join(getTenexBasePath(), "projects");
         ConversationStore.projectId = null;
         ConversationStore.agentPubkeys.clear();
     }
