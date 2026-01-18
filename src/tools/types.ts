@@ -57,8 +57,7 @@ export type ToolName =
     | "bug_report_create"
     | "bug_report_add"
     | "stop_pairing"
-    | "todo_add"
-    | "todo_update"
+    | "todo_write"
     | "web_fetch"
     | "web_search"
     | "nostr_fetch"
@@ -133,7 +132,7 @@ export interface ToolExecutionContext extends ExecutionEnvironment {
 
 /**
  * Extended context for tools that require conversation state.
- * Tools like todo_add, todo_update, conversation_get (current conversation) need this.
+ * Tools like todo_write, conversation_get (current conversation) need this.
  */
 export interface ConversationToolContext extends ToolExecutionContext {
     getConversation: () => ConversationStore;

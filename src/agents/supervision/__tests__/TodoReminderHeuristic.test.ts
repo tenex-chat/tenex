@@ -182,7 +182,7 @@ describe("TodoReminderHeuristic", () => {
             expect(message).toContain("Write tests");
             expect(message).toContain("in_progress");
             expect(message).not.toContain("Done task");
-            expect(message).toContain("todo_update");
+            expect(message).toContain("todo_write");
         });
 
         it("should include description when present", () => {
@@ -225,8 +225,7 @@ describe("TodoReminderHeuristic", () => {
             it("should return todo tool names", () => {
                 const tools = heuristic.getTodoTools();
                 expect(tools).toEqual(TODO_TOOL_NAMES);
-                expect(tools).toContain("todo_add");
-                expect(tools).toContain("todo_update");
+                expect(tools).toContain("todo_write");
             });
         });
     });

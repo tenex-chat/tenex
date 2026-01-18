@@ -59,7 +59,7 @@ export class ConsecutiveToolsWithoutTodoHeuristic implements Heuristic<PostCompl
     }
 
     buildCorrectionMessage(_context: PostCompletionContext, _verification: VerificationResult): string {
-        return `**Task Tracking Suggestion:** You've made several tool calls without tracking your work. Consider using \`todo_add()\` to break down complex tasks into trackable steps - it helps show progress and ensures nothing is missed.
+        return `**Task Tracking Suggestion:** You've made several tool calls without tracking your work. Consider using \`todo_write()\` to break down complex tasks into trackable steps - it helps show progress and ensures nothing is missed.
 
 This is a one-time suggestion.`;
     }
