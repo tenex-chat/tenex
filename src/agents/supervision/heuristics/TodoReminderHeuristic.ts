@@ -23,7 +23,7 @@ import type {
 /**
  * Tool names that are considered "todo tools" for restricted execution.
  */
-export const TODO_TOOL_NAMES = ["todo_add", "todo_update"] as const;
+export const TODO_TOOL_NAMES = ["todo_write"] as const;
 
 /**
  * Heuristic that reminds agents about incomplete todos after completion.
@@ -101,9 +101,9 @@ export class TodoReminderHeuristic implements Heuristic<PostCompletionContext> {
 
 ${todoList}
 
-Use \`todo_update\` to mark items as:
+Use \`todo_write\` to update item statuses:
 - \`done\` - if completed
-- \`skipped\` (with reason) - if no longer applicable
+- \`skipped\` (with skip_reason) - if no longer applicable
 
 This ensures accurate progress tracking.`;
     }

@@ -69,7 +69,7 @@ import { createBugReportCreateTool } from "./implementations/bug_report_create";
 import { createStopPairingTool } from "./implementations/stop_pairing";
 
 // Todo tools
-import { createTodoAddTool, createTodoUpdateTool } from "./implementations/todo";
+import { createTodoWriteTool } from "./implementations/todo";
 
 // Web tools
 import { createWebFetchTool } from "./implementations/web_fetch";
@@ -118,8 +118,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
  * These are filtered out when no conversation is available (e.g., MCP context).
  */
 const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
-    "todo_add",
-    "todo_update",
+    "todo_write",
     "conversation_get", // Needs conversation for current-conversation optimization
     "change_model", // Needs conversation to persist variant override
 ]);
@@ -213,8 +212,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     stop_pairing: createStopPairingTool,
 
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
-    todo_add: createTodoAddTool as ToolFactory,
-    todo_update: createTodoUpdateTool as ToolFactory,
+    todo_write: createTodoWriteTool as ToolFactory,
 
     // Web tools
     web_fetch: createWebFetchTool,
@@ -287,7 +285,7 @@ const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
 const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 
 /** Todo tools - for restricted agent execution (reminder mode) */
-const TODO_TOOLS: ToolName[] = ["todo_add", "todo_update"];
+const TODO_TOOLS: ToolName[] = ["todo_write"];
 
 /** Meta model tools - auto-injected when agent uses a meta model configuration */
 const META_MODEL_TOOLS: ToolName[] = ["change_model"];

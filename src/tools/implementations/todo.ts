@@ -1,7 +1,7 @@
 /**
  * Todo Tools - Conversation-scoped todo list management for agents
  *
- * Provides todo_add and todo_update functionality.
+ * Provides todo_write functionality for full state replacement.
  * Todos are stored on the Conversation object and persisted with it.
  */
 
@@ -20,159 +20,169 @@ function getCurrentTimestamp(): number {
     return Date.now();
 }
 
-function addTodosToConversation(
+/**
+ * Validates and writes the complete todo list, replacing all existing items.
+ * Implements safety check to prevent accidental deletions.
+ */
+function writeTodosToConversation(
     conversation: ConversationStore,
     agentPubkey: string,
-    items: Array<{
+    newItems: Array<{
         id: string;
         title: string;
         description: string;
-        position?: number;
-    }>
-): { added: TodoItem[]; duplicates: string[] } {
-    const todos = [...conversation.getTodos(agentPubkey)];
-
-    const added: TodoItem[] = [];
-    const duplicates: string[] = [];
+        status: TodoStatus;
+        skip_reason?: string;
+    }>,
+    force: boolean
+): {
+    success: boolean;
+    items: TodoItem[];
+    error?: string;
+    missingIds?: string[];
+} {
+    const existingTodos = conversation.getTodos(agentPubkey);
     const now = getCurrentTimestamp();
 
-    for (const item of items) {
-        const id = item.id;
+    // Build a map of new item IDs for quick lookup
+    const newItemIds = new Set(newItems.map((item) => item.id));
 
-        // Check for duplicate ID
-        if (todos.some((t: TodoItem) => t.id === id)) {
-            duplicates.push(id);
-            continue;
+    // Check for duplicate IDs in the input array
+    if (newItemIds.size !== newItems.length) {
+        const seen = new Set<string>();
+        const duplicates: string[] = [];
+        for (const item of newItems) {
+            if (seen.has(item.id)) {
+                duplicates.push(item.id);
+            }
+            seen.add(item.id);
         }
+        return {
+            success: false,
+            items: [],
+            error: `Duplicate IDs in input: ${duplicates.join(", ")}`,
+        };
+    }
 
-        const position = item.position ?? todos.length;
-        const todoItem: TodoItem = {
-            id,
+    // Safety check: find any existing IDs that are missing from the new list
+    const existingIds = existingTodos.map((t) => t.id);
+    const missingIds = existingIds.filter((id) => !newItemIds.has(id));
+
+    if (missingIds.length > 0 && !force) {
+        return {
+            success: false,
+            items: [],
+            error: `Safety check failed: ${missingIds.length} existing item(s) would be removed. Use force=true to allow removal.`,
+            missingIds,
+        };
+    }
+
+    // Validate skip_reason requirement
+    for (const item of newItems) {
+        if (item.status === "skipped" && !item.skip_reason) {
+            return {
+                success: false,
+                items: [],
+                error: `Validation failed: skip_reason is required when status='skipped' (item: ${item.id})`,
+            };
+        }
+    }
+
+    // Build the new todo list, preserving timestamps for existing items
+    const existingMap = new Map(existingTodos.map((t) => [t.id, t]));
+    const newTodos: TodoItem[] = newItems.map((item, index) => {
+        const existing = existingMap.get(item.id);
+        return {
+            id: item.id,
             title: item.title,
             description: item.description,
-            status: "pending",
-            position,
-            createdAt: now,
-            updatedAt: now,
+            status: item.status,
+            skipReason: item.skip_reason,
+            position: index,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: existing && existing.status === item.status ? existing.updatedAt : now,
         };
+    });
 
-        // Append to the list (no re-indexing of existing items)
-        todos.push(todoItem);
-        added.push(todoItem);
-    }
+    // Persist the new list
+    conversation.setTodos(agentPubkey, newTodos);
 
-    // Persist the updated list
-    conversation.setTodos(agentPubkey, todos);
-
-    return { added, duplicates };
-}
-
-function updateTodoStatusInConversation(
-    conversation: ConversationStore,
-    agentPubkey: string,
-    updates: Array<{ id: string; status: TodoStatus; skipReason?: string }>
-): { updated: TodoItem[]; notFound: string[]; errors: string[]; debug?: { conversationId: string; agentPubkey: string; existingTodoIds: string[] } } {
-    const todos = [...conversation.getTodos(agentPubkey)];
-
-    const updated: TodoItem[] = [];
-    const notFound: string[] = [];
-    const errors: string[] = [];
-    const now = getCurrentTimestamp();
-
-    for (const update of updates) {
-        const todo = todos.find((t: TodoItem) => t.id === update.id);
-        if (!todo) {
-            notFound.push(update.id);
-            continue;
-        }
-
-        // Validate skip_reason requirement
-        if (update.status === "skipped" && !update.skipReason) {
-            errors.push(`${update.id}: skip_reason required when status='skipped'`);
-            continue;
-        }
-
-        todo.status = update.status;
-        todo.skipReason = update.skipReason;
-        todo.updatedAt = now;
-        updated.push(todo);
-    }
-
-    // Persist the updated list
-    conversation.setTodos(agentPubkey, todos);
-
-    // Include debug info when there are notFound items to help diagnose issues
-    if (notFound.length > 0) {
-        return {
-            updated,
-            notFound,
-            errors,
-            debug: {
-                conversationId: conversation.id,
-                agentPubkey,
-                existingTodoIds: todos.map((t: TodoItem) => t.id),
-            },
-        };
-    }
-
-    return { updated, notFound, errors };
+    return {
+        success: true,
+        items: newTodos,
+    };
 }
 
 // ============================================================================
-// todo_add
+// todo_write
 // ============================================================================
 
-const todoAddItemSchema = z.object({
+const todoWriteItemSchema = z.object({
     id: z.string().describe("Unique identifier for the todo item (e.g., 'implement-auth', 'fix-bug-123')"),
     title: z.string().describe("Short human-readable title for the todo item"),
     description: z.string().describe("Detailed description of what needs to be done"),
-    position: z
-        .number()
+    status: z
+        .enum(["pending", "in_progress", "done", "skipped"])
+        .describe("Current status of the item"),
+    skip_reason: z
+        .string()
         .optional()
-        .describe("Position in the list (0-indexed). If omitted, appends to end"),
+        .describe("Required when status='skipped' - explain why this item was skipped"),
 });
 
-const todoAddSchema = z.object({
-    items: z.array(todoAddItemSchema).min(1).describe("Array of todo items to add"),
+const todoWriteSchema = z.object({
+    todos: z.array(todoWriteItemSchema).describe("The complete todo list. All items must be provided - this replaces the entire list."),
+    force: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe("When true, allows removing items from the list. Default false (safety check prevents removals)."),
 });
 
-type TodoAddInput = z.infer<typeof todoAddSchema>;
+type TodoWriteInput = z.infer<typeof todoWriteSchema>;
 
-interface TodoAddOutput {
+interface TodoWriteOutput {
     success: boolean;
-    added: Array<{ id: string; title: string; position: number }>;
-    duplicates: string[];
+    items: Array<{ id: string; title: string; status: string; position: number }>;
     totalItems: number;
+    error?: string;
+    missingIds?: string[];
     debug: {
         conversationId: string;
         agentPubkey: string;
     };
 }
 
-async function executeTodoAdd(
-    input: TodoAddInput,
+async function executeTodoWrite(
+    input: TodoWriteInput,
     context: ConversationToolContext
-): Promise<TodoAddOutput> {
+): Promise<TodoWriteOutput> {
     const conversation = context.getConversation();
 
-    const result = addTodosToConversation(
+    const result = writeTodosToConversation(
         conversation,
         context.agent.pubkey,
-        input.items.map((item) => ({
+        input.todos.map((item) => ({
             id: item.id,
             title: item.title,
             description: item.description,
-            position: item.position,
-        }))
+            status: item.status as TodoStatus,
+            skip_reason: item.skip_reason,
+        })),
+        input.force ?? false
     );
 
-    const todos = conversation.getTodos(context.agent.pubkey);
-
     return {
-        success: result.added.length > 0,
-        added: result.added.map((t: TodoItem) => ({ id: t.id, title: t.title, position: t.position })),
-        duplicates: result.duplicates,
-        totalItems: todos.length,
+        success: result.success,
+        items: result.items.map((t: TodoItem) => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            position: t.position,
+        })),
+        totalItems: result.items.length,
+        error: result.error,
+        missingIds: result.missingIds,
         debug: {
             conversationId: conversation.id,
             agentPubkey: context.agent.pubkey,
@@ -180,112 +190,28 @@ async function executeTodoAdd(
     };
 }
 
-export function createTodoAddTool(context: ConversationToolContext): AISdkTool {
+export function createTodoWriteTool(context: ConversationToolContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Add one or more todo items to track tasks. Each item requires an id (unique identifier), " +
-            "title (short label), and description (details). Optionally specify position to insert at a " +
-            "specific index; otherwise items are appended. Returns the added items and any duplicate IDs skipped.",
-        inputSchema: todoAddSchema,
-        execute: async (input: TodoAddInput) => {
-            return await executeTodoAdd(input, context);
+            "Write the complete todo list, replacing all existing items. Provide ALL items you want to exist - " +
+            "this is a full state replacement. By default, removing existing items is blocked (safety check). " +
+            "Set force=true to allow item removal. Each item requires: id (unique), title, description, and status. " +
+            "Use skip_reason when status='skipped'.",
+        inputSchema: todoWriteSchema,
+        execute: async (input: TodoWriteInput) => {
+            return await executeTodoWrite(input, context);
         },
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ items }: TodoAddInput) => {
-            if (items.length === 1) {
-                return `Adding todo: "${items[0].title}"`;
+        value: ({ todos }: TodoWriteInput) => {
+            if (todos.length === 0) {
+                return "Clearing todo list";
             }
-            return `Adding ${items.length} todos`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
-    return aiTool as AISdkTool;
-}
-
-// ============================================================================
-// todo_update
-// ============================================================================
-
-const todoUpdateItemSchema = z.object({
-    id: z.string().describe("The todo item ID (slug)"),
-    status: z
-        .enum(["pending", "in_progress", "done", "skipped"])
-        .describe("New status for the item"),
-    skip_reason: z
-        .string()
-        .optional()
-        .describe("Required when status='skipped' - explain why this item was skipped"),
-});
-
-const todoUpdateSchema = z.object({
-    items: z.array(todoUpdateItemSchema).min(1).describe("Array of todo status updates"),
-});
-
-type TodoUpdateInput = z.infer<typeof todoUpdateSchema>;
-
-interface TodoUpdateOutput {
-    success: boolean;
-    updated: Array<{ id: string; status: string }>;
-    notFound: string[];
-    errors: string[];
-    pendingCount: number;
-    debug?: {
-        conversationId: string;
-        agentPubkey: string;
-        existingTodoIds: string[];
-    };
-}
-
-async function executeTodoUpdate(
-    input: TodoUpdateInput,
-    context: ConversationToolContext
-): Promise<TodoUpdateOutput> {
-    const conversation = context.getConversation();
-
-    const result = updateTodoStatusInConversation(
-        conversation,
-        context.agent.pubkey,
-        input.items.map((item) => ({
-            id: item.id,
-            status: item.status as TodoStatus,
-            skipReason: item.skip_reason,
-        }))
-    );
-
-    const todos = conversation.getTodos(context.agent.pubkey);
-    const pendingCount = todos.filter((t: TodoItem) => t.status === "pending").length;
-
-    return {
-        success: result.updated.length > 0 && result.errors.length === 0,
-        updated: result.updated.map((t: TodoItem) => ({ id: t.id, status: t.status })),
-        notFound: result.notFound,
-        errors: result.errors,
-        pendingCount,
-        debug: result.debug,
-    };
-}
-
-export function createTodoUpdateTool(context: ConversationToolContext): AISdkTool {
-    const aiTool = tool({
-        description:
-            "Update the status of todo items. Use 'in_progress' when starting work, 'done' when complete, " +
-            "'skipped' (with skip_reason) if not applicable. Items with 'pending' status indicate work not yet started.",
-        inputSchema: todoUpdateSchema,
-        execute: async (input: TodoUpdateInput) => {
-            return await executeTodoUpdate(input, context);
-        },
-    });
-
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ items }: TodoUpdateInput) => {
-            if (items.length === 1) {
-                return `Updating todo "${items[0].id}" to ${items[0].status}`;
+            if (todos.length === 1) {
+                return `Writing todo list with 1 item: "${todos[0].title}"`;
             }
-            return `Updating ${items.length} todo statuses`;
+            return `Writing todo list with ${todos.length} items`;
         },
         enumerable: false,
         configurable: true,

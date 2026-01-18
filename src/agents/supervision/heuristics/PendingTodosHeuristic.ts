@@ -72,10 +72,10 @@ ${todoList}
 
 Please either:
 1. Complete the remaining tasks and mark them as \`done\`
-2. Mark items as \`skipped\` with a reason if they're no longer needed
+2. Mark items as \`skipped\` with a skip_reason if they're no longer needed
 3. If you've completed work but forgot to update the status, update them now
 
-Use \`todo_update\` to change the status of each item.`;
+Use \`todo_write\` to update the status of your items.`;
     }
 
     getCorrectionAction(_verification: VerificationResult): CorrectionAction {
