@@ -212,8 +212,15 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             const config: AskConfig = {
                 recipient: "recipient-pubkey",
-                tldr: "Quick question",
                 context: "Full context here",
+                title: "Quick question",
+                questions: [
+                    {
+                        type: "question",
+                        title: "Question",
+                        question: "Quick question?",
+                    },
+                ],
             };
 
             await publisher.ask(config, context);
@@ -234,8 +241,15 @@ describe("AgentPublisher - Delegation Tag", () => {
 
             const config: AskConfig = {
                 recipient: "recipient-pubkey",
-                tldr: "Quick question",
                 context: "Full context here",
+                title: "Quick question",
+                questions: [
+                    {
+                        type: "question",
+                        title: "Question",
+                        question: "Quick question?",
+                    },
+                ],
             };
 
             await expect(

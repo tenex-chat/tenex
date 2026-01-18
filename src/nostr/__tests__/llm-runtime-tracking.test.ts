@@ -313,16 +313,33 @@ describe("LLM Runtime Tracking", () => {
             // Encode ask event
             const askEvent = encoder.encodeAsk(
                 {
-                    content: "Which approach do you prefer?",
-                    suggestions: ["Option A", "Option B"]
+                    title: "Approach",
+                    context: "Need your input on the next step.",
+                    questions: [
+                        {
+                            type: "question",
+                            title: "Choice",
+                            question: "Which approach do you prefer?",
+                            suggestions: ["Option A", "Option B"],
+                        },
+                    ],
                 },
                 context
             );
 
             // Verify ask event structure
             expect(askEvent.tags.find((t) => t[0] === "intent" && t[1] === "ask")).toBeDefined();
-            expect(askEvent.tags.find((t) => t[0] === "suggestion" && t[1] === "Option A")).toBeDefined();
-            expect(askEvent.tags.find((t) => t[0] === "suggestion" && t[1] === "Option B")).toBeDefined();
+            const titleTag = askEvent.tags.find((t) => t[0] === "title");
+            expect(titleTag).toBeDefined();
+            expect(titleTag?.[1]).toBe("Approach");
+            const questionTag = askEvent.tags.find((t) => t[0] === "question");
+            expect(questionTag).toEqual([
+                "question",
+                "Choice",
+                "Which approach do you prefer?",
+                "Option A",
+                "Option B",
+            ]);
 
             // Verify execution-time reflects only LLM time
             const execTimeTag = askEvent.tags.find((t) => t[0] === "execution-time");
