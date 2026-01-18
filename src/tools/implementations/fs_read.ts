@@ -2,6 +2,9 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import { formatAnyError } from "@/lib/error-formatter";
+import { llmServiceFactory } from "@/llm";
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -31,6 +34,10 @@ const readPathSchema = z.object({
         .string()
         .optional()
         .describe("Event ID of a tool execution to read its result. When provided, 'path' is ignored and the tool's output is returned. Useful for retrieving truncated tool results."),
+    prompt: z
+        .string()
+        .optional()
+        .describe("Optional prompt to analyze the content. When provided, the content (file or tool result) will be processed through an LLM which will provide an explanation based on this prompt. Useful for extracting specific information or getting a summary."),
 });
 
 /**
@@ -155,6 +162,74 @@ async function executeFsRead(
 }
 
 /**
+ * Synthesize content using an LLM based on a prompt
+ */
+async function synthesizeContent(content: string, prompt: string, source: string): Promise<string> {
+    // Get LLM configuration - use summarization config if set, otherwise default
+    const { llms } = await config.loadConfig();
+    const configName = llms.summarization || llms.default;
+
+    if (!configName) {
+        logger.warn("No LLM configuration available for content synthesis");
+        return content;
+    }
+
+    const llmConfig = config.getLLMConfig(configName);
+
+    // Create LLM service
+    const llmService = llmServiceFactory.createService(llmConfig, {
+        agentName: "content-synthesizer",
+        sessionId: `synthesizer-${Date.now()}`,
+    });
+
+    // Generate synthesis using the LLM
+    const { object: result } = await llmService.generateObject(
+        [
+            {
+                role: "system",
+                content: `You are a helpful assistant that analyzes content and provides explanations based on user prompts.
+
+CRITICAL REQUIREMENTS:
+1. VERBATIM QUOTES: You MUST include relevant parts of the content verbatim in your response. Quote the exact text that supports your analysis.
+2. PRESERVE IDENTIFIERS: All IDs, file paths, function names, variable names, and other technical identifiers must be preserved exactly as they appear.
+3. Base your analysis ONLY on what is explicitly present in the content.
+
+FORMAT: Structure your response with:
+- Your analysis/explanation
+- Verbatim quotes from relevant parts (use quotation marks)
+- All referenced identifiers preserved exactly`,
+            },
+            {
+                role: "user",
+                content: `Please analyze the following content based on this prompt: "${prompt}"
+
+IMPORTANT: Include verbatim quotes from the relevant parts that support your analysis.
+
+SOURCE: ${source}
+
+CONTENT:
+${content}`,
+            },
+        ],
+        z.object({
+            explanation: z
+                .string()
+                .describe(
+                    "A detailed explanation based on the user's prompt. MUST include verbatim quotes from relevant content and preserve all important identifiers."
+                ),
+        })
+    );
+
+    logger.info("✅ Content synthesized with prompt", {
+        source,
+        promptLength: prompt.length,
+        contentLength: content.length,
+    });
+
+    return result.explanation;
+}
+
+/**
  * Create an AI SDK tool for reading paths
  */
 export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
@@ -164,18 +239,38 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
 
         inputSchema: readPathSchema,
 
-        execute: async ({ path, offset, limit, allowOutsideWorkingDirectory, tool: toolEventId }: { path?: string; offset?: number; limit?: number; allowOutsideWorkingDirectory?: boolean; tool?: string }) => {
+        execute: async ({ path, offset, limit, allowOutsideWorkingDirectory, tool: toolEventId, prompt }: { path?: string; offset?: number; limit?: number; allowOutsideWorkingDirectory?: boolean; tool?: string; prompt?: string }) => {
             try {
+                let content: string;
+                let source: string;
+
                 // If tool parameter is provided, fetch tool result instead of reading a file
                 if (toolEventId) {
-                    return await executeReadToolResult(toolEventId);
+                    content = await executeReadToolResult(toolEventId);
+                    source = `tool result ${toolEventId}`;
+                } else {
+                    // Otherwise, read the file/directory
+                    if (!path) {
+                        throw new Error("Either 'path' or 'tool' parameter is required");
+                    }
+                    content = await executeFsRead(path, context.workingDirectory, offset, limit, allowOutsideWorkingDirectory);
+                    source = path;
                 }
 
-                // Otherwise, read the file/directory
-                if (!path) {
-                    throw new Error("Either 'path' or 'tool' parameter is required");
+                // If a prompt is provided, synthesize the content
+                if (prompt) {
+                    try {
+                        return await synthesizeContent(content, prompt, source);
+                    } catch (synthError) {
+                        logger.error("Failed to synthesize content, returning raw content", {
+                            source,
+                            error: synthError instanceof Error ? synthError.message : String(synthError),
+                        });
+                        return `[Synthesis failed: ${synthError instanceof Error ? synthError.message : String(synthError)}]\n\n${content}`;
+                    }
                 }
-                return await executeFsRead(path, context.workingDirectory, offset, limit, allowOutsideWorkingDirectory);
+
+                return content;
             } catch (error: unknown) {
                 const target = toolEventId ? `tool result ${toolEventId}` : path;
                 throw new Error(`Failed to read ${target}: ${formatAnyError(error)}`);
@@ -184,11 +279,12 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, tool: toolEventId }: { path?: string; tool?: string }) => {
+        value: ({ path, tool: toolEventId, prompt }: { path?: string; tool?: string; prompt?: string }) => {
+            const action = prompt ? "Analyzing" : "Reading";
             if (toolEventId) {
-                return `Reading tool result ${toolEventId.substring(0, 16)}...`;
+                return `${action} tool result ${toolEventId.substring(0, 16)}...`;
             }
-            return `Reading ${path}`;
+            return `${action} ${path}`;
         },
         enumerable: false,
         configurable: true,
