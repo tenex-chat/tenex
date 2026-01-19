@@ -77,9 +77,10 @@ describe("todo_write tool", () => {
             }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
 
             const todos = context.getTodosRaw();
-            expect(todos[0].position).toBe(0);
-            expect(todos[1].position).toBe(1);
-            expect(todos[2].position).toBe(2);
+            // Array order is the source of truth for position
+            expect(todos[0].id).toBe("task-a");
+            expect(todos[1].id).toBe("task-b");
+            expect(todos[2].id).toBe("task-c");
         });
 
         it("should update existing items when IDs match", async () => {

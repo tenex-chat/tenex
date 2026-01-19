@@ -89,8 +89,9 @@ function writeTodosToConversation(
     }
 
     // Build the new todo list, preserving timestamps for existing items
+    // Array order determines position (index-based ordering)
     const existingMap = new Map(existingTodos.map((t) => [t.id, t]));
-    const newTodos: TodoItem[] = newItems.map((item, index) => {
+    const newTodos: TodoItem[] = newItems.map((item) => {
         const existing = existingMap.get(item.id);
         return {
             id: item.id,
@@ -98,7 +99,6 @@ function writeTodosToConversation(
             description: item.description,
             status: item.status,
             skipReason: item.skip_reason,
-            position: index,
             createdAt: existing?.createdAt ?? now,
             updatedAt: existing && existing.status === item.status ? existing.updatedAt : now,
         };
@@ -143,7 +143,7 @@ type TodoWriteInput = z.infer<typeof todoWriteSchema>;
 
 interface TodoWriteOutput {
     success: boolean;
-    items: Array<{ id: string; title: string; status: string; position: number }>;
+    items: Array<{ id: string; title: string; status: string }>;
     totalItems: number;
     error?: string;
     missingIds?: string[];
@@ -178,7 +178,6 @@ async function executeTodoWrite(
             id: t.id,
             title: t.title,
             status: t.status,
-            position: t.position,
         })),
         totalItems: result.items.length,
         error: result.error,

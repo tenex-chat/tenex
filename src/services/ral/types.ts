@@ -28,8 +28,6 @@ export interface TodoItem {
   status: TodoStatus;
   /** Required when status='skipped' - explains why item was skipped */
   skipReason?: string;
-  /** Order in the list (0-indexed) */
-  position: number;
   /** Timestamp when item was created */
   createdAt: number;
   /** Timestamp of last status change */
