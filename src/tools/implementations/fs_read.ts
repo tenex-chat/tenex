@@ -18,10 +18,9 @@ const readPathSchema = z.object({
         .describe("The absolute path to the file or directory to read. Required unless using 'tool' parameter."),
     description: z
         .string()
-        .nullable()
-        .optional()
+        .min(1, "Description is required and cannot be empty")
         .describe(
-            "A clear, concise description of why you're reading this file (5-10 words). Helps provide human-readable context for the operation."
+            "REQUIRED: A clear, concise description of why you're reading this file (5-10 words). Helps provide human-readable context for the operation."
         ),
     offset: z
         .number()
@@ -246,11 +245,11 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
 
         inputSchema: readPathSchema,
 
-        execute: async ({ path, description, offset, limit, allowOutsideWorkingDirectory, tool: toolEventId, prompt }: { path?: string; description?: string | null; offset?: number; limit?: number; allowOutsideWorkingDirectory?: boolean; tool?: string; prompt?: string }) => {
+        execute: async ({ path, description, offset, limit, allowOutsideWorkingDirectory, tool: toolEventId, prompt }: { path?: string; description: string; offset?: number; limit?: number; allowOutsideWorkingDirectory?: boolean; tool?: string; prompt?: string }) => {
             // Log the read operation with context
             logger.info("Reading file or tool result", {
                 path: path || undefined,
-                description: description || undefined,
+                description,
                 tool: toolEventId || undefined,
                 hasPrompt: !!prompt,
             });
@@ -294,14 +293,12 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description, tool: toolEventId, prompt }: { path?: string; description?: string | null; tool?: string; prompt?: string }) => {
+        value: ({ path, description, tool: toolEventId, prompt }: { path?: string; description: string; tool?: string; prompt?: string }) => {
             const action = prompt ? "Analyzing" : "Reading";
             if (toolEventId) {
-                const base = `${action} tool result ${toolEventId.substring(0, 16)}...`;
-                return description ? `${base} (${description})` : base;
+                return `${action} tool result ${toolEventId.substring(0, 16)}... (${description})`;
             }
-            const base = `${action} ${path}`;
-            return description ? `${base} (${description})` : base;
+            return `${action} ${path} (${description})`;
         },
         enumerable: false,
         configurable: true,
