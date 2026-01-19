@@ -1,14 +1,19 @@
 /**
  * Web Search Tool
  *
- * Searches the web using DuckDuckGo without requiring API keys.
- * Returns search results with titles, URLs, and descriptions.
+ * Searches the web using either:
+ * 1. A configured LLM model (via TenexLLMs.search) - preferred when available
+ * 2. DuckDuckGo as a fallback
+ *
+ * When using an LLM, the model performs the search using its internal knowledge
+ * and web access capabilities.
  */
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { search, SafeSearchType, SearchTimeType } from "duck-duck-scrape";
+import { config as configService } from "@/services/ConfigService";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -42,7 +47,20 @@ interface WebSearchOutput {
     query: string;
     resultsCount: number;
     results: SearchResultItem[];
+    source?: "llm" | "duckduckgo";
 }
+
+/**
+ * Schema for LLM search response
+ */
+const llmSearchResponseSchema = z.object({
+    query: z.string().describe("The search query that was processed"),
+    results: z.array(z.object({
+        title: z.string().describe("Title of the search result"),
+        url: z.string().describe("URL of the search result"),
+        snippet: z.string().describe("Brief description or snippet of the result"),
+    })).describe("Array of search results"),
+});
 
 function mapSafeSearch(level: "off" | "moderate" | "strict"): SafeSearchType {
     switch (level) {
@@ -69,10 +87,58 @@ function mapTimeFilter(time?: "d" | "w" | "m" | "y"): SearchTimeType | undefined
     }
 }
 
-async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput> {
+/**
+ * Execute search using a configured LLM model
+ */
+async function executeLLMSearch(input: WebSearchInput, searchConfigName: string): Promise<WebSearchOutput> {
+    const { query, max_results } = input;
+
+    logger.debug(`LLM search: "${query}" (max: ${max_results}) using config: ${searchConfigName}`);
+
+    const llmService = configService.createLLMService(searchConfigName);
+
+    const systemPrompt = `You are a web search tool. You MUST respond ONLY with valid JSON matching the required schema.
+Return search results for the given query. Provide accurate, relevant results with real URLs when possible.
+If you cannot find real URLs, provide plausible examples with clearly marked placeholder URLs.`;
+
+    const userPrompt = `Search for: "${query}"
+Return up to ${max_results} results.
+Each result must have a title, url, and snippet (brief description).`;
+
+    const result = await llmService.generateObject(
+        [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ],
+        llmSearchResponseSchema
+    );
+
+    const searchResults = result.object;
+
+    // Map LLM response to our output format
+    const results: SearchResultItem[] = searchResults.results
+        .slice(0, max_results)
+        .map((r) => ({
+            title: r.title,
+            url: r.url,
+            description: r.snippet,
+        }));
+
+    return {
+        query,
+        resultsCount: results.length,
+        results,
+        source: "llm",
+    };
+}
+
+/**
+ * Execute search using DuckDuckGo (fallback)
+ */
+async function executeDuckDuckGoSearch(input: WebSearchInput): Promise<WebSearchOutput> {
     const { query, max_results, safe_search, time } = input;
 
-    logger.debug(`Web search: "${query}" (max: ${max_results}, safe: ${safe_search})`);
+    logger.debug(`DuckDuckGo search: "${query}" (max: ${max_results}, safe: ${safe_search})`);
 
     const searchResults = await search(query, {
         safeSearch: mapSafeSearch(safe_search),
@@ -84,6 +150,7 @@ async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput>
             query,
             resultsCount: 0,
             results: [],
+            source: "duckduckgo",
         };
     }
 
@@ -99,14 +166,50 @@ async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput>
         query,
         resultsCount: results.length,
         results,
+        source: "duckduckgo",
     };
+}
+
+/**
+ * Get the configured search model name if available
+ */
+function getSearchModelConfig(): string | undefined {
+    try {
+        // Access loadedConfig directly to check for search model
+        // We need to check if the config has a search model configured
+        const llmsConfig = (configService as unknown as { loadedConfig?: { llms?: { search?: string } } }).loadedConfig?.llms;
+        return llmsConfig?.search;
+    } catch {
+        return undefined;
+    }
+}
+
+async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput> {
+    // Check if we have a configured search model
+    const searchConfigName = getSearchModelConfig();
+
+    if (searchConfigName) {
+        try {
+            logger.info(`Using LLM search with config: ${searchConfigName}`);
+            return await executeLLMSearch(input, searchConfigName);
+        } catch (error) {
+            // Log the error and fall back to DuckDuckGo
+            logger.warn(`LLM search failed, falling back to DuckDuckGo`, {
+                error: formatAnyError(error),
+                query: input.query,
+            });
+        }
+    }
+
+    // Fall back to DuckDuckGo
+    return await executeDuckDuckGoSearch(input);
 }
 
 export function createWebSearchTool(_context: ToolExecutionContext): AISdkTool {
     const toolInstance = tool({
         description:
-            "Search the web using DuckDuckGo. Returns search results with titles, URLs, and descriptions. " +
-            "No API key required. Use for finding current information, documentation, articles, or any web content. " +
+            "Search the web for information. Returns search results with titles, URLs, and descriptions. " +
+            "Use for finding current information, documentation, articles, or any web content. " +
             "For site-specific searches, include 'site:example.com' in your query.",
 
         inputSchema: webSearchSchema,
@@ -121,7 +224,7 @@ export function createWebSearchTool(_context: ToolExecutionContext): AISdkTool {
                 // Provide a clearer message for rate limiting
                 if (errorMsg.includes("anomaly") || errorMsg.includes("too quickly")) {
                     throw new Error(
-                        "DuckDuckGo rate limited the request. Wait a moment and try again, or try a different query."
+                        "Search rate limited. Wait a moment and try again, or try a different query."
                     );
                 }
 

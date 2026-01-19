@@ -491,6 +491,30 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Supervision model set to "${name}"`));
     }
 
+    static async setSearchModel(llmsConfig: TenexLLMs): Promise<void> {
+        const configNames = Object.keys(llmsConfig.configurations);
+
+        if (configNames.length === 0) {
+            console.log(chalk.yellow("⚠️  No configurations available"));
+            return;
+        }
+
+        const { name } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "name",
+                message: "Select search model:",
+                choices: configNames.map((n) => ({
+                    name: n === llmsConfig.search ? `${n} (current)` : n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        llmsConfig.search = name;
+        console.log(chalk.green(`✅ Search model set to "${name}"`));
+    }
+
     /**
      * Select a Codex model and reasoning effort interactively
      */
