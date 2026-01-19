@@ -10,9 +10,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_learn", // All agents should be able to learn
     "reports_list", // All agents should see available reports
     "report_read", // All agents should read reports
-    // Todo tools for task tracking
-    "todo_add", // All agents should be able to add todo items
-    "todo_update", // All agents should be able to update todo status
+    // Todo tool for task tracking
+    "todo_write", // All agents should be able to write/update todos
 ] as const;
 
 /**
