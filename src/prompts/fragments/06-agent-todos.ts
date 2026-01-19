@@ -49,9 +49,8 @@ export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
         );
         parts.push("");
 
-        // List all items in order
-        const sortedTodos = [...todos].sort((a, b) => a.position - b.position);
-        for (const todo of sortedTodos) {
+        // List all items in order (array order is the source of truth)
+        for (const todo of todos) {
             parts.push(formatTodoItem(todo));
         }
 
