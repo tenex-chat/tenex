@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { isStopExecutionSignal, extractPendingDelegations } from "@/services/ral/types";
 
 describe("onStopCheck tool result mapping - BUG REPRODUCTION", () => {
     // Simulating the AI SDK's TypedToolResult structure
@@ -124,5 +125,100 @@ describe("onStopCheck tool result mapping - BUG REPRODUCTION", () => {
         expect(fixedMapping[0].output).toHaveProperty("__stopExecution", true);
         expect(fixedMapping[0].output).toHaveProperty("delegationEventIds");
         expect((fixedMapping[0].output as any).message).toBe("Delegated to: @agent -> ev1");
+    });
+});
+
+describe("isStopExecutionSignal and extractPendingDelegations - MCP wrapped format", () => {
+    const directSignal = {
+        __stopExecution: true as const,
+        pendingDelegations: [
+            {
+                delegationConversationId: "event123",
+                recipientPubkey: "pk1",
+                senderPubkey: "pk2",
+                prompt: "do something",
+                ralNumber: 1,
+            },
+        ],
+    };
+
+    it("should detect direct StopExecutionSignal", () => {
+        expect(isStopExecutionSignal(directSignal)).toBe(true);
+    });
+
+    it("should extract pending delegations from direct StopExecutionSignal", () => {
+        const delegations = extractPendingDelegations(directSignal);
+        expect(delegations).not.toBeNull();
+        expect(delegations?.length).toBe(1);
+        expect(delegations?.[0].delegationConversationId).toBe("event123");
+    });
+
+    it("should detect MCP-wrapped StopExecutionSignal (array format)", () => {
+        // This is what Claude Code SDK produces
+        const mcpWrapped = [
+            { type: "text", text: JSON.stringify(directSignal) }
+        ];
+        expect(isStopExecutionSignal(mcpWrapped)).toBe(true);
+    });
+
+    it("should extract pending delegations from MCP-wrapped format (array)", () => {
+        const mcpWrapped = [
+            { type: "text", text: JSON.stringify(directSignal) }
+        ];
+        const delegations = extractPendingDelegations(mcpWrapped);
+        expect(delegations).not.toBeNull();
+        expect(delegations?.length).toBe(1);
+        expect(delegations?.[0].delegationConversationId).toBe("event123");
+    });
+
+    it("should detect MCP-wrapped StopExecutionSignal (content object format)", () => {
+        // Alternative MCP format with content property
+        const mcpWrapped = {
+            content: [{ type: "text", text: JSON.stringify(directSignal) }]
+        };
+        expect(isStopExecutionSignal(mcpWrapped)).toBe(true);
+    });
+
+    it("should extract pending delegations from MCP-wrapped format (content object)", () => {
+        const mcpWrapped = {
+            content: [{ type: "text", text: JSON.stringify(directSignal) }]
+        };
+        const delegations = extractPendingDelegations(mcpWrapped);
+        expect(delegations).not.toBeNull();
+        expect(delegations?.length).toBe(1);
+        expect(delegations?.[0].delegationConversationId).toBe("event123");
+    });
+
+    it("should return false for non-stop signals", () => {
+        expect(isStopExecutionSignal("just a string")).toBe(false);
+        expect(isStopExecutionSignal({ foo: "bar" })).toBe(false);
+        expect(isStopExecutionSignal([{ type: "text", text: '{"foo": "bar"}' }])).toBe(false);
+        expect(isStopExecutionSignal(null)).toBe(false);
+        expect(isStopExecutionSignal(undefined)).toBe(false);
+    });
+
+    it("should return null for non-stop signals when extracting", () => {
+        expect(extractPendingDelegations("just a string")).toBeNull();
+        expect(extractPendingDelegations({ foo: "bar" })).toBeNull();
+        expect(extractPendingDelegations([{ type: "text", text: '{"foo": "bar"}' }])).toBeNull();
+        expect(extractPendingDelegations(null)).toBeNull();
+        expect(extractPendingDelegations(undefined)).toBeNull();
+    });
+
+    it("should handle malformed JSON gracefully", () => {
+        const malformed = [{ type: "text", text: "not valid json{{{" }];
+        expect(isStopExecutionSignal(malformed)).toBe(false);
+        expect(extractPendingDelegations(malformed)).toBeNull();
+    });
+
+    it("should handle empty arrays", () => {
+        expect(isStopExecutionSignal([])).toBe(false);
+        expect(extractPendingDelegations([])).toBeNull();
+    });
+
+    it("should handle arrays without text items", () => {
+        const noText = [{ type: "image", url: "http://example.com/img.png" }];
+        expect(isStopExecutionSignal(noText)).toBe(false);
+        expect(extractPendingDelegations(noText)).toBeNull();
     });
 });

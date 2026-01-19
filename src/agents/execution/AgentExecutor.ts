@@ -32,7 +32,7 @@ import { config as configService } from "@/services/ConfigService";
 import { NudgeService } from "@/services/nudge";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
-import { RALRegistry, isStopExecutionSignal } from "@/services/ral";
+import { RALRegistry, extractPendingDelegations } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
 import type { AISdkTool, ToolRegistryContext } from "@/tools/types";
@@ -1190,6 +1190,48 @@ export class AgentExecutor {
                 ] as ToolResultPart[],
             });
 
+            // Check for StopExecutionSignal in tool result (handles both direct and MCP-wrapped formats)
+            // This is critical for Claude Code where onStopCheck doesn't run because tool execution
+            // happens inside a single doStream call. We register pending delegations here so the
+            // completion logic knows to wait instead of publishing a final response.
+            const delegationsFromResult = extractPendingDelegations(event.result);
+            if (delegationsFromResult && delegationsFromResult.length > 0) {
+                trace.getActiveSpan()?.addEvent("executor.delegation_detected_in_tool_result", {
+                    "ral.number": ralNumber,
+                    "tool.name": event.toolName,
+                    "delegation.count": delegationsFromResult.length,
+                });
+
+                // Merge with any existing delegations (in case of multiple delegation tools in same step)
+                const existingDelegations = ralRegistry.getConversationPendingDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                const mergedDelegations = [...existingDelegations];
+                for (const newDelegation of delegationsFromResult) {
+                    if (!mergedDelegations.some(d => d.delegationConversationId === newDelegation.delegationConversationId)) {
+                        mergedDelegations.push(newDelegation);
+                    }
+                }
+
+                ralRegistry.setPendingDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber,
+                    mergedDelegations
+                );
+
+                logger.info("[AgentExecutor] Registered pending delegations from tool result", {
+                    agent: context.agent.slug,
+                    ralNumber,
+                    toolName: event.toolName,
+                    delegationCount: delegationsFromResult.length,
+                    totalPending: mergedDelegations.length,
+                });
+            }
+
             await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
@@ -1391,8 +1433,9 @@ export class AgentExecutor {
                 const toolResults = lastStep.toolResults ?? [];
 
                 for (const toolResult of toolResults) {
-                    if (isStopExecutionSignal(toolResult.output)) {
-                        const pendingDelegations = toolResult.output.pendingDelegations;
+                    // Check for StopExecutionSignal (handles both direct and MCP-wrapped formats)
+                    const pendingDelegations = extractPendingDelegations(toolResult.output);
+                    if (pendingDelegations) {
 
                         executionSpan?.addEvent("executor.delegation_stop", {
                             "ral.number": ralNumber,

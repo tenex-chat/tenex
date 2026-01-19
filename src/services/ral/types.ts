@@ -11,8 +11,6 @@ export interface InjectionResult {
   aborted: boolean;
 }
 
-export type DelegationType = "standard" | "followup" | "external" | "ask";
-
 // ============================================================================
 // Todo Types
 // ============================================================================
@@ -130,11 +128,93 @@ export interface StopExecutionSignal {
   pendingDelegations: PendingDelegation[];
 }
 
-export function isStopExecutionSignal(value: unknown): value is StopExecutionSignal {
+/**
+ * Check if value is a direct (unwrapped) StopExecutionSignal
+ */
+function isDirectStopExecutionSignal(value: unknown): value is StopExecutionSignal {
   return (
     typeof value === "object" &&
     value !== null &&
     "__stopExecution" in value &&
     (value as StopExecutionSignal).__stopExecution === true
   );
+}
+
+/**
+ * Try to extract a StopExecutionSignal from an MCP-wrapped response.
+ *
+ * Claude Code SDK wraps tool results in MCP format:
+ * - Array format: [{ type: "text", text: '{"__stopExecution":true,...}' }]
+ * - Object format: { content: [{ type: "text", text: "..." }] }
+ *
+ * Returns the parsed StopExecutionSignal if found, null otherwise.
+ */
+function extractFromMCPWrapped(value: unknown): StopExecutionSignal | null {
+  // Handle both array format and { content: [...] } format
+  const content = Array.isArray(value)
+    ? value
+    : (typeof value === "object" && value !== null && "content" in value)
+      ? (value as { content: unknown[] }).content
+      : null;
+
+  if (!Array.isArray(content)) return null;
+
+  // Find the text item in the content array
+  const textItem = content.find((c: unknown) =>
+    typeof c === "object" &&
+    c !== null &&
+    (c as { type?: string }).type === "text"
+  ) as { text?: string } | undefined;
+
+  if (!textItem?.text) return null;
+
+  try {
+    const parsed = JSON.parse(textItem.text);
+    if (isDirectStopExecutionSignal(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Not valid JSON, not a stop signal
+  }
+
+  return null;
+}
+
+/**
+ * Type guard for StopExecutionSignal.
+ *
+ * Handles both:
+ * 1. Direct StopExecutionSignal objects (from standard AI SDK providers)
+ * 2. MCP-wrapped responses (from Claude Code SDK where tool results get
+ *    wrapped in [{ type: "text", text: "..." }] format)
+ */
+export function isStopExecutionSignal(value: unknown): value is StopExecutionSignal {
+  // Check direct format first (most common case)
+  if (isDirectStopExecutionSignal(value)) {
+    return true;
+  }
+
+  // Check MCP-wrapped format (Claude Code SDK)
+  return extractFromMCPWrapped(value) !== null;
+}
+
+/**
+ * Extract the pending delegations from a StopExecutionSignal.
+ *
+ * Works with both direct and MCP-wrapped formats.
+ * Returns null if value is not a StopExecutionSignal.
+ */
+export function extractPendingDelegations(value: unknown): PendingDelegation[] | null {
+  // Check direct format first
+  if (isDirectStopExecutionSignal(value)) {
+    return value.pendingDelegations;
+  }
+
+  // Check MCP-wrapped format
+  const extracted = extractFromMCPWrapped(value);
+  if (extracted) {
+    return extracted.pendingDelegations;
+  }
+
+  return null;
 }
