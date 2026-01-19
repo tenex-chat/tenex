@@ -9,7 +9,6 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
 import type { SessionManager } from "./SessionManager";
 
@@ -19,8 +18,6 @@ interface MessageCompilationPlan {
     mode: CompilationMode;
     cursor?: number;
 }
-
-const tracer = trace.getTracer("tenex.message-compiler");
 
 export interface MessageCompilerContext {
     agent: AgentInstance;
@@ -68,151 +65,88 @@ export class MessageCompiler {
     }
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
-        const session = this.sessionManager.getSession();
-        const capabilities = this.getProviderCapabilities();
-        const isStateful = capabilities?.sessionResumption === true;
-        const span = tracer.startSpan("tenex.message.compile", {
-            attributes: {
-                "agent.pubkey": context.agent.pubkey,
-                "agent.slug": context.agent.slug,
-                "conversation.id": context.conversation.id,
-                "llm.provider": this.providerId,
-                "message.conversation_length": this.conversationStore.getMessageCount(),
-                "message.cursor": this.currentCursor,
-                "message.has_session": Boolean(session.sessionId),
-                "message.mode": this.plan.mode,
-                "message.session_resumption": isStateful,
-                "ral.number": context.ralNumber,
-            },
-        }, otelContext.active());
+        const cursor = this.currentCursor;
+        const messages: ModelMessage[] = [];
+        let systemPromptCount = 0;
+        let dynamicContextCount = 0;
 
-        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
-            try {
-                const cursor = this.currentCursor;
-                const messages: ModelMessage[] = [];
-                let systemPromptCount = 0;
-                let dynamicContextCount = 0;
+        if (this.plan.mode === "full") {
+            const systemPromptMessages = await buildSystemPromptMessages(context);
+            const conversationMessages = await this.conversationStore.buildMessagesForRal(
+                context.agent.pubkey,
+                context.ralNumber
+            );
+            const dynamicContextMessages = await this.buildDynamicContextMessages(context);
 
-                if (this.plan.mode === "full") {
-                    const systemPromptMessages = await buildSystemPromptMessages(context);
-                    const conversationMessages = await this.conversationStore.buildMessagesForRal(
-                        context.agent.pubkey,
-                        context.ralNumber
-                    );
-                    const dynamicContextMessages = await this.buildDynamicContextMessages(context);
+            messages.push(...systemPromptMessages.map((sm) => sm.message));
 
-                    messages.push(...systemPromptMessages.map((sm) => sm.message));
-
-                    // Inject meta model system prompts if present
-                    // These describe available model variants and variant-specific instructions
-                    if (context.metaModelSystemPrompt) {
-                        messages.push({
-                            role: "system",
-                            content: context.metaModelSystemPrompt,
-                        });
-                        systemPromptCount++;
-                    }
-                    if (context.variantSystemPrompt) {
-                        messages.push({
-                            role: "system",
-                            content: context.variantSystemPrompt,
-                        });
-                        systemPromptCount++;
-                    }
-
-                    messages.push(...conversationMessages);
-                    messages.push(...dynamicContextMessages);
-
-                    systemPromptCount += systemPromptMessages.length;
-                    dynamicContextCount = dynamicContextMessages.length;
-                } else {
-                    // In delta mode, only send new conversation messages.
-                    // The session already has full context from initial compilation.
-                    // Sending wrapped system context as user messages confuses Claude Code
-                    // into responding to the context instead of the user's question.
-                    const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
-                        context.agent.pubkey,
-                        context.ralNumber,
-                        cursor
-                    );
-                    messages.push(...conversationMessages);
-                }
-
-                const conversationCount = this.plan.mode === "full"
-                    ? messages.length - systemPromptCount - dynamicContextCount
-                    : messages.length;
-
-                const counts = {
-                    systemPrompt: systemPromptCount,
-                    conversation: conversationCount,
-                    dynamicContext: dynamicContextCount,
-                    total: messages.length,
-                };
-
-                // Update cursor for subsequent prepareStep calls within same execution.
-                // This prevents resending the same messages during streaming.
-                this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
-
-                span.setAttributes({
-                    "message.system_count": counts.systemPrompt,
-                    "message.conversation_count": counts.conversation,
-                    "message.dynamic_count": counts.dynamicContext,
-                    "message.total_count": counts.total,
+            // Inject meta model system prompts if present
+            // These describe available model variants and variant-specific instructions
+            if (context.metaModelSystemPrompt) {
+                messages.push({
+                    role: "system",
+                    content: context.metaModelSystemPrompt,
                 });
-                span.setStatus({ code: SpanStatusCode.OK });
-                span.end();
-
-                return { messages, mode: this.plan.mode, counts };
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({
-                    code: SpanStatusCode.ERROR,
-                    message: (error as Error).message,
-                });
-                span.end();
-                throw error;
+                systemPromptCount++;
             }
-        });
+            if (context.variantSystemPrompt) {
+                messages.push({
+                    role: "system",
+                    content: context.variantSystemPrompt,
+                });
+                systemPromptCount++;
+            }
+
+            messages.push(...conversationMessages);
+            messages.push(...dynamicContextMessages);
+
+            systemPromptCount += systemPromptMessages.length;
+            dynamicContextCount = dynamicContextMessages.length;
+        } else {
+            // In delta mode, only send new conversation messages.
+            // The session already has full context from initial compilation.
+            // Sending wrapped system context as user messages confuses Claude Code
+            // into responding to the context instead of the user's question.
+            const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
+                context.agent.pubkey,
+                context.ralNumber,
+                cursor
+            );
+            messages.push(...conversationMessages);
+        }
+
+        const conversationCount = this.plan.mode === "full"
+            ? messages.length - systemPromptCount - dynamicContextCount
+            : messages.length;
+
+        const counts = {
+            systemPrompt: systemPromptCount,
+            conversation: conversationCount,
+            dynamicContext: dynamicContextCount,
+            total: messages.length,
+        };
+
+        // Update cursor for subsequent prepareStep calls within same execution.
+        // This prevents resending the same messages during streaming.
+        this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
+
+        return { messages, mode: this.plan.mode, counts };
     }
 
     advanceCursor(): void {
-        const session = this.sessionManager.getSession();
         const sessionCapabilities = this.getProviderCapabilities();
         const isStateful = sessionCapabilities?.sessionResumption === true;
+
+        if (!isStateful) {
+            return;
+        }
+
         // Use current message count (includes agent's response), not compile-time cursor.
         // advanceCursor is called after agent responds, so we want the cursor to point
         // to the last message the agent knows about (its own response).
         const messageCount = this.conversationStore.getMessageCount();
         const cursorToSave = messageCount - 1;
-        const span = tracer.startSpan("tenex.message.cursor.advance", {
-            attributes: {
-                "llm.provider": this.providerId,
-                "message.cursor": cursorToSave,
-                "message.has_session": Boolean(session.sessionId),
-                "message.session_resumption": isStateful,
-            },
-        }, otelContext.active());
-
-        try {
-            if (!isStateful) {
-                span.setAttribute("message.cursor.persisted", false);
-                span.setStatus({ code: SpanStatusCode.OK });
-                return;
-            }
-
-            this.sessionManager.saveLastSentMessageIndex(cursorToSave);
-            span.setAttribute("message.cursor.persisted", true);
-            span.setStatus({ code: SpanStatusCode.OK });
-        } catch (error) {
-            span.recordException(error as Error);
-            span.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: (error as Error).message,
-            });
-            throw error;
-        } finally {
-            span.end();
-        }
+        this.sessionManager.saveLastSentMessageIndex(cursorToSave);
     }
 
     private buildPlan(): MessageCompilationPlan {
