@@ -47,7 +47,8 @@ interface WebSearchOutput {
     query: string;
     resultsCount: number;
     results: SearchResultItem[];
-    source?: "llm" | "duckduckgo";
+    /** The search backend used: "llm" if using configured search model, "duckduckgo" for fallback */
+    source: "llm" | "duckduckgo";
 }
 
 /**
@@ -88,7 +89,12 @@ function mapTimeFilter(time?: "d" | "w" | "m" | "y"): SearchTimeType | undefined
 }
 
 /**
- * Execute search using a configured LLM model
+ * Execute search using a configured LLM model.
+ *
+ * NOTE: When using LLM search, the `safe_search` and `time` parameters are not applied.
+ * These filters are only supported by the DuckDuckGo backend. LLM search relies on the
+ * model's training data and capabilities, which may not respect time-based filtering.
+ * This is a known limitation that may be addressed in future versions.
  */
 async function executeLLMSearch(input: WebSearchInput, searchConfigName: string): Promise<WebSearchOutput> {
     const { query, max_results } = input;
@@ -171,14 +177,12 @@ async function executeDuckDuckGoSearch(input: WebSearchInput): Promise<WebSearch
 }
 
 /**
- * Get the configured search model name if available
+ * Get the configured search model name if available.
+ * Uses the typed accessor from ConfigService.
  */
 function getSearchModelConfig(): string | undefined {
     try {
-        // Access loadedConfig directly to check for search model
-        // We need to check if the config has a search model configured
-        const llmsConfig = (configService as unknown as { loadedConfig?: { llms?: { search?: string } } }).loadedConfig?.llms;
-        return llmsConfig?.search;
+        return configService.getSearchModelName();
     } catch {
         return undefined;
     }

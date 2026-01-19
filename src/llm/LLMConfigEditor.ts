@@ -43,6 +43,10 @@ export class LLMConfigEditor {
                         name: `Supervision model: ${llmsConfig.supervision || "none"}`,
                         value: "supervision",
                     },
+                    {
+                        name: `Search model: ${llmsConfig.search || "none"}`,
+                        value: "search",
+                    },
                     { name: "Test configuration", value: "test" },
                     { name: "Exit", value: "exit" },
                 ],
@@ -64,6 +68,7 @@ export class LLMConfigEditor {
             if (action === "default") await ConfigurationManager.setDefault(llmsConfig);
             if (action === "summarization") await ConfigurationManager.setSummarizationModel(llmsConfig);
             if (action === "supervision") await ConfigurationManager.setSupervisionModel(llmsConfig);
+            if (action === "search") await ConfigurationManager.setSearchModel(llmsConfig);
             await this.saveConfig(llmsConfig);
         }
 

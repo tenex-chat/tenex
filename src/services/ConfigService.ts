@@ -461,6 +461,15 @@ export class ConfigService {
     // =====================================================================================
 
     /**
+     * Get the configured search model name if available.
+     * This is a typed accessor for the search configuration.
+     * @returns The search model config name or undefined if not configured
+     */
+    getSearchModelName(): string | undefined {
+        return this.loadedConfig?.llms?.search;
+    }
+
+    /**
      * Ensures that a backend private key exists for TENEX
      * Generates a new one if not present
      */
