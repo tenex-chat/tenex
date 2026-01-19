@@ -166,12 +166,16 @@ export class LLMServiceFactory {
         // Create the model from the provider
         const modelResult = provider.createModel(config.model, runtimeContext);
 
+        // Get capabilities from provider metadata
+        const capabilities = provider.metadata.capabilities;
+
         // For agent providers (claude-code, codex-app-server, gemini-cli), use their provider function
         if (modelResult.bypassRegistry && modelResult.providerFunction) {
             return new LLMService(
                 null,
                 actualProvider,
                 config.model,
+                capabilities,
                 config.temperature,
                 config.maxTokens,
                 modelResult.providerFunction as (model: string, options?: ClaudeCodeSettings) => LanguageModel,
@@ -189,6 +193,7 @@ export class LLMServiceFactory {
             registry,
             actualProvider,
             config.model,
+            capabilities,
             config.temperature,
             config.maxTokens,
             undefined,

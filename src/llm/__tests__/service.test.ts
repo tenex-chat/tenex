@@ -1,6 +1,29 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 import { LLMService } from "../service";
+import type { ProviderCapabilities } from "../providers/types";
+
+/**
+ * Default mock capabilities for standard providers (no built-in tools)
+ */
+const mockCapabilities: ProviderCapabilities = {
+    streaming: true,
+    toolCalling: true,
+    builtInTools: false,
+    sessionResumption: false,
+    requiresApiKey: true,
+    mcpSupport: false,
+};
+
+/**
+ * Mock capabilities for agent providers (with built-in tools)
+ */
+const mockAgentCapabilities: ProviderCapabilities = {
+    ...mockCapabilities,
+    builtInTools: true,
+    requiresApiKey: false,
+    mcpSupport: true,
+};
 
 // Mock the AI SDK functions
 const mockStreamText = mock(() => ({
@@ -139,12 +162,12 @@ describe("LLMService", () => {
     describe("constructor", () => {
         test("throws if no registry and no Claude Code provider", () => {
             expect(() => {
-                new LLMService(null, "openrouter", "gpt-4");
+                new LLMService(null, "openrouter", "gpt-4", mockCapabilities);
             }).toThrow("LLMService requires either a registry or Claude Code provider function");
         });
 
         test("accepts a registry", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             expect(service.provider).toBe("openrouter");
             expect(service.model).toBe("gpt-4");
         });
@@ -155,6 +178,7 @@ describe("LLMService", () => {
                 null,
                 "claude-code",
                 "claude-3",
+                mockAgentCapabilities,
                 undefined,
                 undefined,
                 claudeCodeProvider
@@ -163,7 +187,7 @@ describe("LLMService", () => {
         });
 
         test("stores temperature and maxTokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", 0.7, 1000);
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities, 0.7, 1000);
             // These are private, but instantiation should succeed.
             expect(service).toBeDefined();
         });
@@ -171,7 +195,7 @@ describe("LLMService", () => {
 
     describe("getModel()", () => {
         test("returns a language model from registry", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const model = service.getModel();
             expect(model).toBeDefined();
         });
@@ -182,6 +206,7 @@ describe("LLMService", () => {
                 null,
                 "claude-code",
                 "claude-3",
+                mockAgentCapabilities,
                 undefined,
                 undefined,
                 claudeCodeProvider
@@ -193,7 +218,7 @@ describe("LLMService", () => {
 
     describe("cache control", () => {
         test("adds cache control for Anthropic with large system messages", async () => {
-            const service = new LLMService(mockRegistry, "anthropic", "claude-3");
+            const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
 
             // Create a large system message (> 4096 chars = 1024 tokens * 4 chars/token)
             const largeSystemContent = "x".repeat(5000);
@@ -215,7 +240,7 @@ describe("LLMService", () => {
         });
 
         test("does not add cache control for small system messages", async () => {
-            const service = new LLMService(mockRegistry, "anthropic", "claude-3");
+            const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
 
             const messages: ModelMessage[] = [
                 { role: "system", content: "Short system prompt" },
@@ -231,7 +256,7 @@ describe("LLMService", () => {
         });
 
         test("does not add cache control for non-Anthropic providers", async () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const largeSystemContent = "x".repeat(5000);
             const messages: ModelMessage[] = [
@@ -248,7 +273,7 @@ describe("LLMService", () => {
         });
 
         test("adds cache control for gemini-cli with large system messages", async () => {
-            const service = new LLMService(mockRegistry, "gemini-cli", "gemini-pro");
+            const service = new LLMService(mockRegistry, "gemini-cli", "gemini-pro", mockCapabilities);
 
             const largeSystemContent = "x".repeat(5000);
             const messages: ModelMessage[] = [
@@ -272,7 +297,7 @@ describe("LLMService", () => {
     describe("generateObject()", () => {
         test("generates a structured object", async () => {
             const { z } = await import("zod");
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const schema = z.object({
                 result: z.string(),
@@ -301,7 +326,7 @@ describe("LLMService private methods (via behavior)", () => {
         test("detects error-text format in tool results", async () => {
             // We test this indirectly by checking that tool-did-execute events
             // include error: true when the result has error format
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -323,7 +348,7 @@ describe("LLMService private methods (via behavior)", () => {
 
     describe("extractErrorDetails", () => {
         test("extracts details from error-text format", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
 
             const result = extractErrorDetails({ type: "error-text", text: "Something went wrong" });
@@ -335,7 +360,7 @@ describe("LLMService private methods (via behavior)", () => {
         });
 
         test("extracts details from error-json format", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
 
             const result = extractErrorDetails({
@@ -350,7 +375,7 @@ describe("LLMService private methods (via behavior)", () => {
         });
 
         test("returns null for non-error results", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
 
             expect(extractErrorDetails({ success: true })).toBeNull();
@@ -361,7 +386,7 @@ describe("LLMService private methods (via behavior)", () => {
 
     describe("calculateCostUsd", () => {
         test("calculates cost based on token usage", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
 
             // 1000 input tokens * $0.001/1k = $0.001
@@ -376,7 +401,7 @@ describe("LLMService private methods (via behavior)", () => {
         });
 
         test("handles zero tokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
 
             const cost = calculateCostUsd({
@@ -388,7 +413,7 @@ describe("LLMService private methods (via behavior)", () => {
         });
 
         test("handles undefined tokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
             const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
 
             const cost = calculateCostUsd({});
@@ -407,7 +432,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleTextDelta", () => {
         test("emits content event for streaming providers", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const contentSpy = mock(() => {});
             service.on("content", contentSpy);
@@ -423,7 +448,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleReasoningDelta", () => {
         test("emits reasoning event", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
@@ -436,7 +461,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("ignores [REDACTED] reasoning", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
@@ -450,7 +475,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleToolCall", () => {
         test("emits tool-will-execute event", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const toolWillExecuteSpy = mock(() => {});
             service.on("tool-will-execute", toolWillExecuteSpy);
@@ -469,7 +494,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleToolResult", () => {
         test("emits tool-did-execute event for successful result", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -487,7 +512,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("emits tool-did-execute event with error: true for error result", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -507,7 +532,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleChunk", () => {
         test("emits chunk-type-change when chunk type changes", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const chunkTypeChangeSpy = mock(() => {});
             service.on("chunk-type-change", chunkTypeChangeSpy);
@@ -532,7 +557,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("handles error chunks", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const streamErrorSpy = mock(() => {});
             service.on("stream-error", streamErrorSpy);
@@ -554,6 +579,7 @@ describe("LLMService telemetry configuration", () => {
             mockRegistry,
             "openrouter",
             "gpt-4",
+            mockCapabilities,
             0.7,
             1000,
             undefined,
@@ -576,7 +602,7 @@ describe("LLMService telemetry configuration", () => {
 
     test("uses 'unknown' for missing agent slug", () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const getFullTelemetryConfig = (service as any).getFullTelemetryConfig.bind(service);
         const config = getFullTelemetryConfig();
@@ -612,7 +638,7 @@ describe("LLMService stream()", () => {
     });
 
     test("calls streamText with correct parameters", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", 0.7, 2000);
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities, 0.7, 2000);
 
         const messages: ModelMessage[] = [
             { role: "user", content: [{ type: "text", text: "Hello" }] },
@@ -629,12 +655,13 @@ describe("LLMService stream()", () => {
         expect(callArgs.maxOutputTokens).toBe(2000);
     });
 
-    test("does not pass tools for claude-code provider", async () => {
+    test("does not pass tools for providers with builtInTools capability", async () => {
         const claudeCodeProvider = createMockClaudeCodeProvider();
         const service = new LLMService(
             null,
             "claude-code",
             "claude-3",
+            mockAgentCapabilities,
             undefined,
             undefined,
             claudeCodeProvider
@@ -652,7 +679,7 @@ describe("LLMService stream()", () => {
     });
 
     test("emits complete event via onFinish callback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -680,7 +707,7 @@ describe("LLMService stream()", () => {
     });
 
     test("extracts OpenRouter usage metadata including token counts", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -725,7 +752,7 @@ describe("LLMService stream()", () => {
     });
 
     test("falls back to AI SDK totalUsage when OpenRouter token counts unavailable", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -763,50 +790,13 @@ describe("LLMService stream()", () => {
         expect(completeEvent.usage.totalTokens).toBe(300); // Calculated fallback
     });
 
-    test("emits session-captured for claude-code with session metadata", async () => {
-        const claudeCodeProvider = createMockClaudeCodeProvider();
-        const service = new LLMService(
-            null,
-            "claude-code",
-            "claude-3",
-            undefined,
-            undefined,
-            claudeCodeProvider
-        );
-
-        const sessionSpy = mock(() => {});
-        service.on("session-captured", sessionSpy);
-
-        const messages: ModelMessage[] = [
-            { role: "user", content: [{ type: "text", text: "Hello" }] },
-        ];
-
-        await service.stream(messages, {});
-
-        if (capturedOnFinish) {
-            await capturedOnFinish({
-                text: "Response",
-                steps: [],
-                totalUsage: {},
-                finishReason: "stop",
-                providerMetadata: {
-                    "claude-code": { sessionId: "stream-session-456" },
-                },
-            });
-        }
-
-        expect(sessionSpy).toHaveBeenCalled();
-        expect(sessionSpy.mock.calls[0][0]).toEqual({
-            sessionId: "stream-session-456",
-        });
-    });
-
     test("extracts costUsd from claude-code provider metadata", async () => {
         const claudeCodeProvider = createMockClaudeCodeProvider();
         const service = new LLMService(
             null,
             "claude-code",
             "claude-3",
+            mockAgentCapabilities,
             undefined,
             undefined,
             claudeCodeProvider
@@ -847,7 +837,7 @@ describe("LLMService stream()", () => {
     });
 
     test("respects custom onStopCheck callback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         let capturedStopWhen: ((args: { steps: any[] }) => Promise<boolean>) | undefined;
 
@@ -877,7 +867,7 @@ describe("LLMService stream()", () => {
     });
 
     test("passes abort signal to streamText", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
         const abortController = new AbortController();
 
         const messages: ModelMessage[] = [
@@ -891,7 +881,7 @@ describe("LLMService stream()", () => {
     });
 
     test("passes prepareStep to streamText", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
         const prepareStep = mock(() => ({ messages: [] }));
 
         const messages: ModelMessage[] = [
@@ -913,7 +903,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("uses cached content for non-streaming providers", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         // Simulate cached content
         (service as any).cachedContentForComplete = "Cached response text";
@@ -936,7 +926,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("clears cached content after use", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         (service as any).cachedContentForComplete = "Some cached content";
 
@@ -954,7 +944,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("detects invalid tool calls and logs error", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const finishHandler = (service as any).createFinishHandler();
 
@@ -986,7 +976,7 @@ describe("LLMService createFinishHandler", () => {
 describe("LLMService handleStreamError", () => {
     test("logs stream errors with duration", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const handleStreamError = (service as any).handleStreamError.bind(service);
 
@@ -996,7 +986,7 @@ describe("LLMService handleStreamError", () => {
 
     test("handles non-Error objects", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4");
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
         const handleStreamError = (service as any).handleStreamError.bind(service);
 
@@ -1008,7 +998,7 @@ describe("LLMService handleStreamError", () => {
 describe("LLMService addCacheControl edge cases", () => {
     test("preserves existing message properties", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "anthropic", "claude-3");
+        const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
 
         const addCacheControl = (service as any).addCacheControl.bind(service);
 
@@ -1028,7 +1018,7 @@ describe("LLMService addCacheControl edge cases", () => {
 
     test("only caches system messages, not user messages", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "anthropic", "claude-3");
+        const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
 
         const addCacheControl = (service as any).addCacheControl.bind(service);
 

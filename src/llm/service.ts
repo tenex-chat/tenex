@@ -23,6 +23,7 @@ import type { z } from "zod";
 import { shouldIgnoreChunk } from "./chunk-validators";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import { PROVIDER_IDS } from "./providers/provider-ids";
+import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
@@ -112,6 +113,7 @@ export interface RawChunkEvent {
 export class LLMService extends EventEmitter<Record<string, any>> {
     public readonly provider: string;
     public readonly model: string;
+    private readonly capabilities: ProviderCapabilities;
     private readonly temperature?: number;
     private readonly maxTokens?: number;
     private previousChunkType?: string;
@@ -132,6 +134,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         private readonly registry: ProviderRegistryProvider<any, any> | null,
         provider: string,
         model: string,
+        capabilities: ProviderCapabilities,
         temperature?: number,
         maxTokens?: number,
         claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
@@ -143,6 +146,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         super();
         this.provider = provider;
         this.model = model;
+        this.capabilities = capabilities;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
         this.claudeCodeProviderFunction = claudeCodeProviderFunction;
@@ -495,10 +499,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
         const startTime = Date.now();
 
-        // ProgressMonitor is only used for standard providers (not Claude Code/Codex CLI)
-        // Creating a second model with resume for Claude Code can cause session conflicts
+        // ProgressMonitor is only used for providers without built-in tools
+        // Providers with built-in tools handle their own progress/session management
         let progressMonitor: ProgressMonitor | undefined;
-        if (this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_APP_SERVER) {
+        if (!this.capabilities.builtInTools) {
             const reviewModel = this.getLanguageModel();
             progressMonitor = new ProgressMonitor(reviewModel);
         }
@@ -534,8 +538,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const { textStream } = streamText({
             model,
             messages: processedMessages,
-            // Don't pass tools for agent providers - they have their own built-in tools that conflict
-            ...(this.provider !== PROVIDER_IDS.CLAUDE_CODE && this.provider !== PROVIDER_IDS.CODEX_APP_SERVER && { tools }),
+            // Don't pass tools for providers with built-in tools - they have their own that would conflict
+            ...(!this.capabilities.builtInTools && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
