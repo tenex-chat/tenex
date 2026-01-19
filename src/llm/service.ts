@@ -24,12 +24,9 @@ import { shouldIgnoreChunk } from "./chunk-validators";
 import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 import type { LanguageModelUsageWithCostUsd } from "./types";
-import {
-    compileMessagesForClaudeCode,
-    convertSystemMessagesForResume,
-} from "./utils/claudeCodePromptCompiler";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
+import { extractUsageMetadata, extractOpenRouterGenerationId } from "./providers/usage-metadata";
 
 /**
  * Content delta event
@@ -260,15 +257,16 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             // Start with base settings (cwd, env, mcpServers, etc.) from createAgentSettings
             const options: ClaudeCodeSettings = { ...this.claudeCodeBaseSettings };
 
-            if (this.sessionId) {
-                // When resuming, add the resume option
-                options.resume = this.sessionId;
-            } else if (messages && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
-                // Compile messages into systemPrompt format
-                const { systemPrompt } = compileMessagesForClaudeCode(messages);
+            // Extract system messages and pass as plain string systemPrompt for Claude Code
+            // Using plain string (not preset+append) gives full control over agent identity
+            if (messages && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
+                const systemContent = messages
+                    .filter((m) => m.role === "system")
+                    .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+                    .join("\n\n");
 
-                if (systemPrompt) {
-                    options.systemPrompt = systemPrompt;
+                if (systemContent) {
+                    options.systemPrompt = systemContent;
                 }
             }
 
@@ -340,16 +338,9 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private prepareMessagesForRequest(messages: ModelMessage[]): ModelMessage[] {
         let processedMessages = messages;
 
-        if (this.provider === PROVIDER_IDS.CLAUDE_CODE || this.provider === PROVIDER_IDS.CODEX_APP_SERVER) {
-            if (this.sessionId) {
-                // Resuming session: Convert system messages to user messages
-                // (system messages after conversation start need to be delivered as user messages)
-                processedMessages = convertSystemMessagesForResume(messages);
-            } else {
-                // New session: Filter out system messages (they're in systemPrompt.append)
-                // Only pass user/assistant messages to avoid duplication
-                processedMessages = messages.filter((m) => m.role !== "system");
-            }
+        // For Claude Code, filter out system messages since they're passed via systemPrompt
+        if (this.provider === PROVIDER_IDS.CLAUDE_CODE) {
+            processedMessages = messages.filter((m) => m.role !== "system");
         }
 
         return this.addCacheControl(processedMessages);
@@ -434,20 +425,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         providerMetadata: Record<string, unknown> | undefined,
         recordSpanEvent: boolean
     ): void {
-        if (this.provider === PROVIDER_IDS.CLAUDE_CODE) {
-            const sessionId = (
-                providerMetadata?.[PROVIDER_IDS.CLAUDE_CODE] as { sessionId?: string } | undefined
-            )?.sessionId;
-            if (sessionId) {
-                if (recordSpanEvent) {
-                    trace.getActiveSpan()?.addEvent("llm.session_captured", {
-                        "session.id": sessionId,
-                    });
-                }
-                this.emit("session-captured", { sessionId });
-            }
-        }
-
         if (this.provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             const sessionId = (
                 providerMetadata?.[PROVIDER_IDS.CODEX_APP_SERVER] as { sessionId?: string } | undefined
@@ -490,6 +467,31 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const model = this.getLanguageModel(messages);
 
         const processedMessages = this.prepareMessagesForRequest(messages);
+
+        // DEBUG: Write Claude Code call details to file
+        if (this.provider === PROVIDER_IDS.CLAUDE_CODE) {
+            const debugDir = `/tmp/claude_code_debug/${this.conversationId || "unknown"}`;
+            const fs = require("fs");
+            fs.mkdirSync(debugDir, { recursive: true });
+            const debugFile = `${debugDir}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+
+            // Extract systemPrompt the same way getLanguageModel does
+            const systemPrompt = messages
+                .filter((m) => m.role === "system")
+                .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+                .join("\n\n");
+
+            fs.writeFileSync(debugFile, JSON.stringify({
+                timestamp: new Date().toISOString(),
+                conversationId: this.conversationId,
+                systemPrompt,
+                processedMessages,
+                originalMessageCount: messages.length,
+                processedMessageCount: processedMessages.length,
+            }, null, 2));
+
+            logger.info(`[LLMService] DEBUG: Wrote Claude Code call to ${debugFile}`);
+        }
 
         const startTime = Date.now();
 
@@ -730,59 +732,27 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     false
                 );
 
-                // Extract OpenRouter-specific usage and correlation data
-                const openrouterMetadata = e.providerMetadata?.openrouter as {
-                    id?: string;
-                    usage?: {
-                        cost?: number;
-                        promptTokens?: number;
-                        completionTokens?: number;
-                        totalTokens?: number;
-                        promptTokensDetails?: { cachedTokens?: number };
-                        completionTokensDetails?: { reasoningTokens?: number };
-                    };
-                };
-                const openrouterUsage = openrouterMetadata?.usage;
-
                 // Capture OpenRouter generation ID for trace correlation
-                if (openrouterMetadata?.id) {
-                    trace.getActiveSpan()?.setAttribute("openrouter.generation_id", openrouterMetadata.id);
+                const openrouterGenerationId = extractOpenRouterGenerationId(
+                    e.providerMetadata as Record<string, unknown> | undefined
+                );
+                if (openrouterGenerationId) {
+                    trace.getActiveSpan()?.setAttribute("openrouter.generation_id", openrouterGenerationId);
                 }
 
-                // Extract Claude Code-specific cost data
-                const claudeCodeCostUsd = (
-                    e.providerMetadata?.[PROVIDER_IDS.CLAUDE_CODE] as {
-                        costUsd?: number;
-                        sessionId?: string;
-                        durationMs?: number;
-                    }
-                )?.costUsd;
-
-                // Use OpenRouter's token counts as primary source (more reliable for streaming)
-                // Fall back to AI SDK's totalUsage if OpenRouter metadata unavailable
-                const inputTokens =
-                    openrouterUsage?.promptTokens ?? e.totalUsage?.inputTokens;
-                const outputTokens =
-                    openrouterUsage?.completionTokens ?? e.totalUsage?.outputTokens;
-                const totalTokens =
-                    openrouterUsage?.totalTokens ??
-                    (inputTokens !== undefined && outputTokens !== undefined
-                        ? inputTokens + outputTokens
-                        : undefined);
+                // Extract usage metadata using provider-specific extractor
+                const usage = extractUsageMetadata(
+                    this.provider,
+                    this.model,
+                    e.totalUsage,
+                    e.providerMetadata as Record<string, unknown> | undefined
+                );
 
                 this.emit("complete", {
                     message: finalMessage,
                     steps: e.steps,
                     usage: {
-                        // Include model ID so downstream EventContext uses the actual model,
-                        // not the config name fallback (prevents mismatched llm-model tags).
-                        model: this.model,
-                        inputTokens,
-                        outputTokens,
-                        totalTokens,
-                        costUsd: openrouterUsage?.cost ?? claudeCodeCostUsd,
-                        cachedInputTokens: openrouterUsage?.promptTokensDetails?.cachedTokens,
-                        reasoningTokens: openrouterUsage?.completionTokensDetails?.reasoningTokens,
+                        ...usage,
                         contextWindow: this.getModelContextWindow(),
                     },
                     finishReason: e.finishReason,

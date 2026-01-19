@@ -11,8 +11,10 @@ import {
     type Session,
     type McpServerConfigOrSdk,
 } from "ai-sdk-provider-codex-app-server";
+import type { LanguageModelUsage } from "ai";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import type { LanguageModelUsageWithCostUsd } from "../../types";
 import type {
     ProviderInitConfig,
     ProviderMetadata,
@@ -20,6 +22,23 @@ import type {
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
 import { CodexAppServerToolsAdapter } from "./CodexAppServerToolsAdapter";
+import { PROVIDER_IDS } from "../provider-ids";
+
+/**
+ * Codex App Server-specific metadata structure
+ */
+interface CodexAppServerProviderMetadata {
+    costUsd?: number;
+    sessionId?: string;
+}
+
+/**
+ * AI SDK usage with optional extended fields
+ */
+interface ExtendedUsage extends LanguageModelUsage {
+    cachedInputTokens?: number;
+    reasoningTokens?: number;
+}
 
 /**
  * Codex App Server provider implementation
@@ -162,5 +181,34 @@ export class CodexAppServerProvider extends AgentProvider {
      */
     isAvailable(): boolean {
         return this._initialized;
+    }
+
+    /**
+     * Extract usage metadata from Codex App Server provider response
+     */
+    static extractUsageMetadata(
+        model: string,
+        totalUsage: LanguageModelUsage | undefined,
+        providerMetadata: Record<string, unknown> | undefined
+    ): LanguageModelUsageWithCostUsd {
+        const metadata = providerMetadata?.[PROVIDER_IDS.CODEX_APP_SERVER] as CodexAppServerProviderMetadata | undefined;
+        const extendedUsage = totalUsage as ExtendedUsage | undefined;
+
+        const inputTokens = totalUsage?.inputTokens;
+        const outputTokens = totalUsage?.outputTokens;
+        const totalTokens = totalUsage?.totalTokens ??
+            (inputTokens !== undefined && outputTokens !== undefined
+                ? inputTokens + outputTokens
+                : undefined);
+
+        return {
+            model,
+            inputTokens,
+            outputTokens,
+            totalTokens,
+            costUsd: metadata?.costUsd,
+            cachedInputTokens: extendedUsage?.cachedInputTokens,
+            reasoningTokens: extendedUsage?.reasoningTokens,
+        } as LanguageModelUsageWithCostUsd;
     }
 }

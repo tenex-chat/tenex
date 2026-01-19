@@ -6,8 +6,10 @@
  */
 
 import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
+import type { LanguageModelUsage } from "ai";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import type { LanguageModelUsageWithCostUsd } from "../../types";
 import type {
     ProviderInitConfig,
     ProviderMetadata,
@@ -15,6 +17,24 @@ import type {
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
 import { ClaudeCodeToolsAdapter } from "./ClaudeCodeToolsAdapter";
+import { PROVIDER_IDS } from "../provider-ids";
+
+/**
+ * Claude Code-specific metadata structure
+ */
+interface ClaudeCodeProviderMetadata {
+    costUsd?: number;
+    sessionId?: string;
+    durationMs?: number;
+}
+
+/**
+ * AI SDK usage with optional extended fields
+ */
+interface ExtendedUsage extends LanguageModelUsage {
+    cachedInputTokens?: number;
+    reasoningTokens?: number;
+}
 
 /**
  * Claude Code provider implementation
@@ -32,7 +52,7 @@ export class ClaudeCodeProvider extends AgentProvider {
             streaming: true,
             toolCalling: true,
             builtInTools: true,
-            sessionResumption: true,
+            sessionResumption: false,
             requiresApiKey: false,
             mcpSupport: true,
         },
@@ -127,6 +147,7 @@ export class ClaudeCodeProvider extends AgentProvider {
             },
             mcpServers: mcpServersConfig,
             disallowedTools: ["AskUserQuestion"],
+            persistSession: false,
             logger: {
                 warn: (message: string) => logger.warn("[ClaudeCode]", message),
                 error: (message: string) => logger.error("[ClaudeCode]", message),
@@ -134,11 +155,6 @@ export class ClaudeCodeProvider extends AgentProvider {
                 debug: (message: string) => logger.debug("[ClaudeCode]", message),
             },
         };
-
-        // Handle session resumption
-        if (context.sessionId) {
-            settings.resume = context.sessionId;
-        }
 
         return settings;
     }
@@ -148,5 +164,34 @@ export class ClaudeCodeProvider extends AgentProvider {
      */
     isAvailable(): boolean {
         return this._initialized;
+    }
+
+    /**
+     * Extract usage metadata from Claude Code provider response
+     */
+    static extractUsageMetadata(
+        model: string,
+        totalUsage: LanguageModelUsage | undefined,
+        providerMetadata: Record<string, unknown> | undefined
+    ): LanguageModelUsageWithCostUsd {
+        const metadata = providerMetadata?.[PROVIDER_IDS.CLAUDE_CODE] as ClaudeCodeProviderMetadata | undefined;
+        const extendedUsage = totalUsage as ExtendedUsage | undefined;
+
+        const inputTokens = totalUsage?.inputTokens;
+        const outputTokens = totalUsage?.outputTokens;
+        const totalTokens = totalUsage?.totalTokens ??
+            (inputTokens !== undefined && outputTokens !== undefined
+                ? inputTokens + outputTokens
+                : undefined);
+
+        return {
+            model,
+            inputTokens,
+            outputTokens,
+            totalTokens,
+            costUsd: metadata?.costUsd,
+            cachedInputTokens: extendedUsage?.cachedInputTokens,
+            reasoningTokens: extendedUsage?.reasoningTokens,
+        } as LanguageModelUsageWithCostUsd;
     }
 }
