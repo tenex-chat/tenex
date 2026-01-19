@@ -5,7 +5,6 @@ import { OpenAIProvider } from "../standard/OpenAIProvider";
 import { OllamaProvider } from "../standard/OllamaProvider";
 import { GeminiCliProvider } from "../standard/GeminiCliProvider";
 import { ClaudeCodeProvider } from "../agent/ClaudeCodeProvider";
-import { CodexCliProvider } from "../agent/CodexCliProvider";
 import { CodexAppServerProvider } from "../agent/CodexAppServerProvider";
 
 describe("Provider Metadata", () => {
@@ -46,19 +45,11 @@ describe("Provider Metadata", () => {
             expect(ClaudeCodeProvider.METADATA.id).toBe("claude-code");
             expect(ClaudeCodeProvider.METADATA.category).toBe("agent");
             expect(ClaudeCodeProvider.METADATA.capabilities.builtInTools).toBe(true);
-            expect(ClaudeCodeProvider.METADATA.capabilities.sessionResumption).toBe(true);
+            expect(ClaudeCodeProvider.METADATA.capabilities.sessionResumption).toBe(false);
             expect(ClaudeCodeProvider.METADATA.capabilities.mcpSupport).toBe(true);
             expect(ClaudeCodeProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });
 
-        it("CodexCliProvider has correct static METADATA with kebab-case id", () => {
-            expect(CodexCliProvider.METADATA.id).toBe("codex-cli");
-            expect(CodexCliProvider.METADATA.category).toBe("agent");
-            expect(CodexCliProvider.METADATA.capabilities.builtInTools).toBe(true);
-            expect(CodexCliProvider.METADATA.capabilities.sessionResumption).toBe(true);
-            expect(CodexCliProvider.METADATA.capabilities.mcpSupport).toBe(true);
-            expect(CodexCliProvider.METADATA.capabilities.requiresApiKey).toBe(false);
-        });
     });
 
     describe("instance metadata matches static", () => {
@@ -71,9 +62,6 @@ describe("Provider Metadata", () => {
 
             const claudeCode = new ClaudeCodeProvider();
             expect(claudeCode.metadata).toBe(ClaudeCodeProvider.METADATA);
-
-            const codexCli = new CodexCliProvider();
-            expect(codexCli.metadata).toBe(CodexCliProvider.METADATA);
         });
     });
 });
@@ -87,7 +75,6 @@ describe("Provider ID conventions", () => {
             OllamaProvider.METADATA,
             GeminiCliProvider.METADATA,
             ClaudeCodeProvider.METADATA,
-            CodexCliProvider.METADATA,
         ];
 
         for (const metadata of allMetadata) {

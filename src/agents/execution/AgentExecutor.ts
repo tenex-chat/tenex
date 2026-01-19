@@ -983,6 +983,18 @@ export class AgentExecutor {
             workingDirectory: context.workingDirectory,
             conversationId: context.conversationId,
             resolvedConfigName,
+            // Register message injector when Claude Code stream starts (for mid-execution message injection)
+            onStreamStart: (injector) => {
+                llmOpsRegistry.setMessageInjector(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    injector
+                );
+                logger.debug("[AgentExecutor] Message injector registered", {
+                    agent: context.agent.slug,
+                    conversationId: context.conversationId.substring(0, 8),
+                });
+            },
         });
 
         const messageCompiler = new MessageCompiler(

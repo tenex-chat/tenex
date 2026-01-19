@@ -73,6 +73,7 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
                     workingDirectory: options?.workingDirectory ?? registry.getBasePath(),
                     mcpConfig: mergedMcpConfig,
                     conversationId: options?.conversationId,
+                    onStreamStart: options?.onStreamStart,
                 }
             );
         },

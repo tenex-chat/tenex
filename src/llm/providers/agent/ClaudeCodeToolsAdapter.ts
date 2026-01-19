@@ -63,7 +63,7 @@ export class ClaudeCodeToolsAdapter {
                 // If it's some other Zod type, leave rawShape as empty object
             }
 
-            return tool(name, tenexTool.description || `Execute ${name}`, rawShape, async (args, extra) => {
+            return tool(name, tenexTool.description || `Execute ${name}`, rawShape, async (args: Record<string, unknown>, extra: unknown) => {
                 try {
                     // Check if the tool has an execute method
                     if (!tenexTool.execute) {

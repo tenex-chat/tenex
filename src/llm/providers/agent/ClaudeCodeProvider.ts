@@ -148,6 +148,8 @@ export class ClaudeCodeProvider extends AgentProvider {
             mcpServers: mcpServersConfig,
             disallowedTools: ["AskUserQuestion"],
             persistSession: false,
+            // Enable streaming input for mid-execution message injection
+            streamingInput: "always",
             logger: {
                 warn: (message: string) => logger.warn("[ClaudeCode]", message),
                 error: (message: string) => logger.error("[ClaudeCode]", message),
@@ -155,6 +157,14 @@ export class ClaudeCodeProvider extends AgentProvider {
                 debug: (message: string) => logger.debug("[ClaudeCode]", message),
             },
         };
+
+        // Pass through onStreamStart callback if provided (requires fork of ai-sdk-provider-claude-code)
+        // The callback receives a MessageInjector when the stream starts, allowing mid-execution message injection
+        if (context.onStreamStart) {
+            // Cast to any since the fork's ClaudeCodeSettings type includes onStreamStart
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (settings as any).onStreamStart = context.onStreamStart;
+        }
 
         return settings;
     }

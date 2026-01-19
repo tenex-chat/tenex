@@ -1,6 +1,7 @@
 import type { AgentMetadataStore } from "@/services/agents";
 import type { LLMService } from "@/llm/service";
 import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
+import type { OnStreamStartCallback } from "@/llm/types";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
@@ -47,6 +48,8 @@ export interface AgentInstance {
          * If provided, uses this config instead of the agent's llmConfig.
          */
         resolvedConfigName?: string;
+        /** Callback invoked when Claude Code stream starts, providing the message injector */
+        onStreamStart?: OnStreamStartCallback;
     }): LLMService;
     sign(event: NDKEvent): Promise<void>;
 }

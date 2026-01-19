@@ -7,6 +7,7 @@
 
 import type { LanguageModel } from "ai";
 import type { AISdkTool } from "@/tools/types";
+import type { OnStreamStartCallback } from "@/llm/types";
 
 /**
  * Provider categories
@@ -30,18 +31,6 @@ export interface ProviderCapabilities {
     /** Whether the provider supports MCP servers */
     mcpSupport: boolean;
 }
-
-/**
- * Default capabilities for standard providers
- */
-export const DEFAULT_CAPABILITIES: ProviderCapabilities = {
-    streaming: true,
-    toolCalling: true,
-    builtInTools: false,
-    sessionResumption: false,
-    requiresApiKey: true,
-    mcpSupport: false,
-};
 
 /**
  * Provider metadata for display and configuration
@@ -110,6 +99,8 @@ export interface ProviderRuntimeContext {
     enableTenexTools?: boolean;
     /** Reasoning effort level (for codex-app-server) */
     reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
+    /** Callback invoked when Claude Code stream starts, providing the message injector */
+    onStreamStart?: OnStreamStartCallback;
 }
 
 /**
