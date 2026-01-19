@@ -23,6 +23,7 @@ import {
     type ProviderRuntimeContext,
 } from "./providers";
 import { PROVIDER_IDS } from "./providers/provider-ids";
+import type { OnStreamStartCallback } from "./types";
 
 /**
  * Factory for creating LLM services with proper provider initialization
@@ -127,6 +128,8 @@ export class LLMServiceFactory {
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Callback invoked when Claude Code stream starts, providing the message injector */
+            onStreamStart?: OnStreamStartCallback;
         }
     ): LLMService {
         if (!this.initialized) {
@@ -150,6 +153,7 @@ export class LLMServiceFactory {
             mcpConfig: context?.mcpConfig,
             enableTenexTools: this.enableTenexTools,
             reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" }).reasoningEffort,
+            onStreamStart: context?.onStreamStart,
         };
 
         // Get the provider from the registry

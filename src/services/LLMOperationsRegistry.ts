@@ -1,4 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
+import type { MessageInjector } from "@/llm/types";
 import { logger } from "@/utils/logger";
 import { EventEmitter } from "tseep";
 
@@ -17,6 +18,8 @@ export interface LLMOperation {
     agentPubkey: string; // Agent doing the work
     conversationId: string; // Root event ID for conversation
     registeredAt: number; // Timestamp
+    /** MessageInjector for Claude Code streams (set via onStreamStart callback) */
+    messageInjector?: MessageInjector;
 }
 
 export class LLMOperationsRegistry {
@@ -177,6 +180,56 @@ export class LLMOperationsRegistry {
             }
         }
         return false;
+    }
+
+    /**
+     * Set the message injector for a streaming Claude Code operation.
+     * Called from onStreamStart callback when the stream starts.
+     *
+     * @param agentPubkey - The agent's public key
+     * @param conversationId - The conversation (root event) ID
+     * @param injector - The MessageInjector instance
+     * @returns Whether an operation was found and updated
+     */
+    setMessageInjector(agentPubkey: string, conversationId: string, injector: MessageInjector): boolean {
+        for (const operation of this.operations.values()) {
+            if (
+                operation.agentPubkey === agentPubkey &&
+                operation.conversationId === conversationId &&
+                !operation.abortController.signal.aborted
+            ) {
+                operation.messageInjector = injector;
+                logger.debug("[LLMOpsRegistry] Set message injector", {
+                    operationId: operation.id.substring(0, 8),
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    conversationId: conversationId.substring(0, 8),
+                });
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the message injector for a streaming Claude Code operation.
+     * Returns undefined if no active operation exists or no injector is set.
+     *
+     * @param agentPubkey - The agent's public key
+     * @param conversationId - The conversation (root event) ID
+     * @returns The MessageInjector or undefined
+     */
+    getMessageInjector(agentPubkey: string, conversationId: string): MessageInjector | undefined {
+        for (const operation of this.operations.values()) {
+            if (
+                operation.agentPubkey === agentPubkey &&
+                operation.conversationId === conversationId &&
+                !operation.abortController.signal.aborted &&
+                operation.messageInjector
+            ) {
+                return operation.messageInjector;
+            }
+        }
+        return undefined;
     }
 
     getActiveOperationsCount(): number {

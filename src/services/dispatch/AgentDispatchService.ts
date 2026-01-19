@@ -623,16 +623,48 @@ export class AgentDispatchService {
         );
 
         if (activeRal.isStreaming) {
-            // Check if this is a Claude Code agent - only those need abort-and-restart
-            // because the Claude Code SDK doesn't support mid-execution message injection.
-            // Other providers (Anthropic, OpenAI, OpenRouter, etc.) can pick up queued
-            // messages on their next step without needing to abort.
+            // Check if this is a Claude Code agent
             const llmConfig = config.getLLMConfig(agent.llmConfig);
             const isClaudeCodeProvider = llmConfig.provider === "claude-code";
 
             if (isClaudeCodeProvider) {
-                // Claude Code SDK doesn't support mid-execution injection.
-                // Abort and let a new execution pick up the queued message.
+                // Try to use message injection if available (requires fork of ai-sdk-provider-claude-code)
+                const injector = llmOpsRegistry.getMessageInjector(agent.pubkey, conversationId);
+
+                if (injector) {
+                    // Message injector available - use it instead of abort-restart
+                    injector.inject(message, (delivered) => {
+                        if (delivered) {
+                            logger.info("[dispatch] Message injected via Claude Code MessageInjector", {
+                                agent: agent.slug,
+                                ralNumber: activeRal.ralNumber,
+                                messageLength,
+                            });
+                        } else {
+                            // Injection failed - the message is already queued in RALRegistry,
+                            // so the next execution will pick it up
+                            logger.warn("[dispatch] Message injection delivery failed (message already queued)", {
+                                agent: agent.slug,
+                                ralNumber: activeRal.ralNumber,
+                                messageLength,
+                            });
+                        }
+                    });
+
+                    getSafeActiveSpan()?.addEvent("reply.message_injected_via_injector", {
+                        "agent.slug": agent.slug,
+                        "ral.number": activeRal.ralNumber,
+                        "message.length": messageLength,
+                    });
+                    agentSpan.addEvent("dispatch.injection_via_message_injector", {
+                        "message.length": messageLength,
+                    });
+
+                    // Skip spawning new execution - the active execution will pick up the injected message
+                    return true;
+                }
+
+                // No injector available - fall back to abort-restart
                 const aborted = llmOpsRegistry.stopByAgentAndConversation(
                     agent.pubkey,
                     conversationId,
@@ -645,12 +677,12 @@ export class AgentDispatchService {
                         "ral.number": activeRal.ralNumber,
                         "message.length": messageLength,
                     });
-                    logger.info("[reply] Aborted Claude Code execution for injection", {
+                    logger.info("[reply] Aborted Claude Code execution for injection (no injector)", {
                         agent: agent.slug,
                         ralNumber: activeRal.ralNumber,
                         injectionLength: messageLength,
                     });
-                    agentSpan.addEvent("dispatch.injection_stream_abort", {
+                    agentSpan.addEvent("dispatch.injection_stream_abort_fallback", {
                         "message.length": messageLength,
                     });
                 } else {
@@ -663,7 +695,7 @@ export class AgentDispatchService {
                         "message.length": messageLength,
                     });
                 }
-                // Claude Code: always spawn new execution (aborted or will pick up on restart)
+                // Spawn new execution (aborted or will pick up on restart)
                 return false;
             } else {
                 // Non-Claude-Code provider: just queue the message, don't abort.

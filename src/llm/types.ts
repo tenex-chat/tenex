@@ -92,21 +92,6 @@ export const AI_SDK_PROVIDERS = [
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 
-/**
- * LLM Provider type alias for compatibility
- */
-export type LLMProvider = AISdkProvider;
-
-/**
- * Model configuration
- */
-export interface ModelConfig {
-    provider: AISdkProvider;
-    model: string;
-    temperature?: number;
-    maxTokens?: number;
-}
-
 export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     costUsd?: number;
     model?: string;
@@ -129,3 +114,29 @@ export interface LocalStreamChunk {
     /** Raw AI SDK chunk - passthrough without transformation */
     data: unknown;
 }
+
+/**
+ * Callback invoked when message injection completes
+ * @param delivered - true if the message was successfully delivered to the stream
+ */
+export type MessageInjectionCallback = (delivered: boolean) => void;
+
+/**
+ * Interface for injecting messages into an active Claude Code stream.
+ * This allows mid-execution message delivery without restarting the stream.
+ */
+export interface MessageInjector {
+    /**
+     * Inject a user message into the active stream.
+     * The message will be delivered between tool calls (not during continuous text).
+     * @param content - The message content to inject
+     * @param onDelivered - Optional callback invoked when delivery completes
+     */
+    inject(content: string, onDelivered?: MessageInjectionCallback): void;
+}
+
+/**
+ * Callback invoked when a stream starts, providing the message injector.
+ * Used by agent providers that support mid-stream message injection.
+ */
+export type OnStreamStartCallback = (injector: MessageInjector) => void;

@@ -6,6 +6,7 @@ import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MetaModelResolver } from "@/llm/meta";
 import type { MCPConfig } from "@/llm/providers/types";
 import type { LLMService } from "@/llm/service";
+import type { OnStreamStartCallback } from "@/llm/types";
 import type {
     ConfigFile,
     LLMConfiguration,
@@ -421,6 +422,8 @@ export class ConfigService {
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
+            /** Callback invoked when Claude Code stream starts, providing the message injector */
+            onStreamStart?: OnStreamStartCallback;
         }
     ): LLMService {
         const llmConfig = this.getLLMConfig(configName);
