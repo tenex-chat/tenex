@@ -1,9 +1,15 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentInstance } from "@/agents/types/runtime";
 import { getTenexBasePath } from "@/constants";
-import { fragmentRegistry } from "../core/FragmentRegistry";
+import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
+
+/**
+ * Maximum number of entries to show in the home directory listing.
+ * Prevents prompt bloat if an agent has many files.
+ */
+const MAX_LISTING_ENTRIES = 50;
 
 /**
  * Arguments for the agent home directory fragment.
@@ -28,46 +34,39 @@ export function getAgentHomeDirectory(agentPubkey: string): string {
 }
 
 /**
- * Ensure the agent's home directory exists, creating it if necessary.
+ * Build the home directory listing with proper error handling.
+ * Creates the directory if it doesn't exist and returns a formatted listing.
  */
-function ensureHomeDirectoryExists(homeDir: string): void {
-    if (!existsSync(homeDir)) {
-        mkdirSync(homeDir, { recursive: true });
-    }
-}
-
-/**
- * Get a listing of files and directories in the home directory.
- * Returns a formatted string showing the directory contents.
- */
-function getDirectoryListing(homeDir: string): string {
-    if (!existsSync(homeDir)) {
-        return "(empty - directory will be created on first use)";
-    }
-
+function buildHomeListing(homeDir: string): string {
+    // Try to create the directory
     try {
-        const entries = readdirSync(homeDir);
+        mkdirSync(homeDir, { recursive: true });
+    } catch (error) {
+        logger.warn("Failed to create agent home dir:", error);
+        return "(home directory unavailable)";
+    }
+
+    // Try to list the directory contents
+    try {
+        const entries = readdirSync(homeDir, { withFileTypes: true }).sort((a, b) =>
+            a.name.localeCompare(b.name)
+        );
+
         if (entries.length === 0) {
             return "(empty)";
         }
 
-        const listing: string[] = [];
-        for (const entry of entries.sort()) {
-            const entryPath = join(homeDir, entry);
-            try {
-                const stats = statSync(entryPath);
-                if (stats.isDirectory()) {
-                    listing.push(`  ${entry}/`);
-                } else {
-                    listing.push(`  ${entry}`);
-                }
-            } catch {
-                // If we can't stat an entry, just list it without decoration
-                listing.push(`  ${entry}`);
-            }
+        const totalCount = entries.length;
+        const displayEntries = entries.slice(0, MAX_LISTING_ENTRIES);
+        const lines = displayEntries.map((entry) => `  ${entry.name}${entry.isDirectory() ? "/" : ""}`);
+
+        if (totalCount > MAX_LISTING_ENTRIES) {
+            lines.push(`  ...and ${totalCount - MAX_LISTING_ENTRIES} more`);
         }
-        return listing.join("\n");
-    } catch {
+
+        return lines.join("\n");
+    } catch (error) {
+        logger.warn("Failed to list agent home dir:", error);
         return "(unable to read directory)";
     }
 }
@@ -81,12 +80,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
     priority: 2, // Right after agent-identity (priority 1)
     template: ({ agent }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
-
-        // Ensure the home directory exists
-        ensureHomeDirectoryExists(homeDir);
-
-        // Get the directory listing
-        const listing = getDirectoryListing(homeDir);
+        const listing = buildHomeListing(homeDir);
 
         const parts: string[] = [];
 
@@ -106,6 +100,3 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
         return parts.join("\n");
     },
 };
-
-// Register the fragment
-fragmentRegistry.register(agentHomeDirectoryFragment);
