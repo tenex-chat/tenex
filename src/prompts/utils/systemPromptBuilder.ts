@@ -235,6 +235,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         workingDirectory,
     });
 
+    // Add agent home directory context
+    systemPromptBuilder.add("agent-home-directory", { agent });
+
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
@@ -302,6 +305,9 @@ async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions):
         projectTitle: "Standalone Mode",
         projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
     });
+
+    // Add agent home directory context
+    systemPromptBuilder.add("agent-home-directory", { agent });
 
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
