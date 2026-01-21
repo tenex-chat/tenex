@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
@@ -23,18 +24,20 @@ async function executeWriteFile(
     path: string,
     content: string,
     workingDirectory: string,
+    agentPubkey: string,
     allowOutsideWorkingDirectory?: boolean,
 ): Promise<string> {
     if (!path.startsWith("/")) {
         throw new Error(`Path must be absolute, got: ${path}`);
     }
 
-    // Check if path is outside working directory
-    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
-    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
-    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+    // Check if path is within working directory (using secure path normalization)
+    const isWithinWorkDir = isPathWithinDirectory(path, workingDirectory);
 
-    if (isOutside && !allowOutsideWorkingDirectory) {
+    // Always allow access to agent's home directory without requiring allowOutsideWorkingDirectory
+    const isInAgentHome = isWithinAgentHome(path, agentPubkey);
+
+    if (!isWithinWorkDir && !isInAgentHome && !allowOutsideWorkingDirectory) {
         return `Path "${path}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
     }
 
@@ -60,7 +63,7 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
 
         execute: async ({ path, content, allowOutsideWorkingDirectory }: { path: string; content: string; allowOutsideWorkingDirectory?: boolean }) => {
             try {
-                return await executeWriteFile(path, content, context.workingDirectory, allowOutsideWorkingDirectory);
+                return await executeWriteFile(path, content, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
                 throw new Error(`Failed to write ${path}: ${formatAnyError(error)}`);
             }

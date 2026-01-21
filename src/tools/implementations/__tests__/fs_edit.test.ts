@@ -1,9 +1,37 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
+import { isAbsolute, relative, resolve, normalize } from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 import type { ExecutionEnvironment } from "@/tools/types";
-import { createFsEditTool } from "../fs_edit";
+
+// Mock the agent home directory functions BEFORE importing the tool
+// Uses cross-platform path.relative approach matching the real implementation
+const TEST_HOME_BASE = "/tmp/tenex/home";
+const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
+
+// Helper for path normalization (matches the real implementation using path.relative)
+const normalizePath = (inputPath: string) => normalize(resolve(inputPath));
+const isPathWithin = (checkPath: string, directory: string) => {
+    const normalizedPath = normalizePath(checkPath);
+    const normalizedDir = normalizePath(directory);
+    const relativePath = relative(normalizedDir, normalizedPath);
+    return !relativePath.startsWith("..") && !isAbsolute(relativePath);
+};
+
+mock.module("@/lib/agent-home", () => ({
+    getAgentHomeDirectory: getTestAgentHomeDir,
+    isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
+        const homeDir = getTestAgentHomeDir(agentPubkey);
+        return isPathWithin(inputPath, homeDir);
+    },
+    isPathWithinDirectory: isPathWithin,
+    normalizePath,
+    ensureAgentHomeDirectory: () => true,
+}));
+
+// Dynamic import after mock setup
+const { createFsEditTool } = await import("../fs_edit");
 
 describe("fs_edit tool", () => {
     let testDir: string;
@@ -333,6 +361,28 @@ modified line 3`,
                 expect(result).toContain("outside your working directory");
             } finally {
                 await cleanupTempDir(similarDir);
+            }
+        });
+
+        it("should allow editing inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
+            // Use the shared getTestAgentHomeDir function for consistent path derivation
+            const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
+            mkdirSync(agentHomeDir, { recursive: true });
+            const homeFile = path.join(agentHomeDir, "notes.txt");
+            writeFileSync(homeFile, "original notes");
+
+            try {
+                const result = await editTool.execute({
+                    path: homeFile,
+                    old_string: "original",
+                    new_string: "modified",
+                    // NOTE: No allowOutsideWorkingDirectory flag!
+                });
+
+                expect(result).toContain("Successfully replaced");
+                expect(readFileSync(homeFile, "utf-8")).toBe("modified notes");
+            } finally {
+                await cleanupTempDir(agentHomeDir);
             }
         });
     });

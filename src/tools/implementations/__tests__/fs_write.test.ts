@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { isAbsolute, relative, resolve, normalize } from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
@@ -31,12 +31,12 @@ mock.module("@/lib/agent-home", () => ({
 }));
 
 // Dynamic import after mock setup
-const { createFsGrepTool } = await import("../fs_grep");
+const { createFsWriteTool } = await import("../fs_write");
 
-describe("fs_grep tool", () => {
+describe("fs_write tool", () => {
     let testDir: string;
     let context: ExecutionEnvironment;
-    let grepTool: ReturnType<typeof createFsGrepTool>;
+    let writeTool: ReturnType<typeof createFsWriteTool>;
 
     beforeEach(async () => {
         testDir = await createTempDir();
@@ -48,7 +48,7 @@ describe("fs_grep tool", () => {
             agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
         } as ExecutionEnvironment;
 
-        grepTool = createFsGrepTool(context);
+        writeTool = createFsWriteTool(context);
     });
 
     afterEach(async () => {
@@ -57,39 +57,36 @@ describe("fs_grep tool", () => {
 
     describe("absolute path requirement", () => {
         it("should reject relative paths", async () => {
-            writeFileSync(path.join(testDir, "test.txt"), "hello world");
-
-            const result = await grepTool.execute({
-                pattern: "hello",
-                path: "test.txt",
-            });
-
-            expect(result).toContain("Path must be absolute");
+            await expect(
+                writeTool.execute({
+                    path: "test.txt",
+                    content: "content",
+                })
+            ).rejects.toThrow("Path must be absolute");
         });
 
         it("should accept absolute paths", async () => {
             const filePath = path.join(testDir, "test.txt");
-            writeFileSync(filePath, "hello world");
 
-            const result = await grepTool.execute({
-                pattern: "hello",
-                path: testDir,
+            const result = await writeTool.execute({
+                path: filePath,
+                content: "new content",
             });
 
-            expect(result).toContain("test.txt");
+            expect(result).toContain("Successfully wrote");
+            expect(readFileSync(filePath, "utf-8")).toBe("new content");
         });
     });
 
     describe("allowOutsideWorkingDirectory", () => {
-        it("should block searching outside working directory by default", async () => {
+        it("should block writing outside working directory by default", async () => {
             const outsideDir = await createTempDir();
             const outsideFile = path.join(outsideDir, "outside.txt");
-            writeFileSync(outsideFile, "secret content");
 
             try {
-                const result = await grepTool.execute({
-                    pattern: "secret",
-                    path: outsideDir,
+                const result = await writeTool.execute({
+                    path: outsideFile,
+                    content: "malicious content",
                 });
 
                 expect(result).toContain("outside your working directory");
@@ -99,44 +96,45 @@ describe("fs_grep tool", () => {
             }
         });
 
-        it("should allow searching outside when flag is set", async () => {
+        it("should allow writing outside when flag is set", async () => {
             const outsideDir = await createTempDir();
             const outsideFile = path.join(outsideDir, "outside.txt");
-            writeFileSync(outsideFile, "findme content");
 
             try {
-                const result = await grepTool.execute({
-                    pattern: "findme",
-                    path: outsideDir,
+                const result = await writeTool.execute({
+                    path: outsideFile,
+                    content: "allowed content",
                     allowOutsideWorkingDirectory: true,
                 });
 
-                expect(result).toContain("outside.txt");
+                expect(result).toContain("Successfully wrote");
+                expect(readFileSync(outsideFile, "utf-8")).toBe("allowed content");
             } finally {
                 await cleanupTempDir(outsideDir);
             }
         });
 
-        it("should allow searching within working directory without flag", async () => {
-            writeFileSync(path.join(testDir, "inside.txt"), "findme content");
+        it("should allow writing within working directory without flag", async () => {
+            const filePath = path.join(testDir, "inside.txt");
 
-            const result = await grepTool.execute({
-                pattern: "findme",
-                path: testDir,
+            const result = await writeTool.execute({
+                path: filePath,
+                content: "inside content",
             });
 
-            expect(result).toContain("inside.txt");
+            expect(result).toContain("Successfully wrote");
+            expect(readFileSync(filePath, "utf-8")).toBe("inside content");
         });
 
         it("should block paths that look similar but are outside", async () => {
             const similarDir = testDir + "-backup";
             mkdirSync(similarDir, { recursive: true });
-            writeFileSync(path.join(similarDir, "sneaky.txt"), "findme content");
+            const outsideFile = path.join(similarDir, "sneaky.txt");
 
             try {
-                const result = await grepTool.execute({
-                    pattern: "findme",
-                    path: similarDir,
+                const result = await writeTool.execute({
+                    path: outsideFile,
+                    content: "sneaky content",
                 });
 
                 expect(result).toContain("outside your working directory");
@@ -145,21 +143,21 @@ describe("fs_grep tool", () => {
             }
         });
 
-        it("should allow searching inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
+        it("should allow writing inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
             // Use the shared getTestAgentHomeDir function for consistent path derivation
             const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
             mkdirSync(agentHomeDir, { recursive: true });
-            writeFileSync(path.join(agentHomeDir, "notes.txt"), "my secret notes");
+            const homeFile = path.join(agentHomeDir, "notes.txt");
 
             try {
-                const result = await grepTool.execute({
-                    pattern: "secret",
-                    path: agentHomeDir,
+                const result = await writeTool.execute({
+                    path: homeFile,
+                    content: "my private notes",
                     // NOTE: No allowOutsideWorkingDirectory flag!
                 });
 
-                expect(result).toContain("notes.txt");
-                expect(result).not.toContain("outside your working directory");
+                expect(result).toContain("Successfully wrote");
+                expect(readFileSync(homeFile, "utf-8")).toBe("my private notes");
             } finally {
                 await cleanupTempDir(agentHomeDir);
             }
@@ -167,38 +165,48 @@ describe("fs_grep tool", () => {
     });
 
     describe("basic functionality", () => {
-        it("should find matches in files", async () => {
-            writeFileSync(path.join(testDir, "test.txt"), "hello world");
+        it("should create parent directories automatically", async () => {
+            const filePath = path.join(testDir, "a", "b", "c", "deep.txt");
 
-            const result = await grepTool.execute({
-                pattern: "hello",
-                path: testDir,
+            const result = await writeTool.execute({
+                path: filePath,
+                content: "deep content",
             });
 
-            expect(result).toContain("test.txt");
+            expect(result).toContain("Successfully wrote");
+            expect(readFileSync(filePath, "utf-8")).toBe("deep content");
         });
 
-        it("should return no matches message when nothing found", async () => {
-            writeFileSync(path.join(testDir, "test.txt"), "hello world");
+        it("should overwrite existing files", async () => {
+            const filePath = path.join(testDir, "existing.txt");
+            writeFileSync(filePath, "old content");
 
-            const result = await grepTool.execute({
-                pattern: "notfound",
-                path: testDir,
+            const result = await writeTool.execute({
+                path: filePath,
+                content: "new content",
             });
 
-            expect(result).toContain("No matches found");
+            expect(result).toContain("Successfully wrote");
+            expect(readFileSync(filePath, "utf-8")).toBe("new content");
         });
 
-        it("should support different output modes", async () => {
-            writeFileSync(path.join(testDir, "test.txt"), "hello world\nhello again");
+        it("should handle unicode content", async () => {
+            const filePath = path.join(testDir, "unicode.txt");
 
-            const contentResult = await grepTool.execute({
-                pattern: "hello",
-                path: testDir,
-                output_mode: "content",
+            const result = await writeTool.execute({
+                path: filePath,
+                content: "Hello 世界 🌍",
             });
 
-            expect(contentResult).toContain("hello");
+            expect(result).toContain("Successfully wrote");
+            expect(readFileSync(filePath, "utf-8")).toBe("Hello 世界 🌍");
+        });
+    });
+
+    describe("getHumanReadableContent", () => {
+        it("should return human-readable description", () => {
+            const readable = writeTool.getHumanReadableContent?.({ path: "/test/file.txt" });
+            expect(readable).toBe("Writing /test/file.txt");
         });
     });
 });

@@ -4,7 +4,6 @@
  * Central registry for all AI SDK tools in the TENEX system.
  */
 
-import { dynamicToolService } from "@/services/DynamicToolService";
 import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
 import type { Tool as CoreTool } from "ai";
@@ -27,7 +26,6 @@ import { createConversationGetTool } from "./implementations/conversation_get";
 import { createFsGlobTool } from "./implementations/fs_glob";
 import { createFsGrepTool } from "./implementations/fs_grep";
 import { createConversationListTool } from "./implementations/conversation_list";
-import { createCreateDynamicToolTool } from "./implementations/create_dynamic_tool";
 import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
@@ -184,9 +182,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     shell: createShellTool,
     kill_shell: createKillShellTool,
 
-    // Dynamic tool creation
-    create_dynamic_tool: createCreateDynamicToolTool,
-
     // Upload tools
     upload_blob: createUploadBlobTool,
 
@@ -292,7 +287,7 @@ const META_MODEL_TOOLS: ToolName[] = ["change_model"];
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
- * @param names - Tool names to include (can include MCP tool names and dynamic tool names)
+ * @param names - Tool names to include (can include MCP tool names)
  * @param context - Registry context (full or MCP partial)
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
@@ -305,9 +300,8 @@ export function getToolsObject(
     // Check if conversation is available
     const hasConversation = 'conversationStore' in context && context.conversationStore !== undefined;
 
-    // Separate regular tools, dynamic tools, and MCP tools
+    // Separate regular tools and MCP tools
     const regularTools: ToolName[] = [];
-    const dynamicToolNames: string[] = [];
     const mcpToolNames: string[] = [];
 
     for (const name of names) {
@@ -320,8 +314,6 @@ export function getToolsObject(
                 continue;
             }
             regularTools.push(name as ToolName);
-        } else if (dynamicToolService.isDynamicTool(name)) {
-            dynamicToolNames.push(name);
         }
     }
 
@@ -378,18 +370,6 @@ export function getToolsObject(
         }
     }
 
-    // Add dynamic tools (only for full registry context)
-    if (dynamicToolNames.length > 0 && 'conversationStore' in context) {
-        const dynamicTools = dynamicToolService.getDynamicToolsObject(context as ToolExecutionContext);
-        for (const name of dynamicToolNames) {
-            if (dynamicTools[name]) {
-                tools[name] = dynamicTools[name];
-            } else {
-                console.debug(`Dynamic tool '${name}' not found`);
-            }
-        }
-    }
-
     // Add only requested MCP tools (only for full registry context)
     if (mcpToolNames.length > 0 && 'mcpManager' in context && context.mcpManager) {
         try {
@@ -417,7 +397,6 @@ export function getAllToolsObject(
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
-    // Add static tools
     const toolNames = Object.keys(toolFactories) as ToolName[];
     for (const name of toolNames) {
         const tool = getTool(name, context);
@@ -426,10 +405,6 @@ export function getAllToolsObject(
             tools[name] = tool;
         }
     }
-
-    // Add dynamic tools
-    const dynamicTools = dynamicToolService.getDynamicToolsObject(context);
-    Object.assign(tools, dynamicTools);
 
     return tools;
 }
@@ -440,17 +415,15 @@ export function getAllToolsObject(
  * @returns True if the tool name is valid
  */
 export function isValidToolName(name: string): boolean {
-    return name in toolFactories || dynamicToolService.isDynamicTool(name);
+    return name in toolFactories;
 }
 
 /**
- * Get all available tool names including dynamic tools
- * @returns Array of all tool names (static and dynamic)
+ * Get all available tool names
+ * @returns Array of all tool names
  */
 export function getAllAvailableToolNames(): string[] {
-    const staticTools = getAllToolNames();
-    const dynamicTools = Array.from(dynamicToolService.getDynamicTools().keys());
-    return [...staticTools, ...dynamicTools];
+    return getAllToolNames();
 }
 
 /**
@@ -460,12 +433,11 @@ export function getAllAvailableToolNames(): string[] {
  * @returns true if the tool has side effects, false if it's read-only
  */
 export function toolHasSideEffects(toolName: string): boolean {
-    // Check static tools
     if (toolName in toolMetadata) {
         return toolMetadata[toolName as ToolName]?.hasSideEffects !== false;
     }
 
-    // Dynamic tools and MCP tools are assumed to have side effects by default
+    // MCP tools are assumed to have side effects by default
     // This is the safe default - assume side effects unless explicitly declared otherwise
     return true;
 }

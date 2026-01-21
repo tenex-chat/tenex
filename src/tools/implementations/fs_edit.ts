@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
 import { tool } from "ai";
 import { z } from "zod";
@@ -30,18 +31,20 @@ async function executeEdit(
     newString: string,
     replaceAll: boolean,
     workingDirectory: string,
+    agentPubkey: string,
     allowOutsideWorkingDirectory?: boolean,
 ): Promise<string> {
     if (!path.startsWith("/")) {
         throw new Error(`Path must be absolute, got: ${path}`);
     }
 
-    // Check if path is outside working directory
-    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
-    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
-    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+    // Check if path is within working directory (using secure path normalization)
+    const isWithinWorkDir = isPathWithinDirectory(path, workingDirectory);
 
-    if (isOutside && !allowOutsideWorkingDirectory) {
+    // Always allow access to agent's home directory without requiring allowOutsideWorkingDirectory
+    const isInAgentHome = isWithinAgentHome(path, agentPubkey);
+
+    if (!isWithinWorkDir && !isInAgentHome && !allowOutsideWorkingDirectory) {
         return `Path "${path}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
     }
 
@@ -113,7 +116,7 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
                     throw new Error("old_string and new_string must be different");
                 }
 
-                return await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, allowOutsideWorkingDirectory);
+                return await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
                 throw new Error(`Failed to edit ${path}: ${formatAnyError(error)}`);
             }
