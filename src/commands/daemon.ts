@@ -26,17 +26,6 @@ export const daemonCommand = new Command("daemon")
     .option("-v, --verbose", "Enable verbose logging")
     .option("-a, --alpha", "Enable alpha mode with bug reporting tools")
     .action(async (options) => {
-        // Ensure stdin is NOT in raw mode (allows Ctrl+C to send SIGINT)
-        if (process.stdin.isTTY && process.stdin.setRawMode) {
-            process.stdin.setRawMode(false);
-        }
-
-        // Setup SIGINT handler immediately
-        process.on("SIGINT", () => {
-            console.log("\n>>> SIGINT RECEIVED <<<");
-            process.exit(0);
-        });
-
         // Enable verbose logging if requested
         if (options.verbose) {
             process.env.LOG_LEVEL = "debug";
@@ -103,17 +92,7 @@ export const daemonCommand = new Command("daemon")
             // Start the daemon
             await daemon.start();
 
-            // Force stdin out of raw mode AFTER all initialization
-            // Something during startup might be setting raw mode
-            if (process.stdin.isTTY && process.stdin.setRawMode) {
-                process.stdin.setRawMode(false);
-                console.log(chalk.gray("   [stdin raw mode disabled]"));
-            }
-
             console.log(chalk.green("✅ Daemon started successfully"));
-            console.log(chalk.gray("   Managing all projects in a single process"));
-            console.log(chalk.gray("   Press Ctrl+C to stop"));
-            console.log();
 
             // Log initial status
             const status = daemon.getStatus();
