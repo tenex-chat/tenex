@@ -263,16 +263,25 @@ export class RALRegistry {
   /**
    * Mark the start of an LLM streaming session.
    * Call this immediately before llmService.stream() to begin timing.
+   *
+   * @param lastUserMessage - The last user message that triggered this LLM call (for debugging)
    */
-  startLLMStream(agentPubkey: string, conversationId: string, ralNumber: number): void {
+  startLLMStream(agentPubkey: string, conversationId: string, ralNumber: number, lastUserMessage?: string): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (ral) {
       ral.llmStreamStartTime = Date.now();
       ral.lastActivityAt = ral.llmStreamStartTime;
 
+      // Include the last user message in telemetry for debugging
+      // Truncate to 1000 chars to avoid bloating traces
+      const truncatedMessage = lastUserMessage
+        ? (lastUserMessage.length > 1000 ? lastUserMessage.substring(0, 1000) + "..." : lastUserMessage)
+        : undefined;
+
       trace.getActiveSpan()?.addEvent("ral.llm_stream_started", {
         "ral.number": ralNumber,
         "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
+        ...(truncatedMessage && { "ral.last_user_message": truncatedMessage }),
       });
     }
   }
