@@ -107,6 +107,57 @@ export function formatToolError(error: ToolError): string {
     }
 }
 
+// Constants for AI error markers
+const AI_API_CALL_ERROR = "AI_APICallError";
+const PROVIDER_RETURNED_ERROR = "Provider returned error";
+const OPENROUTER_MARKER = "openrouter";
+const HTTP_422_STATUS = "422";
+
+/**
+ * Generic prefixes that indicate the message itself is not meaningful
+ * and we should try to extract details from toString() instead.
+ * These will be checked with startsWith, so "AI_APICallError" will match
+ * "AI_APICallError: some details" etc.
+ */
+const GENERIC_ERROR_PREFIXES = [
+    AI_API_CALL_ERROR,
+    PROVIDER_RETURNED_ERROR,
+    HTTP_422_STATUS,
+    "Unprocessable Entity",
+    "Error:",
+] as const;
+
+/**
+ * Check if an error message is meaningful enough to use directly,
+ * or if it's a generic wrapper that requires regex extraction for details.
+ *
+ * A message is considered "meaningful" if:
+ * 1. It's not empty
+ * 2. It doesn't start with any known generic prefix
+ * 3. It's not just the error class name
+ */
+export function isMeaningfulAiMessage(message: string | undefined): boolean {
+    if (!message || message.trim() === "") {
+        return false;
+    }
+
+    const trimmedMessage = message.trim();
+
+    // Check if message starts with any generic prefix
+    for (const prefix of GENERIC_ERROR_PREFIXES) {
+        if (trimmedMessage.startsWith(prefix)) {
+            return false;
+        }
+    }
+
+    // Check for HTTP status code patterns (e.g., "422", "500 Internal Server Error")
+    if (/^\d{3}\b/.test(trimmedMessage)) {
+        return false;
+    }
+
+    return true;
+}
+
 /**
  * Format error for stream/execution errors from LLM providers
  */
@@ -117,22 +168,28 @@ export function formatStreamError(error: unknown): { message: string; errorType:
     if (error instanceof Error) {
         const errorStr = error.toString();
         if (
-            errorStr.includes("AI_APICallError") ||
-            errorStr.includes("Provider returned error") ||
-            errorStr.includes("422") ||
-            errorStr.includes("openrouter")
+            errorStr.includes(AI_API_CALL_ERROR) ||
+            errorStr.includes(PROVIDER_RETURNED_ERROR) ||
+            errorStr.includes(HTTP_422_STATUS) ||
+            errorStr.includes(OPENROUTER_MARKER)
         ) {
             errorType = "ai_api";
 
-            // Extract meaningful error details
-            const providerMatch = errorStr.match(/provider_name":"([^"]+)"/);
-            const provider = providerMatch ? providerMatch[1] : "AI provider";
-            errorMessage = `Failed to process request with ${provider}. The AI service returned an error.`;
+            // Check if error.message is meaningful (not a generic wrapper)
+            // Claude Code errors often have the real error in error.message
+            if (isMeaningfulAiMessage(error.message)) {
+                errorMessage = `AI Error: ${error.message}`;
+            } else {
+                // Fall back to regex extraction for OpenRouter-style errors
+                const providerMatch = errorStr.match(/provider_name":"([^"]+)"/);
+                const provider = providerMatch ? providerMatch[1] : "AI provider";
+                errorMessage = `Failed to process request with ${provider}. The AI service returned an error.`;
 
-            // Add raw error details if available
-            const rawMatch = errorStr.match(/raw":"([^"]+)"/);
-            if (rawMatch) {
-                errorMessage += ` Details: ${rawMatch[1]}`;
+                // Add raw error details if available
+                const rawMatch = errorStr.match(/raw":"([^"]+)"/);
+                if (rawMatch) {
+                    errorMessage += ` Details: ${rawMatch[1]}`;
+                }
             }
         } else {
             errorMessage = `Error: ${error.message}`;
