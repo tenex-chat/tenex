@@ -32,26 +32,24 @@ export interface DelegationCompletionResult {
 export async function handleDelegationCompletion(
     event: NDKEvent
 ): Promise<DelegationCompletionResult> {
+    // Early exit: check for e-tags BEFORE creating a span to avoid trace noise
+    // Events without e-tags cannot be delegation completions
+    const eTags = TagExtractor.getETags(event);
+    if (eTags.length === 0) {
+        return { recorded: false };
+    }
+
     const span = tracer.startSpan("tenex.delegation.completion_check", {
         attributes: {
             "event.id": event.id || "",
             "event.pubkey": event.pubkey,
             "event.kind": event.kind || 0,
+            "delegation.etag_count": eTags.length,
         },
     }, otelContext.active());
 
     try {
         const ralRegistry = RALRegistry.getInstance();
-
-        // Find which delegation this responds to (via e-tags)
-        // For threaded conversations, we need to check ALL e-tags, not just the first one
-        // NIP-10: The last 'e' tag is the reply target, but we should try all to find a matching delegation
-        const eTags = TagExtractor.getETags(event);
-        if (eTags.length === 0) {
-            span.addEvent("no_e_tag");
-            span.setStatus({ code: SpanStatusCode.OK });
-            return { recorded: false };
-        }
 
         // Try e-tags in reverse order (last to first) as per NIP-10 convention
         // The last e-tag is typically the direct reply target in threaded conversations
