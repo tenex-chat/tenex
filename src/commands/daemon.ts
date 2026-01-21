@@ -1,11 +1,8 @@
 import { getDaemon } from "@/daemon";
-import { TerminalInputManager } from "@/daemon/TerminalInputManager";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import { dynamicToolService } from "@/services/DynamicToolService";
 import { SchedulerService } from "@/services/scheduling";
 import { logger } from "@/utils/logger";
-import { setupGracefulShutdown } from "@/utils/process";
 import { runInteractiveSetup } from "./setup/interactive";
 import chalk from "chalk";
 import { Command } from "commander";
@@ -29,6 +26,17 @@ export const daemonCommand = new Command("daemon")
     .option("-v, --verbose", "Enable verbose logging")
     .option("-a, --alpha", "Enable alpha mode with bug reporting tools")
     .action(async (options) => {
+        // Ensure stdin is NOT in raw mode (allows Ctrl+C to send SIGINT)
+        if (process.stdin.isTTY && process.stdin.setRawMode) {
+            process.stdin.setRawMode(false);
+        }
+
+        // Setup SIGINT handler immediately
+        process.on("SIGINT", () => {
+            console.log("\n>>> SIGINT RECEIVED <<<");
+            process.exit(0);
+        });
+
         // Enable verbose logging if requested
         if (options.verbose) {
             process.env.LOG_LEVEL = "debug";
@@ -83,39 +91,28 @@ export const daemonCommand = new Command("daemon")
         const schedulerService = SchedulerService.getInstance();
         await schedulerService.initialize(getNDK(), ".tenex");
 
-        await dynamicToolService.initialize();
-
         // Get the daemon instance
         const daemon = getDaemon();
 
-        // Initialize terminal input manager
-        const terminalInputManager = new TerminalInputManager(daemon);
-
-        // Set up graceful shutdown
-        setupGracefulShutdown(async () => {
-            logger.info("Shutting down daemon...");
-
-            // Stop terminal input manager
-            terminalInputManager.stop();
-
-            // Stop the daemon
-            await daemon.stop();
-
-            // Shutdown services
+        // Register scheduler shutdown with daemon's shutdown handlers
+        daemon.addShutdownHandler(async () => {
             schedulerService.shutdown();
-            dynamicToolService.shutdown();
-
-            logger.info("Daemon shutdown complete");
         });
 
         try {
             // Start the daemon
             await daemon.start();
 
+            // Force stdin out of raw mode AFTER all initialization
+            // Something during startup might be setting raw mode
+            if (process.stdin.isTTY && process.stdin.setRawMode) {
+                process.stdin.setRawMode(false);
+                console.log(chalk.gray("   [stdin raw mode disabled]"));
+            }
+
             console.log(chalk.green("✅ Daemon started successfully"));
             console.log(chalk.gray("   Managing all projects in a single process"));
             console.log(chalk.gray("   Press Ctrl+C to stop"));
-            console.log(chalk.gray("   Press 'p' to view running projects"));
             console.log();
 
             // Log initial status
@@ -125,9 +122,6 @@ export const daemonCommand = new Command("daemon")
             console.log(chalk.gray(`   Active Projects: ${status.activeProjects}`));
             console.log(chalk.gray(`   Total Agents: ${status.totalAgents}`));
             console.log();
-
-            // Start terminal input manager
-            terminalInputManager.start();
 
             // Keep the process alive
             await new Promise(() => {
