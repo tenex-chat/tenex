@@ -138,8 +138,9 @@ describe("MessageCompiler", () => {
         expect(contents[1]).toBe("STATIC_SYSTEM_B");
         expect(contents[2]).toContain("hello");
         expect(contents[3]).toContain("hi");
+        // Dynamic context is now a single combined message (todos + response context)
         expect(contents[4]).toContain("TODO LIST");
-        expect(contents[5]).toContain("Your response will be sent to @User.");
+        expect(contents[4]).toContain("Your response will be sent to @User.");
     });
 
     it("builds delta context for session-stateful providers", async () => {

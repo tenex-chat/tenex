@@ -107,8 +107,11 @@ export class MessageCompiler {
 
             messages.push(...conversationMessages);
 
-            // Add ephemeral messages (e.g., supervision corrections) after conversation
-            // but before dynamic context. These influence the current turn but don't persist.
+            messages.push(...dynamicContextMessages);
+
+            // Add ephemeral messages (e.g., supervision corrections) LAST in the message array.
+            // This satisfies Gemini's constraint that multi-turn requests should end with a user role.
+            // If ephemeral messages are placed before system messages, Gemini/OpenRouter strips them.
             if (context.ephemeralMessages?.length) {
                 for (const ephemeral of context.ephemeralMessages) {
                     messages.push({
@@ -117,8 +120,6 @@ export class MessageCompiler {
                     });
                 }
             }
-
-            messages.push(...dynamicContextMessages);
 
             systemPromptCount += systemPromptMessages.length;
             dynamicContextCount = dynamicContextMessages.length + (context.ephemeralMessages?.length ?? 0);
@@ -134,7 +135,8 @@ export class MessageCompiler {
             );
             messages.push(...conversationMessages);
 
-            // Add ephemeral messages in delta mode too (for supervision corrections)
+            // Add ephemeral messages LAST in delta mode too (for supervision corrections).
+            // Must be last to satisfy Gemini's message ordering constraints.
             if (context.ephemeralMessages?.length) {
                 for (const ephemeral of context.ephemeralMessages) {
                     messages.push({
@@ -219,26 +221,28 @@ export class MessageCompiler {
     private async buildDynamicContextMessages(
         context: MessageCompilerContext
     ): Promise<ModelMessage[]> {
-        const messages: ModelMessage[] = [];
+        const parts: string[] = [];
+
+        // Add todo content if present
         const todoContent = await agentTodosFragment.template({
             conversation: context.conversation,
             agentPubkey: context.agent.pubkey,
         });
-
         if (todoContent) {
-            messages.push({
-                role: "system",
-                content: todoContent,
-            });
+            parts.push(todoContent);
         }
 
+        // Always add response context
         const responseContextContent = await this.buildResponseContext(context);
-        messages.push({
-            role: "system",
-            content: responseContextContent,
-        });
+        parts.push(responseContextContent);
 
-        return messages;
+        // Return as a single combined system message
+        return [
+            {
+                role: "system",
+                content: parts.join("\n\n"),
+            },
+        ];
     }
 
     private async buildResponseContext(context: MessageCompilerContext): Promise<string> {
