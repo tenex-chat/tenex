@@ -1,3 +1,4 @@
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -21,6 +22,54 @@ export interface RoutingDecision {
  * AgentRouter which handles project-level routing (event -> agent).
  */
 export class DaemonRouter {
+    /**
+     * Check if this daemon should process and trace this event.
+     *
+     * Use this BEFORE creating telemetry spans to avoid noisy traces
+     * from events that will be dropped. When multiple backends are running,
+     * each receives all events from relays but should only trace events
+     * relevant to their controlled projects.
+     *
+     * @param event - The event to check
+     * @param knownProjects - Map of project IDs this daemon controls
+     * @param agentPubkeyToProjects - Map of agent pubkeys to their project IDs
+     * @param activeRuntimes - Map of active project runtimes
+     * @returns true if the event should be processed and traced by this daemon
+     */
+    static willThisRoute(
+        event: NDKEvent,
+        knownProjects: Map<string, NDKProject>,
+        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>,
+        activeRuntimes: Map<string, ProjectRuntime>
+    ): boolean {
+        // Never-route kinds don't need tracing at all
+        if (AgentEventDecoder.isNeverRouteKind(event)) {
+            return false;
+        }
+
+        // Project events (kind 31933) are broadcast updates - only trace if it's OUR project
+        if (AgentEventDecoder.isProjectEvent(event)) {
+            const projectId = AgentEventDecoder.extractProjectId(event);
+            return projectId !== null && knownProjects.has(projectId);
+        }
+
+        // Lesson events (kind 4129) - check if they reference an agent we know
+        if (AgentEventDecoder.isLessonEvent(event)) {
+            // Lesson events are authored by agents - check if the author is one of ours
+            return agentPubkeyToProjects.has(event.pubkey);
+        }
+
+        // For all other events, check if we can route to a known project
+        const routing = this.determineTargetProject(
+            event,
+            knownProjects,
+            agentPubkeyToProjects,
+            activeRuntimes
+        );
+
+        return routing.projectId !== null;
+    }
+
     /**
      * Determine which project an event should be routed to
      * @param event - The event to route
