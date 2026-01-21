@@ -628,71 +628,52 @@ export class Daemon {
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
-        const shutdown = async (initiator?: string): Promise<void> => {
-            console.log("\n🛑 Shutting down daemon...");
-            if (initiator) {
-                console.log(`   Initiated by: ${initiator}`);
-            }
+        const shutdown = async (): Promise<void> => {
+            console.log("\nShutting down...");
             if (!this.isRunning) {
-                console.log("   Not running, exiting immediately");
                 process.exit(0);
             }
 
             this.isRunning = false;
 
             try {
-                // Stop streaming socket
                 if (this.streamTransport) {
-                    console.log("   Stopping stream transport...");
                     await this.streamTransport.stop();
                     streamPublisher.setTransport(null);
                     this.streamTransport = null;
                 }
 
-                // Stop accepting new events
                 if (this.subscriptionManager) {
-                    console.log("   Stopping subscriptions...");
                     this.subscriptionManager.stop();
                 }
 
-                // Stop all active project runtimes
                 if (this.runtimeLifecycle) {
-                    console.log("   Stopping runtimes...");
                     await this.runtimeLifecycle.stopAllRuntimes();
                 }
 
-                // Run custom shutdown handlers
-                console.log(`   Running ${this.shutdownHandlers.length} custom handlers...`);
                 for (const handler of this.shutdownHandlers) {
                     await handler();
                 }
 
-                // Release lockfile
                 if (this.lockfile) {
-                    console.log("   Releasing lockfile...");
                     await this.lockfile.release();
                 }
 
-                // Shutdown conversation span manager
-                console.log("   Stopping span manager...");
                 const conversationSpanManager = getConversationSpanManager();
                 conversationSpanManager.shutdown();
 
-                // Shutdown telemetry
-                console.log("   Stopping telemetry...");
                 await shutdownTelemetry();
 
-                console.log("   ✅ Shutdown complete");
                 process.exit(0);
             } catch (error) {
-                console.error("   ❌ Error during shutdown:", error);
+                logger.error("Error during shutdown", { error });
                 process.exit(1);
             }
         };
 
-        process.on("SIGTERM", () => shutdown("SIGTERM"));
-        process.on("SIGINT", () => shutdown("SIGINT"));
-        process.on("SIGHUP", () => shutdown("SIGHUP"));
+        process.on("SIGTERM", () => shutdown());
+        process.on("SIGINT", () => shutdown());
+        process.on("SIGHUP", () => shutdown());
 
         // Handle uncaught exceptions
         process.on("uncaughtException", (error) => {
@@ -700,7 +681,7 @@ export class Daemon {
                 error: error.message,
                 stack: error.stack,
             });
-            shutdown("uncaughtException");
+            shutdown();
         });
 
         process.on("unhandledRejection", (reason, promise) => {
