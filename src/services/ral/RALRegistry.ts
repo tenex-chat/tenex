@@ -600,7 +600,7 @@ export class RALRegistry {
     conversationId: string,
     ralNumber: number,
     message: string,
-    options?: { suppressAttribution?: boolean }
+    options?: { suppressAttribution?: boolean; ephemeral?: boolean }
   ): void {
     this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
@@ -614,7 +614,7 @@ export class RALRegistry {
     ralNumber: number,
     role: "system" | "user",
     message: string,
-    options?: { suppressAttribution?: boolean }
+    options?: { suppressAttribution?: boolean; ephemeral?: boolean }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -639,7 +639,17 @@ export class RALRegistry {
       content: message,
       queuedAt: Date.now(),
       suppressAttribution: options?.suppressAttribution,
+      ephemeral: options?.ephemeral,
     });
+
+    // Add telemetry for ephemeral injection queuing (useful for debugging supervision re-engagement)
+    if (options?.ephemeral) {
+      trace.getActiveSpan()?.addEvent("ral.ephemeral_correction_queued", {
+        "ral.number": ralNumber,
+        "message.length": message.length,
+        "message.role": role,
+      });
+    }
   }
 
   /**

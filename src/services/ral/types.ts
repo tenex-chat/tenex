@@ -93,6 +93,8 @@ export interface QueuedInjection {
   content: string;
   queuedAt: number;
   suppressAttribution?: boolean;
+  /** If true, message is included in LLM context but NOT persisted to ConversationStore */
+  ephemeral?: boolean;
 }
 
 export interface RALRegistryEntry {
