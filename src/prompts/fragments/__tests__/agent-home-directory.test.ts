@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs";
-import * as constants from "@/constants";
+import * as agentHome from "@/lib/agent-home";
 import { agentHomeDirectoryFragment, getAgentHomeDirectory } from "../02-agent-home-directory";
 
 // Mock the logger to avoid console output during tests
@@ -35,22 +35,22 @@ describe("agent-home-directory fragment", () => {
     });
 
     describe("agentHomeDirectoryFragment.template", () => {
-        let mkdirSyncSpy: ReturnType<typeof spyOn>;
+        let ensureAgentHomeSpy: ReturnType<typeof spyOn>;
         let readdirSyncSpy: ReturnType<typeof spyOn>;
 
         beforeEach(() => {
             // Reset spies before each test
-            mkdirSyncSpy = spyOn(fs, "mkdirSync");
+            ensureAgentHomeSpy = spyOn(agentHome, "ensureAgentHomeDirectory");
             readdirSyncSpy = spyOn(fs, "readdirSync");
         });
 
         afterEach(() => {
-            mkdirSyncSpy.mockRestore();
+            ensureAgentHomeSpy.mockRestore();
             readdirSyncSpy.mockRestore();
         });
 
         it("should show empty directory message when no files exist", async () => {
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => []);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
@@ -61,7 +61,7 @@ describe("agent-home-directory fragment", () => {
         });
 
         it("should list files and directories with proper formatting", async () => {
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => [
                 { name: "notes.txt", isDirectory: () => false },
                 { name: "scripts", isDirectory: () => true },
@@ -76,7 +76,7 @@ describe("agent-home-directory fragment", () => {
         });
 
         it("should cap listing at 50 entries and show overflow count", async () => {
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             // Create 60 mock entries
             const manyEntries = Array.from({ length: 60 }, (_, i) => ({
                 name: `file-${String(i).padStart(2, "0")}.txt`,
@@ -95,9 +95,7 @@ describe("agent-home-directory fragment", () => {
         });
 
         it("should handle directory creation failure gracefully", async () => {
-            mkdirSyncSpy.mockImplementation(() => {
-                throw new Error("Permission denied");
-            });
+            ensureAgentHomeSpy.mockImplementation(() => false);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
@@ -106,7 +104,7 @@ describe("agent-home-directory fragment", () => {
         });
 
         it("should handle directory listing failure gracefully", async () => {
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => {
                 throw new Error("Cannot read directory");
             });
@@ -118,18 +116,21 @@ describe("agent-home-directory fragment", () => {
         });
 
         it("should include the correct home directory path in output", async () => {
-            // Get the actual base path
-            const basePath = constants.getTenexBasePath();
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            // Use the same function that the template uses to ensure consistency
+            const expectedPath = getAgentHomeDirectory(mockAgent.pubkey);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => []);
 
             const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
 
-            expect(result).toContain(`${basePath}/home/abcd1234`);
+            // Verify the path in the output matches what getAgentHomeDirectory returns
+            expect(result).toContain(expectedPath);
+            // Also verify it contains the expected pubkey prefix
+            expect(result).toContain("/home/abcd1234");
         });
 
         it("should sort entries alphabetically", async () => {
-            mkdirSyncSpy.mockImplementation(() => undefined);
+            ensureAgentHomeSpy.mockImplementation(() => true);
             readdirSyncSpy.mockImplementation(() => [
                 { name: "zebra.txt", isDirectory: () => false },
                 { name: "alpha.txt", isDirectory: () => false },

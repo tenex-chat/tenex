@@ -1,7 +1,6 @@
-import { mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import type { AgentInstance } from "@/agents/types/runtime";
-import { getTenexBasePath } from "@/constants";
+import { ensureAgentHomeDirectory, getAgentHomeDirectory } from "@/lib/agent-home";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 
@@ -19,30 +18,12 @@ interface AgentHomeDirectoryArgs {
 }
 
 /**
- * Get the short pubkey (first 8 characters) for an agent.
- */
-function getShortPubkey(pubkey: string): string {
-    return pubkey.slice(0, 8);
-}
-
-/**
- * Get the home directory path for an agent.
- */
-export function getAgentHomeDirectory(agentPubkey: string): string {
-    const shortPubkey = getShortPubkey(agentPubkey);
-    return join(getTenexBasePath(), "home", shortPubkey);
-}
-
-/**
  * Build the home directory listing with proper error handling.
  * Creates the directory if it doesn't exist and returns a formatted listing.
  */
-function buildHomeListing(homeDir: string): string {
-    // Try to create the directory
-    try {
-        mkdirSync(homeDir, { recursive: true });
-    } catch (error) {
-        logger.warn("Failed to create agent home dir:", error);
+function buildHomeListing(homeDir: string, agentPubkey: string): string {
+    // Try to create the directory using the shared helper
+    if (!ensureAgentHomeDirectory(agentPubkey)) {
         return "(home directory unavailable)";
     }
 
@@ -80,7 +61,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
     priority: 2, // Right after agent-identity (priority 1)
     template: ({ agent }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
-        const listing = buildHomeListing(homeDir);
+        const listing = buildHomeListing(homeDir, agent.pubkey);
 
         const parts: string[] = [];
 

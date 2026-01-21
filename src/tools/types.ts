@@ -41,7 +41,6 @@ export type ToolName =
     | "schedule_task"
     | "schedule_tasks_list"
     | "schedule_task_cancel"
-    | "create_dynamic_tool"
     | "upload_blob"
     | "rag_create_collection"
     | "rag_add_documents"
@@ -112,12 +111,6 @@ export interface ExecutionEnvironment {
      * Access to conversation state. May return undefined before full execution setup.
      */
     getConversation: () => ConversationStore | undefined;
-    /**
-     * Mutable reference to the active tools object used by the LLM service.
-     * Tools created via create_dynamic_tool can inject themselves here
-     * to become immediately available in the current streaming session.
-     */
-    activeToolsObject?: Record<string, CoreTool<unknown, unknown>>;
 }
 
 /**

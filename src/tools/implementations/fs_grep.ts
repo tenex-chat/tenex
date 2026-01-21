@@ -2,6 +2,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { relative } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -235,6 +236,7 @@ function applyPagination(lines: string[], offset: number, limit: number): string
 async function executeGrep(
     input: GrepInput,
     workingDirectory: string,
+    agentPubkey: string,
 ): Promise<string> {
     const { pattern, path: inputPath, output_mode, head_limit, offset, allowOutsideWorkingDirectory } = input;
 
@@ -250,12 +252,13 @@ async function executeGrep(
     // Determine search path
     const searchPath = inputPath ?? workingDirectory;
 
-    // Check if path is outside working directory
-    const normalizedPath = searchPath.endsWith("/") ? searchPath.slice(0, -1) : searchPath;
-    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
-    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+    // Check if path is within working directory (using secure path normalization)
+    const isWithinWorkDir = isPathWithinDirectory(searchPath, workingDirectory);
 
-    if (isOutside && !allowOutsideWorkingDirectory) {
+    // Always allow access to agent's home directory without requiring allowOutsideWorkingDirectory
+    const isInAgentHome = isWithinAgentHome(searchPath, agentPubkey);
+
+    if (!isWithinWorkDir && !isInAgentHome && !allowOutsideWorkingDirectory) {
         return `Path "${searchPath}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
     }
 
@@ -336,7 +339,7 @@ export function createFsGrepTool(context: ToolExecutionContext): AISdkTool {
         inputSchema: grepSchema,
 
         execute: async (input: GrepInput) => {
-            return await executeGrep(input, context.workingDirectory);
+            return await executeGrep(input, context.workingDirectory, context.agent.pubkey);
         },
     });
 

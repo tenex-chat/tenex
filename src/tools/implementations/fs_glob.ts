@@ -1,7 +1,8 @@
 import { glob } from "node:fs/promises";
 import { stat } from "node:fs/promises";
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -55,6 +56,7 @@ function applyPagination<T>(items: T[], offset: number, limit: number): T[] {
 async function executeGlob(
     input: GlobInput,
     workingDirectory: string,
+    agentPubkey: string,
 ): Promise<string> {
     const { pattern, path: inputPath, head_limit, offset, allowOutsideWorkingDirectory } = input;
 
@@ -66,12 +68,13 @@ async function executeGlob(
     // Determine search directory
     const searchDir = inputPath ?? workingDirectory;
 
-    // Check if path is outside working directory
-    const normalizedPath = searchDir.endsWith("/") ? searchDir.slice(0, -1) : searchDir;
-    const normalizedWorkingDir = workingDirectory.endsWith("/") ? workingDirectory.slice(0, -1) : workingDirectory;
-    const isOutside = !normalizedPath.startsWith(normalizedWorkingDir + "/") && normalizedPath !== normalizedWorkingDir;
+    // Check if path is within working directory (using secure path normalization)
+    const isWithinWorkDir = isPathWithinDirectory(searchDir, workingDirectory);
 
-    if (isOutside && !allowOutsideWorkingDirectory) {
+    // Always allow access to agent's home directory without requiring allowOutsideWorkingDirectory
+    const isInAgentHome = isWithinAgentHome(searchDir, agentPubkey);
+
+    if (!isWithinWorkDir && !isInAgentHome && !allowOutsideWorkingDirectory) {
         return `Path "${searchDir}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
     }
 
@@ -94,7 +97,21 @@ async function executeGlob(
 
         for await (const match of matches) {
             try {
-                const fullPath = `${searchDir}/${match}`;
+                // Resolve the full path to handle any ".." in the glob pattern
+                const fullPath = resolve(searchDir, match);
+
+                // Security check: ensure the resolved path is still within allowed directories
+                // This prevents patterns like "../**/*" from escaping the allowed boundary
+                const isWithinAllowed =
+                    isPathWithinDirectory(fullPath, searchDir) ||
+                    isWithinAgentHome(fullPath, agentPubkey) ||
+                    (allowOutsideWorkingDirectory && isPathWithinDirectory(fullPath, workingDirectory));
+
+                if (!isWithinAllowed) {
+                    // Skip files that escaped the allowed directory via ".." in pattern
+                    continue;
+                }
+
                 const stats = await stat(fullPath);
                 if (stats.isFile()) {
                     filesWithMtime.push({
@@ -142,7 +159,7 @@ export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
         inputSchema: globSchema,
 
         execute: async (input: GlobInput) => {
-            return await executeGlob(input, context.workingDirectory);
+            return await executeGlob(input, context.workingDirectory, context.agent.pubkey);
         },
     });
 

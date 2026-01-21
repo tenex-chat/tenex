@@ -1,9 +1,37 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
+import { isAbsolute, relative, resolve, normalize } from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 import type { ExecutionEnvironment } from "@/tools/types";
-import { createFsGlobTool } from "../fs_glob";
+
+// Mock the agent home directory functions BEFORE importing the tool
+// Uses cross-platform path.relative approach matching the real implementation
+const TEST_HOME_BASE = "/tmp/tenex/home";
+const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
+
+// Helper for path normalization (matches the real implementation using path.relative)
+const normalizePath = (inputPath: string) => normalize(resolve(inputPath));
+const isPathWithin = (checkPath: string, directory: string) => {
+    const normalizedPath = normalizePath(checkPath);
+    const normalizedDir = normalizePath(directory);
+    const relativePath = relative(normalizedDir, normalizedPath);
+    return !relativePath.startsWith("..") && !isAbsolute(relativePath);
+};
+
+mock.module("@/lib/agent-home", () => ({
+    getAgentHomeDirectory: getTestAgentHomeDir,
+    isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
+        const homeDir = getTestAgentHomeDir(agentPubkey);
+        return isPathWithin(inputPath, homeDir);
+    },
+    isPathWithinDirectory: isPathWithin,
+    normalizePath,
+    ensureAgentHomeDirectory: () => true,
+}));
+
+// Dynamic import after mock setup
+const { createFsGlobTool } = await import("../fs_glob");
 
 describe("fs_glob tool", () => {
     let testDir: string;
@@ -111,6 +139,56 @@ describe("fs_glob tool", () => {
                 expect(result).toContain("outside your working directory");
             } finally {
                 await cleanupTempDir(similarDir);
+            }
+        });
+
+        it("should allow globbing inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
+            // Use the shared getTestAgentHomeDir function for consistent path derivation
+            const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
+            mkdirSync(agentHomeDir, { recursive: true });
+            writeFileSync(path.join(agentHomeDir, "notes.txt"), "my notes");
+            writeFileSync(path.join(agentHomeDir, "script.sh"), "echo hello");
+
+            try {
+                const result = await globTool.execute({
+                    pattern: "*.txt",
+                    path: agentHomeDir,
+                    // NOTE: No allowOutsideWorkingDirectory flag!
+                });
+
+                expect(result).toContain("notes.txt");
+                expect(result).not.toContain("outside your working directory");
+            } finally {
+                await cleanupTempDir(agentHomeDir);
+            }
+        });
+
+        it("should block path traversal via glob pattern with ../*", async () => {
+            // Create a directory structure where traversal could escape
+            const parentDir = path.dirname(testDir);
+            const escapedFile = path.join(parentDir, "escaped-secret.txt");
+            writeFileSync(escapedFile, "escaped content");
+
+            // Create a file inside the working dir for reference
+            writeFileSync(path.join(testDir, "inside.txt"), "inside content");
+
+            try {
+                const result = await globTool.execute({
+                    pattern: "../*",
+                    path: testDir,
+                });
+
+                // The pattern should NOT match files outside the allowed directory
+                // Either it returns "No files found" or filters out the escaped files
+                expect(result).not.toContain("escaped-secret.txt");
+            } finally {
+                // Cleanup - the escaped file is in a temp parent directory
+                try {
+                    const fs = await import("node:fs");
+                    fs.unlinkSync(escapedFile);
+                } catch {
+                    // Ignore cleanup errors
+                }
             }
         });
     });
