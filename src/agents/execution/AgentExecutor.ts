@@ -409,7 +409,6 @@ export class AgentExecutor {
             alphaMode: context.alphaMode,
             hasActivePairings,
             mcpManager: projectContext.mcpManager,
-            activeToolsObject: context.activeToolsObject,
             // Execution-specific flags
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,
@@ -938,10 +937,6 @@ export class AgentExecutor {
         // Wrap tools with pre-tool supervision checks
         toolsObject = this.wrapToolsWithSupervision(toolsObject, context);
 
-        // Store reference to active tools in context for dynamic tool injection
-        // This allows create_dynamic_tool to add new tools mid-stream
-        context.activeToolsObject = toolsObject;
-
         const sessionManager = new SessionManager(context.agent, context.conversationId, context.workingDirectory);
         const { sessionId } = sessionManager.getSession();
 
@@ -1444,8 +1439,12 @@ export class AgentExecutor {
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
-                    // Include mid-step ephemeral messages (if any)
-                    ephemeralMessages: midStepEphemeralMessages.length > 0 ? midStepEphemeralMessages : undefined,
+                    // Merge initial ephemeral messages (from before stream started) with mid-step ones
+                    // Initial ephemeral messages (e.g., supervision corrections queued before executeOnce)
+                    // must persist across ALL prepareStep rebuilds, not just the first compile call
+                    ephemeralMessages: [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
+                        ? [...ephemeralMessages, ...midStepEphemeralMessages]
+                        : undefined,
                 });
 
                 // For Claude Code session resumption (delta mode), returning empty messages

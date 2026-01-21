@@ -1,4 +1,4 @@
-import type { ModelMessage, Tool as CoreTool } from "ai";
+import type { ModelMessage } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -39,9 +39,6 @@ export interface ExecutionContext {
     alphaMode?: boolean;
     hasActivePairings?: boolean;
     mcpManager?: MCPManager;
-
-    // Dynamic tool injection
-    activeToolsObject?: Record<string, CoreTool<unknown, unknown>>;
 }
 
 /**
