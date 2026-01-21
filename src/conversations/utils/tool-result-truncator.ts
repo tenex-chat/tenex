@@ -8,6 +8,10 @@
  *
  * Truncated results are replaced with a reference that allows re-reading via
  * the event ID using fs_read(tool=<eventId>).
+ *
+ * EMERGENCY CONTENT GUARD: If truncation criteria are met but no eventId is
+ * available, content is STILL omitted to protect the context window. This
+ * prioritizes context window safety over content retrieval.
  */
 
 import type { ToolResultPart } from "ai";
@@ -48,7 +52,9 @@ function getToolResultSize(toolData: ToolResultPart[]): number {
 }
 
 /**
- * Check if a tool result should be truncated based on its size and burial depth
+ * Check if a tool result should be truncated based on its size and burial depth.
+ * EMERGENCY CONTENT GUARD: Truncation decision is independent of eventId availability.
+ * Context window safety takes priority over content retrieval.
  */
 export function shouldTruncateToolResult(
     toolData: ToolResultPart[],
@@ -61,10 +67,9 @@ export function shouldTruncateToolResult(
         return false;
     }
 
-    // Can't truncate without an eventId to reference
-    if (!context.eventId) {
-        return false;
-    }
+    // NOTE: We no longer check for eventId here. Truncation decision is purely
+    // based on size and burial depth. The processToolResult function handles
+    // the case where eventId is missing by providing a placeholder message.
 
     const burialDepth = context.totalMessages - context.currentIndex - 1;
 
@@ -96,14 +101,42 @@ export function createTruncatedToolResult(
 }
 
 /**
- * Process tool result, potentially truncating if buried too deep
+ * Create an omitted tool result when no eventId is available for retrieval.
+ * EMERGENCY CONTENT GUARD: This protects the context window from overflow
+ * when truncation criteria are met but content cannot be retrieved later.
+ */
+export function createOmittedToolResult(toolData: ToolResultPart[]): ToolResultPart[] {
+    const size = getToolResultSize(toolData);
+
+    return toolData.map((part) => ({
+        type: "tool-result" as const,
+        toolCallId: part.toolCallId,
+        toolName: part.toolName,
+        output: {
+            type: "text" as const,
+            value: `[Tool output omitted to save context (${size} chars) - no reference available for retrieval]`,
+        },
+    }));
+}
+
+/**
+ * Process tool result, potentially truncating if buried too deep.
+ * EMERGENCY CONTENT GUARD: If truncation is needed but no eventId is available,
+ * content is omitted with a placeholder to protect the context window.
  */
 export function processToolResult(
     toolData: ToolResultPart[],
     context: TruncationContext
 ): ToolResultPart[] {
-    if (shouldTruncateToolResult(toolData, context) && context.eventId) {
-        return createTruncatedToolResult(toolData, context.eventId);
+    if (shouldTruncateToolResult(toolData, context)) {
+        if (context.eventId) {
+            // Normal case: truncate with retrieval reference
+            return createTruncatedToolResult(toolData, context.eventId);
+        } else {
+            // EMERGENCY CONTENT GUARD: No eventId available, but we still
+            // must protect the context window. Omit content with placeholder.
+            return createOmittedToolResult(toolData);
+        }
     }
     return toolData;
 }
