@@ -8,7 +8,6 @@
 import { createProviderRegistry } from "ai";
 import type { ProviderRegistryProvider } from "ai";
 import { logger } from "@/utils/logger";
-import { trace, type Span } from "@opentelemetry/api";
 import type {
     ILLMProvider,
     ProviderInitConfig,
@@ -95,30 +94,13 @@ export class ProviderRegistry {
      */
     async initialize(
         configs: Record<string, ProviderInitConfig>,
-        options?: { enableTenexTools?: boolean }
-    ): Promise<InitializationResult[]> {
-        const tracer = trace.getTracer("provider-registry");
-
-        return tracer.startActiveSpan("initializeProviders", async (span) => {
-            try {
-                return await this.doInitialize(configs, options, span);
-            } finally {
-                span.end();
-            }
-        });
-    }
-
-    private async doInitialize(
-        configs: Record<string, ProviderInitConfig>,
-        _options: { enableTenexTools?: boolean } | undefined,
-        span: Span
+        _options?: { enableTenexTools?: boolean }
     ): Promise<InitializationResult[]> {
         const results: InitializationResult[] = [];
         this.providers.clear();
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
-            span.addEvent("provider_registry.mock_mode_enabled");
             await this.initializeMockProvider();
         }
 
@@ -150,14 +132,11 @@ export class ProviderRegistry {
         }
 
         // Build the AI SDK registry from standard providers
-        this.buildAiSdkRegistry(span);
+        this.buildAiSdkRegistry();
 
         this.initialized = true;
 
-        span.addEvent("provider_registry.initialized", {
-            "providers.count": this.providers.size,
-            "providers.names": Array.from(this.providers.keys()).join(", "),
-        });
+        logger.debug(`[ProviderRegistry] Initialized ${this.providers.size} providers: ${Array.from(this.providers.keys()).join(", ")}`);
 
         return results;
     }
@@ -211,7 +190,7 @@ export class ProviderRegistry {
     /**
      * Build the AI SDK provider registry from initialized standard providers
      */
-    private buildAiSdkRegistry(span: Span): void {
+    private buildAiSdkRegistry(): void {
         // biome-ignore lint/suspicious/noExplicitAny: AI SDK provider types vary
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const standardProviders: Record<string, any> = {};
@@ -228,9 +207,6 @@ export class ProviderRegistry {
 
         if (Object.keys(standardProviders).length > 0) {
             this.aiSdkRegistry = createProviderRegistry(standardProviders);
-            span.addEvent("provider_registry.ai_sdk_registry_created", {
-                "standard_providers.count": Object.keys(standardProviders).length,
-            });
         } else {
             // Create empty registry to avoid null checks
             this.aiSdkRegistry = createProviderRegistry({});
