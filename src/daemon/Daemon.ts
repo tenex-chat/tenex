@@ -188,9 +188,18 @@ export class Daemon {
      * Handle incoming events from the subscription (telemetry wrapper)
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
-        // Skip unroutable event kinds
-        if (AgentEventDecoder.isNeverRouteKind(event)) {
-            await logDropped(this.routingLogger, event, `Event kind ${event.kind} is never routed`);
+        // Check if this daemon should process this event at all.
+        // This prevents noisy traces when multiple backends are running.
+        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+        if (
+            !DaemonRouter.willThisRoute(
+                event,
+                this.knownProjects,
+                this.agentPubkeyToProjects,
+                activeRuntimes
+            )
+        ) {
+            // Not our event - drop silently without creating a span
             return;
         }
 
