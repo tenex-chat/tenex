@@ -26,6 +26,7 @@ import { PROVIDER_IDS } from "./providers/provider-ids";
 import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd } from "./types";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
+import { getInvalidToolCalls, isToolResultError, extractErrorDetails } from "./utils/tool-errors";
 import { calculateCumulativeUsage } from "./utils/usage";
 import { extractUsageMetadata, extractOpenRouterGenerationId } from "./providers/usage-metadata";
 
@@ -350,39 +351,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         return this.addCacheControl(processedMessages);
     }
 
-    private getInvalidToolCalls(
-        steps: StepResult<Record<string, AISdkTool>>[]
-    ): Array<{ toolName: string; error: string }> {
-        const invalidToolCalls: Array<{ toolName: string; error: string }> = [];
-
-        for (const step of steps) {
-            if (step.toolCalls) {
-                for (const toolCall of step.toolCalls) {
-                    // Check if this is a dynamic tool call that's invalid
-                    if (
-                        "dynamic" in toolCall &&
-                        toolCall.dynamic === true &&
-                        toolCall.invalid === true &&
-                        toolCall.error
-                    ) {
-                        const error =
-                            typeof toolCall.error === "object" &&
-                            toolCall.error !== null &&
-                            "name" in toolCall.error
-                                ? (toolCall.error as { name: string }).name
-                                : "Unknown error";
-                        invalidToolCalls.push({
-                            toolName: toolCall.toolName,
-                            error,
-                        });
-                    }
-                }
-            }
-        }
-
-        return invalidToolCalls;
-    }
-
     private recordInvalidToolCalls(
         steps: StepResult<Record<string, AISdkTool>>[],
         logContext: "complete" | "response"
@@ -392,7 +360,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             return;
         }
 
-        const invalidToolCalls = this.getInvalidToolCalls(steps);
+        const invalidToolCalls = getInvalidToolCalls(steps);
         if (invalidToolCalls.length === 0) {
             return;
         }
@@ -471,31 +439,6 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const model = this.getLanguageModel(messages);
 
         const processedMessages = this.prepareMessagesForRequest(messages);
-
-        // DEBUG: Write Claude Code call details to file
-        if (this.provider === PROVIDER_IDS.CLAUDE_CODE) {
-            const debugDir = `/tmp/claude_code_debug/${this.conversationId || "unknown"}`;
-            const fs = require("fs");
-            fs.mkdirSync(debugDir, { recursive: true });
-            const debugFile = `${debugDir}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-
-            // Extract systemPrompt the same way getLanguageModel does
-            const systemPrompt = messages
-                .filter((m) => m.role === "system")
-                .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
-                .join("\n\n");
-
-            fs.writeFileSync(debugFile, JSON.stringify({
-                timestamp: new Date().toISOString(),
-                conversationId: this.conversationId,
-                systemPrompt,
-                processedMessages,
-                originalMessageCount: messages.length,
-                processedMessageCount: processedMessages.length,
-            }, null, 2));
-
-            logger.info(`[LLMService] DEBUG: Wrote Claude Code call to ${debugFile}`);
-        }
 
         const startTime = Date.now();
 
@@ -821,49 +764,11 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         });
     }
 
-    /**
-     * Check if a tool result indicates an error
-     * AI SDK wraps tool execution errors in error-text or error-json formats
-     */
-    private isToolResultError(result: unknown): boolean {
-        if (typeof result !== "object" || result === null) {
-            return false;
-        }
-        const res = result as Record<string, unknown>;
-        // Check for AI SDK's known error formats
-        return (
-            (res.type === "error-text" && typeof res.text === "string") ||
-            (res.type === "error-json" && typeof res.json === "object")
-        );
-    }
-
-    /**
-     * Extract error details from tool result for better logging
-     */
-    private extractErrorDetails(result: unknown): { message: string; type: string } | null {
-        if (typeof result !== "object" || result === null) {
-            return null;
-        }
-        const res = result as Record<string, unknown>;
-
-        if (res.type === "error-text" && typeof res.text === "string") {
-            return { message: res.text, type: "error-text" };
-        }
-
-        if (res.type === "error-json" && typeof res.json === "object") {
-            const errorJson = res.json as Record<string, unknown>;
-            const message = errorJson.message || errorJson.error || JSON.stringify(errorJson);
-            return { message: String(message), type: "error-json" };
-        }
-
-        return null;
-    }
-
     private handleToolResult(toolCallId: string, toolName: string, result: unknown): void {
-        const hasError = this.isToolResultError(result);
+        const hasError = isToolResultError(result);
 
         if (hasError) {
-            const errorDetails = this.extractErrorDetails(result);
+            const errorDetails = extractErrorDetails(result);
             logger.error(`[LLMService] Tool '${toolName}' execution failed`, {
                 toolCallId,
                 toolName,
