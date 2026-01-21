@@ -13,6 +13,19 @@ import type {
 import { MAX_SUPERVISION_RETRIES } from "./types";
 
 /**
+ * Determines if a correction message should be built for the given action.
+ * - inject-message type always needs a message
+ * - block-tool type always needs a message
+ * - suppress-publish type needs a message only when reEngage is true (to guide the agent on what to fix)
+ * Uses strict undefined check to preserve intentional empty strings.
+ */
+function shouldBuildCorrectionMessage(action: CorrectionAction): boolean {
+    if (action.message !== undefined) return false;
+    if (action.type === "inject-message" || action.type === "block-tool") return true;
+    return action.type === "suppress-publish" && action.reEngage === true;
+}
+
+/**
  * Result of a supervision check
  */
 export interface SupervisionCheckResult {
@@ -148,7 +161,7 @@ export class SupervisorOrchestrator {
 
                     const correctionAction = heuristic.getCorrectionAction(syntheticVerification);
 
-                    if (correctionAction.type === "inject-message" && !correctionAction.message) {
+                    if (shouldBuildCorrectionMessage(correctionAction)) {
                         correctionAction.message = heuristic.buildCorrectionMessage(
                             context,
                             syntheticVerification
@@ -188,7 +201,7 @@ export class SupervisorOrchestrator {
                     const correctionAction = heuristic.getCorrectionAction(verification);
 
                     // Build correction message if action type supports it
-                    if ((correctionAction.type === "inject-message" || correctionAction.type === "block-tool") && !correctionAction.message) {
+                    if (shouldBuildCorrectionMessage(correctionAction)) {
                         correctionAction.message = heuristic.buildCorrectionMessage(
                             context,
                             verification
@@ -277,7 +290,7 @@ export class SupervisorOrchestrator {
                     const correctionAction = heuristic.getCorrectionAction(verification);
 
                     // Build correction message if action type supports it
-                    if ((correctionAction.type === "inject-message" || correctionAction.type === "block-tool") && !correctionAction.message) {
+                    if (shouldBuildCorrectionMessage(correctionAction)) {
                         correctionAction.message = heuristic.buildCorrectionMessage(
                             context,
                             verification

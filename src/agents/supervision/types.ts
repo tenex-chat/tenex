@@ -35,7 +35,8 @@ export interface VerificationResult {
 export interface CorrectionAction {
     /** Type of correction to apply */
     type: "inject-message" | "block-tool" | "suppress-publish";
-    /** Message to inject (for inject-message type) */
+    /** Correction message to provide to the agent. Used for inject-message type and
+     *  for suppress-publish type when reEngage is true (to guide the agent on what to fix). */
     message?: string;
     /** Whether to re-engage the agent after correction */
     reEngage: boolean;
