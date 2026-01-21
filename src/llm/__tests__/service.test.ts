@@ -384,43 +384,6 @@ describe("LLMService private methods (via behavior)", () => {
         });
     });
 
-    describe("calculateCostUsd", () => {
-        test("calculates cost based on token usage", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
-
-            // 1000 input tokens * $0.001/1k = $0.001
-            // 2000 output tokens * $0.002/1k = $0.004
-            // Total = $0.005
-            const cost = calculateCostUsd({
-                inputTokens: 1000,
-                outputTokens: 2000,
-            });
-
-            expect(cost).toBeCloseTo(0.005, 6);
-        });
-
-        test("handles zero tokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
-
-            const cost = calculateCostUsd({
-                inputTokens: 0,
-                outputTokens: 0,
-            });
-
-            expect(cost).toBe(0);
-        });
-
-        test("handles undefined tokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const calculateCostUsd = (service as any).calculateCostUsd.bind(service);
-
-            const cost = calculateCostUsd({});
-
-            expect(cost).toBe(0);
-        });
-    });
 });
 
 describe("LLMService chunk handling", () => {

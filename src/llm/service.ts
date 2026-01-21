@@ -981,32 +981,12 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 return {
                     object: result.object,
-                    usage: {
-                        ...result.usage,
-                        costUsd: this.calculateCostUsd(result.usage),
-                    },
+                    usage: result.usage,
                 };
             },
             "Generate structured object",
             startTime
         );
-    }
-
-    /**
-     * Calculate cost in USD for token usage
-     * Uses standard pricing tiers based on provider and model
-     */
-    private calculateCostUsd(usage: LanguageModelUsage): number {
-        const promptTokens = usage.inputTokens ?? 0;
-        const completionTokens = usage.outputTokens ?? 0;
-
-        const costPer1kPrompt = 0.001;
-        const costPer1kCompletion = 0.002;
-
-        const promptCost = (promptTokens / 1000) * costPer1kPrompt;
-        const completionCost = (completionTokens / 1000) * costPer1kCompletion;
-
-        return promptCost + completionCost;
     }
 
     /**
