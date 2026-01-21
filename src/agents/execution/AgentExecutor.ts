@@ -767,16 +767,27 @@ export class AgentExecutor {
 
                 if (supervisionResult.correctionAction.type === "suppress-publish" &&
                     supervisionResult.correctionAction.reEngage) {
+                    // Add telemetry for supervision correction diagnosis
+                    trace.getActiveSpan()?.addEvent("executor.supervision_correction", {
+                        "has_message": !!supervisionResult.correctionAction.message,
+                        "message_length": supervisionResult.correctionAction.message?.length || 0,
+                        "heuristic.id": supervisionResult.heuristicId || "unknown",
+                        "action.type": supervisionResult.correctionAction.type,
+                        "action.reEngage": supervisionResult.correctionAction.reEngage,
+                    });
+
                     // Increment retry count
                     supervisorOrchestrator.incrementRetryCount(executionId);
 
-                    // Inject correction message as user message
+                    // Inject correction message as ephemeral user message
+                    // Ephemeral = influences re-execution but NOT persisted to ConversationStore
                     if (supervisionResult.correctionAction.message) {
                         ralRegistry.queueUserMessage(
                             context.agent.pubkey,
                             context.conversationId,
                             ralNumber,
-                            supervisionResult.correctionAction.message
+                            supervisionResult.correctionAction.message,
+                            { ephemeral: true, suppressAttribution: true }
                         );
                     }
 
@@ -800,6 +811,38 @@ export class AgentExecutor {
             }
         }
         // === END SUPERVISION CHECK ===
+
+        // === RAL CLEANUP ===
+        // Clear RAL AFTER supervision check passes (or max retries exceeded).
+        // This ensures supervision correction messages can be queued before RAL is cleared.
+        // If supervision triggered re-engagement, we already returned above, so this only
+        // runs for successful completions.
+        const conversationStore = context.conversationStore;
+
+        // Re-check pending delegations for final cleanup decision
+        // (startedWithPendingDelegations was already computed above, reuse it)
+        const finalPendingDelegationsForCleanup = ralRegistry.getConversationPendingDelegations(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
+        if (finalPendingDelegationsForCleanup.length === 0 && !startedWithPendingDelegations) {
+            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
+
+            // Complete RAL in ConversationStore and persist
+            conversationStore.completeRal(context.agent.pubkey, ralNumber);
+            await conversationStore.save();
+
+            trace.getActiveSpan()?.addEvent("executor.ral_cleared_after_supervision", {
+                "ral.number": ralNumber,
+            });
+        } else if (finalPendingDelegationsForCleanup.length === 0 && startedWithPendingDelegations) {
+            trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
+                "ral.number": ralNumber,
+            });
+        }
+        // === END RAL CLEANUP ===
 
         const eventContext = createEventContext(context, completionEvent?.usage?.model);
 
@@ -892,21 +935,35 @@ export class AgentExecutor {
             ralNumber
         );
 
+        // Collect ephemeral messages to pass to MessageCompiler (don't persist these)
+        const ephemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
+
         if (initialInjections.length > 0) {
             for (const injection of initialInjections) {
-                conversationStore.addMessage({
-                    pubkey: context.triggeringEvent.pubkey,
-                    ral: ralNumber,
-                    content: injection.content,
-                    messageType: "text",
-                    targetedPubkeys: [context.agent.pubkey],
-                    suppressAttribution: injection.suppressAttribution,
-                });
+                if (injection.ephemeral) {
+                    // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
+                    // but don't become permanent conversation history - pass directly to MessageCompiler
+                    ephemeralMessages.push({
+                        role: injection.role,
+                        content: injection.content,
+                    });
+                } else {
+                    // Non-ephemeral injections are persisted to ConversationStore
+                    conversationStore.addMessage({
+                        pubkey: context.triggeringEvent.pubkey,
+                        ral: ralNumber,
+                        content: injection.content,
+                        messageType: "text",
+                        targetedPubkeys: [context.agent.pubkey],
+                        suppressAttribution: injection.suppressAttribution,
+                    });
+                }
             }
 
             trace.getActiveSpan()?.addEvent("executor.initial_injections_consumed", {
                 "ral.number": ralNumber,
                 "injection.count": initialInjections.length,
+                "injection.ephemeral_count": ephemeralMessages.length,
             });
         }
 
@@ -1032,6 +1089,8 @@ export class AgentExecutor {
             // Meta model system prompts (only present if agent uses a meta model)
             metaModelSystemPrompt,
             variantSystemPrompt,
+            // Ephemeral messages for supervision corrections (not persisted)
+            ephemeralMessages,
         });
 
         trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
@@ -1299,22 +1358,36 @@ export class AgentExecutor {
                     ralNumber
                 );
 
+                // Collect mid-step ephemeral messages for MessageCompiler
+                const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
+
                 if (newInjections.length > 0) {
-                    // Persist injections to ConversationStore as user messages
+                    // Separate ephemeral vs non-ephemeral injections
                     for (const injection of newInjections) {
-                        conversationStore.addMessage({
-                            pubkey: context.triggeringEvent.pubkey,
-                            ral: ralNumber,
-                            content: injection.content,
-                            messageType: "text",
-                            targetedPubkeys: [context.agent.pubkey],
-                            suppressAttribution: injection.suppressAttribution,
-                        });
+                        if (injection.ephemeral) {
+                            // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
+                            // but don't become permanent conversation history
+                            midStepEphemeralMessages.push({
+                                role: injection.role,
+                                content: injection.content,
+                            });
+                        } else {
+                            // Non-ephemeral injections are persisted to ConversationStore
+                            conversationStore.addMessage({
+                                pubkey: context.triggeringEvent.pubkey,
+                                ral: ralNumber,
+                                content: injection.content,
+                                messageType: "text",
+                                targetedPubkeys: [context.agent.pubkey],
+                                suppressAttribution: injection.suppressAttribution,
+                            });
+                        }
                     }
 
                     if (executionSpan) {
                         executionSpan.addEvent("ral_injection.process", {
                             "injection.message_count": newInjections.length,
+                            "injection.ephemeral_count": midStepEphemeralMessages.length,
                             "ral.number": ralNumber,
                         });
                     }
@@ -1345,6 +1418,8 @@ export class AgentExecutor {
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
+                    // Include mid-step ephemeral messages (if any)
+                    ephemeralMessages: midStepEphemeralMessages.length > 0 ? midStepEphemeralMessages : undefined,
                 });
 
                 // For Claude Code session resumption (delta mode), returning empty messages
@@ -1610,35 +1685,15 @@ export class AgentExecutor {
             sessionManager.saveLastSentEventId(context.triggeringEvent.id);
         }
 
-        // Capture accumulated runtime BEFORE clearing RAL (it will be gone after clearRAL)
+        // Capture accumulated runtime for caller (executeOnce handles RAL cleanup AFTER supervision)
         const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
-        // Clear RAL if execution completed without pending delegations
-        // We clear for any terminal finish reason (not just "stop"/"end" - Gemini returns "other")
-        const finalPendingDelegations = ralRegistry.getConversationPendingDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-        const startedWithPendingDelegations = Boolean(
-            context.isDelegationCompletion && context.hasPendingDelegations
-        );
-
-        if (finalPendingDelegations.length === 0 && !startedWithPendingDelegations) {
-            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
-
-            // Complete RAL in ConversationStore and persist
-            conversationStore.completeRal(context.agent.pubkey, ralNumber);
-            await conversationStore.save();
-        } else if (finalPendingDelegations.length === 0 && startedWithPendingDelegations) {
-            trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
-                "ral.number": ralNumber,
-            });
-        }
+        // NOTE: RAL cleanup is now done in executeOnce() AFTER supervision check.
+        // This ensures supervision correction messages can be queued before RAL is cleared.
 
         if (!result) {
             throw new Error("LLM stream completed without emitting complete or stream-error event");

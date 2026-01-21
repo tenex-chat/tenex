@@ -19,6 +19,12 @@ interface MessageCompilationPlan {
     cursor?: number;
 }
 
+/** Ephemeral message to include in LLM context but NOT persist */
+export interface EphemeralMessage {
+    role: "user" | "system";
+    content: string;
+}
+
 export interface MessageCompilerContext {
     agent: AgentInstance;
     project: NDKProject;
@@ -38,6 +44,8 @@ export interface MessageCompilerContext {
     metaModelSystemPrompt?: string;
     /** Variant-specific system prompt to inject when a meta model variant is active */
     variantSystemPrompt?: string;
+    /** Ephemeral messages to include in this compilation only (not persisted) */
+    ephemeralMessages?: EphemeralMessage[];
 }
 
 export interface CompiledMessages {
@@ -98,10 +106,22 @@ export class MessageCompiler {
             }
 
             messages.push(...conversationMessages);
+
+            // Add ephemeral messages (e.g., supervision corrections) after conversation
+            // but before dynamic context. These influence the current turn but don't persist.
+            if (context.ephemeralMessages?.length) {
+                for (const ephemeral of context.ephemeralMessages) {
+                    messages.push({
+                        role: ephemeral.role,
+                        content: ephemeral.content,
+                    });
+                }
+            }
+
             messages.push(...dynamicContextMessages);
 
             systemPromptCount += systemPromptMessages.length;
-            dynamicContextCount = dynamicContextMessages.length;
+            dynamicContextCount = dynamicContextMessages.length + (context.ephemeralMessages?.length ?? 0);
         } else {
             // In delta mode, only send new conversation messages.
             // The session already has full context from initial compilation.
@@ -113,6 +133,16 @@ export class MessageCompiler {
                 cursor
             );
             messages.push(...conversationMessages);
+
+            // Add ephemeral messages in delta mode too (for supervision corrections)
+            if (context.ephemeralMessages?.length) {
+                for (const ephemeral of context.ephemeralMessages) {
+                    messages.push({
+                        role: ephemeral.role,
+                        content: ephemeral.content,
+                    });
+                }
+            }
         }
 
         const conversationCount = this.plan.mode === "full"
