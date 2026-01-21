@@ -84,8 +84,7 @@ Use this section to understand each service’s scope and dependencies:
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.
 
 ### Daemon Runtime (`src/daemon`)
-- **Core Runtime**: `Daemon`, `ProjectRuntime`, `ProcessManagerController`, and `SubscriptionManager` run background loops that subscribe to relays and forward updates to the terminal UI.
-- **UI (`daemon/ui`)**: React components (rendered with Ink) for projects, conversations, and agents. They read data via daemon state stores, not directly from `conversations/`.
+- **Core Runtime**: `Daemon`, `ProjectRuntime`, and `SubscriptionManager` run background loops that subscribe to relays and process events.
 - **Guideline**: Keep daemon modules dependent on services + stores, never the other way around.
 
 ### Telemetry & Logging

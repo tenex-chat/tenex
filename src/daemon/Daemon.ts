@@ -14,6 +14,7 @@ import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
 import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
+import { shutdownTelemetry } from "@/telemetry/setup";
 import type { RoutingDecision } from "./routing/DaemonRouter";
 import type { ProjectRuntime } from "./ProjectRuntime";
 import { RuntimeLifecycle } from "./RuntimeLifecycle";
@@ -188,14 +189,19 @@ export class Daemon {
      * Handle incoming events from the subscription (telemetry wrapper)
      */
     private async handleIncomingEvent(event: NDKEvent): Promise<void> {
-        // Check if this daemon should process this event at all.
+        // Check if this daemon should trace this event at all.
         // This prevents noisy traces when multiple backends are running.
+        // Only trace events we'll actually process:
+        // - Project events from whitelisted authors (for discovery)
+        // - Other events only if we have a runtime OR can boot one
+        const knownAgentPubkeys = new Set(this.agentPubkeyToProjects.keys());
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         if (
-            !DaemonRouter.willThisRoute(
+            !DaemonRouter.shouldTraceEvent(
                 event,
                 this.knownProjects,
-                this.agentPubkeyToProjects,
+                knownAgentPubkeys,
+                this.whitelistedPubkeys,
                 activeRuntimes
             )
         ) {
@@ -623,10 +629,12 @@ export class Daemon {
      */
     private setupShutdownHandlers(): void {
         const shutdown = async (initiator?: string): Promise<void> => {
+            console.log("\n🛑 Shutting down daemon...");
             if (initiator) {
-                logger.info(`Shutdown initiated by ${initiator}`);
+                console.log(`   Initiated by: ${initiator}`);
             }
             if (!this.isRunning) {
+                console.log("   Not running, exiting immediately");
                 process.exit(0);
             }
 
@@ -635,6 +643,7 @@ export class Daemon {
             try {
                 // Stop streaming socket
                 if (this.streamTransport) {
+                    console.log("   Stopping stream transport...");
                     await this.streamTransport.stop();
                     streamPublisher.setTransport(null);
                     this.streamTransport = null;
@@ -642,39 +651,47 @@ export class Daemon {
 
                 // Stop accepting new events
                 if (this.subscriptionManager) {
+                    console.log("   Stopping subscriptions...");
                     this.subscriptionManager.stop();
                 }
 
                 // Stop all active project runtimes
                 if (this.runtimeLifecycle) {
+                    console.log("   Stopping runtimes...");
                     await this.runtimeLifecycle.stopAllRuntimes();
                 }
 
                 // Run custom shutdown handlers
+                console.log(`   Running ${this.shutdownHandlers.length} custom handlers...`);
                 for (const handler of this.shutdownHandlers) {
                     await handler();
                 }
 
                 // Release lockfile
                 if (this.lockfile) {
+                    console.log("   Releasing lockfile...");
                     await this.lockfile.release();
                 }
 
                 // Shutdown conversation span manager
+                console.log("   Stopping span manager...");
                 const conversationSpanManager = getConversationSpanManager();
                 conversationSpanManager.shutdown();
 
+                // Shutdown telemetry
+                console.log("   Stopping telemetry...");
+                await shutdownTelemetry();
+
+                console.log("   ✅ Shutdown complete");
                 process.exit(0);
             } catch (error) {
-                logger.error("Error during shutdown", {
-                    error: error instanceof Error ? error.message : String(error),
-                });
+                console.error("   ❌ Error during shutdown:", error);
                 process.exit(1);
             }
         };
 
-        process.on("SIGTERM", () => shutdown());
-        process.on("SIGINT", () => shutdown());
+        process.on("SIGTERM", () => shutdown("SIGTERM"));
+        process.on("SIGINT", () => shutdown("SIGINT"));
         process.on("SIGHUP", () => shutdown("SIGHUP"));
 
         // Handle uncaught exceptions

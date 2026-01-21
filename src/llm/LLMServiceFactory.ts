@@ -11,7 +11,6 @@
 import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { trace } from "@opentelemetry/api";
 import type { LanguageModel, ProviderRegistryProvider } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 
@@ -49,65 +48,48 @@ export class LLMServiceFactory {
         providerConfigs: Record<string, { apiKey: string }>,
         options?: { enableTenexTools?: boolean }
     ): Promise<void> {
-        const tracer = trace.getTracer("llm-service-factory");
+        this.enableTenexTools = options?.enableTenexTools !== false;
 
-        return tracer.startActiveSpan("initializeProviders", async (span) => {
-            try {
-                this.enableTenexTools = options?.enableTenexTools !== false;
-
-                // Convert to ProviderInitConfig format
-                const configs: Record<string, ProviderInitConfig> = {};
-                for (const [name, config] of Object.entries(providerConfigs)) {
-                    if (config?.apiKey) {
-                        configs[name] = {
-                            apiKey: config.apiKey,
-                            options: {
-                                enableTenexTools: this.enableTenexTools,
-                            },
-                        };
-                    }
-                }
-
-                // Also ensure agent providers are initialized (they don't need API keys)
-                // Add them with empty configs if not already present
-                const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER, PROVIDER_IDS.GEMINI_CLI];
-                for (const providerId of agentProviders) {
-                    if (!configs[providerId]) {
-                        configs[providerId] = {
-                            options: {
-                                enableTenexTools: this.enableTenexTools,
-                            },
-                        };
-                    }
-                }
-
-                // Initialize through the registry
-                const results = await providerRegistry.initialize(configs, options);
-
-                // Log initialization results
-                const successful = results.filter(r => r.success).map(r => r.providerId);
-                const failed = results.filter(r => !r.success);
-
-                if (successful.length > 0) {
-                    span.addEvent("llm_factory.providers_initialized", {
-                        "providers.count": successful.length,
-                        "providers.names": successful.join(", "),
-                    });
-                }
-
-                if (failed.length > 0) {
-                    for (const f of failed) {
-                        logger.error(`[LLMServiceFactory] Failed to initialize provider ${f.providerId}`, {
-                            error: f.error,
-                        });
-                    }
-                }
-
-                this.initialized = true;
-            } finally {
-                span.end();
+        // Convert to ProviderInitConfig format
+        const configs: Record<string, ProviderInitConfig> = {};
+        for (const [name, config] of Object.entries(providerConfigs)) {
+            if (config?.apiKey) {
+                configs[name] = {
+                    apiKey: config.apiKey,
+                    options: {
+                        enableTenexTools: this.enableTenexTools,
+                    },
+                };
             }
-        });
+        }
+
+        // Also ensure agent providers are initialized (they don't need API keys)
+        // Add them with empty configs if not already present
+        const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER, PROVIDER_IDS.GEMINI_CLI];
+        for (const providerId of agentProviders) {
+            if (!configs[providerId]) {
+                configs[providerId] = {
+                    options: {
+                        enableTenexTools: this.enableTenexTools,
+                    },
+                };
+            }
+        }
+
+        // Initialize through the registry (which has its own tracing span)
+        const results = await providerRegistry.initialize(configs, options);
+
+        // Log initialization failures
+        const failed = results.filter(r => !r.success);
+        if (failed.length > 0) {
+            for (const f of failed) {
+                logger.error(`[LLMServiceFactory] Failed to initialize provider ${f.providerId}`, {
+                    error: f.error,
+                });
+            }
+        }
+
+        this.initialized = true;
     }
 
     /**

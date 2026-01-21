@@ -23,23 +23,28 @@ export interface RoutingDecision {
  */
 export class DaemonRouter {
     /**
-     * Check if this daemon should process and trace this event.
+     * Check if this daemon should trace this event.
      *
-     * Use this BEFORE creating telemetry spans to avoid noisy traces
-     * from events that will be dropped. When multiple backends are running,
-     * each receives all events from relays but should only trace events
-     * relevant to their controlled projects.
+     * This balances two concerns:
+     * 1. Avoiding noisy traces when multiple daemons share relays
+     * 2. Allowing project discovery (bootstrap problem)
+     *
+     * The key insight: only trace events that this daemon will actually process.
+     * - Project events: Always trace from whitelisted authors (for discovery)
+     * - Other events: Only trace if we have a runtime OR event can boot one
      *
      * @param event - The event to check
      * @param knownProjects - Map of project IDs this daemon controls
-     * @param agentPubkeyToProjects - Map of agent pubkeys to their project IDs
-     * @param activeRuntimes - Map of active project runtimes
-     * @returns true if the event should be processed and traced by this daemon
+     * @param knownAgentPubkeys - Set of agent pubkeys from project definitions
+     * @param whitelistedPubkeys - Array of pubkeys that can create projects
+     * @param activeRuntimes - Map of currently active project runtimes
+     * @returns true if the event should be traced by this daemon
      */
-    static willThisRoute(
+    static shouldTraceEvent(
         event: NDKEvent,
         knownProjects: Map<string, NDKProject>,
-        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>,
+        knownAgentPubkeys: Set<Hexpubkey>,
+        whitelistedPubkeys: Hexpubkey[],
         activeRuntimes: Map<string, ProjectRuntime>
     ): boolean {
         // Never-route kinds don't need tracing at all
@@ -47,27 +52,92 @@ export class DaemonRouter {
             return false;
         }
 
-        // Project events (kind 31933) are broadcast updates - only trace if it's OUR project
+        // Project events from whitelisted authors should always be traced.
+        // This includes new projects we haven't seen yet (avoiding bootstrap problem).
         if (AgentEventDecoder.isProjectEvent(event)) {
-            const projectId = AgentEventDecoder.extractProjectId(event);
-            return projectId !== null && knownProjects.has(projectId);
+            return whitelistedPubkeys.includes(event.pubkey);
         }
 
-        // Lesson events (kind 4129) - check if they reference an agent we know
+        // Lesson events from our agents should be traced if we have a runtime
+        // for at least one of their projects.
         if (AgentEventDecoder.isLessonEvent(event)) {
-            // Lesson events are authored by agents - check if the author is one of ours
-            return agentPubkeyToProjects.has(event.pubkey);
+            // Check if this agent's project has an active runtime
+            for (const [projectId] of activeRuntimes) {
+                if (knownAgentPubkeys.has(event.pubkey)) {
+                    // Agent is known, check if their project is running
+                    const project = knownProjects.get(projectId);
+                    if (project) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
-        // For all other events, check if we can route to a known project
-        const routing = this.determineTargetProject(
-            event,
-            knownProjects,
-            agentPubkeyToProjects,
-            activeRuntimes
-        );
+        // For other events, we need to determine if we'd actually process them.
+        // Only trace if we have an ACTIVE runtime - this prevents the "other backend" problem
+        // where multiple daemons create traces for events they can't actually handle.
 
-        return routing.projectId !== null;
+        // Check if event is authored by one of our agents with an active runtime
+        if (knownAgentPubkeys.has(event.pubkey)) {
+            // Find if any of our active runtimes contain this agent
+            for (const [, runtime] of activeRuntimes) {
+                const context = runtime.getContext();
+                if (context) {
+                    const agent = context.agentRegistry.getAllAgents().find(a => a.pubkey === event.pubkey);
+                    if (agent) {
+                        return true;
+                    }
+                }
+            }
+            // Agent known but no active runtime - don't trace
+            // The other daemon with the active runtime will handle this agent's events
+            return false;
+        }
+
+        // Check for A-tags to our projects
+        // IMPORTANT: Only trace if we have an ACTIVE runtime for this project.
+        // Having a "known project" isn't enough - the event needs an active runtime to be processed.
+        // Boot-capable events (kind:1, kind:24000) can still boot runtimes, but only if the runtime
+        // would actually be able to handle the event (which requires going through proper routing).
+        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        for (const tag of aTags) {
+            const aTagValue = tag[1];
+            if (aTagValue && knownProjects.has(aTagValue)) {
+                // Project is known - only trace if we have an ACTIVE runtime
+                if (activeRuntimes.has(aTagValue)) {
+                    return true;
+                }
+                // Known project but no active runtime - don't trace
+                // This prevents the "other backend" from creating noise for projects it knows about
+                // but isn't actively managing
+            }
+        }
+
+        // Check for P-tags to our agents
+        // Only trace if the targeted agent has an ACTIVE runtime
+        const pTags = event.tags.filter((t) => t[0] === "p");
+        for (const tag of pTags) {
+            const pubkey = tag[1];
+            if (pubkey && knownAgentPubkeys.has(pubkey as Hexpubkey)) {
+                // Find if this agent's project has an active runtime
+                for (const [, runtime] of activeRuntimes) {
+                    const context = runtime.getContext();
+                    if (context) {
+                        const agent = context.agentRegistry.getAllAgents().find(a => a.pubkey === pubkey);
+                        if (agent) {
+                            return true;
+                        }
+                    }
+                }
+                // Agent known but no active runtime - don't trace
+                // The other daemon with the active runtime will handle this event
+                return false;
+            }
+        }
+
+        // No match - don't trace
+        return false;
     }
 
     /**
@@ -114,7 +184,7 @@ export class DaemonRouter {
         }
 
         // No match found
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "a");
         const pTags = event.tags.filter((t) => t[0] === "p");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
@@ -145,7 +215,7 @@ export class DaemonRouter {
         event: NDKEvent,
         knownProjects: Map<string, NDKProject>
     ): RoutingDecision | null {
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "a");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
         logger.debug("Checking A-tags for project routing", {
@@ -322,10 +392,6 @@ export class DaemonRouter {
      * @returns Project ID string
      */
     static buildProjectId(event: NDKEvent): string {
-        const dTag = event.tags.find((t) => t[0] === "d")?.[1];
-        if (!dTag) {
-            throw new Error("Project event missing d tag");
-        }
-        return `31933:${event.pubkey}:${dTag}`;
+        return event.tagId();
     }
 }

@@ -101,19 +101,6 @@ export function initializeTelemetry(enabled = true, serviceName = DEFAULT_SERVIC
     console.log(
         `[Telemetry] Exporting to ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces"}`
     );
-
-    process.on("SIGTERM", () => {
-        sdk?.shutdown()
-            .then(() => console.log("[Telemetry] Shut down successfully"))
-            .catch(console.error);
-    });
-
-    process.on("SIGINT", () => {
-        sdk?.shutdown()
-            .then(() => console.log("[Telemetry] Shut down successfully"))
-            .catch(console.error)
-            .finally(() => process.exit(0));
-    });
 }
 
 export function shutdownTelemetry(): Promise<void> {
