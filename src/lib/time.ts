@@ -3,7 +3,8 @@
  */
 
 /**
- * Format a timestamp into a human-readable "time ago" string
+ * Format a timestamp into a human-readable "time ago" string (long form)
+ * Example: "2 hours ago", "45 minutes ago"
  */
 export function formatTimeAgo(timestamp: number): string {
     const now = Date.now();
@@ -34,6 +35,29 @@ export function formatTimeAgo(timestamp: number): string {
         return `${seconds} seconds ago`;
     }
     return "just now";
+}
+
+/**
+ * Format a Unix timestamp (in seconds) into a short relative time string
+ * Example: "2h ago", "45m ago", "3d ago"
+ * @param timestampSeconds - Unix timestamp in seconds
+ */
+export function formatRelativeTimeShort(timestampSeconds: number): string {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestampSeconds;
+
+    if (diff < 60) {
+        return "just now";
+    } else if (diff < 3600) {
+        const minutes = Math.floor(diff / 60);
+        return `${minutes}m ago`;
+    } else if (diff < 86400) {
+        const hours = Math.floor(diff / 3600);
+        return `${hours}h ago`;
+    } else {
+        const days = Math.floor(diff / 86400);
+        return `${days}d ago`;
+    }
 }
 
 /**

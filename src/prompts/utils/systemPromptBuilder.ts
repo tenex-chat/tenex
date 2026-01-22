@@ -238,6 +238,12 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add agent home directory context
     systemPromptBuilder.add("agent-home-directory", { agent });
 
+    // Add recent conversations context (short-term memory)
+    systemPromptBuilder.add("recent-conversations", {
+        agent,
+        currentConversationId: conversation.getId(),
+    });
+
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
     if (conversation?.metadata?.delegationChain && conversation.metadata.delegationChain.length > 0) {
         systemPromptBuilder.add("delegation-chain", {
