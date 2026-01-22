@@ -6,6 +6,8 @@ import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
+import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -54,11 +56,47 @@ async function executeDelegate(
   const pendingDelegations: PendingDelegation[] = [];
   const failedRecipients: string[] = [];
 
+  // Get the delegation chain from the current conversation for cycle detection
+  const conversationStore = ConversationStore.get(context.conversationId);
+  const delegationChain = conversationStore?.metadata?.delegationChain;
+
   for (const delegation of delegations) {
     const pubkey = resolveRecipientToPubkey(delegation.recipient);
     if (!pubkey) {
       failedRecipients.push(delegation.recipient);
       continue;
+    }
+
+    // Self-delegation guard: agent can never delegate to itself
+    if (pubkey === context.agent.pubkey) {
+      logger.warn("[delegate] Self-delegation attempted", {
+        recipient: delegation.recipient,
+        agentPubkey: context.agent.pubkey.substring(0, 8),
+      });
+
+      throw new Error(
+        `Self-delegation is not allowed: you cannot delegate a task to yourself. ` +
+        `Complete the task directly or delegate to a different agent.`
+      );
+    }
+
+    // Check for circular delegation using stored chain
+    if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
+      const projectContext = getProjectContext();
+      const targetAgent = projectContext.getAgentByPubkey(pubkey);
+      const targetName = targetAgent?.slug || pubkey.substring(0, 8);
+      const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
+
+      logger.warn("[delegate] Circular delegation detected", {
+        recipient: delegation.recipient,
+        targetPubkey: pubkey.substring(0, 8),
+        chain: chainDisplay,
+      });
+
+      throw new Error(
+        `Circular delegation detected: "${targetName}" is already in the delegation chain (${chainDisplay}). ` +
+        `Delegating to them would create a cycle. Consider completing your own task or delegating to a different agent.`
+      );
     }
 
     // Publish delegation event

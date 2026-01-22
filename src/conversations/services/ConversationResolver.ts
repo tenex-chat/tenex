@@ -3,6 +3,7 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
+import { buildDelegationChain } from "@/utils/delegation-chain";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -151,6 +152,38 @@ export class ConversationResolver {
                     "article.dTag": referencedArticle.dTag,
                     "article.content_length": referencedArticle.content.length,
                 });
+            }
+
+            // Build and store delegation chain if this is a delegated conversation
+            // For delegation events, the first p-tag is always the intended recipient.
+            // getMentionedPubkeys returns p-tags in order, so the first agent pubkey
+            // found is the correct target.
+            const targetAgentPubkey = mentionedPubkeys.find((pubkey) =>
+                Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+            );
+
+            if (targetAgentPubkey) {
+                const delegationChain = buildDelegationChain(
+                    event,
+                    targetAgentPubkey,
+                    projectCtx.project.pubkey // Project owner is the human user
+                );
+
+                if (delegationChain && delegationChain.length > 0) {
+                    conversation.updateMetadata({ delegationChain });
+                    await conversation.save();
+
+                    activeSpan?.addEvent("delegation_chain_built", {
+                        "chain.length": delegationChain.length,
+                        "chain.display": delegationChain.map(c => c.displayName).join(" → "),
+                    });
+
+                    logger.debug("[ConversationResolver] Built delegation chain for new conversation", {
+                        conversationId: conversation.id.substring(0, 8),
+                        chainLength: delegationChain.length,
+                        chain: delegationChain.map(c => c.displayName).join(" → "),
+                    });
+                }
             }
 
             logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
