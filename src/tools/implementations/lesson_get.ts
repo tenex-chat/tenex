@@ -1,17 +1,19 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
-import { RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
+import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { logger } from "@/utils/logger";
+import { normalizeLessonEventId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
 import { z } from "zod";
 
 const lessonGetSchema = z.object({
-    title: z.string().describe("Title of the lesson to retrieve"),
+    eventId: z.string().describe("Nostr event ID of the lesson to retrieve. Supports full 64-char hex ID, 12-char hex prefix, or NIP-19 formats (note1.../nevent1...)."),
 });
 
 type LessonGetInput = z.infer<typeof lessonGetSchema>;
 type LessonGetOutput = {
+    eventId: string;
     title: string;
     lesson: string;
     detailed?: string;
@@ -20,100 +22,14 @@ type LessonGetOutput = {
     hasDetailed: boolean;
 };
 
-// Core implementation - extracted from existing execute function
-async function executeLessonGet(
-    input: LessonGetInput,
-    context: ToolExecutionContext
-): Promise<LessonGetOutput> {
-    const { title } = input;
-
-    logger.info("📖 Agent retrieving lesson by title", {
-        agent: context.agent.name,
-        agentPubkey: context.agent.pubkey,
-        title,
-        conversationId: context.conversationId,
-    });
-
-    // First, try to use RAG for semantic search
-    try {
-        const ragService = RAGService.getInstance();
-
-        // Query the lessons collection using semantic search
-        const searchResults = await ragService.query("lessons", title, 3);
-
-        if (searchResults && searchResults.length > 0) {
-            // Use the best matching result
-            const bestMatch = searchResults[0];
-
-            logger.info("✅ Found lesson via RAG semantic search", {
-                agent: context.agent.name,
-                agentPubkey: context.agent.pubkey,
-                title: bestMatch.document.metadata?.title || title,
-                similarity: bestMatch.score,
-                conversationId: context.conversationId,
-            });
-
-            // Extract lesson data from metadata
-            const metadata = bestMatch.document.metadata || {};
-            return {
-                title: metadata.title || title,
-                lesson: bestMatch.document.content,
-                detailed: metadata.hasDetailed ? bestMatch.document.content : undefined,
-                category: metadata.category,
-                hashtags:
-                    Array.isArray(metadata.hashtags) &&
-                    metadata.hashtags.every((item) => typeof item === "string")
-                        ? (metadata.hashtags as string[])
-                        : undefined,
-                hasDetailed: !!metadata.hasDetailed,
-            };
-        }
-    } catch (error) {
-        logger.debug("RAG search failed or no results, falling back to in-memory search", {
-            error,
-        });
-    }
-
-    // Fallback to in-memory search if RAG fails or returns no results
-    const projectContext = getProjectContext();
-
-    // Get lessons for this agent from memory
-    const agentLessons = projectContext.getLessonsForAgent(context.agent.pubkey);
-
-    // Search for a lesson matching the title (case-insensitive)
-    const normalizedSearchTitle = title.toLowerCase().trim();
-    const matchingLesson = agentLessons.find((lesson) => {
-        const lessonTitle = (lesson.title || "").toLowerCase().trim();
-        return lessonTitle === normalizedSearchTitle;
-    });
-
-    // Determine which lesson to use (exact match or partial)
-    const lesson =
-        matchingLesson ||
-        agentLessons.find((lesson) => {
-            const lessonTitle = (lesson.title || "").toLowerCase().trim();
-            return (
-                lessonTitle.includes(normalizedSearchTitle) ||
-                normalizedSearchTitle.includes(lessonTitle)
-            );
-        });
-
-    if (!lesson) {
-        throw new Error(`No lesson found with title: "${title}"`);
-    }
-
-    // No longer publishing status update - using getHumanReadableContent instead
-
-    logger.info("✅ Successfully retrieved lesson from memory", {
-        agent: context.agent.name,
-        agentPubkey: context.agent.pubkey,
-        title: lesson.title || title,
-        hasDetailed: !!lesson.detailed,
-        conversationId: context.conversationId,
-    });
-
+/**
+ * Formats a lesson into the standard output shape for lesson_get.
+ * Consolidates the output mapping to avoid DRY violations.
+ */
+function formatLessonOutput(lesson: NDKAgentLesson, eventId: string): LessonGetOutput {
     return {
-        title: lesson.title || title,
+        eventId,
+        title: lesson.title || "Untitled",
         lesson: lesson.lesson || lesson.content,
         detailed: lesson.detailed,
         category: lesson.category,
@@ -122,11 +38,73 @@ async function executeLessonGet(
     };
 }
 
+// Core implementation - fetches lesson by event ID
+async function executeLessonGet(
+    input: LessonGetInput,
+    context: ToolExecutionContext
+): Promise<LessonGetOutput> {
+    const { eventId: inputEventId } = input;
+
+    const projectContext = getProjectContext();
+
+    // Get all lessons upfront for both normalization fallback and lookup
+    const allLessons = projectContext.getAllLessons();
+
+    // Normalize the input to a canonical 64-char hex ID
+    // Supports: hex IDs, hex prefixes, note1..., nevent1..., nostr: prefixed versions
+    const normalizeResult = normalizeLessonEventId(inputEventId, allLessons);
+    if (!normalizeResult.success) {
+        throw new Error(normalizeResult.error);
+    }
+
+    const eventId = normalizeResult.eventId;
+
+    logger.info("📖 Agent retrieving lesson by event ID", {
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        inputEventId,
+        resolvedEventId: eventId,
+        conversationId: context.conversationId,
+    });
+
+    // Find lesson by event ID - first try agent-specific, then global
+    const agentLessons = projectContext.getLessonsForAgent(context.agent.pubkey);
+    let lesson = agentLessons.find((l) => l.id === eventId);
+    let isGlobalMatch = false;
+
+    if (!lesson) {
+        // Fall back to global search (in case agent pubkey doesn't match exactly)
+        lesson = allLessons.find((l) => l.id === eventId);
+        isGlobalMatch = true;
+    }
+
+    if (!lesson) {
+        throw new Error(`No lesson found with event ID: "${eventId}"`);
+    }
+
+    logger.info("✅ Successfully retrieved lesson", {
+        agent: context.agent.name,
+        agentPubkey: context.agent.pubkey,
+        eventId,
+        title: lesson.title,
+        hasDetailed: !!lesson.detailed,
+        source: isGlobalMatch ? "global" : "agent",
+        conversationId: context.conversationId,
+    });
+
+    return formatLessonOutput(lesson, eventId);
+}
+
 // AI SDK tool factory
 export function createLessonGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve lessons learned from previous work by title. Lessons are knowledge persisted from past agent experiences. Search is case-insensitive and supports partial matches. Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented. Lessons are agent-specific and stored in memory.",
+            "Retrieve a lesson by its Nostr event ID. Supports multiple formats:\n" +
+            "- Full 64-character hex IDs\n" +
+            "- 12-character hex prefixes\n" +
+            "- NIP-19 formats: note1..., nevent1...\n" +
+            "- nostr: prefixed versions of all the above\n\n" +
+            "Returns full lesson content including detailed explanations if available. Use when you need to recall specific knowledge or patterns that have been previously documented.",
         inputSchema: lessonGetSchema,
         execute: async (input: LessonGetInput) => {
             return await executeLessonGet(input, context);
@@ -134,8 +112,8 @@ export function createLessonGetTool(context: ToolExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ title }: LessonGetInput) => {
-            return `Reading lesson: ${title}`;
+        value: ({ eventId }: LessonGetInput) => {
+            return `Reading lesson: ${eventId}`;
         },
         enumerable: false,
         configurable: true,
