@@ -59,8 +59,20 @@ export class Daemon {
     // Agent pubkey mapping for routing (pubkey -> project IDs)
     private agentPubkeyToProjects = new Map<Hexpubkey, Set<string>>();
 
+    // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
+    private autoBootPatterns: string[] = [];
+
     constructor() {
         this.routingLogger = new EventRoutingLogger();
+    }
+
+    /**
+     * Set patterns for auto-booting projects on discovery
+     * Projects whose d-tag contains any of these patterns will be auto-started
+     */
+    setAutoBootPatterns(patterns: string[]): void {
+        this.autoBootPatterns = patterns;
+        logger.info("Auto-boot patterns configured", { patterns });
     }
 
     /**
@@ -488,10 +500,40 @@ export class Daemon {
         }
 
         // Route to active runtime if exists
-        const runtime = this.runtimeLifecycle?.getRuntime(projectId);
+        let runtime = this.runtimeLifecycle?.getRuntime(projectId);
         if (runtime) {
             await runtime.handleEvent(event);
             await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+        }
+
+        // Auto-boot newly discovered projects that match boot patterns
+        if (isNewProject && !runtime && this.autoBootPatterns.length > 0) {
+            const dTag = event.tags.find((t) => t[0] === "d")?.[1] || "";
+            const matchingPattern = this.autoBootPatterns.find((pattern) =>
+                dTag.toLowerCase().includes(pattern.toLowerCase())
+            );
+
+            if (matchingPattern && this.runtimeLifecycle) {
+                const projectTitle = project.tagValue("title") || dTag;
+                logger.info("Auto-booting project matching pattern", {
+                    projectId,
+                    projectTitle,
+                    dTag,
+                    matchedPattern: matchingPattern,
+                });
+
+                try {
+                    runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
+                    await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                    logger.info("Auto-booted project successfully", { projectId, projectTitle });
+                } catch (error) {
+                    logger.error("Failed to auto-boot project", {
+                        projectId,
+                        projectTitle,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                }
+            }
         }
     }
 
