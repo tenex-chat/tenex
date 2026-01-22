@@ -419,7 +419,10 @@ export class AgentDispatchService {
 
             metadataDebounceManager.onAgentStart(delegationTarget.conversationId);
 
-            await agentExecutor.execute(executionContext);
+            // Execute within span context so agent.execute becomes a child span
+            await otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
+                await agentExecutor.execute(executionContext);
+            });
 
             metadataDebounceManager.schedulePublish(
                 delegationTarget.conversationId,
@@ -570,7 +573,10 @@ export class AgentDispatchService {
                     mcpManager: projectCtx.mcpManager,
                 });
 
-                await agentExecutor.execute(executionContext);
+                // Execute within agentSpan context so agent.execute becomes a child span
+                await otelContext.with(trace.setSpan(otelContext.active(), agentSpan), async () => {
+                    await agentExecutor.execute(executionContext);
+                });
 
                 agentSpan.setStatus({ code: SpanStatusCode.OK });
             } catch (error) {
