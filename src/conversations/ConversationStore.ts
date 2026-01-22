@@ -726,11 +726,17 @@ export class ConversationStore {
 
     // Message Operations
 
-    addMessage(entry: ConversationEntry): void {
+    /**
+     * Add a message to the conversation.
+     * @returns The index of the added message (for later setEventId calls)
+     */
+    addMessage(entry: ConversationEntry): number {
+        const index = this.state.messages.length;
         this.state.messages.push(entry);
         if (entry.eventId) {
             this.eventIdSet.add(entry.eventId);
         }
+        return index;
     }
 
     getAllMessages(): ConversationEntry[] {
