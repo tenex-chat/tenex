@@ -81,6 +81,7 @@
     "duck-duck-scrape": "^2.2.7",
     "ink": "^6.5.0",
     "inquirer": "^12.9.1",
+    "lmdb": "^3.4.4",
     "lodash": "^4.17.21",
     "node-cron": "^4.2.1",
     "node-html-markdown": "^2.0.0",
