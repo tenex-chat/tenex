@@ -15,6 +15,7 @@ import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { PairingManager } from "@/services/pairing";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
+import { prefixKVStore } from "@/services/storage";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
@@ -51,6 +52,7 @@ export class ProjectRuntime {
     private startTime: Date | null = null;
     private lastEventTime: Date | null = null;
     private eventCount = 0;
+    private prefixStoreInitialized = false;
 
     constructor(project: NDKProject, projectsBase: string) {
         this.project = project;
@@ -121,6 +123,20 @@ export class ProjectRuntime {
             // Create project context directly (don't use global singleton)
             this.context = new ProjectContext(this.project, agentRegistry);
 
+            // Initialize prefix KV store and index agent pubkeys
+            // This is best-effort - indexing failures don't block project startup
+            await prefixKVStore.initialize();
+            this.prefixStoreInitialized = true;
+            const agentPubkeysForIndex = Array.from(this.context.agents.values()).map(a => a.pubkey);
+            try {
+                await prefixKVStore.addBatch(agentPubkeysForIndex);
+            } catch (error) {
+                logger.warn("[ProjectRuntime] Failed to index agent pubkeys for prefix lookup", {
+                    projectId: this.projectId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+
             // Load MCP tools from project event
             await this.initializeMCPTools();
 
@@ -172,6 +188,12 @@ export class ProjectRuntime {
             );
             console.log();
         } catch (error) {
+            // Release prefix store reference if we acquired one during startup
+            if (this.prefixStoreInitialized) {
+                await prefixKVStore.close();
+                this.prefixStoreInitialized = false;
+            }
+
             logger.error(`Failed to start project runtime: ${this.projectId}`, {
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined,
@@ -255,6 +277,10 @@ export class ProjectRuntime {
         if (this.context?.pairingManager) {
             this.context.pairingManager.stopAll();
         }
+
+        // Release our reference to the prefix KV store (but don't close it -
+        // it's a daemon-global resource that outlives individual project runtimes)
+        await prefixKVStore.close();
 
         // Clear context
         this.context = null;
