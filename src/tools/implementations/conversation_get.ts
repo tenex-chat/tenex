@@ -5,6 +5,7 @@ import { config } from "@/services/ConfigService";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import { z } from "zod";
@@ -341,7 +342,17 @@ async function executeConversationGet(
         };
     }
 
-    const targetConversationId = input.conversationId;
+    // Resolve prefix to full conversation ID if needed
+    let targetConversationId = input.conversationId;
+    if (isHexPrefix(input.conversationId)) {
+        const resolved = await resolvePrefixToId(input.conversationId);
+        if (!resolved) {
+            throw new Error(
+                `Could not resolve prefix "${input.conversationId}" to a conversation ID. The prefix may be ambiguous or no matching conversation was found.`
+            );
+        }
+        targetConversationId = resolved;
+    }
 
     logger.info("📖 Retrieving conversation", {
         conversationId: targetConversationId,

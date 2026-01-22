@@ -3,6 +3,7 @@ import { getNDK } from "@/nostr";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/utils/event-context";
 import { tool } from "ai";
 import { z } from "zod";
@@ -29,7 +30,19 @@ async function executeDelegateFollowup(
   input: DelegateFollowupInput,
   context: ToolExecutionContext
 ): Promise<DelegateFollowupOutput> {
-  const { delegation_conversation_id, message } = input;
+  const { delegation_conversation_id: inputConversationId, message } = input;
+
+  // Resolve prefix to full delegation conversation ID if needed
+  let delegation_conversation_id = inputConversationId;
+  if (isHexPrefix(inputConversationId)) {
+    const resolved = await resolvePrefixToId(inputConversationId);
+    if (!resolved) {
+      throw new Error(
+        `Could not resolve prefix "${inputConversationId}" to a delegation conversation ID. The prefix may be ambiguous or no matching delegation was found.`
+      );
+    }
+    delegation_conversation_id = resolved;
+  }
 
   // Find the delegation in conversation storage (persists even after RAL is cleared)
   const ralRegistry = RALRegistry.getInstance();

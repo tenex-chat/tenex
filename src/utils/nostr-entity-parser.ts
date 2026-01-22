@@ -5,6 +5,12 @@ import { nip19 } from "nostr-tools";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 /**
+ * The standard prefix length used for shortened hex IDs throughout the system.
+ * Used for delegation IDs, conversation IDs, and other nostr identifiers.
+ */
+export const PREFIX_LENGTH = 12;
+
+/**
  * Parses various Nostr user identifier formats into a pubkey
  * Handles: npub, nprofile, hex pubkey, with or without "nostr:" prefix
  *
