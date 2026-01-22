@@ -25,6 +25,9 @@ export const daemonCommand = new Command("daemon")
     .option("-c, --config <path>", "Path to config file")
     .option("-v, --verbose", "Enable verbose logging")
     .option("-a, --alpha", "Enable alpha mode with bug reporting tools")
+    .option("-b, --boot <pattern>", "Auto-boot projects whose d-tag contains this pattern (can be used multiple times)", (value: string, prev: string[]) => {
+        return prev ? [...prev, value] : [value];
+    }, [])
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
@@ -82,6 +85,13 @@ export const daemonCommand = new Command("daemon")
 
         // Get the daemon instance
         const daemon = getDaemon();
+
+        // Set boot patterns if provided
+        const bootPatterns: string[] = options.boot || [];
+        if (bootPatterns.length > 0) {
+            daemon.setAutoBootPatterns(bootPatterns);
+            console.log(chalk.yellow(`🚀 Auto-boot patterns: ${bootPatterns.join(", ")}`));
+        }
 
         // Register scheduler shutdown with daemon's shutdown handlers
         daemon.addShutdownHandler(async () => {
