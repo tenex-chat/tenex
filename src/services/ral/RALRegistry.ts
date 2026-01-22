@@ -2,6 +2,7 @@ import { trace } from "@opentelemetry/api";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { logger } from "@/utils/logger";
+import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type {
   InjectionResult,
   InjectionRole,
@@ -867,7 +868,8 @@ export class RALRegistry {
   /**
    * Build a message containing delegation results for injection into the RAL.
    * Shows complete conversation transcript for each delegation.
-   * Uses full delegation conversation IDs so agents can use them with delegate_followup.
+   * Uses shortened delegation IDs (PREFIX_LENGTH chars) for display; agents can use
+   * these prefixes directly with delegate_followup which will resolve them.
    * Format: [@sender -> @recipient]: message content
    */
   async buildDelegationResultsMessage(
@@ -890,7 +892,7 @@ export class RALRegistry {
       const recipientName = await pubkeyService.getName(c.recipientPubkey);
       lines.push(`**@${recipientName} has finished and returned their final response.**`);
       lines.push("");
-      lines.push(`## Delegation ID: ${c.delegationConversationId}`);
+      lines.push(`## Delegation ID: ${c.delegationConversationId.substring(0, PREFIX_LENGTH)}`);
       lines.push("");
       lines.push("### Transcript:");
 
@@ -907,7 +909,7 @@ export class RALRegistry {
       lines.push("## Still Pending");
       for (const p of pending) {
         const recipientName = await pubkeyService.getName(p.recipientPubkey);
-        lines.push(`- @${recipientName} (${p.delegationConversationId})`);
+        lines.push(`- @${recipientName} (${p.delegationConversationId.substring(0, PREFIX_LENGTH)})`);
       }
       lines.push("");
     }
