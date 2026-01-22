@@ -22,6 +22,8 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
             const category = lesson.category;
             const hashtags = lesson.hashtags;
             const hasDetailed = !!lesson.detailed;
+            // Get 12-char prefix for convenient lookup (lesson_get accepts prefixes)
+            const idPrefix = lesson.id ? lesson.id.substring(0, 12) : null;
 
             // Build metadata line
             let metadata = "";
@@ -30,7 +32,11 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
             if (hashtags && hashtags.length > 0) metadata += ` #${hashtags.join(" #")}`;
 
             // Create a concise format for each lesson
-            return `#${index + 1}: ${title} ${metadata}\n${content}${hasDetailed ? `\n↳ Use lesson_get("${title}") for detailed version` : ""}`;
+            // Show ID prefix for lesson_get if detailed version available
+            const detailedHint = hasDetailed && idPrefix
+                ? `\n↳ Use lesson_get("${idPrefix}") for detailed version`
+                : "";
+            return `#${index + 1}: ${title} ${metadata}\n${content}${detailedHint}`;
         })
         .join("\n\n");
 
