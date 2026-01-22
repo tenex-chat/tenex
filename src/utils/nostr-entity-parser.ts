@@ -1,5 +1,8 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import { type NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
+import { prefixKVStore } from "@/services/storage";
+import { nip19 } from "nostr-tools";
+import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 
 /**
  * Parses various Nostr user identifier formats into a pubkey
@@ -120,5 +123,163 @@ export function normalizeNostrIdentifier(input: string | undefined): string | nu
     }
 
     return null;
+}
+
+/**
+ * Checks if a string looks like a 12-char hex prefix (potential shorthand ID).
+ * Note: This is a pure format check - it doesn't do any lookup.
+ * For resolving prefixes to actual IDs, use the appropriate service.
+ */
+export function isHexPrefix(input: string | undefined): boolean {
+    if (!input) return false;
+    return /^[0-9a-fA-F]{12}$/.test(input.trim());
+}
+
+/**
+ * Resolves a 12-character hex prefix to a full 64-character ID using PrefixKVStore.
+ * This enables shorthand references to event IDs and pubkeys.
+ *
+ * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
+ * validating whether it's an event ID or pubkey. For resolving specifically to
+ * agent pubkeys, use `resolveRecipientToPubkey` from AgentResolution service.
+ *
+ * @param prefix - A 12-character hex string prefix
+ * @returns The full 64-character ID, or null if not found or invalid input
+ */
+export function resolvePrefixToId(prefix: string | undefined): string | null {
+    if (!prefix) return null;
+
+    const cleaned = prefix.trim().toLowerCase();
+
+    // Must be exactly 12 hex characters
+    if (!/^[0-9a-f]{12}$/.test(cleaned)) {
+        return null;
+    }
+
+    // Check if store is initialized (best-effort lookup)
+    if (!prefixKVStore.isInitialized()) {
+        console.debug("[resolvePrefixToId] PrefixKVStore not initialized, cannot resolve prefix");
+        return null;
+    }
+
+    // Wrap lookup in try/catch - LMDB can throw
+    try {
+        return prefixKVStore.lookup(cleaned);
+    } catch (error) {
+        console.debug("[resolvePrefixToId] Prefix lookup failed:", cleaned, error);
+        return null;
+    }
+}
+
+/**
+ * Result type for normalizeLessonEventId - either success with eventId or error with message
+ */
+export type NormalizeLessonEventIdResult =
+    | { success: true; eventId: string }
+    | { success: false; error: string; errorType: "invalid_format" | "prefix_not_found" | "store_not_initialized" };
+
+/**
+ * Normalizes various lesson event ID formats to a canonical 64-char lowercase hex ID.
+ *
+ * Accepts:
+ * - Full 64-character hex IDs
+ * - 12-character hex prefixes (resolved via PrefixKVStore or in-memory fallback)
+ * - NIP-19 formats: note1..., nevent1...
+ * - nostr: prefixed versions of all the above
+ *
+ * This bridges the contract mismatch between lesson_learn (which emits NIP-19 encoded IDs)
+ * and lesson_get (which needs hex IDs for lookup).
+ *
+ * @param input - The event ID in any supported format
+ * @param allLessons - Optional array of all lessons for in-memory prefix fallback
+ * @returns Result object with either normalized eventId or error details
+ */
+export function normalizeLessonEventId(
+    input: string,
+    allLessons?: NDKAgentLesson[]
+): NormalizeLessonEventIdResult {
+    const trimmed = input.trim();
+
+    // Strip nostr: prefix if present
+    const cleaned = trimmed.startsWith("nostr:") ? trimmed.slice(6) : trimmed;
+
+    // 1. Check for full 64-char hex ID
+    if (/^[0-9a-f]{64}$/i.test(cleaned)) {
+        return { success: true, eventId: cleaned.toLowerCase() };
+    }
+
+    // 2. Check for 12-char hex prefix
+    if (isHexPrefix(cleaned)) {
+        const prefix = cleaned.toLowerCase();
+
+        // Try PrefixKVStore first
+        if (prefixKVStore.isInitialized()) {
+            try {
+                const resolved = prefixKVStore.lookup(prefix);
+                if (resolved) {
+                    return { success: true, eventId: resolved };
+                }
+            } catch (error) {
+                console.debug("[normalizeLessonEventId] PrefixKVStore lookup error:", error);
+                // Fall through to in-memory fallback
+            }
+        }
+
+        // In-memory fallback: scan lessons for unique prefix match
+        if (allLessons && allLessons.length > 0) {
+            const matches = allLessons.filter((l) => l.id?.toLowerCase().startsWith(prefix));
+            if (matches.length === 1 && matches[0].id) {
+                return { success: true, eventId: matches[0].id.toLowerCase() };
+            }
+            if (matches.length > 1) {
+                return {
+                    success: false,
+                    error: `Prefix "${input}" is ambiguous - matches ${matches.length} lessons. Use a longer prefix or full event ID.`,
+                    errorType: "prefix_not_found",
+                };
+            }
+        }
+
+        // Distinguish between "store not initialized" vs "not found"
+        if (!prefixKVStore.isInitialized()) {
+            return {
+                success: false,
+                error: `Could not resolve prefix "${input}" - PrefixKVStore is not initialized and no in-memory matches found.`,
+                errorType: "store_not_initialized",
+            };
+        }
+
+        return {
+            success: false,
+            error: `Could not resolve prefix "${input}" to a full event ID. No matching lesson found.`,
+            errorType: "prefix_not_found",
+        };
+    }
+
+    // 3. Try NIP-19 decoding (note1..., nevent1...)
+    try {
+        const decoded = nip19.decode(cleaned);
+        if (decoded.type === "note") {
+            return { success: true, eventId: (decoded.data as string).toLowerCase() };
+        }
+        if (decoded.type === "nevent") {
+            return { success: true, eventId: (decoded.data as { id: string }).id.toLowerCase() };
+        }
+        // Other NIP-19 types (npub, nprofile, naddr) are not valid event IDs
+        return {
+            success: false,
+            error: `Invalid lesson event ID format: "${input}". Got NIP-19 type "${decoded.type}" but expected "note" or "nevent".`,
+            errorType: "invalid_format",
+        };
+    } catch {
+        // Not a valid NIP-19 format, fall through to error
+    }
+
+    // 4. Invalid format
+    return {
+        success: false,
+        error: `Invalid lesson event ID format: "${input}". Expected 64-char hex, 12-char hex prefix, or NIP-19 (note1.../nevent1...).`,
+        errorType: "invalid_format",
+    };
 }
 
