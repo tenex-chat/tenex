@@ -509,6 +509,125 @@ export class ConversationStore {
     }
 
     /**
+     * Lightweight metadata for recent conversation indexing.
+     * Avoids loading full conversation state into memory.
+     */
+    static readLightweightMetadata(conversationId: string): {
+        id: string;
+        lastActivity: number;
+        title?: string;
+        summary?: string;
+        lastUserMessage?: string;
+    } | null {
+        if (!ConversationStore.projectId) return null;
+
+        const filePath = join(
+            ConversationStore.basePath,
+            ConversationStore.projectId,
+            "conversations",
+            `${conversationId}.json`
+        );
+
+        try {
+            if (!existsSync(filePath)) return null;
+
+            const content = readFileSync(filePath, "utf-8");
+            const parsed = JSON.parse(content);
+
+            // Get last activity from the last message timestamp
+            const messages = parsed.messages ?? [];
+            const lastMessage = messages[messages.length - 1];
+            const lastActivity = lastMessage?.timestamp || 0;
+
+            return {
+                id: conversationId,
+                lastActivity,
+                title: parsed.metadata?.title,
+                summary: parsed.metadata?.summary,
+                lastUserMessage: parsed.metadata?.last_user_message,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Read all messages from a conversation file without caching to global store.
+     * Used for filtering/checking participation without memory growth.
+     */
+    static readMessagesFromDisk(conversationId: string): ConversationEntry[] | null {
+        if (!ConversationStore.projectId) return null;
+
+        const filePath = join(
+            ConversationStore.basePath,
+            ConversationStore.projectId,
+            "conversations",
+            `${conversationId}.json`
+        );
+
+        try {
+            if (!existsSync(filePath)) return null;
+
+            const content = readFileSync(filePath, "utf-8");
+            const parsed = JSON.parse(content);
+
+            return parsed.messages ?? [];
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Read conversation preview data (metadata + participation check) in a single disk read.
+     * This is more efficient than calling readLightweightMetadata + readMessagesFromDisk separately.
+     *
+     * @param conversationId - The conversation ID
+     * @param agentPubkey - The agent pubkey to check participation for
+     * @returns Preview data including metadata and participation status, or null if not found
+     */
+    static readConversationPreview(conversationId: string, agentPubkey: string): {
+        id: string;
+        lastActivity: number;
+        title?: string;
+        summary?: string;
+        agentParticipated: boolean;
+    } | null {
+        if (!ConversationStore.projectId) return null;
+
+        const filePath = join(
+            ConversationStore.basePath,
+            ConversationStore.projectId,
+            "conversations",
+            `${conversationId}.json`
+        );
+
+        try {
+            if (!existsSync(filePath)) return null;
+
+            const content = readFileSync(filePath, "utf-8");
+            const parsed = JSON.parse(content);
+
+            // Extract messages for participation check and lastActivity
+            const messages: ConversationEntry[] = parsed.messages ?? [];
+            const lastMessage = messages[messages.length - 1];
+            const lastActivity = lastMessage?.timestamp || 0;
+
+            // Check if agent participated
+            const agentParticipated = messages.some(msg => msg.pubkey === agentPubkey);
+
+            return {
+                id: conversationId,
+                lastActivity,
+                title: parsed.metadata?.title,
+                summary: parsed.metadata?.summary,
+                agentParticipated,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * Reset static state (for testing).
      */
     static reset(): void {
