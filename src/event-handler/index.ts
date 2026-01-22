@@ -10,6 +10,7 @@ import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
+import { prefixKVStore } from "@/services/storage";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
@@ -17,6 +18,35 @@ import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
+
+/**
+ * Index event ID and pubkey into the prefix KV store.
+ * Skips ephemeral events (kinds 20000-29999) since their IDs are transient.
+ *
+ * This is a best-effort operation - indexing failures are logged but do NOT
+ * abort event handling. The prefix index is a convenience feature, not critical.
+ */
+async function indexEventForPrefixLookup(event: NDKEvent): Promise<void> {
+    const kind = event.kind ?? 0;
+
+    // Skip ephemeral events (kinds 20000-29999)
+    if (kind >= 20000 && kind < 30000) {
+        return;
+    }
+
+    // Index both event ID and pubkey - best effort, don't let failures bubble up
+    if (prefixKVStore.isInitialized()) {
+        try {
+            await prefixKVStore.addBatch([event.id, event.pubkey]);
+        } catch (error) {
+            // Log but don't abort - indexing is a sidecar feature
+            logger.warn("[EventHandler] Failed to index event for prefix lookup", {
+                eventId: event.id?.substring(0, 12),
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+}
 
 const IGNORED_EVENT_KINDS = [
     NDKKind.Metadata,
@@ -36,6 +66,9 @@ export class EventHandler {
     async handleEvent(event: NDKEvent): Promise<void> {
         // Ignore ephemeral status and typing indicator events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
+
+        // Index event ID and pubkey for prefix lookups
+        await indexEventForPrefixLookup(event);
 
         // EMERGENCY STOP: If a whitelisted pubkey sends "EMERGENCY STOP", exit immediately
         if (event.content === "EMERGENCY STOP") {

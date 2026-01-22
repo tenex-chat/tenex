@@ -6,6 +6,7 @@ import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
+import { prefixKVStore } from "@/services/storage";
 import { Lockfile } from "@/utils/lockfile";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { logger } from "@/utils/logger";
@@ -693,6 +694,9 @@ export class Daemon {
                     await this.runtimeLifecycle.stopAllRuntimes();
                 }
 
+                // Close the global prefix KV store (after all runtimes are stopped)
+                await prefixKVStore.forceClose();
+
                 for (const handler of this.shutdownHandlers) {
                     await handler();
                 }
@@ -927,6 +931,9 @@ export class Daemon {
         if (this.runtimeLifecycle) {
             await this.runtimeLifecycle.stopAllRuntimes();
         }
+
+        // Close the global prefix KV store (after all runtimes are stopped)
+        await prefixKVStore.forceClose();
 
         // Clear state
         this.knownProjects.clear();
