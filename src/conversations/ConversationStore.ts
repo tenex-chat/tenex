@@ -18,7 +18,6 @@ import { getTenexBasePath } from "@/constants";
 import { trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
-import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
 import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
@@ -34,7 +33,7 @@ export interface ConversationEntry {
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
-    suppressAttribution?: boolean; // Skip [@sender -> @recipient] prefix for system-style messages
+    suppressAttribution?: boolean; // @deprecated - No longer used. Attribution prefixes are never added to LLM input.
 }
 
 export interface Injection {
@@ -42,7 +41,21 @@ export interface Injection {
     role: "user" | "system";
     content: string;
     queuedAt: number;
+    /** @deprecated - No longer used. Attribution prefixes are never added to LLM input. */
     suppressAttribution?: boolean;
+}
+
+/**
+ * Represents a participant in the delegation chain.
+ * Can be either a human user or an agent.
+ */
+export interface DelegationChainEntry {
+    /** The pubkey of the participant */
+    pubkey: string;
+    /** The display name (agent slug or "User") */
+    displayName: string;
+    /** Whether this is the project owner/human user */
+    isUser: boolean;
 }
 
 export interface ConversationMetadata {
@@ -60,6 +73,12 @@ export interface ConversationMetadata {
         content: string;
         dTag: string;
     };
+    /**
+     * The delegation chain showing who initiated this conversation.
+     * First entry is the original initiator (typically User), last entry is the current agent.
+     * Example: [User, pm-wip, execution-coordinator, claude-code]
+     */
+    delegationChain?: DelegationChainEntry[];
 }
 
 interface RalTracker {
@@ -869,8 +888,8 @@ export class ConversationStore {
      * - user: All other messages (regardless of targeting)
      * - tool: Tool results (fixed)
      *
-     * The [@sender -> @recipient] prefix provides attribution context,
-     * so role no longer needs to distinguish between targeted and observing.
+     * Note: Attribution context is not added to LLM input. Role simply distinguishes
+     * between the agent's own messages and messages from others.
      */
     private deriveRole(
         entry: ConversationEntry,
@@ -889,41 +908,23 @@ export class ConversationStore {
     }
 
     /**
-     * Format content with [@sender -> @recipient] attribution prefix.
-     */
-    private async formatWithAttribution(
-        entry: ConversationEntry,
-        content: string
-    ): Promise<string> {
-        const pubkeyService = getPubkeyService();
-        const senderName = await pubkeyService.getName(entry.pubkey);
-
-        // Build recipient names if targeted
-        let prefix: string;
-        if (entry.targetedPubkeys && entry.targetedPubkeys.length > 0) {
-            const recipientNames = await Promise.all(
-                entry.targetedPubkeys.map((pk) => pubkeyService.getName(pk))
-            );
-            prefix = `[@${senderName} -> @${recipientNames.join(", @")}]`;
-        } else {
-            // Broadcast - no recipient
-            prefix = `[@${senderName}]`;
-        }
-
-        return `${prefix} ${content}`;
-    }
-
-    /**
      * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+     *
+     * Note: Attribution prefixes ([@sender -> @recipient]) are intentionally NOT
+     * included in LLM input. Less capable models were copying the prefix format
+     * in their outputs. Since we now use flatter conversations instead of nested
+     * ones with multiple participants, attribution is less important for the LLM.
+     *
+     * For human-readable attribution, see conversation_get tool which uses formatLine().
      *
      * For text messages containing image URLs, the content is converted to
      * multimodal format (TextPart + ImagePart array) for AI SDK compatibility.
      */
-    private async entryToMessage(
+    private entryToMessage(
         entry: ConversationEntry,
         viewingAgentPubkey: string,
         truncationContext?: TruncationContext
-    ): Promise<ModelMessage> {
+    ): ModelMessage {
         const role = this.deriveRole(entry, viewingAgentPubkey);
 
         if (entry.messageType === "tool-call" && entry.toolData) {
@@ -938,14 +939,10 @@ export class ConversationStore {
             return { role: "tool", content: toolData };
         }
 
-        // Text message - add attribution prefix
-        const formattedContent = entry.suppressAttribution
-            ? entry.content
-            : await this.formatWithAttribution(entry, entry.content);
-
+        // Text message - return raw content (no attribution prefix)
         // Convert to multimodal format if content contains image URLs
         // This allows the AI SDK to fetch and process images automatically
-        const content = convertToMultimodalContent(formattedContent);
+        const content = convertToMultimodalContent(entry.content);
 
         return { role, content } as ModelMessage;
     }
@@ -1000,7 +997,7 @@ export class ConversationStore {
 
             // User messages (no RAL) - include with derived role
             if (!entry.ral) {
-                result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
                 continue;
             }
 
@@ -1008,18 +1005,18 @@ export class ConversationStore {
             if (entry.pubkey === agentPubkey) {
                 if (entry.ral === ralNumber) {
                     // Current RAL - include
-                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
+                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
                 } else if (activeRals.has(entry.ral)) {
                     // Other active RAL - skip to avoid message duplication
                     continue;
                 } else {
                     // Completed RAL - include all
-                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
+                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
                 }
             } else {
                 // Other agent's message - only include text content
                 if (entry.messageType === "text" && entry.content) {
-                    result.push(await this.entryToMessage(entry, agentPubkey, truncationContext));
+                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
                 }
             }
         }

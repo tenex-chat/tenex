@@ -238,6 +238,14 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add agent home directory context
     systemPromptBuilder.add("agent-home-directory", { agent });
 
+    // Add delegation chain if present (shows agent their position in multi-agent workflow)
+    if (conversation?.metadata?.delegationChain && conversation.metadata.delegationChain.length > 0) {
+        systemPromptBuilder.add("delegation-chain", {
+            delegationChain: conversation.metadata.delegationChain,
+            currentAgentPubkey: agent.pubkey,
+        });
+    }
+
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
