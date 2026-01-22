@@ -49,13 +49,21 @@ export class DaemonRouter {
     ): boolean {
         // Never-route kinds don't need tracing at all
         if (AgentEventDecoder.isNeverRouteKind(event)) {
+            logger.debug("shouldTraceEvent: never-route kind", { kind: event.kind });
             return false;
         }
 
         // Project events from whitelisted authors should always be traced.
         // This includes new projects we haven't seen yet (avoiding bootstrap problem).
         if (AgentEventDecoder.isProjectEvent(event)) {
-            return whitelistedPubkeys.includes(event.pubkey);
+            const isWhitelisted = whitelistedPubkeys.includes(event.pubkey);
+            logger.debug("shouldTraceEvent: project event", {
+                kind: event.kind,
+                author: event.pubkey.slice(0, 8),
+                isWhitelisted,
+                whitelistedCount: whitelistedPubkeys.length,
+            });
+            return isWhitelisted;
         }
 
         // Lesson events from our agents should be traced if we have a runtime
@@ -75,8 +83,20 @@ export class DaemonRouter {
         }
 
         // For other events, we need to determine if we'd actually process them.
-        // Only trace if we have an ACTIVE runtime - this prevents the "other backend" problem
-        // where multiple daemons create traces for events they can't actually handle.
+        // This balances two concerns:
+        // 1. Boot events (kind:24000) must be able to start projects
+        // 2. Regular events should only trace if we have an active runtime (prevents "other backend" noise)
+
+        // kind:24000 (TenexBootProject) is an EXPLICIT boot request - always allow if project is known
+        const isExplicitBootRequest = event.kind === 24000;
+
+        if (isExplicitBootRequest) {
+            logger.debug("shouldTraceEvent: boot request event", {
+                kind: event.kind,
+                author: event.pubkey.slice(0, 8),
+                aTags: event.tags.filter(t => t[0] === "A" || t[0] === "a").map(t => t[1]),
+            });
+        }
 
         // Check if event is authored by one of our agents with an active runtime
         if (knownAgentPubkeys.has(event.pubkey)) {
@@ -91,31 +111,36 @@ export class DaemonRouter {
                 }
             }
             // Agent known but no active runtime - don't trace
-            // The other daemon with the active runtime will handle this agent's events
             return false;
         }
 
         // Check for A-tags to our projects
-        // IMPORTANT: Only trace if we have an ACTIVE runtime for this project.
-        // Having a "known project" isn't enough - the event needs an active runtime to be processed.
-        // Boot-capable events (kind:1, kind:24000) can still boot runtimes, but only if the runtime
-        // would actually be able to handle the event (which requires going through proper routing).
         const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
         for (const tag of aTags) {
             const aTagValue = tag[1];
             if (aTagValue && knownProjects.has(aTagValue)) {
-                // Project is known - only trace if we have an ACTIVE runtime
-                if (activeRuntimes.has(aTagValue)) {
+                // Project is known - trace if:
+                // 1. We have an active runtime, OR
+                // 2. This is an explicit boot request (kind:24000)
+                const hasRuntime = activeRuntimes.has(aTagValue);
+                if (hasRuntime || isExplicitBootRequest) {
+                    logger.debug("shouldTraceEvent: accepting via A-tag", {
+                        kind: event.kind,
+                        projectId: aTagValue.slice(0, 30),
+                        hasRuntime,
+                        isExplicitBootRequest,
+                    });
                     return true;
                 }
-                // Known project but no active runtime - don't trace
-                // This prevents the "other backend" from creating noise for projects it knows about
-                // but isn't actively managing
+                // Known project but no active runtime and not a boot request - don't trace
+                logger.debug("shouldTraceEvent: rejecting - known project but no runtime", {
+                    kind: event.kind,
+                    projectId: aTagValue.slice(0, 30),
+                });
             }
         }
 
         // Check for P-tags to our agents
-        // Only trace if the targeted agent has an ACTIVE runtime
         const pTags = event.tags.filter((t) => t[0] === "p");
         for (const tag of pTags) {
             const pubkey = tag[1];
@@ -131,12 +156,19 @@ export class DaemonRouter {
                     }
                 }
                 // Agent known but no active runtime - don't trace
-                // The other daemon with the active runtime will handle this event
                 return false;
             }
         }
 
         // No match - don't trace
+        logger.debug("shouldTraceEvent: no match found", {
+            kind: event.kind,
+            author: event.pubkey.slice(0, 8),
+            aTags: aTags.map(t => t[1]?.slice(0, 20)),
+            pTags: pTags.map(t => t[1]?.slice(0, 8)),
+            knownProjectsCount: knownProjects.size,
+            activeRuntimesCount: activeRuntimes.size,
+        });
         return false;
     }
 
