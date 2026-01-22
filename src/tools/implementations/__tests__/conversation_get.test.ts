@@ -26,7 +26,7 @@ mock.module("@/llm", () => ({
         createService: mock(),
     },
 }));
- 
+
 
 // Store mock conversation data
 let mockConversationData: {
@@ -89,10 +89,19 @@ describe("conversation_get Tool", () => {
 
     afterEach(() => {
         loadConfigSpy.mockRestore();
+        // Reset mockGetConversation to its original implementation
+        mockGetConversation.mockImplementation(() => mockConversationData ? {
+            id: mockConversationData.id,
+            title: mockConversationData.title,
+            metadata: mockConversationData.metadata,
+            executionTime: mockConversationData.executionTime,
+            getAllMessages: mockGetAllMessages,
+            getMessageCount: mockGetMessageCount,
+        } : null);
     });
 
-    describe("Tool Results Filtering", () => {
-        it("should skip tool-result messages by default", async () => {
+    describe("Output Format", () => {
+        it("should return messages as a formatted multi-line string", async () => {
             mockConversationData = {
                 id: "test-conversation-id",
                 title: "Test Conversation",
@@ -100,33 +109,204 @@ describe("conversation_get Tool", () => {
                     {
                         messageType: "text",
                         content: "Hello",
+                        pubkey: "user-pub1",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Hi there!",
+                        pubkey: "agent-pu",
+                        eventId: "event-2",
+                        timestamp: 1700000002000, // +2 seconds
+                        ral: {},
+                        targetedPubkeys: ["user-pub1"],
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            expect(result.success).toBe(true);
+            const messages = (result.conversation as any).messages;
+
+            // Should be a string, not an array
+            expect(typeof messages).toBe("string");
+
+            // Should contain formatted lines
+            const lines = messages.split("\n");
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toBe("[+0] [@user-pub] Hello");
+            expect(lines[1]).toBe("[+2] [@agent-pu -> @user-pub] Hi there!");
+        });
+
+        it("should not include metadata field", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                title: "Test Conversation",
+                metadata: { some: "data" },
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "event-1",
-                        timestamp: 1700000000,
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            expect(result.success).toBe(true);
+            expect((result.conversation as any).metadata).toBeUndefined();
+        });
+
+        it("should format relative timestamps in seconds", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000, // Base
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000010000, // +10 seconds
+                    },
+                    {
+                        messageType: "text",
+                        content: "Third",
+                        pubkey: "user-pubkey",
+                        eventId: "event-3",
+                        timestamp: 1700000065000, // +65 seconds
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines[0]).toContain("[+0]");
+            expect(lines[1]).toContain("[+10]");
+            expect(lines[2]).toContain("[+65]");
+        });
+    });
+
+    describe("Arrow Syntax", () => {
+        it("should show no arrow when there is no target", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "No target message",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).toBe("[+0] [@user-pub] No target message");
+            expect(messages).not.toContain("->");
+        });
+
+        it("should show single arrow for single target", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Single target",
+                        pubkey: "sender-pk",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                        targetedPubkeys: ["target-pk"],
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).toBe("[+0] [@sender-p -> @target-p] Single target");
+        });
+
+        it("should show comma-separated targets for multiple targets", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Multi target",
+                        pubkey: "sender-pk",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                        targetedPubkeys: ["target-1p", "target-2p"],
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).toBe("[+0] [@sender-p -> @target-1, @target-2] Multi target");
+        });
+    });
+
+    describe("Tool Call and Result Merging", () => {
+        it("should skip tool-results by default (no merging)", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
                     },
                     {
                         messageType: "tool-call",
                         content: "",
                         toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
-                        pubkey: "agent-pubkey",
+                        pubkey: "agent-pub",
                         eventId: "event-2",
-                        timestamp: 1700000001,
+                        timestamp: 1700000001000,
                         ral: {},
                     },
                     {
                         messageType: "tool-result",
                         content: "",
-                        toolData: [{ output: "some result data" }],
-                        pubkey: "system-pubkey",
+                        toolData: [{ output: "some result" }],
+                        pubkey: "agent-pub",
                         eventId: "event-3",
-                        timestamp: 1700000002,
+                        timestamp: 1700000002000,
                     },
                     {
                         messageType: "text",
                         content: "Thanks!",
                         pubkey: "user-pubkey",
                         eventId: "event-4",
-                        timestamp: 1700000003,
+                        timestamp: 1700000003000,
                     },
                 ],
             };
@@ -134,144 +314,156 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({ conversationId: "test-conversation-id" });
 
-            expect(result.success).toBe(true);
             const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
 
-            // Should have 3 messages (text, tool-call, text) - tool-result is skipped
-            expect(messages).toHaveLength(3);
-            expect(messages.map((m: any) => m.messageType)).toEqual([
-                "text",
-                "tool-call",
-                "text",
-            ]);
+            // Should have 3 lines: text, tool-call (no result), text
+            expect(lines).toHaveLength(3);
+            expect(lines[0]).toContain("Hello");
+            expect(lines[1]).toContain("[tool-use test_tool");
+            expect(lines[1]).not.toContain("[tool-result");
+            expect(lines[2]).toContain("Thanks!");
         });
 
-        it("should include tool-result messages when includeToolResults=true", async () => {
+        it("should merge tool-call and tool-result into single line when includeToolResults=true", async () => {
             mockConversationData = {
                 id: "test-conversation-id",
-                title: "Test Conversation",
+                messages: [
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "shell", input: { command: "date" } }],
+                        pubkey: "agent-pub",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "2020-01-01" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should be merged into single line
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("[tool-use shell");
+            expect(lines[0]).toContain("[tool-result");
+            expect(lines[0]).toContain("2020-01-01");
+        });
+
+        it("should handle standalone tool-result when not preceded by tool-call", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "standalone result" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).toContain("[tool-result");
+            expect(messages).toContain("standalone result");
+        });
+    });
+
+    describe("Line Truncation (1500 char limit)", () => {
+        it("should not truncate lines under 1500 chars", async () => {
+            const content = "x".repeat(100);
+            mockConversationData = {
+                id: "test-conversation-id",
                 messages: [
                     {
                         messageType: "text",
-                        content: "Hello",
+                        content,
                         pubkey: "user-pubkey",
                         eventId: "event-1",
-                        timestamp: 1700000000,
+                        timestamp: 1700000000000,
                     },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).not.toContain("[truncated");
+            expect(messages).toContain(content);
+        });
+
+        it("should truncate lines over 1500 chars", async () => {
+            // Create content that will make line exceed 1500 chars
+            const content = "x".repeat(1600);
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content,
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            expect(messages).toContain("[truncated");
+            expect(messages.length).toBeLessThan(content.length + 100); // Significantly shorter
+        });
+
+        it("should truncate tool-call + tool-result merged lines", async () => {
+            // Create large tool data that will exceed 1500 chars when merged
+            const largeArgs = { data: "y".repeat(800) };
+            const largeResult = "z".repeat(800);
+
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
                     {
                         messageType: "tool-call",
                         content: "",
-                        toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
-                        pubkey: "agent-pubkey",
+                        toolData: [{ toolName: "big_tool", input: largeArgs }],
+                        pubkey: "agent-pub",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: largeResult }],
+                        pubkey: "agent-pub",
                         eventId: "event-2",
-                        timestamp: 1700000001,
-                        ral: {},
-                    },
-                    {
-                        messageType: "tool-result",
-                        content: "",
-                        toolData: [{ output: "some result data" }],
-                        pubkey: "system-pubkey",
-                        eventId: "event-3",
-                        timestamp: 1700000002,
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "test-conversation-id",
-                includeToolResults: true,
-            });
-
-            expect(result.success).toBe(true);
-            const messages = (result.conversation as any).messages;
-
-            // Should have all 3 messages including tool-result
-            expect(messages).toHaveLength(3);
-            expect(messages.map((m: any) => m.messageType)).toEqual([
-                "text",
-                "tool-call",
-                "tool-result",
-            ]);
-        });
-    });
-
-    describe("Tool Call Truncation (1.5k limit)", () => {
-        it("should not truncate tool calls under 1.5k chars", async () => {
-            const smallToolData = { toolName: "test", input: { small: "data" } };
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    {
-                        messageType: "tool-call",
-                        content: "",
-                        toolData: [smallToolData],
-                        pubkey: "agent-pubkey",
-                        eventId: "event-1",
-                        timestamp: 1700000000,
-                        ral: {},
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ conversationId: "test-conversation-id" });
-
-            const messages = (result.conversation as any).messages;
-            expect(messages[0].content).toBe(JSON.stringify([smallToolData]));
-            expect(messages[0].content).not.toContain("[truncated");
-        });
-
-        it("should truncate tool calls over 1.5k chars", async () => {
-            // Create tool data that exceeds 1.5k chars
-            const largeInput = "x".repeat(2000);
-            const largeToolData = [{ toolName: "test", input: { data: largeInput } }];
-            const fullContent = JSON.stringify(largeToolData);
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    {
-                        messageType: "tool-call",
-                        content: "",
-                        toolData: largeToolData,
-                        pubkey: "agent-pubkey",
-                        eventId: "event-1",
-                        timestamp: 1700000000,
-                        ral: {},
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({ conversationId: "test-conversation-id" });
-
-            const messages = (result.conversation as any).messages;
-            expect(messages[0].content).toContain("[truncated");
-            expect(messages[0].content.length).toBeLessThan(fullContent.length);
-
-            // Verify truncation message includes char count
-            const truncatedChars = fullContent.length - 1500;
-            expect(messages[0].content).toContain(`[truncated ${truncatedChars} chars]`);
-        });
-    });
-
-    describe("Tool Result Truncation (10k per result, 50k total budget)", () => {
-        it("should not truncate tool results under 10k chars", async () => {
-            const smallResultData = [{ output: "small result" }];
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    {
-                        messageType: "tool-result",
-                        content: "",
-                        toolData: smallResultData,
-                        pubkey: "system-pubkey",
-                        eventId: "event-1",
-                        timestamp: 1700000000,
+                        timestamp: 1700000001000,
                     },
                 ],
             };
@@ -283,125 +475,13 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            expect(messages[0].content).toBe(JSON.stringify(smallResultData));
-            expect(messages[0].content).not.toContain("[truncated");
-        });
-
-        it("should truncate individual tool results over 10k chars", async () => {
-            // Create result data that exceeds 10k chars
-            const largeOutput = "y".repeat(15000);
-            const largeResultData = [{ output: largeOutput }];
-            const fullContent = JSON.stringify(largeResultData);
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    {
-                        messageType: "tool-result",
-                        content: "",
-                        toolData: largeResultData,
-                        pubkey: "system-pubkey",
-                        eventId: "event-1",
-                        timestamp: 1700000000,
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "test-conversation-id",
-                includeToolResults: true,
-            });
-
-            const messages = (result.conversation as any).messages;
-            expect(messages[0].content).toContain("[truncated");
-
-            // Should be truncated to ~10k + truncation message
-            const truncatedChars = fullContent.length - 10000;
-            expect(messages[0].content).toContain(`[truncated ${truncatedChars} chars]`);
-        });
-
-        it("should respect 50k total budget across multiple tool results", async () => {
-            // Create 6 tool results, each 10k chars = 60k total, exceeds 50k budget
-            const createLargeResult = (index: number) => ({
-                messageType: "tool-result" as const,
-                content: "",
-                toolData: [{ output: `result-${index}-${"z".repeat(9990)}` }],
-                pubkey: "system-pubkey",
-                eventId: `event-${index}`,
-                timestamp: 1700000000 + index,
-            });
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    createLargeResult(1),
-                    createLargeResult(2),
-                    createLargeResult(3),
-                    createLargeResult(4),
-                    createLargeResult(5),
-                    createLargeResult(6),
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "test-conversation-id",
-                includeToolResults: true,
-            });
-
-            const messages = (result.conversation as any).messages;
-            expect(messages).toHaveLength(6);
-
-            // First 5 results should fit within budget (5 * 10k = 50k)
-            // 6th result should show budget exhausted
-            const lastMessage = messages[5];
-            expect(lastMessage.content).toContain("[budget exhausted");
-        });
-
-        it("should show budget exhausted message with char count", async () => {
-            // Create enough results to exhaust budget
-            const largeOutput = "a".repeat(20000);
-            const createLargeResult = (index: number) => ({
-                messageType: "tool-result" as const,
-                content: "",
-                toolData: [{ output: `${index}-${largeOutput}` }],
-                pubkey: "system-pubkey",
-                eventId: `event-${index}`,
-                timestamp: 1700000000 + index,
-            });
-
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    createLargeResult(1),
-                    createLargeResult(2),
-                    createLargeResult(3),
-                    createLargeResult(4),
-                    createLargeResult(5),
-                    createLargeResult(6),
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "test-conversation-id",
-                includeToolResults: true,
-            });
-
-            const messages = (result.conversation as any).messages;
-
-            // Find the first message that shows budget exhausted
-            const exhaustedMessage = messages.find((m: any) =>
-                m.content.includes("[budget exhausted")
-            );
-            expect(exhaustedMessage).toBeDefined();
-            expect(exhaustedMessage.content).toMatch(/\[budget exhausted, \d+ chars omitted\]/);
+            // Check for either line-level truncation "[truncated" or param-level truncation "(N chars truncated)"
+            expect(messages).toMatch(/\[truncated|chars truncated\)/);
         });
     });
 
     describe("Message Count", () => {
-        it("should report original message count even when tool results are filtered", async () => {
+        it("should report original message count", async () => {
             mockConversationData = {
                 id: "test-conversation-id",
                 messages: [
@@ -410,23 +490,23 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "event-1",
-                        timestamp: 1700000000,
+                        timestamp: 1700000000000,
                     },
                     {
                         messageType: "tool-result",
                         content: "",
                         toolData: [{ output: "result" }],
-                        pubkey: "system-pubkey",
+                        pubkey: "agent-pub",
                         eventId: "event-2",
-                        timestamp: 1700000001,
+                        timestamp: 1700000001000,
                     },
                     {
                         messageType: "tool-result",
                         content: "",
                         toolData: [{ output: "result2" }],
-                        pubkey: "system-pubkey",
+                        pubkey: "agent-pub",
                         eventId: "event-3",
-                        timestamp: 1700000002,
+                        timestamp: 1700000002000,
                     },
                 ],
             };
@@ -436,62 +516,6 @@ describe("conversation_get Tool", () => {
 
             // messageCount should reflect original count (3)
             expect((result.conversation as any).messageCount).toBe(3);
-            // But messages array should only have 1 (the text message)
-            expect((result.conversation as any).messages).toHaveLength(1);
-        });
-    });
-
-    describe("Role Assignment", () => {
-        it("should assign correct roles to different message types", async () => {
-            mockConversationData = {
-                id: "test-conversation-id",
-                messages: [
-                    {
-                        messageType: "text",
-                        content: "User message",
-                        pubkey: "user-pubkey",
-                        eventId: "event-1",
-                        timestamp: 1700000000,
-                    },
-                    {
-                        messageType: "text",
-                        content: "Agent message",
-                        pubkey: "agent-pubkey",
-                        eventId: "event-2",
-                        timestamp: 1700000001,
-                        ral: {}, // Has RAL = agent message
-                    },
-                    {
-                        messageType: "tool-call",
-                        content: "",
-                        toolData: [{ toolName: "test" }],
-                        pubkey: "agent-pubkey",
-                        eventId: "event-3",
-                        timestamp: 1700000002,
-                        ral: {},
-                    },
-                    {
-                        messageType: "tool-result",
-                        content: "",
-                        toolData: [{ output: "result" }],
-                        pubkey: "system-pubkey",
-                        eventId: "event-4",
-                        timestamp: 1700000003,
-                    },
-                ],
-            };
-
-            const tool = createConversationGetTool(mockContext);
-            const result = await tool.execute({
-                conversationId: "test-conversation-id",
-                includeToolResults: true,
-            });
-
-            const messages = (result.conversation as any).messages;
-            expect(messages[0].role).toBe("user");      // text without ral
-            expect(messages[1].role).toBe("assistant"); // text with ral
-            expect(messages[2].role).toBe("assistant"); // tool-call
-            expect(messages[3].role).toBe("tool");      // tool-result
         });
     });
 
@@ -506,6 +530,66 @@ describe("conversation_get Tool", () => {
 
             expect(result.success).toBe(false);
             expect(result.message).toContain("not found");
+        });
+    });
+
+    describe("Multiple Tool Calls", () => {
+        it("should handle multiple tool calls in sequence", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "tool1", input: {} }],
+                        pubkey: "agent-pub",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "result1" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "tool2", input: {} }],
+                        pubkey: "agent-pub",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "result2" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-4",
+                        timestamp: 1700000003000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should merge each pair, resulting in 2 lines
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("tool1");
+            expect(lines[0]).toContain("result1");
+            expect(lines[1]).toContain("tool2");
+            expect(lines[1]).toContain("result2");
         });
     });
 });
