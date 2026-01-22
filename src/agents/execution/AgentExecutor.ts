@@ -1251,7 +1251,8 @@ export class AgentExecutor {
 
         llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
             // Add tool-result message to ConversationStore for persistence
-            conversationStore.addMessage({
+            // Capture the message index so we can link it with the tool event ID later
+            const toolResultMessageIndex = conversationStore.addMessage({
                 pubkey: context.agent.pubkey,
                 ral: ralNumber,
                 content: "",
@@ -1311,12 +1312,19 @@ export class AgentExecutor {
                 });
             }
 
-            await toolTracker.completeExecution({
+            // Complete tracking and get the tool event ID
+            const toolEventId = await toolTracker.completeExecution({
                 toolCallId: event.toolCallId,
                 result: event.result,
                 error: event.error ?? false,
                 agentPubkey: context.agent.pubkey,
             });
+
+            // Link the tool event ID to the ConversationStore message
+            // This enables truncated tool results to be fetched via their eventId
+            if (toolEventId) {
+                conversationStore.setEventId(toolResultMessageIndex, toolEventId);
+            }
         });
 
         const executionSpan = trace.getActiveSpan();

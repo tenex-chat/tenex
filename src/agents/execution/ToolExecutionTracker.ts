@@ -259,13 +259,13 @@ export class ToolExecutionTracker {
      * 3. Persists the complete tool message to filesystem
      *
      * @param options - Configuration for completing the execution
-     * @returns Promise that resolves when the execution is completed and persisted
+     * @returns Promise that resolves with the tool event ID (for linking to ConversationStore messages)
      *
      * @remarks
      * If the toolCallId is not found (e.g., due to a race condition or error),
      * this method logs a warning but does not throw an error
      */
-    async completeExecution(options: CompleteExecutionOptions): Promise<void> {
+    async completeExecution(options: CompleteExecutionOptions): Promise<string | undefined> {
         const { toolCallId, result, error, agentPubkey } = options;
 
         logger.debug("[ToolExecutionTracker] Completing tool execution", {
@@ -290,7 +290,7 @@ export class ToolExecutionTracker {
                 });
             }
 
-            return;
+            return undefined;
         }
 
         // Log errors explicitly for visibility
@@ -409,6 +409,9 @@ export class ToolExecutionTracker {
             toolEventId: execution.toolEventId,
             error,
         });
+
+        // Return the tool event ID so callers can link it to ConversationStore messages
+        return execution.toolEventId;
     }
 
     /**
