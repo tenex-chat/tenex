@@ -439,6 +439,118 @@ describe("RALRegistry", () => {
         registry.setCurrentTool("nonexistent", conversationId, 1, "fs_read");
       }).not.toThrow();
     });
+
+    it("should update activeTools for backward compatibility (ACTING state)", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
+
+      const state = registry.getState(agentPubkey, conversationId);
+      // setCurrentTool should now update activeTools so ACTING state is reachable
+      expect(state?.activeTools.size).toBe(1);
+      expect(state?.currentTool).toBe("fs_read");
+    });
+
+    it("should clear activeTools when tool is set to undefined", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
+      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, undefined);
+
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.size).toBe(0);
+      expect(state?.currentTool).toBeUndefined();
+    });
+  });
+
+  describe("setToolActive (concurrent tool tracking)", () => {
+    it("should track multiple concurrent tools", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start two tools concurrently
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.size).toBe(2);
+      expect(state?.activeTools.has("tool-call-1")).toBe(true);
+      expect(state?.activeTools.has("tool-call-2")).toBe(true);
+      // currentTool should be set to the most recent tool
+      expect(state?.currentTool).toBe("web_fetch");
+    });
+
+    it("should update currentTool to remaining tool when one completes", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start two tools
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+
+      // Complete the second tool (current one)
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.size).toBe(1);
+      expect(state?.activeTools.has("tool-call-1")).toBe(true);
+      // currentTool should now point to the remaining active tool
+      expect(state?.currentTool).toBe("fs_read");
+    });
+
+    it("should clear currentTool and toolStartedAt when all tools complete", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start and complete two tools
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", false);
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.size).toBe(0);
+      expect(state?.currentTool).toBeUndefined();
+      expect(state?.toolStartedAt).toBeUndefined();
+    });
+
+    it("should store tool name in activeTools map", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.get("tool-call-1")).toBe("fs_read");
+    });
+
+    it("should handle setToolActive for non-existent RAL gracefully", () => {
+      expect(() => {
+        registry.setToolActive("nonexistent", conversationId, 1, "tool-call-1", true, "fs_read");
+      }).not.toThrow();
+    });
+  });
+
+  describe("clearToolFallback", () => {
+    it("should clear a tool and update currentTool to remaining", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start two tools
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+
+      // Clear the second tool via fallback
+      const cleared = registry.clearToolFallback(agentPubkey, conversationId, ralNumber, "tool-call-2");
+
+      expect(cleared).toBe(true);
+      const state = registry.getState(agentPubkey, conversationId);
+      expect(state?.activeTools.size).toBe(1);
+      expect(state?.currentTool).toBe("fs_read");
+    });
+
+    it("should return false for non-existent tool", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      const cleared = registry.clearToolFallback(agentPubkey, conversationId, ralNumber, "nonexistent");
+
+      expect(cleared).toBe(false);
+    });
   });
 
   describe("abort controller management", () => {

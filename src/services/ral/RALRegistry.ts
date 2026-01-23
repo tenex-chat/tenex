@@ -175,7 +175,7 @@ export class RALRegistry {
       conversationId,
       queuedInjections: [],
       isStreaming: false,
-      activeTools: new Set(),
+      activeTools: new Map(),
       createdAt: now,
       lastActivityAt: now,
       originalTriggeringEventId,
@@ -705,16 +705,43 @@ export class RALRegistry {
   /**
    * Set current tool being executed.
    * @deprecated Use setToolActive instead for proper concurrent tool tracking.
+   *
+   * This method maintains backward compatibility by:
+   * - Using a synthetic toolCallId based on tool name for activeTools tracking
+   * - Ensuring legacy callers can still reach ACTING state
    */
   setCurrentTool(agentPubkey: string, conversationId: string, ralNumber: number, toolName: string | undefined): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return;
 
-    // Maintain backward compatibility with currentTool
-    ral.currentTool = toolName;
-    ral.toolStartedAt = toolName ? Date.now() : undefined;
+    // Use a synthetic toolCallId for legacy callers that don't have a real toolCallId
+    const legacyToolCallId = "__legacy_tool__";
 
-    // Derive state from activeTools (not the deprecated currentTool)
+    if (toolName) {
+      // Tool is starting - add to activeTools and set currentTool
+      ral.activeTools.set(legacyToolCallId, toolName);
+      ral.currentTool = toolName;
+      ral.toolStartedAt = Date.now();
+    } else {
+      // Tool is ending - remove from activeTools
+      ral.activeTools.delete(legacyToolCallId);
+      // Update currentTool to another active tool if any remain
+      if (ral.activeTools.size === 0) {
+        ral.currentTool = undefined;
+        ral.toolStartedAt = undefined;
+      } else {
+        // Set currentTool to one of the remaining active tools
+        const remainingToolName = ral.activeTools.values().next().value;
+        ral.currentTool = remainingToolName;
+      }
+      // Clean up abort controller
+      const key = this.makeKey(agentPubkey, conversationId);
+      this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
+    }
+
+    ral.lastActivityAt = Date.now();
+
+    // Derive state from activeTools:
     // - If any tools are active: ACTING
     // - If no tools but streaming: STREAMING
     // - If no tools and not streaming: REASONING
@@ -728,11 +755,6 @@ export class RALRegistry {
     }
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
-
-    if (!toolName) {
-      const key = this.makeKey(agentPubkey, conversationId);
-      this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
-    }
   }
 
   /**
@@ -755,16 +777,21 @@ export class RALRegistry {
     if (!ral) return;
 
     if (isActive) {
-      ral.activeTools.add(toolCallId);
+      // Store toolCallId -> toolName mapping
+      ral.activeTools.set(toolCallId, toolName ?? "unknown");
       ral.toolStartedAt = Date.now();
       // Maintain backward compatibility - set currentTool to most recent tool name
       ral.currentTool = toolName;
     } else {
       ral.activeTools.delete(toolCallId);
-      // Only clear currentTool if no tools remain active
+      // Update currentTool to another active tool if any remain, otherwise clear
       if (ral.activeTools.size === 0) {
         ral.currentTool = undefined;
         ral.toolStartedAt = undefined;
+      } else {
+        // Set currentTool to one of the remaining active tools
+        const remainingToolName = ral.activeTools.values().next().value;
+        ral.currentTool = remainingToolName;
       }
     }
 
@@ -810,16 +837,20 @@ export class RALRegistry {
     if (!ral) return false;
 
     if (!ral.activeTools.has(toolCallId)) {
-      return false; // Tool wasn't in active set
+      return false; // Tool wasn't in active map
     }
 
     ral.activeTools.delete(toolCallId);
     ral.lastActivityAt = Date.now();
 
-    // Clear currentTool if no tools remain
+    // Update currentTool to another active tool if any remain, otherwise clear
     if (ral.activeTools.size === 0) {
       ral.currentTool = undefined;
       ral.toolStartedAt = undefined;
+    } else {
+      // Set currentTool to one of the remaining active tools
+      const remainingToolName = ral.activeTools.values().next().value;
+      ral.currentTool = remainingToolName;
     }
 
     // Update state
