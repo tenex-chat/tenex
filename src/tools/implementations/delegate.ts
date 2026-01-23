@@ -67,19 +67,6 @@ async function executeDelegate(
       continue;
     }
 
-    // Self-delegation guard: agent can never delegate to itself
-    if (pubkey === context.agent.pubkey) {
-      logger.warn("[delegate] Self-delegation attempted", {
-        recipient: delegation.recipient,
-        agentPubkey: context.agent.pubkey.substring(0, 8),
-      });
-
-      throw new Error(
-        `Self-delegation is not allowed: you cannot delegate a task to yourself. ` +
-        `Complete the task directly or delegate to a different agent.`
-      );
-    }
-
     // Check for circular delegation using stored chain
     if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
       const projectContext = getProjectContext();
