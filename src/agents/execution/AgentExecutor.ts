@@ -1248,8 +1248,15 @@ export class AgentExecutor {
                 )
             );
 
-            // Update RAL state to ACTING - tool is now executing
-            ralRegistry.setCurrentTool(context.agent.pubkey, context.conversationId, ralNumber, event.toolName);
+            // Track tool as active by its unique toolCallId (supports concurrent tool execution)
+            ralRegistry.setToolActive(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber,
+                event.toolCallId,
+                true, // isActive
+                event.toolName
+            );
 
             // Add tool-call message to ConversationStore for persistence
             conversationStore.addMessage({
@@ -1361,8 +1368,15 @@ export class AgentExecutor {
                 conversationStore.setEventId(toolResultMessageIndex, toolEventId);
             }
 
-            // Clear current tool - execution finished, state transitions back to STREAMING or REASONING
-            ralRegistry.setCurrentTool(context.agent.pubkey, context.conversationId, ralNumber, undefined);
+            // Mark tool as no longer active - state transitions back to STREAMING or REASONING if no other tools running
+            ralRegistry.setToolActive(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber,
+                event.toolCallId,
+                false, // isActive
+                event.toolName
+            );
         });
 
         const executionSpan = trace.getActiveSpan();

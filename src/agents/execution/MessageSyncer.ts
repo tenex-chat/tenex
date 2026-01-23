@@ -1,5 +1,6 @@
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { RALRegistry } from "@/services/ral";
 
 /**
  * Syncs messages from AI SDK's step.messages to ConversationStore.
@@ -7,13 +8,20 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
  *
  * This handles cases where tool-did-execute events don't fire (provider-dependent,
  * e.g., Ollama doesn't emit tool-error chunks), ensuring tool results are never lost.
+ *
+ * Also clears tool tracking state as a fallback when tool results are observed
+ * without corresponding tool-did-execute events.
  */
 export class MessageSyncer {
+    private conversationId: string;
+
     constructor(
         private conversationStore: ConversationStore,
         private agentPubkey: string,
         private ralNumber: number
-    ) {}
+    ) {
+        this.conversationId = conversationStore.id;
+    }
 
     /**
      * Sync tool messages from AI SDK to ConversationStore.
@@ -47,6 +55,8 @@ export class MessageSyncer {
     }
 
     private syncToolResults(content: unknown[]): void {
+        const ralRegistry = RALRegistry.getInstance();
+
         for (const part of content) {
             if (this.isToolResultPart(part)) {
                 if (!this.conversationStore.hasToolResult(part.toolCallId)) {
@@ -58,6 +68,16 @@ export class MessageSyncer {
                         toolData: [part],
                     });
                 }
+
+                // Fallback: Clear tool from activeTools if it wasn't cleared by tool-did-execute.
+                // This handles cases where tool-did-execute doesn't fire (provider-dependent).
+                // If the tool was already cleared, this is a no-op.
+                ralRegistry.clearToolFallback(
+                    this.agentPubkey,
+                    this.conversationId,
+                    this.ralNumber,
+                    part.toolCallId
+                );
             }
         }
     }
