@@ -1102,6 +1102,54 @@ export class ConversationStore {
         let prunedDelegationCompletions = 0;
         const totalMessages = this.state.messages.length;
 
+        // ============================================================================
+        // TOOL-CALL / TOOL-RESULT ORDERING FIX
+        // ============================================================================
+        //
+        // The AI SDK (Vercel AI) validates that every tool-call message is immediately
+        // followed by its corresponding tool-result message. If any other message type
+        // (user, assistant text, system) appears between a tool-call and its result,
+        // the SDK throws: "Tool result is missing for tool call <id>"
+        //
+        // This validation happens in convertToLanguageModelPrompt() before sending
+        // messages to the LLM provider.
+        //
+        // PROBLEM 1: User messages arriving mid-tool-execution
+        // ----------------------------------------------------
+        // Messages are stored in ConversationStore in chronological order:
+        //   1. Agent issues tool-call (stored immediately)
+        //   2. User sends a new message (stored while tool executes)
+        //   3. Tool completes, result stored
+        //
+        // This results in: [tool-call, user-message, tool-result]
+        // But AI SDK requires: [tool-call, tool-result, user-message]
+        //
+        // PROBLEM 2: Orphaned tool-calls from RAL interruption
+        // ----------------------------------------------------
+        // When a RAL is aborted mid-execution (e.g., due to a delegation completion
+        // triggering an injection), tool-calls may be stored but their results never
+        // recorded. The tool continues executing in the background, but the stream
+        // handler that would record the result has been torn down.
+        //
+        // When the RAL resumes, it has orphaned tool-calls with no matching results.
+        //
+        // SOLUTION:
+        // ---------
+        // 1. Track pending tool-calls (those without results yet)
+        // 2. Defer non-tool messages while tool-calls are pending
+        // 3. Flush deferred messages only after all pending results arrive
+        // 4. For orphaned tool-calls (no result ever stored), inject synthetic
+        //    error results to satisfy the AI SDK validation
+        //
+        // ============================================================================
+
+        // Map of toolCallId -> {toolName, resultIndex} for pending tool-calls
+        // resultIndex tracks where the synthetic result should be inserted if needed
+        const pendingToolCalls = new Map<string, { toolName: string; resultIndex: number }>();
+
+        // Messages deferred because they arrived while tool-calls were pending
+        const deferredMessages: Array<{ entry: ConversationEntry; truncationContext: TruncationContext }> = [];
+
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
             const ral = getDelegationCompletionRal(entry);
@@ -1121,30 +1169,123 @@ export class ConversationStore {
                 eventId: entry.eventId,
             };
 
-            // User messages (no RAL) - include with derived role
-            if (!entry.ral) {
+            // Helper to check if entry should be included
+            const shouldInclude = (): boolean => {
+                // User messages (no RAL) - always include
+                if (!entry.ral) return true;
+
+                // Same agent
+                if (entry.pubkey === agentPubkey) {
+                    if (entry.ral === ralNumber) return true; // Current RAL
+                    if (activeRals.has(entry.ral)) return false; // Other active RAL - skip
+                    return true; // Completed RAL
+                }
+
+                // Other agent's message - only include text content
+                return entry.messageType === "text" && !!entry.content;
+            };
+
+            if (!shouldInclude()) continue;
+
+            // TOOL-CALL: Add to result and register as pending
+            // We track where this tool-call is in the result array so we can insert
+            // a synthetic result at the right position if the tool-call is orphaned
+            if (entry.messageType === "tool-call" && entry.toolData) {
+                const resultIndex = result.length;
                 result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+
+                for (const part of entry.toolData as ToolCallPart[]) {
+                    pendingToolCalls.set(part.toolCallId, {
+                        toolName: part.toolName,
+                        // Result should be inserted right after the tool-call message
+                        resultIndex: resultIndex + 1,
+                    });
+                }
                 continue;
             }
 
-            // Same agent
-            if (entry.pubkey === agentPubkey) {
-                if (entry.ral === ralNumber) {
-                    // Current RAL - include
-                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
-                } else if (activeRals.has(entry.ral)) {
-                    // Other active RAL - skip to avoid message duplication
-                    continue;
-                } else {
-                    // Completed RAL - include all
-                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+            // TOOL-RESULT: Add to result and mark tool-call as resolved
+            // Once all pending tool-calls have results, we can safely flush
+            // any deferred messages that were waiting
+            if (entry.messageType === "tool-result" && entry.toolData) {
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+
+                for (const part of entry.toolData as ToolResultPart[]) {
+                    pendingToolCalls.delete(part.toolCallId);
                 }
-            } else {
-                // Other agent's message - only include text content
-                if (entry.messageType === "text" && entry.content) {
-                    result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+
+                // All tool-calls resolved - flush deferred messages now
+                // This ensures user messages that arrived mid-execution appear
+                // AFTER the tool-call/result pair, not between them
+                if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
+                    for (const deferred of deferredMessages) {
+                        result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext));
+                    }
+                    deferredMessages.length = 0;
                 }
+                continue;
             }
+
+            // NON-TOOL MESSAGE (user/assistant text, system, etc.)
+            // If tool-calls are pending, defer this message - it must appear AFTER
+            // all pending tool-calls have their results to satisfy AI SDK validation
+            if (pendingToolCalls.size > 0) {
+                deferredMessages.push({ entry, truncationContext });
+            } else {
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+            }
+        }
+
+        // ============================================================================
+        // ORPHANED TOOL-CALL RECONCILIATION
+        // ============================================================================
+        // If we reach the end of all entries and still have pending tool-calls,
+        // those are orphans - tool-calls whose results were never stored.
+        //
+        // This happens when:
+        // - RAL was aborted mid-execution (e.g., executor.aborted_for_injection)
+        // - Tool execution failed catastrophically before result could be recorded
+        // - Race condition between stream teardown and tool completion
+        //
+        // Without synthetic results, the AI SDK will throw:
+        // "Tool result is missing for tool call <id>"
+        //
+        // We insert synthetic error results at the correct positions (right after
+        // each orphaned tool-call) to maintain valid message structure.
+        // ============================================================================
+        if (pendingToolCalls.size > 0) {
+            // Sort by resultIndex descending so splice operations don't shift indices
+            const orphans = Array.from(pendingToolCalls.entries())
+                .sort((a, b) => b[1].resultIndex - a[1].resultIndex);
+
+            for (const [toolCallId, info] of orphans) {
+                const syntheticResult: ModelMessage = {
+                    role: "tool",
+                    content: [{
+                        type: "tool-result" as const,
+                        toolCallId,
+                        toolName: info.toolName,
+                        output: {
+                            type: "text" as const,
+                            value: "[Error: Tool execution was interrupted - result unavailable]",
+                        },
+                    }] as ToolResultPart[],
+                };
+                // Insert synthetic result right after the tool-call
+                result.splice(info.resultIndex, 0, syntheticResult);
+            }
+
+            // Log for debugging/monitoring orphaned tool-calls in production
+            trace.getActiveSpan?.()?.addEvent("conversation.orphaned_tool_calls_reconciled", {
+                "orphan.count": pendingToolCalls.size,
+                "orphan.tool_call_ids": Array.from(pendingToolCalls.keys()).join(","),
+            });
+        }
+
+        // Flush any remaining deferred messages
+        // (edge case: messages deferred but no tool-results ever arrived)
+        for (const deferred of deferredMessages) {
+            result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext));
         }
 
         if (prunedDelegationCompletions > 0) {

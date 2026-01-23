@@ -732,7 +732,8 @@ export class RALRegistry {
         ral.toolStartedAt = undefined;
       } else {
         // Set currentTool to one of the remaining active tools, including its start time
-        const remainingToolInfo = ral.activeTools.values().next().value;
+        // Safe to use ! assertion: we're in the else branch where activeTools.size > 0
+        const remainingToolInfo = ral.activeTools.values().next().value!;
         ral.currentTool = remainingToolInfo.name;
         ral.toolStartedAt = remainingToolInfo.startedAt;
       }
@@ -793,7 +794,8 @@ export class RALRegistry {
         ral.toolStartedAt = undefined;
       } else {
         // Set currentTool to one of the remaining active tools, including its start time
-        const remainingToolInfo = ral.activeTools.values().next().value;
+        // Safe to use ! assertion: we're in the else branch where activeTools.size > 0
+        const remainingToolInfo = ral.activeTools.values().next().value!;
         ral.currentTool = remainingToolInfo.name;
         ral.toolStartedAt = remainingToolInfo.startedAt;
       }
@@ -853,7 +855,7 @@ export class RALRegistry {
       ral.toolStartedAt = undefined;
     } else {
       // Set currentTool to one of the remaining active tools, including its start time
-      const remainingToolInfo = ral.activeTools.values().next().value;
+      const remainingToolInfo = ral.activeTools.values().next().value!;
       ral.currentTool = remainingToolInfo.name;
       ral.toolStartedAt = remainingToolInfo.startedAt;
     }
