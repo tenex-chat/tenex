@@ -511,13 +511,40 @@ describe("RALRegistry", () => {
       expect(state?.toolStartedAt).toBeUndefined();
     });
 
-    it("should store tool name in activeTools map", () => {
+    it("should store tool info in activeTools map", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
 
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
 
       const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.activeTools.get("tool-call-1")).toBe("fs_read");
+      const toolInfo = state?.activeTools.get("tool-call-1");
+      expect(toolInfo?.name).toBe("fs_read");
+      expect(toolInfo?.startedAt).toBeDefined();
+    });
+
+    it("should update toolStartedAt to remaining tool's start time when one completes", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start first tool
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
+      const state1 = registry.getState(agentPubkey, conversationId);
+      const firstToolStartTime = state1?.toolStartedAt;
+
+      // Small delay to ensure different timestamps
+      const start = Date.now();
+      while (Date.now() - start < 2) {}
+
+      // Start second tool
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
+
+      // Complete the second tool (current one)
+      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+
+      const state2 = registry.getState(agentPubkey, conversationId);
+      // currentTool should now point to the remaining active tool
+      expect(state2?.currentTool).toBe("fs_read");
+      // toolStartedAt should match the first tool's start time, not the second
+      expect(state2?.toolStartedAt).toBe(firstToolStartTime);
     });
 
     it("should handle setToolActive for non-existent RAL gracefully", () => {
