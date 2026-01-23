@@ -5,13 +5,28 @@
  * in multi-agent workflows. The delegation chain shows agents their position in
  * the hierarchy, helping them understand context and prevent circular delegations.
  *
- * Example chain format:
- * [User -> pm-wip] [conversation 4f69d3302cf2]
- *   -> [pm-wip -> execution-coordinator] [conversation 8a2bc1e45678]
+ * Example chain:
+ * [User -> architect-orchestrator] [conversation 4f69d3302cf2]
+ *   -> [architect-orchestrator -> execution-coordinator] [conversation 8a2bc1e45678]
  *     -> [execution-coordinator -> claude-code (you)] [conversation 1234567890ab]
  *
- * Semantics: The conversation ID displayed represents the DELEGATEE's conversation -
- * i.e., the conversation that was created when the delegation happened.
+ * SEMANTIC MODEL (Option B - Store on Recipient):
+ * Each entry's `conversationId` represents "the conversation where this agent was
+ * DELEGATED TO" (i.e., where they received the delegation from their delegator).
+ *
+ * Example with conversations:
+ *   User (in user-conv) delegates to pm-wip
+ *   pm-wip (in pm-conv) delegates to exec
+ *   exec (in exec-conv) delegates to claude-code
+ *
+ * Chain entries:
+ *   - User: conversationId = undefined (origin, wasn't delegated)
+ *   - pm-wip: conversationId = user-conv (was delegated to in user-conv)
+ *   - exec: conversationId = pm-conv (was delegated to in pm-conv)
+ *   - claude-code: conversationId = exec-conv (was delegated to in exec-conv)
+ *
+ * When displaying [A -> B] [conversation X], X = B.conversationId
+ * (the conversation where B was delegated to, i.e., where A delegated to B)
  */
 
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -20,11 +35,10 @@ import { getProjectContext, isProjectContextInitialized } from "@/services/proje
 import { logger } from "@/utils/logger";
 
 /**
- * Truncate a conversation ID to 12 characters for display.
+ * Truncate a conversation ID to 12 hex characters for display.
  */
-export const CONVERSATION_ID_DISPLAY_LENGTH = 12;
-export function truncateConversationId(id: string): string {
-    return id.substring(0, CONVERSATION_ID_DISPLAY_LENGTH);
+export function truncateConversationId(conversationId: string): string {
+    return conversationId.substring(0, 12);
 }
 
 /**
@@ -34,6 +48,11 @@ export function truncateConversationId(id: string): string {
  * 1. Looking for the "delegation" tag in the event (points to parent conversation)
  * 2. Recursively following parent conversations to build the full chain
  * 3. Including the sender as the immediate delegator
+ *
+ * SEMANTICS: Each entry's `conversationId` represents "the conversation where this agent
+ * was DELEGATED TO". When displaying [A -> B] [conversation X], X comes from B.conversationId.
+ * - Origin agent has no conversationId (they started the chain, weren't delegated)
+ * - Current agent's conversationId = parentConversationId (where they were delegated to)
  *
  * @param event - The event that triggered this conversation
  * @param currentAgentPubkey - The pubkey of the agent receiving the delegation
@@ -86,24 +105,35 @@ export function buildDelegationChain(
     };
 
     // Build the chain by walking up through parent conversations
-    // Algorithm: Walk backwards from parent to origin, collecting entries,
-    // then reverse at the end to get oldest-first ordering.
     //
-    // Key semantic: conversationId represents the conversation the DELEGATEE is in.
-    // When we find the initiator of conversation X, they delegated to create X,
-    // so their "delegatee conversation" IS X (currentParentId at that moment).
+    // ALGORITHM: We walk from child to parent conversations, tracking where each
+    // agent was "delegated TO". When we visit conversation C:
+    // - The initiator of C was delegated TO in the conversation that led us TO C
+    //   (i.e., the conversation we came from, which had a delegation tag pointing to C)
+    //
+    // Example: claude-code <- exec-conv <- pm-conv <- user-conv
+    // - claude was delegated TO in exec-conv (parentConversationId)
+    // - We visit exec-conv, find initiator=exec. exec was delegated TO in pm-conv
+    //   (the conv that pointed to exec-conv)
+    // - We visit pm-conv, find initiator=pm. pm was delegated TO in user-conv
+    // - We visit user-conv, find initiator=User. User is origin (no conversationId)
+
     let currentParentId: string | undefined = parentConversationId;
     const visitedConversations = new Set<string>();
     const seenPubkeys = new Set<string>();
 
-    // Collect ancestors in reverse order (newest → oldest), we'll reverse at the end
-    // Each entry: { pubkey, displayName, isUser, delegatedToConversationId }
-    const collectedAncestors: Array<{
+    // Collect ancestors as we walk up (newest -> oldest)
+    interface CollectedEntry {
         pubkey: string;
         displayName: string;
         isUser: boolean;
-        delegatedToConversationId: string;
-    }> = [];
+        delegatedToInConvId?: string; // The conversation where this agent received delegation
+    }
+    const collectedAncestors: CollectedEntry[] = [];
+
+    // Track where the immediate delegator (event.pubkey) was delegated TO
+    // This will be discovered as we walk up
+    let immediateDelegatorConvId: string | undefined;
 
     while (currentParentId && !visitedConversations.has(currentParentId)) {
         visitedConversations.add(currentParentId);
@@ -117,17 +147,46 @@ export function buildDelegationChain(
         // Check if this parent conversation has its own delegation chain already computed
         const parentChain = parentStore.metadata.delegationChain;
         if (parentChain && parentChain.length > 0) {
-            // Use the parent's already-computed chain (it's already in oldest-first order)
-            // Add entries we haven't seen yet to avoid duplicates
-            for (const entry of parentChain) {
-                if (!seenPubkeys.has(entry.pubkey)) {
-                    seenPubkeys.add(entry.pubkey);
-                    // Preserve the conversation ID from the stored chain
-                    chain.push(entry);
+            // Check for legacy semantics: under the OLD semantic, the origin entry HAD a conversationId.
+            // Under the NEW semantic (Option B - Store on Recipient), origin should NOT have a conversationId.
+            // If the first entry (origin) has a conversationId, this is a legacy chain that needs re-computation.
+            const isLegacyChain = parentChain[0].conversationId !== undefined;
+
+            if (isLegacyChain) {
+                // Legacy chain detected - do NOT trust it, continue walking to re-compute
+                logger.debug("[delegation-chain] Legacy chain detected (origin has conversationId), re-computing", {
+                    conversationId: currentParentId,
+                    originEntry: parentChain[0].displayName,
+                    originConvId: parentChain[0].conversationId,
+                });
+                // Fall through to continue walking up the chain manually
+            } else {
+                // The stored chain uses new semantics - it's authoritative
+                // Clear any collectedAncestors that overlap with the stored chain
+                const storedPubkeys = new Set(parentChain.map(e => e.pubkey));
+                for (let i = collectedAncestors.length - 1; i >= 0; i--) {
+                    if (storedPubkeys.has(collectedAncestors[i].pubkey)) {
+                        seenPubkeys.delete(collectedAncestors[i].pubkey);
+                        collectedAncestors.splice(i, 1);
+                    }
                 }
+
+                // Use the parent's already-computed chain (it's already in oldest-first order)
+                // Clone entries to avoid mutating stored chain
+                for (const entry of parentChain) {
+                    if (!seenPubkeys.has(entry.pubkey)) {
+                        seenPubkeys.add(entry.pubkey);
+                        chain.push({ ...entry });
+                    }
+                }
+
+                // The immediate delegator (event.pubkey) was delegated TO in currentParentId
+                // (this is the conversation where the stored chain ends, where they work)
+                immediateDelegatorConvId = currentParentId;
+
+                // We have the full ancestry from the stored chain - stop walking
+                break;
             }
-            // We have the full ancestry from the stored chain - stop walking
-            break;
         }
 
         // Get the first message to find who initiated this conversation
@@ -138,9 +197,23 @@ export function buildDelegationChain(
 
         const firstMessage = messages[0];
 
+        // Try to find if this parent conversation itself was a delegation
+        // This tells us where the initiator of THIS conversation was delegated TO
+        const rootEventId = parentStore.getRootEventId();
+        let nextParentId: string | undefined;
+        if (rootEventId) {
+            const rootEvent = ConversationStore.getCachedEvent(rootEventId);
+            if (rootEvent) {
+                const parentDelegationTag = rootEvent.tags.find(t => t[0] === "delegation");
+                if (parentDelegationTag && parentDelegationTag[1]) {
+                    nextParentId = parentDelegationTag[1];
+                }
+            }
+        }
+
         // Add this conversation's initiator to our collected ancestors (if not seen)
-        // The initiator of currentParentId delegated to create currentParentId,
-        // so their "delegatee conversation" IS currentParentId.
+        // The initiator was delegated TO in nextParentId (the conv that led to this one)
+        // If nextParentId is undefined, this is the origin (wasn't delegated)
         if (!seenPubkeys.has(firstMessage.pubkey)) {
             seenPubkeys.add(firstMessage.pubkey);
             const { displayName, isUser } = resolveDisplayName(firstMessage.pubkey);
@@ -148,136 +221,142 @@ export function buildDelegationChain(
                 pubkey: firstMessage.pubkey,
                 displayName,
                 isUser,
-                delegatedToConversationId: currentParentId,
+                delegatedToInConvId: nextParentId, // Where this agent was delegated TO (or undefined for origin)
             });
         }
 
-        // Try to find if this parent conversation itself was a delegation
-        // Look for a delegation tag in the cached root event or check root event ID
-        const rootEventId = parentStore.getRootEventId();
-        if (rootEventId) {
-            const rootEvent = ConversationStore.getCachedEvent(rootEventId);
-            if (rootEvent) {
-                const parentDelegationTag = rootEvent.tags.find(t => t[0] === "delegation");
-                if (parentDelegationTag && parentDelegationTag[1]) {
-                    // This parent was also delegated - continue walking up
-                    currentParentId = parentDelegationTag[1];
-                    continue;
-                }
-            }
+        // If the initiator is the immediate delegator, record where they were delegated TO
+        if (firstMessage.pubkey === event.pubkey && immediateDelegatorConvId === undefined) {
+            immediateDelegatorConvId = nextParentId;
         }
 
-        // No further delegation found - this is the origin
-        break;
+        if (nextParentId) {
+            // Continue walking up
+            currentParentId = nextParentId;
+        } else {
+            // No further delegation found - we've reached the origin
+            break;
+        }
     }
 
-    // Reverse collected ancestors to get oldest-first order and append to chain
-    // (chain may already have entries from a stored parent chain)
+    // Reverse collected ancestors to get oldest-first order (origin first)
     collectedAncestors.reverse();
-    for (const entry of collectedAncestors) {
-        // Double-check for duplicates when merging (belt and suspenders)
-        if (!chain.some(e => e.pubkey === entry.pubkey)) {
+
+    // Convert collectedAncestors to chain entries
+    // SEMANTICS: entry.conversationId = "where this agent was delegated TO"
+    // Store FULL conversation IDs - truncation happens at display time in formatDelegationChain
+    for (const ancestor of collectedAncestors) {
+        if (!chain.some(e => e.pubkey === ancestor.pubkey)) {
             chain.push({
-                pubkey: entry.pubkey,
-                displayName: entry.displayName,
-                isUser: entry.isUser,
-                conversationId: entry.delegatedToConversationId
-                    ? truncateConversationId(entry.delegatedToConversationId)
-                    : undefined,
+                pubkey: ancestor.pubkey,
+                displayName: ancestor.displayName,
+                isUser: ancestor.isUser,
+                conversationId: ancestor.delegatedToInConvId, // Store full ID
             });
         }
     }
 
-    // Always add the immediate delegator (event.pubkey) if not already in chain.
-    // This is crucial for legacy conversations where parent exists but has no stored chain.
-    // The immediate delegator must appear before the current agent.
-    // Their conversationId is the CURRENT conversation (the one they just delegated to us in).
+    // Add the immediate delegator (event.pubkey) if not already in chain.
+    // If chain is empty, delegator is the origin (no conversationId)
+    // Otherwise, delegator was delegated TO in immediateDelegatorConvId (or parentConversationId for legacy)
     if (!seenPubkeys.has(event.pubkey) && !chain.some(e => e.pubkey === event.pubkey)) {
         const { displayName, isUser } = resolveDisplayName(event.pubkey);
         seenPubkeys.add(event.pubkey);
+
+        // If chain is empty, this delegator is the origin (no conversationId)
+        // Otherwise, their conversationId = where they were delegated TO
+        // Use immediateDelegatorConvId if set (from stored chain), or parentConversationId (legacy path)
+        // Store FULL conversation ID - truncation happens at display time
+        const isOrigin = chain.length === 0;
+        const delegatorConvId = isOrigin ? undefined : (immediateDelegatorConvId || parentConversationId);
         chain.push({
             pubkey: event.pubkey,
             displayName,
             isUser,
-            // Note: We don't have the current conversation ID here yet - it will be passed
-            // to formatDelegationChain. The immediate delegator's conversationId should be
-            // the parentConversationId (where they sent the delegation from).
-            // But wait - their delegatee (current agent) is in the CURRENT conversation,
-            // so their conversationId should be currentConversationId (passed to format).
-            // For now, leave undefined and format will use currentConversationId for last hop.
+            conversationId: delegatorConvId, // Store full ID
         });
     }
 
     // Add the current agent at the end (if not already in chain)
-    // Current agent doesn't have a conversationId - they ARE in the current conversation
+    // Current agent was delegated TO in parentConversationId
+    // Store FULL conversation ID - truncation happens at display time
     if (!seenPubkeys.has(currentAgentPubkey) && !chain.some(e => e.pubkey === currentAgentPubkey)) {
         const currentAgentInfo = resolveDisplayName(currentAgentPubkey);
         chain.push({
             pubkey: currentAgentPubkey,
             displayName: currentAgentInfo.displayName,
             isUser: false,
+            conversationId: parentConversationId, // Store full ID
         });
     }
 
     logger.debug("[delegation-chain] Built delegation chain", {
         chainLength: chain.length,
-        chain: chain.map(c => c.displayName).join(" → "),
+        chain: chain.map(c => `${c.displayName}(${c.conversationId || "origin"})`).join(" → "),
     });
 
     return chain;
 }
 
 /**
- * Format a delegation chain as a human-readable string.
+ * Format a delegation chain as a multi-line tree showing delegation relationships.
  *
- * Format:
- * [User -> pm-wip] [conversation 4f69d3302cf2]
- *   -> [pm-wip -> execution-coordinator] [conversation 8a2bc1e45678]
- *     -> [execution-coordinator -> claude-code (you)] [conversation 1234567890ab]
+ * Each line shows: [sender -> recipient] [conversation <id>]
+ * With indentation showing the delegation depth.
  *
- * @param chain - The delegation chain entries
+ * SEMANTICS: The conversation ID shown for [A -> B] comes from B.conversationId
+ * (the conversation where B was delegated to, i.e., where A delegated to B).
+ * This is consistent for ALL links, including the final link.
+ *
+ * @param chain - The delegation chain entries (each entry has full conversation ID stored)
  * @param currentAgentPubkey - The pubkey of the current agent (to mark with "(you)")
- * @param currentConversationId - The ID of the current conversation (will be truncated to 12 chars)
- * @returns A formatted string showing the delegation path with conversation IDs
+ * @returns A formatted multi-line string showing the delegation tree
+ *
+ * Example output:
+ * ```
+ * [User -> architect-orchestrator] [conversation 4f69d3302cf2]
+ *   -> [architect-orchestrator -> execution-coordinator] [conversation 8a2bc1e45678]
+ *     -> [execution-coordinator -> claude-code (you)] [conversation 1234567890ab]
+ * ```
  */
 export function formatDelegationChain(
     chain: DelegationChainEntry[],
-    currentAgentPubkey: string,
-    currentConversationId?: string
+    currentAgentPubkey: string
 ): string {
-    if (chain.length === 0) return "";
+    if (chain.length === 0) {
+        return "";
+    }
+
     if (chain.length === 1) {
-        // Single entry - just show the participant
+        // Single entry - just show the agent with (you) marker if applicable
         const entry = chain[0];
         const suffix = entry.pubkey === currentAgentPubkey ? " (you)" : "";
-        const convId = entry.conversationId
-            || (currentConversationId ? truncateConversationId(currentConversationId) : "unknown");
-        return `[${entry.displayName}${suffix}] [conversation ${convId}]`;
+        return `${entry.displayName}${suffix}`;
     }
 
     const lines: string[] = [];
-    const isLastHop = (index: number) => index === chain.length - 2;
 
+    // Build delegation links: each link is from entry[i] -> entry[i+1]
+    // SEMANTICS: recipient.conversationId = "where recipient was delegated TO"
+    // So for [A -> B], we use B.conversationId (recipient.conversationId)
     for (let i = 0; i < chain.length - 1; i++) {
-        const from = chain[i];
-        const to = chain[i + 1];
-        const indent = "  ".repeat(i);
-        const arrow = i === 0 ? "" : "-> ";
-        const toSuffix = to.pubkey === currentAgentPubkey ? " (you)" : "";
+        const sender = chain[i];
+        const recipient = chain[i + 1];
 
-        // Use the "to" entry's conversation ID (the conversation the delegatee is in)
-        // Only fall back to currentConversationId for the last hop (to current agent)
-        // Otherwise use "unknown" if missing
-        let convId: string;
-        if (to.conversationId) {
-            convId = to.conversationId;
-        } else if (isLastHop(i) && currentConversationId) {
-            convId = truncateConversationId(currentConversationId);
-        } else {
-            convId = "unknown";
-        }
+        // Add (you) marker if recipient is current agent
+        const recipientSuffix = recipient.pubkey === currentAgentPubkey ? " (you)" : "";
+        const recipientName = `${recipient.displayName}${recipientSuffix}`;
 
-        lines.push(`${indent}${arrow}[${from.displayName} -> ${to.displayName}${toSuffix}] [conversation ${convId}]`);
+        // Get the conversation ID for this link from RECIPIENT.conversationId
+        // Truncate to 12 chars for display (full IDs are stored in chain entries)
+        const convId = recipient.conversationId
+            ? truncateConversationId(recipient.conversationId)
+            : "unknown";
+
+        // Build the line with proper indentation
+        const indent = i === 0 ? "" : "  ".repeat(i) + "-> ";
+        const line = `${indent}[${sender.displayName} -> ${recipientName}] [conversation ${convId}]`;
+        lines.push(line);
     }
 
     return lines.join("\n");
