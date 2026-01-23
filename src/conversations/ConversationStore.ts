@@ -46,8 +46,8 @@ export interface Injection {
 }
 
 /**
- * Represents a hop in the delegation chain.
- * Each entry represents a delegation from one participant to the next.
+ * Represents a participant in the delegation chain.
+ * Can be either a human user or an agent.
  */
 export interface DelegationChainEntry {
     /** The pubkey of the participant */
@@ -56,7 +56,7 @@ export interface DelegationChainEntry {
     displayName: string;
     /** Whether this is the project owner/human user */
     isUser: boolean;
-    /** The conversation ID for this delegation hop (first 12 chars of hex) */
+    /** The conversation ID where this delegation occurred (12-char truncated hex) */
     conversationId?: string;
 }
 
