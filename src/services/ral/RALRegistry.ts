@@ -259,12 +259,20 @@ export class RALRegistry {
       ral.isStreaming = isStreaming;
       ral.lastActivityAt = Date.now();
 
-      // Notify LLMOperationsRegistry of state change
-      llmOpsRegistry.updateRALState(
-        agentPubkey,
-        conversationId,
-        isStreaming ? 'STREAMING' : 'IDLE'
-      );
+      // Derive state from current RAL entry state:
+      // - If streaming starts: STREAMING
+      // - If streaming stops but tool is running: ACTING (tool still executing)
+      // - If streaming stops and no tool: REASONING (thinking/preparing next action)
+      let newState: 'STREAMING' | 'ACTING' | 'REASONING';
+      if (isStreaming) {
+        newState = 'STREAMING';
+      } else if (ral.currentTool) {
+        newState = 'ACTING';
+      } else {
+        newState = 'REASONING';
+      }
+
+      llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
     }
   }
 
@@ -703,13 +711,20 @@ export class RALRegistry {
     ral.currentTool = toolName;
     ral.toolStartedAt = toolName ? Date.now() : undefined;
 
-    // Notify LLMOperationsRegistry of state change
-    // When tool starts: ACTING, when tool ends: REASONING (back to thinking)
-    llmOpsRegistry.updateRALState(
-      agentPubkey,
-      conversationId,
-      toolName ? 'ACTING' : 'REASONING'
-    );
+    // Derive state from current RAL entry state:
+    // - If tool starts: ACTING (executing tool)
+    // - If tool ends but streaming: STREAMING (LLM generating response)
+    // - If tool ends and not streaming: REASONING (preparing next action)
+    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
+    if (toolName) {
+      newState = 'ACTING';
+    } else if (ral.isStreaming) {
+      newState = 'STREAMING';
+    } else {
+      newState = 'REASONING';
+    }
+
+    llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
 
     if (!toolName) {
       const key = this.makeKey(agentPubkey, conversationId);
