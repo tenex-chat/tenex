@@ -25,6 +25,7 @@ export class OperationsStatusService {
     private unsubscribe?: () => void;
     private publishedEvents = new Set<string>(); // Track which events we've published status for
     private lastPublishedState = new Map<string, Set<string>>(); // Track which agents were published per event
+    private lastPublishedRALStates = new Map<string, Map<string, RALState>>(); // Track RAL states per event (eventId -> agentPubkey -> state)
 
     constructor(
         private registry: LLMOperationsRegistry,
@@ -127,6 +128,12 @@ export class OperationsStatusService {
                         eventId,
                         new Set(operations.map((op: LLMOperation) => op.agentPubkey))
                     );
+                    // Track RAL states for change detection
+                    const ralStates = new Map<string, RALState>();
+                    for (const op of operations) {
+                        ralStates.set(op.agentPubkey, op.ralState ?? 'IDLE');
+                    }
+                    this.lastPublishedRALStates.set(eventId, ralStates);
                 }
             } catch (err) {
                 logger.error("[OperationsStatusPublisher] Failed to publish event status", {
@@ -145,6 +152,7 @@ export class OperationsStatusService {
                 await this.publishEventStatus(eventId, [], projectCtx);
                 this.publishedEvents.delete(eventId);
                 this.lastPublishedState.delete(eventId);
+                this.lastPublishedRALStates.delete(eventId);
             } catch (err) {
                 logger.error("[OperationsStatusPublisher] Failed to publish cleanup status", {
                     eventId: eventId.substring(0, 8),
@@ -164,14 +172,24 @@ export class OperationsStatusService {
     }
 
     private hasOperationsChanged(eventId: string, operations: LLMOperation[]): boolean {
-        const lastState = this.lastPublishedState.get(eventId);
-        if (!lastState) return true;
+        const lastAgents = this.lastPublishedState.get(eventId);
+        if (!lastAgents) return true;
 
         const currentAgents = new Set(operations.map((op) => op.agentPubkey));
-        if (lastState.size !== currentAgents.size) return true;
+        if (lastAgents.size !== currentAgents.size) return true;
 
         for (const agent of currentAgents) {
-            if (!lastState.has(agent)) return true;
+            if (!lastAgents.has(agent)) return true;
+        }
+
+        // Check if RAL states have changed
+        const lastRALStates = this.lastPublishedRALStates.get(eventId);
+        if (!lastRALStates) return true;
+
+        for (const op of operations) {
+            const lastState = lastRALStates.get(op.agentPubkey);
+            const currentState = op.ralState ?? 'IDLE';
+            if (lastState !== currentState) return true;
         }
 
         return false;
@@ -185,13 +203,14 @@ export class OperationsStatusService {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.TenexOperationsStatus;
 
-        // Build runtime payload with duration and state for each agent
-        const runtime: Record<string, { duration_ms: number; state: RALState }> = {};
+        // Build runtime payload with elapsed time and state for each agent
+        // Note: runtime object is keyed by agentPubkey, so concurrent ops by same agent will overwrite
+        const runtime: Record<string, { elapsed_ms: number; state: RALState }> = {};
         const now = Date.now();
         for (const op of operations) {
-            const durationMs = now - op.registeredAt;
+            const elapsedMs = now - op.registeredAt;
             runtime[op.agentPubkey] = {
-                duration_ms: durationMs,
+                elapsed_ms: elapsedMs,  // Wall-clock time since operation registration
                 state: op.ralState ?? 'IDLE',
             };
         }

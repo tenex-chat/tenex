@@ -253,11 +253,18 @@ export class LLMOperationsRegistry {
                 operation.conversationId === conversationId &&
                 !operation.abortController.signal.aborted
             ) {
+                // Only update and notify if state actually changed
+                const previousState = operation.ralState;
+                if (previousState === state) {
+                    return true; // Found but no change needed
+                }
+
                 operation.ralState = state;
                 logger.debug("[LLMOpsRegistry] Updated RAL state", {
                     operationId: operation.id.substring(0, 8),
                     agentPubkey: agentPubkey.substring(0, 8),
                     conversationId: conversationId.substring(0, 8),
+                    previousState,
                     state,
                 });
                 // Notify listeners of state change
