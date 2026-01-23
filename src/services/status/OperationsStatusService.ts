@@ -8,7 +8,7 @@ import {
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { LLMOperation, LLMOperationsRegistry } from "@/services/LLMOperationsRegistry";
+import type { LLMOperation, LLMOperationsRegistry, RALState } from "@/services/LLMOperationsRegistry";
 import { config } from "@/services/ConfigService";
 
 /**
@@ -184,7 +184,20 @@ export class OperationsStatusService {
     ): Promise<void> {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.TenexOperationsStatus;
-        event.content = "";
+
+        // Build runtime payload with duration and state for each agent
+        const runtime: Record<string, { duration_ms: number; state: RALState }> = {};
+        const now = Date.now();
+        for (const op of operations) {
+            const durationMs = now - op.registeredAt;
+            runtime[op.agentPubkey] = {
+                duration_ms: durationMs,
+                state: op.ralState ?? 'IDLE',
+            };
+        }
+
+        // Set content as JSON payload
+        event.content = JSON.stringify({ runtime });
 
         // Single e-tag for the event being processed
         event.tag(["e", eventId]);
@@ -217,6 +230,7 @@ export class OperationsStatusService {
             operationCount: operations.length,
             type: isCleanup ? "cleanup" : "active",
             pTags: Array.from(agentPubkeys).map((p) => p.substring(0, 8)),
+            runtime,
         });
     }
 }
