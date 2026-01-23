@@ -7,6 +7,7 @@ import { toKebabCase } from "@/lib/string";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 
 /**
  * agent-installer - Pure Nostr operations for fetching agent definitions
@@ -47,21 +48,20 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 /**
  * Validate that an NDK event is a valid agent definition event
  */
-function validateAgentEvent(event: NDKEvent): void {
+function validateAgentEvent(agentDef: NDKAgentDefinition): void {
     // Check if event has required fields
-    if (!event.id) {
+    if (!agentDef.id) {
         throw new AgentValidationError("Agent event missing ID");
     }
 
     // Check if event has a title tag (agents should have titles)
-    const title = event.tagValue("title");
-    if (!title || title.trim() === "") {
+    if (!agentDef.title || agentDef.title.trim() === "") {
         throw new AgentValidationError("Agent event missing title tag");
     }
 
-    // Check if event has content or instructions
-    if (!event.content || event.content.trim() === "") {
-        logger.warn(`Agent event ${event.id} has no instructions (empty content)`);
+    // Check if event has instructions
+    if (!agentDef.instructions || agentDef.instructions.trim() === "") {
+        logger.warn(`Agent event ${agentDef.id} has no instructions`);
     }
 }
 
@@ -69,14 +69,17 @@ function validateAgentEvent(event: NDKEvent): void {
  * Parse an NDK agent definition event into StoredAgent data structure
  */
 function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec" | "projects"> {
-    // Validate before parsing
-    validateAgentEvent(event);
+    // Wrap in NDKAgentDefinition to use proper accessors
+    const agentDef = NDKAgentDefinition.from(event);
 
-    const title = event.tagValue("title") || "Unnamed Agent";
-    const description = event.tagValue("description") || "";
-    const role = event.tagValue("role") || "assistant";
-    const instructions = event.content || "";
-    const useCriteria = event.tagValue("use-criteria") || "";
+    // Validate before parsing
+    validateAgentEvent(agentDef);
+
+    const title = agentDef.title || "Unnamed Agent";
+    const description = agentDef.description || "";
+    const role = agentDef.role || "assistant";
+    const instructions = agentDef.instructions || "";
+    const useCriteria = agentDef.useCriteria || "";
 
     // Extract tool requirements from the agent definition event
     const toolTags = event.tags
