@@ -430,6 +430,150 @@ describe("ConversationStore", () => {
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user"); // Changed: all non-self = user
         });
+
+        it("should keep tool-results immediately after tool-calls even when user message arrives mid-execution", async () => {
+            // =====================================================================
+            // BUG: User messages arriving mid-tool-execution break AI SDK validation
+            // =====================================================================
+            //
+            // Scenario discovered via trace 2413268c9e906dab131772b7f081835b:
+            // 1. Agent calls git commit tool (tool-call stored)
+            // 2. User sends "review all the changes..." (user message stored)
+            // 3. Tool completes (tool-result stored)
+            //
+            // Chronological storage order: [tool-call, user, tool-result]
+            // AI SDK required order:       [tool-call, tool-result, user]
+            //
+            // The AI SDK's convertToLanguageModelPrompt() validates that every
+            // tool-call is immediately followed by its result. When it encounters
+            // the user message before the tool-result, it throws:
+            // "Tool result is missing for tool call toolu_01AQ2GzT9o1DAa3mukVHrSpY"
+            //
+            // FIX: Defer non-tool messages while tool-calls are pending, then
+            // flush them after all results arrive.
+            // =====================================================================
+            const ral = store.createRal(AGENT1_PUBKEY);
+
+            // Tool call
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral,
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_mid_exec",
+                    toolName: "Bash",
+                    input: { command: "git commit" },
+                }] as ToolCallPart[],
+            });
+
+            // User message arrives while tool is executing
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "please also check the branches",
+                messageType: "text",
+            });
+
+            // Tool result arrives
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral,
+                content: "",
+                messageType: "tool-result",
+                toolData: [{
+                    type: "tool-result",
+                    toolCallId: "call_mid_exec",
+                    toolName: "Bash",
+                    output: { type: "text", value: "commit success" },
+                }] as ToolResultPart[],
+            });
+
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            // Should have 3 messages in correct order:
+            // [tool-call, tool-result, user-message]
+            expect(messages).toHaveLength(3);
+
+            // First: tool-call (assistant role)
+            expect(messages[0].role).toBe("assistant");
+            const toolCallContent = messages[0].content as ToolCallPart[];
+            expect(toolCallContent[0].type).toBe("tool-call");
+            expect(toolCallContent[0].toolCallId).toBe("call_mid_exec");
+
+            // Second: tool-result (tool role) - must immediately follow tool-call
+            expect(messages[1].role).toBe("tool");
+            const toolResultContent = messages[1].content as ToolResultPart[];
+            expect(toolResultContent[0].type).toBe("tool-result");
+            expect(toolResultContent[0].toolCallId).toBe("call_mid_exec");
+
+            // Third: user message (user role) - deferred until after tool completes
+            expect(messages[2].role).toBe("user");
+            expect(messages[2].content).toContain("please also check the branches");
+        });
+
+        it("should add synthetic error results for orphaned tool-calls", async () => {
+            // =====================================================================
+            // BUG: Orphaned tool-calls from RAL interruption break AI SDK validation
+            // =====================================================================
+            //
+            // Scenario discovered via trace 2da953abc7faba84d43b061fa77f4b1a:
+            // 1. planning-coordinator agent calls delegate_followup tool
+            // 2. A delegation completes, triggering "executor.aborted_for_injection"
+            // 3. RAL is aborted while tool is still executing
+            // 4. Tool completes in background (AI SDK telemetry shows result)
+            // 5. But tool-did-execute handler never runs - stream already torn down
+            // 6. Tool-call is stored in ConversationStore, but result is never stored
+            // 7. When RAL resumes, the orphaned tool-call causes AI SDK validation to fail
+            //
+            // FIX: Detect orphaned tool-calls (those with no matching result) and
+            // inject synthetic error results so the AI SDK validation passes.
+            // The error message indicates the tool was interrupted, allowing the
+            // LLM to understand what happened and potentially retry.
+            // =====================================================================
+            const ral = store.createRal(AGENT1_PUBKEY);
+
+            // Tool call without result (simulating an aborted execution)
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral,
+                content: "",
+                messageType: "tool-call",
+                toolData: [{
+                    type: "tool-call",
+                    toolCallId: "call_orphaned",
+                    toolName: "delegate_followup",
+                    input: { message: "test" },
+                }] as ToolCallPart[],
+            });
+
+            // User message after (no tool-result ever stored)
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "what happened?",
+                messageType: "text",
+            });
+
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            // Should have 3 messages: tool-call, synthetic tool-result, user-message
+            expect(messages).toHaveLength(3);
+
+            // First: tool-call
+            expect(messages[0].role).toBe("assistant");
+
+            // Second: synthetic tool-result
+            expect(messages[1].role).toBe("tool");
+            const syntheticResult = messages[1].content as ToolResultPart[];
+            expect(syntheticResult[0].toolCallId).toBe("call_orphaned");
+            expect(syntheticResult[0].output).toMatchObject({
+                type: "text",
+                value: expect.stringContaining("interrupted"),
+            });
+
+            // Third: user message
+            expect(messages[2].role).toBe("user");
+        });
     });
 
     describe("Delta Message Building", () => {
