@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { describe, expect, it, beforeEach, afterEach, spyOn } from "bun:test";
 import { resolveRecipientToPubkey } from "../AgentResolution";
 import * as projectsModule from "@/services/projects";
 import { prefixKVStore } from "@/services/storage";
@@ -141,6 +141,24 @@ describe("AgentResolution", () => {
                 // Should return null gracefully, not throw
                 const result = resolveRecipientToPubkey(agentPrefix);
                 expect(result).toBe(null);
+            });
+
+            it("should NOT resolve prefix when project context is unavailable (type safety)", () => {
+                // This is critical: without project context, we can't validate that
+                // a resolved prefix is an agent pubkey vs an event ID
+                getProjectContextSpy.mockImplementation(() => {
+                    throw new Error("No project context");
+                });
+
+                // Even with a working prefix store
+                prefixIsInitializedSpy.mockReturnValue(true);
+                prefixLookupSpy.mockReturnValue(mockAgentPubkey);
+
+                // Should return null because we can't validate the result type
+                const result = resolveRecipientToPubkey(agentPrefix);
+                expect(result).toBe(null);
+                // The prefix lookup should NOT be called because validation would fail
+                expect(prefixLookupSpy).not.toHaveBeenCalled();
             });
         });
 

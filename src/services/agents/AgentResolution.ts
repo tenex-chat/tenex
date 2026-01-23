@@ -1,14 +1,7 @@
 import { getProjectContext } from "@/services/projects";
 import { prefixKVStore } from "@/services/storage";
 import { logger } from "@/utils/logger";
-import { parseNostrUser } from "@/utils/nostr-entity-parser";
-
-/**
- * Checks if a string looks like a 12-char hex prefix (potential shorthand ID)
- */
-function isHexPrefix(input: string): boolean {
-    return /^[0-9a-fA-F]{12}$/.test(input);
-}
+import { isHexPrefix, parseNostrUser } from "@/utils/nostr-entity-parser";
 
 /**
  * Resolve a recipient string to a pubkey
@@ -73,13 +66,19 @@ export function resolveRecipientToPubkey(recipient: string): string | null {
  * Only returns the resolved ID if it's a known agent pubkey (prevents returning event IDs).
  *
  * @param prefix - 12-char hex prefix
- * @param knownAgentPubkeys - Set of known agent pubkeys to validate against (optional)
+ * @param knownAgentPubkeys - Set of known agent pubkeys to validate against (REQUIRED)
  * @returns Agent pubkey or null if not found or not an agent
  */
 function resolveAgentPubkeyFromPrefix(
     prefix: string,
     knownAgentPubkeys: Set<string> | null
 ): string | null {
+    // CRITICAL: Require agent pubkey set for validation - without it we could return event IDs
+    if (!knownAgentPubkeys) {
+        logger.debug("[resolveAgentPubkeyFromPrefix] Cannot resolve prefix without agent pubkey set for validation");
+        return null;
+    }
+
     const cleaned = prefix.trim().toLowerCase();
 
     // Validate format
@@ -108,7 +107,8 @@ function resolveAgentPubkeyFromPrefix(
 
     // CRITICAL: Verify the resolved ID is actually a known agent pubkey
     // The prefix store indexes both event IDs and pubkeys, so we must validate
-    if (knownAgentPubkeys && !knownAgentPubkeys.has(resolved)) {
+    // (knownAgentPubkeys is guaranteed non-null by the guard at the start)
+    if (!knownAgentPubkeys.has(resolved)) {
         logger.debug("[resolveAgentPubkeyFromPrefix] Resolved ID is not a known agent pubkey", {
             prefix: cleaned,
             resolved: resolved.substring(0, 12) + "...",
