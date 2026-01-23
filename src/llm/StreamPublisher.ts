@@ -21,15 +21,13 @@ export class StreamPublisher {
     }
 
     write(chunk: LocalStreamChunk): void {
-        const connected = this.transport?.isConnected() ?? false;
         logger.debug("[StreamPublisher] write called", {
             hasTransport: !!this.transport,
-            isConnected: connected,
+            isConnected: this.transport?.isConnected() ?? false,
             chunkType: (chunk.data as { type?: string })?.type,
         });
-        if (connected) {
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            this.transport!.write(chunk);
+        if (this.transport?.isConnected()) {
+            this.transport.write(chunk);
         }
     }
 
