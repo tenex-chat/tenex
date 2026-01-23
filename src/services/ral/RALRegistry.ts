@@ -707,7 +707,7 @@ export class RALRegistry {
    * @deprecated Use setToolActive instead for proper concurrent tool tracking.
    *
    * This method maintains backward compatibility by:
-   * - Using a synthetic toolCallId based on tool name for activeTools tracking
+   * - Using a fixed synthetic toolCallId (__legacy_tool__) for activeTools tracking
    * - Ensuring legacy callers can still reach ACTING state
    */
   setCurrentTool(agentPubkey: string, conversationId: string, ralNumber: number, toolName: string | undefined): void {
@@ -719,9 +719,10 @@ export class RALRegistry {
 
     if (toolName) {
       // Tool is starting - add to activeTools and set currentTool
-      ral.activeTools.set(legacyToolCallId, toolName);
+      const now = Date.now();
+      ral.activeTools.set(legacyToolCallId, { name: toolName, startedAt: now });
       ral.currentTool = toolName;
-      ral.toolStartedAt = Date.now();
+      ral.toolStartedAt = now;
     } else {
       // Tool is ending - remove from activeTools
       ral.activeTools.delete(legacyToolCallId);
@@ -730,9 +731,10 @@ export class RALRegistry {
         ral.currentTool = undefined;
         ral.toolStartedAt = undefined;
       } else {
-        // Set currentTool to one of the remaining active tools
-        const remainingToolName = ral.activeTools.values().next().value;
-        ral.currentTool = remainingToolName;
+        // Set currentTool to one of the remaining active tools, including its start time
+        const remainingToolInfo = ral.activeTools.values().next().value;
+        ral.currentTool = remainingToolInfo.name;
+        ral.toolStartedAt = remainingToolInfo.startedAt;
       }
       // Clean up abort controller
       const key = this.makeKey(agentPubkey, conversationId);
@@ -777,9 +779,10 @@ export class RALRegistry {
     if (!ral) return;
 
     if (isActive) {
-      // Store toolCallId -> toolName mapping
-      ral.activeTools.set(toolCallId, toolName ?? "unknown");
-      ral.toolStartedAt = Date.now();
+      // Store toolCallId -> tool info mapping (name + startedAt)
+      const now = Date.now();
+      ral.activeTools.set(toolCallId, { name: toolName ?? "unknown", startedAt: now });
+      ral.toolStartedAt = now;
       // Maintain backward compatibility - set currentTool to most recent tool name
       ral.currentTool = toolName;
     } else {
@@ -789,9 +792,10 @@ export class RALRegistry {
         ral.currentTool = undefined;
         ral.toolStartedAt = undefined;
       } else {
-        // Set currentTool to one of the remaining active tools
-        const remainingToolName = ral.activeTools.values().next().value;
-        ral.currentTool = remainingToolName;
+        // Set currentTool to one of the remaining active tools, including its start time
+        const remainingToolInfo = ral.activeTools.values().next().value;
+        ral.currentTool = remainingToolInfo.name;
+        ral.toolStartedAt = remainingToolInfo.startedAt;
       }
     }
 
@@ -848,9 +852,10 @@ export class RALRegistry {
       ral.currentTool = undefined;
       ral.toolStartedAt = undefined;
     } else {
-      // Set currentTool to one of the remaining active tools
-      const remainingToolName = ral.activeTools.values().next().value;
-      ral.currentTool = remainingToolName;
+      // Set currentTool to one of the remaining active tools, including its start time
+      const remainingToolInfo = ral.activeTools.values().next().value;
+      ral.currentTool = remainingToolInfo.name;
+      ral.toolStartedAt = remainingToolInfo.startedAt;
     }
 
     // Update state
