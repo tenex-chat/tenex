@@ -108,11 +108,12 @@ export interface RALRegistryEntry {
   /** Whether the agent is currently streaming a response */
   isStreaming: boolean;
   /**
-   * Set of currently executing tool call IDs.
+   * Map of currently executing tool call IDs to their tool names.
    * Multiple tools can execute concurrently. ACTING state is derived from activeTools.size > 0.
    * Keyed by toolCallId (not toolName) to properly track concurrent calls of the same tool.
+   * Value is the tool name for display purposes (e.g., currentTool).
    */
-  activeTools: Set<string>;
+  activeTools: Map<string, string>;
   /**
    * @deprecated Use activeTools instead. Kept for backward compatibility during transition.
    * Will be removed in a future version.
