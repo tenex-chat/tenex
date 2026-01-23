@@ -72,6 +72,8 @@ export interface SupervisionState {
     maxRetries: number;
     /** ID of the last triggered heuristic */
     lastHeuristicTriggered?: string;
+    /** Set of heuristic IDs that have been enforced in this execution (in-memory only) */
+    enforcedHeuristics: Set<string>;
 }
 
 /**

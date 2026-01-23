@@ -96,6 +96,48 @@ describe("SupervisorOrchestrator", () => {
 
             expect(state.retryCount).toBe(0);
         });
+
+        it("should initialize enforcedHeuristics as empty Set", () => {
+            const state = orchestrator.getSupervisionState("exec-1");
+
+            expect(state.enforcedHeuristics).toBeInstanceOf(Set);
+            expect(state.enforcedHeuristics.size).toBe(0);
+        });
+
+        it("should return false for unknown heuristic in isHeuristicEnforced", () => {
+            expect(orchestrator.isHeuristicEnforced("exec-1", "unknown-heuristic")).toBe(false);
+        });
+
+        it("should return true for enforced heuristic after markHeuristicEnforced", () => {
+            orchestrator.markHeuristicEnforced("exec-1", "pending-todos");
+
+            expect(orchestrator.isHeuristicEnforced("exec-1", "pending-todos")).toBe(true);
+        });
+
+        it("should track multiple enforced heuristics independently", () => {
+            orchestrator.markHeuristicEnforced("exec-1", "heuristic-a");
+            orchestrator.markHeuristicEnforced("exec-1", "heuristic-b");
+
+            expect(orchestrator.isHeuristicEnforced("exec-1", "heuristic-a")).toBe(true);
+            expect(orchestrator.isHeuristicEnforced("exec-1", "heuristic-b")).toBe(true);
+            expect(orchestrator.isHeuristicEnforced("exec-1", "heuristic-c")).toBe(false);
+        });
+
+        it("should clear enforcedHeuristics when clearState is called", () => {
+            orchestrator.markHeuristicEnforced("exec-1", "pending-todos");
+            expect(orchestrator.isHeuristicEnforced("exec-1", "pending-todos")).toBe(true);
+
+            orchestrator.clearState("exec-1");
+
+            expect(orchestrator.isHeuristicEnforced("exec-1", "pending-todos")).toBe(false);
+        });
+
+        it("should track enforcement separately per execution", () => {
+            orchestrator.markHeuristicEnforced("exec-1", "pending-todos");
+
+            expect(orchestrator.isHeuristicEnforced("exec-1", "pending-todos")).toBe(true);
+            expect(orchestrator.isHeuristicEnforced("exec-2", "pending-todos")).toBe(false);
+        });
     });
 
     describe("checkPostCompletion", () => {
@@ -349,6 +391,115 @@ describe("SupervisorOrchestrator", () => {
             expect(result.correctionAction?.message).toBe("Injected correction message");
             expect(mockHeuristic.buildCorrectionMessage).toHaveBeenCalled();
         });
+
+        it("should skip already-enforced heuristics when executionId is provided", async () => {
+            const mockHeuristic: Heuristic<PostCompletionContext> = {
+                id: "test-skip-enforced",
+                name: "Test Skip Enforced",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: true,
+                    reason: "Should not be called",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(mockHeuristic);
+
+            // Mark the heuristic as enforced
+            orchestrator.markHeuristicEnforced("exec-1", "test-skip-enforced");
+
+            const context = createContext();
+            const result = await orchestrator.checkPostCompletion(context, "exec-1");
+
+            // Should not have called detect because heuristic was already enforced
+            expect(mockHeuristic.detect).not.toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
+        });
+
+        it("should still run non-enforced heuristics when one is enforced", async () => {
+            const enforcedHeuristic: Heuristic<PostCompletionContext> = {
+                id: "enforced-heuristic",
+                name: "Enforced Heuristic",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: true,
+                    reason: "Should not be called",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            const activeHeuristic: Heuristic<PostCompletionContext> = {
+                id: "active-heuristic",
+                name: "Active Heuristic",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: true,
+                    reason: "This should trigger",
+                }),
+                buildVerificationPrompt: vi.fn().mockReturnValue("Active prompt"),
+                buildCorrectionMessage: vi.fn().mockReturnValue("Active correction"),
+                getCorrectionAction: vi.fn().mockReturnValue({
+                    type: "suppress-publish",
+                    reEngage: true,
+                    message: undefined,
+                }),
+            };
+
+            HeuristicRegistry.getInstance().register(enforcedHeuristic);
+            HeuristicRegistry.getInstance().register(activeHeuristic);
+
+            // Mark only the first heuristic as enforced
+            orchestrator.markHeuristicEnforced("exec-1", "enforced-heuristic");
+
+            // Mock the LLM service to return a violation
+            (supervisorLLMService.verify as Mock).mockResolvedValueOnce({
+                verdict: "violation",
+                explanation: "Active heuristic violation confirmed",
+            });
+
+            const context = createContext();
+            const result = await orchestrator.checkPostCompletion(context, "exec-1");
+
+            // Enforced heuristic should be skipped
+            expect(enforcedHeuristic.detect).not.toHaveBeenCalled();
+            // Active heuristic should run and trigger
+            expect(activeHeuristic.detect).toHaveBeenCalled();
+            expect(result.hasViolation).toBe(true);
+            expect(result.heuristicId).toBe("active-heuristic");
+        });
+
+        it("should run all heuristics when no executionId is provided (backward compatibility)", async () => {
+            const mockHeuristic: Heuristic<PostCompletionContext> = {
+                id: "test-no-execution-id",
+                name: "Test No Execution ID",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "Not triggered",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(mockHeuristic);
+
+            // Mark heuristic as enforced for some execution
+            orchestrator.markHeuristicEnforced("exec-1", "test-no-execution-id");
+
+            const context = createContext();
+            // Call without executionId - should run all heuristics
+            const result = await orchestrator.checkPostCompletion(context);
+
+            // Should have called detect because no executionId was provided
+            expect(mockHeuristic.detect).toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
+        });
     });
 
     describe("checkPreTool", () => {
@@ -445,6 +596,67 @@ describe("SupervisorOrchestrator", () => {
             expect(result.correctionAction?.reEngage).toBe(false);
             expect(result.correctionAction?.message).toBeUndefined();
             expect(mockHeuristic.buildCorrectionMessage).not.toHaveBeenCalled();
+        });
+
+        it("should skip already-enforced pre-tool heuristics when executionId is provided", async () => {
+            const mockHeuristic: Heuristic<PreToolContext> = {
+                id: "test-pretool-enforced",
+                name: "Test PreTool Enforced",
+                timing: "pre-tool-execution",
+                toolFilter: ["test-tool"],
+                detect: vi.fn().mockResolvedValue({
+                    triggered: true,
+                    reason: "Should not be called",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(mockHeuristic);
+
+            // Mark the heuristic as enforced
+            orchestrator.markHeuristicEnforced("exec-1", "test-pretool-enforced");
+
+            const context = createPreToolContext({
+                toolName: "test-tool",
+            });
+            const result = await orchestrator.checkPreTool(context, "exec-1");
+
+            // Should not have called detect because heuristic was already enforced
+            expect(mockHeuristic.detect).not.toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
+        });
+
+        it("should run pre-tool heuristics without executionId (backward compatibility)", async () => {
+            const mockHeuristic: Heuristic<PreToolContext> = {
+                id: "test-pretool-no-exec-id",
+                name: "Test PreTool No Exec ID",
+                timing: "pre-tool-execution",
+                toolFilter: ["test-tool"],
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "Not triggered",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(mockHeuristic);
+
+            // Mark heuristic as enforced for some execution
+            orchestrator.markHeuristicEnforced("exec-1", "test-pretool-no-exec-id");
+
+            const context = createPreToolContext({
+                toolName: "test-tool",
+            });
+            // Call without executionId - should run all heuristics
+            const result = await orchestrator.checkPreTool(context);
+
+            // Should have called detect because no executionId was provided
+            expect(mockHeuristic.detect).toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
         });
     });
 });

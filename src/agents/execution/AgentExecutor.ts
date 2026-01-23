@@ -507,7 +507,9 @@ export class AgentExecutor {
                             hasTodoList,
                         });
 
-                        const supervisionResult = await supervisorOrchestrator.checkPreTool(preToolContext);
+                        // Build executionId for heuristic enforcement tracking
+                        const preToolExecutionId = `${context.agent.pubkey}:${context.conversationId}:${context.ralNumber}`;
+                        const supervisionResult = await supervisorOrchestrator.checkPreTool(preToolContext, preToolExecutionId);
 
                         // If supervision detected a violation, block the tool
                         if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
@@ -519,6 +521,11 @@ export class AgentExecutor {
                                     actionType: supervisionResult.correctionAction.type,
                                 }
                             );
+
+                            // Mark this heuristic as enforced so it won't fire again in this RAL
+                            if (supervisionResult.heuristicId) {
+                                supervisorOrchestrator.markHeuristicEnforced(preToolExecutionId, supervisionResult.heuristicId);
+                            }
 
                             // Queue correction message if available (for both inject-message and block-tool)
                             if (
@@ -762,7 +769,7 @@ export class AgentExecutor {
                 })),
             };
 
-            const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext);
+            const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext, executionId);
 
             if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
                 trace.getActiveSpan()?.addEvent("executor.supervision_violation", {
@@ -802,6 +809,11 @@ export class AgentExecutor {
 
                     // Increment retry count
                     supervisorOrchestrator.incrementRetryCount(executionId);
+
+                    // Mark this heuristic as enforced so it won't fire again in this RAL
+                    if (supervisionResult.heuristicId) {
+                        supervisorOrchestrator.markHeuristicEnforced(executionId, supervisionResult.heuristicId);
+                    }
 
                     // Inject correction message as ephemeral user message
                     // Ephemeral = influences re-execution but NOT persisted to ConversationStore

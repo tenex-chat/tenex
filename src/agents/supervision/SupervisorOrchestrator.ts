@@ -64,10 +64,32 @@ export class SupervisorOrchestrator {
             state = {
                 retryCount: 0,
                 maxRetries: MAX_SUPERVISION_RETRIES,
+                enforcedHeuristics: new Set(),
             };
             this.supervisionStates.set(executionId, state);
         }
         return state;
+    }
+
+    /**
+     * Check if a heuristic has been enforced in this execution
+     * @param executionId - Unique identifier for the execution
+     * @param heuristicId - The heuristic ID to check
+     */
+    isHeuristicEnforced(executionId: string, heuristicId: string): boolean {
+        const state = this.getSupervisionState(executionId);
+        return state.enforcedHeuristics.has(heuristicId);
+    }
+
+    /**
+     * Mark a heuristic as enforced for this execution
+     * @param executionId - Unique identifier for the execution
+     * @param heuristicId - The heuristic ID to mark as enforced
+     */
+    markHeuristicEnforced(executionId: string, heuristicId: string): void {
+        const state = this.getSupervisionState(executionId);
+        state.enforcedHeuristics.add(heuristicId);
+        logger.debug(`[SupervisorOrchestrator] Marked heuristic "${heuristicId}" as enforced for ${executionId}`);
     }
 
     /**
@@ -120,9 +142,10 @@ export class SupervisorOrchestrator {
     /**
      * Check all post-completion heuristics
      * @param context - The post-completion context
+     * @param executionId - Unique identifier for the execution (used to skip already-enforced heuristics)
      * @returns Result of the supervision check
      */
-    async checkPostCompletion(context: PostCompletionContext): Promise<SupervisionCheckResult> {
+    async checkPostCompletion(context: PostCompletionContext, executionId?: string): Promise<SupervisionCheckResult> {
         const heuristics = this.registry.getPostCompletionHeuristics();
 
         if (heuristics.length === 0) {
@@ -135,6 +158,12 @@ export class SupervisorOrchestrator {
         );
 
         for (const heuristic of heuristics) {
+            // Skip heuristics already enforced in this execution
+            if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
+                logger.debug(`[SupervisorOrchestrator] Skipping heuristic "${heuristic.id}" - already enforced`);
+                continue;
+            }
+
             try {
                 // Run detection
                 const detection = await heuristic.detect(context);
@@ -236,9 +265,10 @@ export class SupervisorOrchestrator {
     /**
      * Check pre-tool execution heuristics for a specific tool
      * @param context - The pre-tool context
+     * @param executionId - Unique identifier for the execution (used to skip already-enforced heuristics)
      * @returns Result of the supervision check
      */
-    async checkPreTool(context: PreToolContext): Promise<SupervisionCheckResult> {
+    async checkPreTool(context: PreToolContext, executionId?: string): Promise<SupervisionCheckResult> {
         const heuristics = this.registry.getPreToolHeuristics(context.toolName);
 
         if (heuristics.length === 0) {
@@ -253,6 +283,12 @@ export class SupervisorOrchestrator {
         );
 
         for (const heuristic of heuristics) {
+            // Skip heuristics already enforced in this execution
+            if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
+                logger.debug(`[SupervisorOrchestrator] Skipping pre-tool heuristic "${heuristic.id}" - already enforced`);
+                continue;
+            }
+
             try {
                 // Run detection
                 const detection = await heuristic.detect(context);
