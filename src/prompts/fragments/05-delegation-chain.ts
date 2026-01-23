@@ -7,7 +7,9 @@
  * Example output:
  * ## Delegation Chain
  * ```
- * User → pm-wip → execution-coordinator → claude-code (you)
+ * [User -> architect-orchestrator] [conversation 4f69d3302cf2]
+ *   -> [architect-orchestrator -> execution-coordinator] [conversation 8a2bc1e45678]
+ *     -> [execution-coordinator -> claude-code (you)] [conversation 1234567890ab]
  * ```
  */
 
@@ -16,7 +18,7 @@ import type { PromptFragment } from "../core/types";
 import { formatDelegationChain } from "@/utils/delegation-chain";
 
 interface DelegationChainArgs {
-    /** The delegation chain entries */
+    /** The delegation chain entries (each with full conversation ID stored) */
     delegationChain: DelegationChainEntry[];
     /** The pubkey of the current agent (to mark with "(you)") */
     currentAgentPubkey: string;

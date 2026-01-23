@@ -245,6 +245,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
+    // The chain entries already have full conversation IDs stored - no need to pass currentConversationId
     if (conversation?.metadata?.delegationChain && conversation.metadata.delegationChain.length > 0) {
         systemPromptBuilder.add("delegation-chain", {
             delegationChain: conversation.metadata.delegationChain,
