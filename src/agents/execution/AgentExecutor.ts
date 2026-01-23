@@ -1248,6 +1248,9 @@ export class AgentExecutor {
                 )
             );
 
+            // Update RAL state to ACTING - tool is now executing
+            ralRegistry.setCurrentTool(context.agent.pubkey, context.conversationId, ralNumber, event.toolName);
+
             // Add tool-call message to ConversationStore for persistence
             conversationStore.addMessage({
                 pubkey: context.agent.pubkey,
@@ -1357,6 +1360,9 @@ export class AgentExecutor {
             if (toolEventId) {
                 conversationStore.setEventId(toolResultMessageIndex, toolEventId);
             }
+
+            // Clear current tool - execution finished, state transitions back to STREAMING or REASONING
+            ralRegistry.setCurrentTool(context.agent.pubkey, context.conversationId, ralNumber, undefined);
         });
 
         const executionSpan = trace.getActiveSpan();
