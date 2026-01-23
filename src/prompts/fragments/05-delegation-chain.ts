@@ -7,7 +7,9 @@
  * Example output:
  * ## Delegation Chain
  * ```
- * User → pm-wip → execution-coordinator → claude-code (you)
+ * [User -> pm-wip] [conversation 4f69d3302cf2]
+ *   -> [pm-wip -> execution-coordinator] [conversation 8a2bc1e45678]
+ *     -> [execution-coordinator -> claude-code (you)] [conversation 1234567890ab]
  * ```
  */
 
@@ -20,24 +22,26 @@ interface DelegationChainArgs {
     delegationChain: DelegationChainEntry[];
     /** The pubkey of the current agent (to mark with "(you)") */
     currentAgentPubkey: string;
+    /** The ID of the current conversation */
+    currentConversationId?: string;
 }
 
 export const delegationChainFragment: PromptFragment<DelegationChainArgs> = {
     id: "delegation-chain",
     priority: 5, // After identity (1) but before most other context
-    template: ({ delegationChain, currentAgentPubkey }) => {
+    template: ({ delegationChain, currentAgentPubkey, currentConversationId }) => {
         if (!delegationChain || delegationChain.length === 0) {
             return "";
         }
 
-        const chainString = formatDelegationChain(delegationChain, currentAgentPubkey);
+        const chainString = formatDelegationChain(delegationChain, currentAgentPubkey, currentConversationId);
 
         return `## Delegation Chain
 \`\`\`
 ${chainString}
 \`\`\`
 
-This shows who initiated this request and how it reached you. The "(you)" marker indicates your position.
+This shows who initiated this request, how it reached you, and the conversation ID for each hop. The "(you)" marker indicates your position.
 `;
     },
 };

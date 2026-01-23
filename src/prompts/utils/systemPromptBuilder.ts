@@ -249,6 +249,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         systemPromptBuilder.add("delegation-chain", {
             delegationChain: conversation.metadata.delegationChain,
             currentAgentPubkey: agent.pubkey,
+            currentConversationId: conversation.getId(),
         });
     }
 
