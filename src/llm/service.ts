@@ -129,6 +129,8 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     private cachedContentForComplete = "";
     /** Cumulative usage from previous steps, set via setCurrentStepUsage */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
+    /** Last user message - stored before streaming for logging in onFinish */
+    private lastUserMessage?: string;
 
     constructor(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -413,6 +415,37 @@ export class LLMService extends EventEmitter<Record<string, any>> {
     }
 
     /**
+     * Extract the last user message text from a message array.
+     * Handles both simple string content and complex content arrays.
+     */
+    private extractLastUserMessage(messages: ModelMessage[]): string | undefined {
+        // Find the last message with role "user" (iterate from end)
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.role === "user") {
+                // User messages can have string content or content array
+                if (typeof msg.content === "string") {
+                    return msg.content;
+                }
+                if (Array.isArray(msg.content)) {
+                    // Extract text from content parts
+                    const textParts = msg.content
+                        .filter((part): part is { type: "text"; text: string } =>
+                            part.type === "text" && typeof part.text === "string"
+                        )
+                        .map((part) => part.text);
+                    if (textParts.length > 0) {
+                        return textParts.join("\n");
+                    }
+                }
+                // Found user message but couldn't extract text
+                return "[User message with non-text content]";
+            }
+        }
+        return undefined;
+    }
+
+    /**
      * Result type for prepareStep, matching AI SDK v6's PrepareStepResult.
      * Allows dynamic model switching, tool control, and message overrides per step.
      */
@@ -439,6 +472,10 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const model = this.getLanguageModel(messages);
 
         const processedMessages = this.prepareMessagesForRequest(messages);
+
+        // Extract last user message for logging - find the last message with role "user"
+        // and extract its text content
+        this.lastUserMessage = this.extractLastUserMessage(messages);
 
         const startTime = Date.now();
 
@@ -757,6 +794,18 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     "complete.total_onFinish_duration_ms": afterEmitTime - onFinishStartTime,
                 });
 
+                // Log the user prompt so we can see what the LLM was answering to
+                if (this.lastUserMessage) {
+                    const truncatedPrompt = this.lastUserMessage.length > 2000
+                        ? this.lastUserMessage.substring(0, 2000) + "... [truncated]"
+                        : this.lastUserMessage;
+                    activeSpan?.addEvent("llm.prompt", {
+                        "prompt.text": truncatedPrompt,
+                        "prompt.full_length": this.lastUserMessage.length,
+                        "prompt.truncated": this.lastUserMessage.length > 2000,
+                    });
+                }
+
                 // Log the actual response text so it shows up in Jaeger's Logs section
                 // This makes it much easier to see what the LLM actually generated
                 if (e.text) {
@@ -773,6 +822,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
                 // Clear cached content after use
                 this.cachedContentForComplete = "";
+                this.lastUserMessage = undefined;
             } catch (error) {
                 const errorTime = Date.now();
                 activeSpan?.addEvent("llm.onFinish_error", {
