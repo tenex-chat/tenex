@@ -56,6 +56,8 @@ export interface DelegationChainEntry {
     displayName: string;
     /** Whether this is the project owner/human user */
     isUser: boolean;
+    /** The conversation ID where this delegation occurred (12-char truncated hex) */
+    conversationId?: string;
 }
 
 export interface ConversationMetadata {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain } from "../delegation-chain";
+import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain, truncateConversationId } from "../delegation-chain";
 import type { DelegationChainEntry } from "@/conversations/ConversationStore";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -40,37 +40,65 @@ vi.mock("@/utils/logger", () => ({
 }));
 
 describe("delegation-chain utilities", () => {
+    describe("truncateConversationId", () => {
+        it("should truncate to 12 characters", () => {
+            expect(truncateConversationId("4f69d3302cf2abcdef123456")).toBe("4f69d3302cf2");
+        });
+
+        it("should handle short IDs gracefully", () => {
+            expect(truncateConversationId("abc")).toBe("abc");
+        });
+
+        it("should handle exactly 12 characters", () => {
+            expect(truncateConversationId("4f69d3302cf2")).toBe("4f69d3302cf2");
+        });
+    });
+
     describe("formatDelegationChain", () => {
-        it("should format a simple two-entry chain", () => {
+        it("should format a simple two-entry chain with conversation ID", () => {
+            // SEMANTICS: conversationId = "where this agent was delegated TO"
+            // claude-code was delegated to in "abc123def456789" (full ID stored)
             const chain: DelegationChainEntry[] = [
                 { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                { pubkey: "agent-pubkey", displayName: "claude-code", isUser: false },
+                { pubkey: "agent-pubkey", displayName: "claude-code", isUser: false, conversationId: "abc123def456789" },
             ];
 
             const result = formatDelegationChain(chain, "agent-pubkey");
-            expect(result).toBe("User → claude-code (you)");
+            // [User -> claude-code] uses recipient.conversationId (truncated to 12 chars for display)
+            expect(result).toBe("[User -> claude-code (you)] [conversation abc123def456]");
         });
 
-        it("should format a longer delegation chain", () => {
+        it("should format a longer delegation chain with multi-line tree format", () => {
+            // SEMANTICS: conversationId = "where this agent was delegated TO"
+            // User is origin (no conversationId)
+            // Full conversation IDs are stored in entries
             const chain: DelegationChainEntry[] = [
                 { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false },
-                { pubkey: "exec-pubkey", displayName: "execution-coordinator", isUser: false },
-                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false },
+                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false, conversationId: "conv1abc123456789" },
+                { pubkey: "exec-pubkey", displayName: "execution-coordinator", isUser: false, conversationId: "conv2def567890123" },
+                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false, conversationId: "conv3ghi901234567" },
             ];
 
             const result = formatDelegationChain(chain, "claude-pubkey");
-            expect(result).toBe("User → pm-wip → execution-coordinator → claude-code (you)");
+            const lines = result.split("\n");
+
+            expect(lines).toHaveLength(3);
+            // Each link uses RECIPIENT.conversationId (truncated to 12 chars for display)
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation conv1abc1234]");
+            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation conv2def5678]");
+            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation conv3ghi9012]");
         });
 
         it("should mark current agent with (you) correctly", () => {
+            // SEMANTICS: pm-wip was delegated to in conv123abc123456789 (full ID stored)
             const chain: DelegationChainEntry[] = [
                 { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false },
+                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false, conversationId: "conv123abc123456789" },
             ];
 
             const result = formatDelegationChain(chain, "pm-pubkey");
-            expect(result).toBe("User → pm-wip (you)");
+            // Uses recipient.conversationId (truncated to 12 chars)
+            expect(result).toBe("[User -> pm-wip (you)] [conversation conv123abc12]");
         });
 
         it("should handle empty chain gracefully", () => {
@@ -79,13 +107,62 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should handle chain with unknown current agent", () => {
+            // SEMANTICS: agent was delegated to in conv123abc123456789 (full ID stored)
             const chain: DelegationChainEntry[] = [
                 { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                { pubkey: "agent-pubkey", displayName: "agent", isUser: false },
+                { pubkey: "agent-pubkey", displayName: "agent", isUser: false, conversationId: "conv123abc123456789" },
             ];
 
             const result = formatDelegationChain(chain, "different-pubkey");
-            expect(result).toBe("User → agent");
+            // Uses recipient.conversationId (truncated to 12 chars)
+            expect(result).toBe("[User -> agent] [conversation conv123abc12]");
+        });
+
+        it("should show 'unknown' for missing conversation IDs (backward compatibility)", () => {
+            // SEMANTICS: conversationId = "where this agent was delegated TO"
+            // If an entry doesn't have conversationId, show "unknown" for that link
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pubkey", displayName: "User", isUser: true },
+                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false }, // No conversationId
+                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false }, // No conversationId
+            ];
+
+            const result = formatDelegationChain(chain, "claude-pubkey");
+            const lines = result.split("\n");
+
+            expect(lines).toHaveLength(2);
+            // pm-wip has no conversationId -> unknown
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation unknown]");
+            // claude-code has no conversationId -> unknown
+            expect(lines[1]).toBe("  -> [pm-wip -> claude-code (you)] [conversation unknown]");
+        });
+
+        it("should use recipient.conversationId for each link", () => {
+            // SEMANTICS: conversationId = "where this agent was delegated TO"
+            // Full conversation IDs are stored in entries
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pubkey", displayName: "User", isUser: true },
+                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" },
+                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false, conversationId: "pmconv12345678901234" },
+            ];
+
+            const result = formatDelegationChain(chain, "claude-pubkey");
+            const lines = result.split("\n");
+
+            expect(lines).toHaveLength(2);
+            // [User -> pm-wip] uses pm-wip.conversationId (truncated to 12 chars)
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv1234]");
+            // [pm-wip -> claude-code] uses claude-code.conversationId (truncated to 12 chars)
+            expect(lines[1]).toBe("  -> [pm-wip -> claude-code (you)] [conversation pmconv123456]");
+        });
+
+        it("should handle single entry chain", () => {
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "agent-pubkey", displayName: "claude-code", isUser: false },
+            ];
+
+            const result = formatDelegationChain(chain, "agent-pubkey");
+            expect(result).toBe("claude-code (you)");
         });
     });
 
@@ -141,15 +218,17 @@ describe("delegation-chain utilities", () => {
         it("should build chain with correct ordering: User first, current agent last", () => {
             const event = {
                 pubkey: "agent-pubkey-pm",
-                tags: [["delegation", "parent-conv-id"]],
+                tags: [["delegation", "parent-conv-id-1234567890"]],
             } as unknown as NDKEvent;
 
             // Mock parent conversation with stored chain starting from User
+            // SEMANTICS: conversationId = "where this agent was delegated TO"
+            // Full conversation IDs are stored
             const mockParentStore = {
                 metadata: {
                     delegationChain: [
                         { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false },
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" },
                     ],
                 },
                 getAllMessages: () => [{ pubkey: "user-pubkey" }],
@@ -161,10 +240,14 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             // Full chain validation: User -> pm-wip -> claude-code
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            // pm-wip: from stored chain, conversationId = userconv1234567890
+            // claude-code: delegated to in parent-conv-id-1234567890 (full ID)
             expect(result).toHaveLength(3);
             expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false });
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" });
         });
 
         it("should not have duplicate entries when merging stored chain with walked ancestors", () => {
@@ -225,7 +308,7 @@ describe("delegation-chain utilities", () => {
         it("should handle missing parent conversation gracefully", () => {
             const event = {
                 pubkey: "agent-pubkey-pm",
-                tags: [["delegation", "missing-parent-id"]],
+                tags: [["delegation", "missing-parent-id-1234567890"]],
             } as unknown as NDKEvent;
 
             mockConversationStoreGet.mockReturnValue(undefined);
@@ -234,15 +317,20 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             // When parent is missing, use sender as first in chain
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // pm-wip: origin (chain is empty), no conversationId
+            // claude-code: delegated to in missing-parent-id-1234567890 (full ID)
             expect(result).toHaveLength(2);
             expect(result![0].displayName).toBe("pm-wip");
+            expect(result![0].conversationId).toBeUndefined(); // Origin has no conversationId
             expect(result![1].displayName).toBe("claude-code");
+            expect(result![1].conversationId).toBe("missing-parent-id-1234567890"); // Where claude was delegated to (full ID)
         });
 
         it("should identify User when sender is project owner", () => {
             const event = {
                 pubkey: "project-owner-pubkey",
-                tags: [["delegation", "parent-conv-id"]],
+                tags: [["delegation", "parent-conv-id-1234567890"]],
             } as unknown as NDKEvent;
 
             mockConversationStoreGet.mockReturnValue(undefined);
@@ -250,15 +338,18 @@ describe("delegation-chain utilities", () => {
             const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey");
 
             expect(result).toBeDefined();
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            // claude-code: delegated to in parent-conv-id-1234567890 (full ID)
             expect(result).toHaveLength(2);
-            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false });
+            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" }); // Full ID stored
         });
 
         it("should walk up multi-level delegation chains with correct full ordering", () => {
             const event = {
                 pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id"]],
+                tags: [["delegation", "exec-conv-id-1234567890"]],
             } as unknown as NDKEvent;
 
             // Mock the execution-coordinator's conversation (has no stored chain, but has root event)
@@ -270,15 +361,18 @@ describe("delegation-chain utilities", () => {
 
             // Mock the cached root event for exec conversation (points to pm-conv)
             const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id"]],
+                tags: [["delegation", "pm-conv-id-1234567890"]],
             };
 
             // Mock pm-wip's conversation (has stored chain starting from User)
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            // pm-wip: was delegated to in userconv1234567890
             const mockPmStore = {
                 metadata: {
                     delegationChain: [
                         { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false },
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" },
                     ],
                 },
                 getAllMessages: () => [{ pubkey: "user-pubkey" }],
@@ -286,8 +380,8 @@ describe("delegation-chain utilities", () => {
             };
 
             mockConversationStoreGet.mockImplementation((convId: string) => {
-                if (convId === "exec-conv-id") return mockExecStore;
-                if (convId === "pm-conv-id") return mockPmStore;
+                if (convId === "exec-conv-id-1234567890") return mockExecStore;
+                if (convId === "pm-conv-id-1234567890") return mockPmStore;
                 return undefined;
             });
 
@@ -300,11 +394,16 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             // Full chain should be: User -> pm-wip -> exec -> claude-code
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            // pm-wip: from stored chain, conversationId = userconv1234567890
+            // exec: delegated to in pm-conv-id-1234567890
+            // claude-code: delegated to in exec-conv-id-1234567890
             expect(result).toHaveLength(4);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false });
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false });
+            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
+            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "exec-conv-id-1234567890" }); // Full ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -315,7 +414,7 @@ describe("delegation-chain utilities", () => {
         it("should include immediate delegator in legacy path (parent exists but no stored chain)", () => {
             const event = {
                 pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "legacy-parent-conv-id"]],
+                tags: [["delegation", "legacy-parent-conv-id-1234567890"]],
             } as unknown as NDKEvent;
 
             // Mock a legacy parent conversation with no stored delegationChain
@@ -332,7 +431,7 @@ describe("delegation-chain utilities", () => {
             };
 
             mockConversationStoreGet.mockImplementation((convId: string) => {
-                if (convId === "legacy-parent-conv-id") return mockLegacyParentStore;
+                if (convId === "legacy-parent-conv-id-1234567890") return mockLegacyParentStore;
                 return undefined;
             });
 
@@ -345,10 +444,14 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             // Chain should include: User (from walking up) -> exec (immediate delegator) -> claude-code (current)
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin (started the conversation), no conversationId
+            // exec: delegated to in legacy-parent-conv-id-1234567890
+            // claude-code: delegated to in legacy-parent-conv-id-1234567890
             expect(result).toHaveLength(3);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false });
+            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -397,6 +500,78 @@ describe("delegation-chain utilities", () => {
             expect(pubkeys.length).toBe(uniquePubkeys.size);
         });
 
+        // Integration test: validates buildDelegationChain + formatDelegationChain end-to-end
+        it("integration: should produce correct formatted output with proper conversation IDs", () => {
+            const event = {
+                pubkey: "agent-pubkey-exec",
+                tags: [["delegation", "exec-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            // Mock the execution-coordinator's conversation
+            const mockExecStore = {
+                metadata: {},
+                getAllMessages: () => [{ pubkey: "agent-pubkey-pm" }],
+                getRootEventId: () => "exec-root-event",
+            };
+
+            // Mock the cached root event for exec conversation (points to pm-conv)
+            const mockExecRootEvent = {
+                tags: [["delegation", "pm-conv-id-1234567890"]],
+            };
+
+            // Mock pm-wip's conversation with stored chain (correct semantics)
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            const mockPmStore = {
+                metadata: {
+                    delegationChain: [
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true }, // Origin
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }, // Full ID
+                    ],
+                },
+                getAllMessages: () => [{ pubkey: "user-pubkey" }],
+                getRootEventId: () => undefined,
+            };
+
+            mockConversationStoreGet.mockImplementation((convId: string) => {
+                if (convId === "exec-conv-id-1234567890") return mockExecStore;
+                if (convId === "pm-conv-id-1234567890") return mockPmStore;
+                return undefined;
+            });
+
+            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEvent;
+                return undefined;
+            });
+
+            // Build the chain
+            const chain = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            expect(chain).toBeDefined();
+            expect(chain).toHaveLength(4);
+
+            // Verify full conversation IDs are stored in the chain
+            expect(chain![0].conversationId).toBeUndefined(); // User is origin
+            expect(chain![1].conversationId).toBe("userconv1234567890"); // Full ID from stored chain
+            expect(chain![2].conversationId).toBe("pm-conv-id-1234567890"); // Full ID
+            expect(chain![3].conversationId).toBe("exec-conv-id-1234567890"); // Full ID
+
+            // Format the chain (no currentConversationId needed - it uses stored IDs)
+            const formatted = formatDelegationChain(chain!, "agent-pubkey-claude");
+
+            // Verify the formatted output has correct structure and conversation IDs
+            // SEMANTICS: [A -> B] shows B.conversationId (truncated to 12 chars for display)
+            const lines = formatted.split("\n");
+            expect(lines).toHaveLength(3);
+
+            // Line 1: [User -> pm-wip] uses pm-wip.conversationId (truncated)
+            expect(lines[0]).toBe("[User -> pm-wip] [conversation userconv1234]");
+
+            // Line 2: [pm-wip -> execution-coordinator] uses exec.conversationId (truncated)
+            expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation pm-conv-id-1]");
+
+            // Line 3: [execution-coordinator -> claude-code (you)] uses claude.conversationId (truncated)
+            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation exec-conv-id]");
+        });
+
         it("should use truncated pubkey for unknown agents", () => {
             const event = {
                 pubkey: "unknown123456789abcdef",
@@ -412,6 +587,216 @@ describe("delegation-chain utilities", () => {
             // Full order validation: unknown first, current agent last
             expect(result![0].displayName).toBe("unknown1");
             expect(result![1].displayName).toBe("claude-code");
+        });
+
+        it("should detect and re-compute legacy chains where origin has conversationId", () => {
+            // LEGACY SEMANTICS: Under the OLD semantic, the origin entry had a conversationId.
+            // Under the NEW semantic (Option B - Store on Recipient), origin should NOT have a conversationId.
+            // This test verifies that legacy chains are detected and re-computed.
+
+            const event = {
+                pubkey: "agent-pubkey-exec",
+                tags: [["delegation", "exec-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            // Mock the execution-coordinator's conversation
+            const mockExecStore = {
+                metadata: {},
+                getAllMessages: () => [{ pubkey: "agent-pubkey-pm" }],
+                getRootEventId: () => "exec-root-event",
+            };
+
+            // Mock the cached root event for exec conversation (points to pm-conv)
+            const mockExecRootEvent = {
+                tags: [["delegation", "pm-conv-id-1234567890"]],
+            };
+
+            // Mock pm-wip's conversation with a LEGACY stored chain
+            // LEGACY SEMANTICS: Origin (User) HAS a conversationId - this is the bug marker
+            const mockPmStore = {
+                metadata: {
+                    delegationChain: [
+                        // LEGACY: Origin has a conversationId (this should NOT happen under new semantics)
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true, conversationId: "legacy-wrong-conv-id" },
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "user-conv-id-1234567890" },
+                    ],
+                },
+                getAllMessages: () => [{ pubkey: "user-pubkey" }],
+                getRootEventId: () => "pm-root-event",
+            };
+
+            // Mock the cached root event for pm conversation (User is origin - no further delegation)
+            const mockPmRootEvent = {
+                tags: [], // No delegation tag - User started it
+            };
+
+            mockConversationStoreGet.mockImplementation((convId: string) => {
+                if (convId === "exec-conv-id-1234567890") return mockExecStore;
+                if (convId === "pm-conv-id-1234567890") return mockPmStore;
+                return undefined;
+            });
+
+            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEvent;
+                if (eventId === "pm-root-event") return mockPmRootEvent;
+                return undefined;
+            });
+
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+
+            expect(result).toBeDefined();
+            expect(result).toHaveLength(4);
+
+            // Verify the chain was re-computed with CORRECT semantics:
+            // Under NEW semantics: origin has NO conversationId
+            expect(result![0].displayName).toBe("User");
+            expect(result![0].conversationId).toBeUndefined(); // Origin should NOT have conversationId
+            expect(result![0].isUser).toBe(true);
+
+            // pm-wip was delegated TO in pm-conv-id-1234567890
+            // (the conversation where User delegated to pm, which we found via exec-root-event delegation tag)
+            expect(result![1].displayName).toBe("pm-wip");
+            expect(result![1].conversationId).toBe("pm-conv-id-1234567890");
+
+            // exec is the immediate delegator (event.pubkey), added after walking
+            // Since exec was not found during the walk (exec initiated exec-conv, but is not the initiator of visited convs),
+            // it falls back to parentConversationId = exec-conv-id-1234567890
+            expect(result![2].displayName).toBe("execution-coordinator");
+            expect(result![2].conversationId).toBe("exec-conv-id-1234567890");
+
+            // claude was delegated TO in exec-conv-id-1234567890
+            expect(result![3].displayName).toBe("claude-code");
+            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
+        });
+
+        it("should trust new-semantic chains where origin has no conversationId", () => {
+            // NEW SEMANTICS: Origin entry does NOT have a conversationId.
+            // This test verifies that valid new-semantic chains are trusted and used directly.
+
+            const event = {
+                pubkey: "agent-pubkey-exec",
+                tags: [["delegation", "exec-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            // Mock the execution-coordinator's conversation
+            const mockExecStore = {
+                metadata: {},
+                getAllMessages: () => [{ pubkey: "agent-pubkey-pm" }],
+                getRootEventId: () => "exec-root-event",
+            };
+
+            // Mock the cached root event for exec conversation (points to pm-conv)
+            const mockExecRootEvent = {
+                tags: [["delegation", "pm-conv-id-1234567890"]],
+            };
+
+            // Mock pm-wip's conversation with a NEW-SEMANTIC stored chain
+            // NEW SEMANTICS: Origin (User) has NO conversationId - this is correct
+            const mockPmStore = {
+                metadata: {
+                    delegationChain: [
+                        // NEW: Origin has NO conversationId (correct semantics)
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true },
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "user-conv-id-1234567890" },
+                    ],
+                },
+                getAllMessages: () => [{ pubkey: "user-pubkey" }],
+                getRootEventId: () => undefined,
+            };
+
+            mockConversationStoreGet.mockImplementation((convId: string) => {
+                if (convId === "exec-conv-id-1234567890") return mockExecStore;
+                if (convId === "pm-conv-id-1234567890") return mockPmStore;
+                return undefined;
+            });
+
+            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEvent;
+                return undefined;
+            });
+
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+
+            expect(result).toBeDefined();
+            expect(result).toHaveLength(4);
+
+            // Verify the stored chain was used (not re-computed):
+            // User from stored chain
+            expect(result![0].displayName).toBe("User");
+            expect(result![0].conversationId).toBeUndefined(); // Origin has no conversationId
+
+            // pm-wip from stored chain
+            expect(result![1].displayName).toBe("pm-wip");
+            expect(result![1].conversationId).toBe("user-conv-id-1234567890"); // From stored chain
+
+            // exec was delegated TO in pm-conv-id-1234567890
+            expect(result![2].displayName).toBe("execution-coordinator");
+            expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
+
+            // claude was delegated TO in exec-conv-id-1234567890
+            expect(result![3].displayName).toBe("claude-code");
+            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
+        });
+
+        it("should capture conversation IDs when walking the chain", () => {
+            const event = {
+                pubkey: "agent-pubkey-exec",
+                tags: [["delegation", "exec-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            // Mock the execution-coordinator's conversation
+            const mockExecStore = {
+                metadata: {},
+                getAllMessages: () => [{ pubkey: "agent-pubkey-pm" }],
+                getRootEventId: () => "exec-root-event",
+            };
+
+            // Mock the cached root event for exec conversation (points to pm-conv)
+            const mockExecRootEvent = {
+                tags: [["delegation", "pm-conv-id-1234567890"]],
+            };
+
+            // Mock pm-wip's conversation with stored chain
+            // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            // pm-wip: was delegated to in user-conv-id-1234567890
+            const mockPmStore = {
+                metadata: {
+                    delegationChain: [
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true }, // Origin, no convId
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "user-conv-id-1234567890" },
+                    ],
+                },
+                getAllMessages: () => [{ pubkey: "user-pubkey" }],
+                getRootEventId: () => undefined,
+            };
+
+            mockConversationStoreGet.mockImplementation((convId: string) => {
+                if (convId === "exec-conv-id-1234567890") return mockExecStore;
+                if (convId === "pm-conv-id-1234567890") return mockPmStore;
+                return undefined;
+            });
+
+            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEvent;
+                return undefined;
+            });
+
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+
+            expect(result).toBeDefined();
+            expect(result).toHaveLength(4);
+
+            // Verify chain entries have FULL conversation IDs based on semantics:
+            // conversationId = "where this agent was delegated TO" (full IDs stored)
+            // User: origin, no conversationId
+            expect(result![0].conversationId).toBeUndefined();
+            // pm-wip: delegated to in user-conv-id-1234567890 (from stored chain, full ID)
+            expect(result![1].conversationId).toBe("user-conv-id-1234567890");
+            // exec: delegated to in pm-conv-id-1234567890 (full ID)
+            expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
+            // claude: delegated to in exec-conv-id-1234567890 (full ID)
+            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
         });
     });
 });
