@@ -175,6 +175,7 @@ export class RALRegistry {
       conversationId,
       queuedInjections: [],
       isStreaming: false,
+      activeTools: new Set(),
       createdAt: now,
       lastActivityAt: now,
       originalTriggeringEventId,
@@ -261,12 +262,12 @@ export class RALRegistry {
 
       // Derive state from current RAL entry state:
       // - If streaming starts: STREAMING
-      // - If streaming stops but tool is running: ACTING (tool still executing)
-      // - If streaming stops and no tool: REASONING (thinking/preparing next action)
+      // - If streaming stops but any tool is running: ACTING (tool still executing)
+      // - If streaming stops and no tools: REASONING (thinking/preparing next action)
       let newState: 'STREAMING' | 'ACTING' | 'REASONING';
       if (isStreaming) {
         newState = 'STREAMING';
-      } else if (ral.currentTool) {
+      } else if (ral.activeTools.size > 0) {
         newState = 'ACTING';
       } else {
         newState = 'REASONING';
@@ -702,21 +703,23 @@ export class RALRegistry {
   }
 
   /**
-   * Set current tool being executed
+   * Set current tool being executed.
+   * @deprecated Use setToolActive instead for proper concurrent tool tracking.
    */
   setCurrentTool(agentPubkey: string, conversationId: string, ralNumber: number, toolName: string | undefined): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) return;
 
+    // Maintain backward compatibility with currentTool
     ral.currentTool = toolName;
     ral.toolStartedAt = toolName ? Date.now() : undefined;
 
-    // Derive state from current RAL entry state:
-    // - If tool starts: ACTING (executing tool)
-    // - If tool ends but streaming: STREAMING (LLM generating response)
-    // - If tool ends and not streaming: REASONING (preparing next action)
+    // Derive state from activeTools (not the deprecated currentTool)
+    // - If any tools are active: ACTING
+    // - If no tools but streaming: STREAMING
+    // - If no tools and not streaming: REASONING
     let newState: 'ACTING' | 'STREAMING' | 'REASONING';
-    if (toolName) {
+    if (ral.activeTools.size > 0) {
       newState = 'ACTING';
     } else if (ral.isStreaming) {
       newState = 'STREAMING';
@@ -730,6 +733,114 @@ export class RALRegistry {
       const key = this.makeKey(agentPubkey, conversationId);
       this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
     }
+  }
+
+  /**
+   * Track a tool as active or completed by its toolCallId.
+   * Supports concurrent tool execution by tracking each tool independently.
+   *
+   * @param toolCallId - Unique identifier for this tool invocation
+   * @param isActive - true when tool starts, false when tool completes
+   * @param toolName - Optional tool name for logging/debugging
+   */
+  setToolActive(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    toolCallId: string,
+    isActive: boolean,
+    toolName?: string
+  ): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return;
+
+    if (isActive) {
+      ral.activeTools.add(toolCallId);
+      ral.toolStartedAt = Date.now();
+      // Maintain backward compatibility - set currentTool to most recent tool name
+      ral.currentTool = toolName;
+    } else {
+      ral.activeTools.delete(toolCallId);
+      // Only clear currentTool if no tools remain active
+      if (ral.activeTools.size === 0) {
+        ral.currentTool = undefined;
+        ral.toolStartedAt = undefined;
+      }
+    }
+
+    ral.lastActivityAt = Date.now();
+
+    // Derive state from activeTools:
+    // - If any tools are active: ACTING
+    // - If no tools but streaming: STREAMING
+    // - If no tools and not streaming: REASONING
+    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
+    if (ral.activeTools.size > 0) {
+      newState = 'ACTING';
+    } else if (ral.isStreaming) {
+      newState = 'STREAMING';
+    } else {
+      newState = 'REASONING';
+    }
+
+    llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
+
+    trace.getActiveSpan()?.addEvent(isActive ? "ral.tool_started" : "ral.tool_completed", {
+      "ral.number": ralNumber,
+      "tool.call_id": toolCallId,
+      "tool.name": toolName,
+      "ral.active_tools_count": ral.activeTools.size,
+    });
+  }
+
+  /**
+   * Clear a tool from the active set as a fallback.
+   * Used by MessageSyncer when a tool result is observed without a prior tool-did-execute event.
+   *
+   * @param toolCallId - The tool call ID to clear
+   * @returns true if the tool was found and removed, false otherwise
+   */
+  clearToolFallback(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    toolCallId: string
+  ): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return false;
+
+    if (!ral.activeTools.has(toolCallId)) {
+      return false; // Tool wasn't in active set
+    }
+
+    ral.activeTools.delete(toolCallId);
+    ral.lastActivityAt = Date.now();
+
+    // Clear currentTool if no tools remain
+    if (ral.activeTools.size === 0) {
+      ral.currentTool = undefined;
+      ral.toolStartedAt = undefined;
+    }
+
+    // Update state
+    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
+    if (ral.activeTools.size > 0) {
+      newState = 'ACTING';
+    } else if (ral.isStreaming) {
+      newState = 'STREAMING';
+    } else {
+      newState = 'REASONING';
+    }
+
+    llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
+
+    trace.getActiveSpan()?.addEvent("ral.tool_cleared_fallback", {
+      "ral.number": ralNumber,
+      "tool.call_id": toolCallId,
+      "ral.active_tools_count": ral.activeTools.size,
+    });
+
+    return true;
   }
 
   /**
