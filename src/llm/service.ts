@@ -509,12 +509,24 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         });
 
         // Consume the stream (this is what triggers everything!)
+        // In AI SDK v6, the stream's flush() handler awaits onFinish before closing,
+        // so the for-await loop should complete AFTER onFinish has run.
         try {
             // CRITICAL: This loop is what actually triggers the stream execution
             for await (const _chunk of textStream) {
                 // The onChunk callback should handle all processing
                 // We just need to consume the stream to trigger execution
             }
+
+            // DIAGNOSTIC: Track when for-await loop completes
+            // At this point, onFinish SHOULD have already run (AI SDK v6 behavior)
+            const loopCompleteTime = Date.now();
+            const loopDuration = loopCompleteTime - startTime;
+            trace.getActiveSpan()?.addEvent("llm.stream_loop_complete", {
+                "stream.loop_complete_time": loopCompleteTime,
+                "stream.loop_duration_ms": loopDuration,
+                "stream.cached_content_length": this.cachedContentForComplete.length,
+            });
         } catch (error) {
             await this.handleStreamError(error, startTime);
             throw error;
@@ -665,6 +677,18 @@ export class LLMService extends EventEmitter<Record<string, any>> {
 
     private createFinishHandler(): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
         return async (e) => {
+            const onFinishStartTime = Date.now();
+            const activeSpan = trace.getActiveSpan();
+
+            // DIAGNOSTIC: Track onFinish lifecycle for debugging race conditions
+            activeSpan?.addEvent("llm.onFinish_started", {
+                "onFinish.start_time": onFinishStartTime,
+                "onFinish.finish_reason": e.finishReason,
+                "onFinish.steps_count": e.steps.length,
+                "onFinish.text_length": e.text?.length ?? 0,
+                "onFinish.cached_content_length": this.cachedContentForComplete.length,
+            });
+
             try {
                 this.recordInvalidToolCalls(e.steps, "response");
 
@@ -684,7 +708,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     e.providerMetadata as Record<string, unknown> | undefined
                 );
                 if (openrouterGenerationId) {
-                    trace.getActiveSpan()?.setAttribute("openrouter.generation_id", openrouterGenerationId);
+                    activeSpan?.setAttribute("openrouter.generation_id", openrouterGenerationId);
                 }
 
                 // Extract usage metadata using provider-specific extractor
@@ -694,6 +718,16 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     e.totalUsage,
                     e.providerMetadata as Record<string, unknown> | undefined
                 );
+
+                // DIAGNOSTIC: Log right before emitting complete event
+                const beforeEmitTime = Date.now();
+                activeSpan?.addEvent("llm.complete_will_emit", {
+                    "complete.message_length": finalMessage.length,
+                    "complete.usage_input_tokens": usage.inputTokens,
+                    "complete.usage_output_tokens": usage.outputTokens,
+                    "complete.finish_reason": e.finishReason,
+                    "complete.ms_since_onFinish_start": beforeEmitTime - onFinishStartTime,
+                });
 
                 this.emit("complete", {
                     message: finalMessage,
@@ -705,9 +739,22 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     finishReason: e.finishReason,
                 });
 
+                // DIAGNOSTIC: Log after emitting complete event
+                const afterEmitTime = Date.now();
+                activeSpan?.addEvent("llm.complete_did_emit", {
+                    "complete.emit_duration_ms": afterEmitTime - beforeEmitTime,
+                    "complete.total_onFinish_duration_ms": afterEmitTime - onFinishStartTime,
+                });
+
                 // Clear cached content after use
                 this.cachedContentForComplete = "";
             } catch (error) {
+                const errorTime = Date.now();
+                activeSpan?.addEvent("llm.onFinish_error", {
+                    "error.message": error instanceof Error ? error.message : String(error),
+                    "error.type": error instanceof Error ? error.constructor.name : typeof error,
+                    "error.ms_since_onFinish_start": errorTime - onFinishStartTime,
+                });
                 logger.error("[LLMService] Error in onFinish handler", {
                     error: error instanceof Error ? error.message : String(error),
                 });

@@ -1178,10 +1178,30 @@ export class AgentExecutor {
         });
 
         llmService.on("complete", (event: CompleteEvent) => {
+            // DIAGNOSTIC: Track when complete event is received
+            const completeReceivedTime = Date.now();
+            executionSpan?.addEvent("executor.complete_received", {
+                "complete.received_at": completeReceivedTime,
+                "complete.message_length": event.message?.length ?? 0,
+                "complete.steps_count": event.steps?.length ?? 0,
+                "complete.finish_reason": event.finishReason ?? "unknown",
+                "complete.result_already_set": result !== undefined,
+                "complete.result_kind": result?.kind ?? "none",
+                "ral.number": ralNumber,
+            });
+
             // Only set result if no error already occurred
             // accumulatedRuntime is set later after stream completes (before RAL cleanup)
             if (!result) {
                 result = { kind: "complete", event, messageCompiler, accumulatedRuntime: 0 };
+                executionSpan?.addEvent("executor.result_set_to_complete", {
+                    "ral.number": ralNumber,
+                });
+            } else {
+                executionSpan?.addEvent("executor.complete_ignored_result_exists", {
+                    "existing_result.kind": result.kind,
+                    "ral.number": ralNumber,
+                });
             }
         });
 
@@ -1660,6 +1680,16 @@ export class AgentExecutor {
                 prepareStep,
                 onStopCheck,
             });
+
+            // DIAGNOSTIC: Track when stream method returns (after for-await loop completes)
+            // At this point, onFinish should have been called (AI SDK v6 awaits it in flush())
+            const streamReturnTime = Date.now();
+            executionSpan?.addEvent("executor.stream_returned", {
+                "stream.return_time": streamReturnTime,
+                "stream.result_set": result !== undefined,
+                "stream.result_kind": result?.kind ?? "undefined",
+                "ral.number": ralNumber,
+            });
         } catch (streamError) {
             // Check if this was an abort from a stop signal (kind 24134)
             if (abortSignal.aborted) {
@@ -1728,7 +1758,30 @@ export class AgentExecutor {
         // NOTE: RAL cleanup is now done in executeOnce() AFTER supervision check.
         // This ensures supervision correction messages can be queued before RAL is cleared.
 
+        // DIAGNOSTIC: Log state right before the critical result check
+        // This helps debug race conditions where onFinish/complete event may not have fired
+        const resultCheckTime = Date.now();
+        executionSpan?.addEvent("executor.result_check", {
+            "result.check_time": resultCheckTime,
+            "result.is_defined": result !== undefined,
+            "result.kind": result?.kind ?? "undefined",
+            "ral.number": ralNumber,
+            "stream.accumulated_runtime_ms": accumulatedRuntime,
+            "agent.slug": context.agent.slug,
+        });
+
         if (!result) {
+            // DIAGNOSTIC: Capture detailed state for debugging this rare failure case
+            executionSpan?.addEvent("executor.result_undefined_error", {
+                "error.type": "missing_result",
+                "ral.number": ralNumber,
+                "stream.accumulated_runtime_ms": accumulatedRuntime,
+                "agent.slug": context.agent.slug,
+                "agent.pubkey": context.agent.pubkey.substring(0, 8),
+                "conversation.id": context.conversationId.substring(0, 8),
+                "llm.provider": llmService.provider,
+                "llm.model": llmService.model,
+            });
             throw new Error("LLM stream completed without emitting complete or stream-error event");
         }
 
