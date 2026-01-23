@@ -1687,6 +1687,23 @@ export class AgentExecutor {
                 });
             });
 
+            // Add TENEX-specific attributes to the active span (ai.streamText.doStream)
+            // This makes our context visible in Jaeger traces from the AI SDK
+            const activeSpan = trace.getActiveSpan();
+            if (activeSpan) {
+                activeSpan.setAttributes({
+                    "tenex.agent.slug": context.agent.slug,
+                    "tenex.agent.name": context.agent.name,
+                    "tenex.agent.pubkey": context.agent.pubkey,
+                    "tenex.conversation.id": context.conversationId,
+                    "tenex.ral.number": ralNumber,
+                    "tenex.delegation.chain":
+                        conversationStore.metadata.delegationChain
+                            ?.map((e) => e.displayName)
+                            .join(" -> ") ?? "",
+                });
+            }
+
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,

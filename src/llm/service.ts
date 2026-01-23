@@ -478,7 +478,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             return false;
         };
 
-        const { textStream } = streamText({
+        const { fullStream } = streamText({
             model,
             messages: processedMessages,
             // Don't pass tools for providers with built-in tools - they have their own that would conflict
@@ -511,11 +511,22 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Consume the stream (this is what triggers everything!)
         // In AI SDK v6, the stream's flush() handler awaits onFinish before closing,
         // so the for-await loop should complete AFTER onFinish has run.
+        //
+        // IMPORTANT: We use fullStream instead of textStream because:
+        // - textStream only yields text deltas
+        // - fullStream yields ALL events including tool-error
+        // - tool-error events are NOT delivered to onChunk callback
+        // - Without fullStream, failed tool executions are never recorded
         try {
             // CRITICAL: This loop is what actually triggers the stream execution
-            for await (const _chunk of textStream) {
-                // The onChunk callback should handle all processing
-                // We just need to consume the stream to trigger execution
+            // We iterate fullStream to catch tool-error events that onChunk misses
+            for await (const part of fullStream) {
+                // Handle tool-error events that don't come through onChunk
+                // The onChunk callback handles most events, but tool-error only comes through fullStream
+                if (part.type === "tool-error") {
+                    this.handleChunk({ chunk: part as TextStreamPart<Record<string, AISdkTool>> });
+                }
+                // Other events are handled by onChunk callback
             }
 
             // DIAGNOSTIC: Track when for-await loop completes
@@ -745,6 +756,20 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                     "complete.emit_duration_ms": afterEmitTime - beforeEmitTime,
                     "complete.total_onFinish_duration_ms": afterEmitTime - onFinishStartTime,
                 });
+
+                // Log the actual response text so it shows up in Jaeger's Logs section
+                // This makes it much easier to see what the LLM actually generated
+                if (e.text) {
+                    // Truncate to avoid massive log entries (OTel has limits)
+                    const truncatedText = e.text.length > 4000
+                        ? e.text.substring(0, 4000) + "... [truncated]"
+                        : e.text;
+                    activeSpan?.addEvent("llm.response", {
+                        "response.text": truncatedText,
+                        "response.full_length": e.text.length,
+                        "response.truncated": e.text.length > 4000,
+                    });
+                }
 
                 // Clear cached content after use
                 this.cachedContentForComplete = "";
