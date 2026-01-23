@@ -258,6 +258,13 @@ export class RALRegistry {
     if (ral) {
       ral.isStreaming = isStreaming;
       ral.lastActivityAt = Date.now();
+
+      // Notify LLMOperationsRegistry of state change
+      llmOpsRegistry.updateRALState(
+        agentPubkey,
+        conversationId,
+        isStreaming ? 'STREAMING' : 'IDLE'
+      );
     }
   }
 
@@ -695,6 +702,14 @@ export class RALRegistry {
 
     ral.currentTool = toolName;
     ral.toolStartedAt = toolName ? Date.now() : undefined;
+
+    // Notify LLMOperationsRegistry of state change
+    // When tool starts: ACTING, when tool ends: REASONING (back to thinking)
+    llmOpsRegistry.updateRALState(
+      agentPubkey,
+      conversationId,
+      toolName ? 'ACTING' : 'REASONING'
+    );
 
     if (!toolName) {
       const key = this.makeKey(agentPubkey, conversationId);

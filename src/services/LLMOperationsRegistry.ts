@@ -9,6 +9,9 @@ import { EventEmitter } from "tseep";
  */
 export const INJECTION_ABORT_REASON = "INJECTION_ABORT";
 
+/** RAL state representing the current phase of agent execution */
+export type RALState = 'IDLE' | 'REASONING' | 'ACTING' | 'STREAMING' | 'ERROR';
+
 // Store essential operation metadata
 export interface LLMOperation {
     id: string;
@@ -20,6 +23,8 @@ export interface LLMOperation {
     registeredAt: number; // Timestamp
     /** MessageInjector for Claude Code streams (set via onStreamStart callback) */
     messageInjector?: MessageInjector;
+    /** Current RAL state for this operation */
+    ralState?: RALState;
 }
 
 export class LLMOperationsRegistry {
@@ -230,6 +235,37 @@ export class LLMOperationsRegistry {
             }
         }
         return undefined;
+    }
+
+    /**
+     * Update the RAL state for an operation identified by agent and conversation.
+     * This is called by RALRegistry when state transitions occur (streaming, tool execution, etc.)
+     *
+     * @param agentPubkey - The agent's public key
+     * @param conversationId - The conversation (root event) ID
+     * @param state - The new RAL state
+     * @returns Whether an operation was found and updated
+     */
+    updateRALState(agentPubkey: string, conversationId: string, state: RALState): boolean {
+        for (const operation of this.operations.values()) {
+            if (
+                operation.agentPubkey === agentPubkey &&
+                operation.conversationId === conversationId &&
+                !operation.abortController.signal.aborted
+            ) {
+                operation.ralState = state;
+                logger.debug("[LLMOpsRegistry] Updated RAL state", {
+                    operationId: operation.id.substring(0, 8),
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    conversationId: conversationId.substring(0, 8),
+                    state,
+                });
+                // Notify listeners of state change
+                this.notifyChange();
+                return true;
+            }
+        }
+        return false;
     }
 
     getActiveOperationsCount(): number {
