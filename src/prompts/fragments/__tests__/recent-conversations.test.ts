@@ -56,18 +56,24 @@ describe("recentConversationsFragment", () => {
     };
 
     let listConversationIdsSpy: ReturnType<typeof spyOn>;
+    let listConversationIdsForProjectSpy: ReturnType<typeof spyOn>;
     let readConversationPreviewSpy: ReturnType<typeof spyOn>;
+    let readConversationPreviewForProjectSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Reset spies - now we only mock the combined readConversationPreview
         listConversationIdsSpy = spyOn(ConversationStore, "listConversationIdsFromDisk");
+        listConversationIdsForProjectSpy = spyOn(ConversationStore, "listConversationIdsFromDiskForProject");
         readConversationPreviewSpy = spyOn(ConversationStore, "readConversationPreview");
+        readConversationPreviewForProjectSpy = spyOn(ConversationStore, "readConversationPreviewForProject");
     });
 
     afterEach(() => {
         // Clear all mocks
         listConversationIdsSpy.mockRestore();
+        listConversationIdsForProjectSpy.mockRestore();
         readConversationPreviewSpy.mockRestore();
+        readConversationPreviewForProjectSpy.mockRestore();
     });
 
     describe("24h cutoff logic", () => {
@@ -379,6 +385,72 @@ describe("recentConversationsFragment", () => {
 
             // Should be called exactly once per conversation ID
             expect(readConversationPreviewSpy).toHaveBeenCalledTimes(3);
+        });
+    });
+
+    describe("project scoping", () => {
+        it("should use project-specific methods when projectId is provided", () => {
+            const projectId = "test-project-123";
+            const conversationIds = ["conv-1", "conv-2"];
+
+            listConversationIdsForProjectSpy.mockReturnValue(conversationIds);
+            readConversationPreviewForProjectSpy.mockImplementation((id: string, _agentPubkey: string, _projId: string) => ({
+                id,
+                lastActivity: now - 1000,
+                title: `Task ${id}`,
+                summary: `Summary ${id}`,
+                agentParticipated: true,
+            }));
+
+            const result = recentConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            // Verify project-specific methods were called
+            expect(listConversationIdsForProjectSpy).toHaveBeenCalledWith(projectId);
+            expect(listConversationIdsForProjectSpy).toHaveBeenCalledTimes(1);
+
+            // Verify readConversationPreviewForProject was called with correct projectId
+            expect(readConversationPreviewForProjectSpy).toHaveBeenCalledTimes(2);
+            expect(readConversationPreviewForProjectSpy).toHaveBeenCalledWith("conv-1", "agent-pubkey-123", projectId);
+            expect(readConversationPreviewForProjectSpy).toHaveBeenCalledWith("conv-2", "agent-pubkey-123", projectId);
+
+            // Verify global methods were NOT called
+            expect(listConversationIdsSpy).not.toHaveBeenCalled();
+            expect(readConversationPreviewSpy).not.toHaveBeenCalled();
+
+            // Verify output contains the expected conversations
+            expect(result).toContain("Task conv-1");
+            expect(result).toContain("Task conv-2");
+        });
+
+        it("should use global methods when projectId is not provided", () => {
+            const conversationIds = ["conv-1"];
+
+            listConversationIdsSpy.mockReturnValue(conversationIds);
+            readConversationPreviewSpy.mockReturnValue({
+                id: "conv-1",
+                lastActivity: now - 1000,
+                title: "Task conv-1",
+                summary: "Summary conv-1",
+                agentParticipated: true,
+            });
+
+            recentConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                // No projectId provided
+            });
+
+            // Verify global methods were called
+            expect(listConversationIdsSpy).toHaveBeenCalledTimes(1);
+            expect(readConversationPreviewSpy).toHaveBeenCalledTimes(1);
+
+            // Verify project-specific methods were NOT called
+            expect(listConversationIdsForProjectSpy).not.toHaveBeenCalled();
+            expect(readConversationPreviewForProjectSpy).not.toHaveBeenCalled();
         });
     });
 });
