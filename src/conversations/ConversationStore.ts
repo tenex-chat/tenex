@@ -18,6 +18,7 @@ import { getTenexBasePath } from "@/constants";
 import { trace } from "@opentelemetry/api";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
 import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
@@ -34,6 +35,8 @@ export interface ConversationEntry {
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
     suppressAttribution?: boolean; // @deprecated - No longer used. Attribution prefixes are never added to LLM input.
+    /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
+    senderPubkey?: string;
 }
 
 export interface Injection {
@@ -582,6 +585,7 @@ export class ConversationStore {
     /**
      * Read conversation preview data (metadata + participation check) in a single disk read.
      * This is more efficient than calling readLightweightMetadata + readMessagesFromDisk separately.
+     * Uses the globally initialized projectId.
      *
      * @param conversationId - The conversation ID
      * @param agentPubkey - The agent pubkey to check participation for
@@ -595,10 +599,43 @@ export class ConversationStore {
         agentParticipated: boolean;
     } | null {
         if (!ConversationStore.projectId) return null;
+        return ConversationStore.readConversationPreviewForProject(
+            conversationId,
+            agentPubkey,
+            ConversationStore.projectId
+        );
+    }
+
+    /**
+     * Read conversation preview data for a specific project.
+     * This is the project-aware version that allows reading from any project.
+     *
+     * @param conversationId - The conversation ID
+     * @param agentPubkey - The agent pubkey to check participation for
+     * @param projectId - The project ID to read from
+     * @returns Preview data including metadata and participation status, or null if not found
+     */
+    static readConversationPreviewForProject(
+        conversationId: string,
+        agentPubkey: string,
+        projectId: string
+    ): {
+        id: string;
+        lastActivity: number;
+        title?: string;
+        summary?: string;
+        agentParticipated: boolean;
+    } | null {
+        // Validate projectId to prevent path traversal attacks
+        // Reject if empty, contains path separators, or has directory traversal patterns
+        if (!projectId || projectId.includes("/") || projectId.includes("\\") || projectId.includes("..")) {
+            logger.warn(`[ConversationStore] Invalid projectId rejected: "${projectId}"`);
+            return null;
+        }
 
         const filePath = join(
             ConversationStore.basePath,
-            ConversationStore.projectId,
+            projectId,
             "conversations",
             `${conversationId}.json`
         );
@@ -850,9 +887,19 @@ export class ConversationStore {
 
     /**
      * Add a message to the conversation.
-     * @returns The index of the added message (for later setEventId calls)
+     * @returns The index of the added message (for later setEventId calls), or -1 if deduplicated
+     *
+     * Deduplication: If the message has an eventId that already exists in this conversation,
+     * the message is skipped to prevent duplicates. This is critical for injection messages
+     * where the same Nostr event may arrive via both the event subscription path (addEvent)
+     * and the injection consumption path (AgentExecutor).
      */
     addMessage(entry: ConversationEntry): number {
+        // Deduplicate by eventId - if this message has an eventId we've already seen, skip it
+        if (entry.eventId && this.eventIdSet.has(entry.eventId)) {
+            return -1; // Signal that message was deduplicated
+        }
+
         const index = this.state.messages.length;
         this.state.messages.push(entry);
         if (entry.eventId) {
@@ -1038,10 +1085,13 @@ export class ConversationStore {
     /**
      * Convert a ConversationEntry to a ModelMessage for the viewing agent.
      *
-     * Note: Attribution prefixes ([@sender -> @recipient]) are intentionally NOT
-     * included in LLM input. Less capable models were copying the prefix format
-     * in their outputs. Since we now use flatter conversations instead of nested
-     * ones with multiple participants, attribution is less important for the LLM.
+     * Note: Most attribution prefixes are NOT added to LLM input to avoid models
+     * copying the format. However, when a message comes from an UNEXPECTED sender
+     * (different from the root conversation author), we add a prose-style prefix:
+     *   [Note: Message from {senderName}]
+     *
+     * This allows agents to know when they receive messages from someone other
+     * than their delegator (e.g., project owner intervening in a delegation).
      *
      * For human-readable attribution, see conversation_get tool which uses formatLine().
      *
@@ -1051,7 +1101,8 @@ export class ConversationStore {
     private entryToMessage(
         entry: ConversationEntry,
         viewingAgentPubkey: string,
-        truncationContext?: TruncationContext
+        truncationContext?: TruncationContext,
+        rootAuthorPubkey?: string
     ): ModelMessage {
         const role = this.deriveRole(entry, viewingAgentPubkey);
 
@@ -1067,10 +1118,20 @@ export class ConversationStore {
             return { role: "tool", content: toolData };
         }
 
-        // Text message - return raw content (no attribution prefix)
+        // Text message - check if attribution prefix needed for unexpected sender
+        let messageContent = entry.content;
+
+        // Add attribution prefix when:
+        // 1. Message has a senderPubkey (was injected with sender tracking)
+        // 2. senderPubkey differs from root conversation author (unexpected sender)
+        if (entry.senderPubkey && rootAuthorPubkey && entry.senderPubkey !== rootAuthorPubkey) {
+            const senderName = getPubkeyService().getNameSync(entry.senderPubkey);
+            messageContent = `[Note: Message from ${senderName}]\n${messageContent}`;
+        }
+
         // Convert to multimodal format if content contains image URLs
         // This allows the AI SDK to fetch and process images automatically
-        const content = convertToMultimodalContent(entry.content);
+        const content = convertToMultimodalContent(messageContent);
 
         return { role, content } as ModelMessage;
     }
@@ -1084,6 +1145,10 @@ export class ConversationStore {
     ): Promise<ModelMessage[]> {
         const result: ModelMessage[] = [];
         const delegationCompletionPrefix = "# DELEGATION COMPLETED";
+
+        // Get root author pubkey (first message in conversation) for attribution
+        // Expected sender = author of the root conversation event
+        const rootAuthorPubkey = this.state.messages[0]?.pubkey;
         const latestDelegationCompletionIndexByRal = new Map<number, number>();
         const getDelegationCompletionRal = (entry: ConversationEntry): number | undefined => {
             if (entry.messageType !== "text") return undefined;
@@ -1194,7 +1259,7 @@ export class ConversationStore {
             // a synthetic result at the right position if the tool-call is orphaned
             if (entry.messageType === "tool-call" && entry.toolData) {
                 const resultIndex = result.length;
-                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext, rootAuthorPubkey));
 
                 for (const part of entry.toolData as ToolCallPart[]) {
                     pendingToolCalls.set(part.toolCallId, {
@@ -1210,7 +1275,7 @@ export class ConversationStore {
             // Once all pending tool-calls have results, we can safely flush
             // any deferred messages that were waiting
             if (entry.messageType === "tool-result" && entry.toolData) {
-                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext, rootAuthorPubkey));
 
                 for (const part of entry.toolData as ToolResultPart[]) {
                     pendingToolCalls.delete(part.toolCallId);
@@ -1221,7 +1286,7 @@ export class ConversationStore {
                 // AFTER the tool-call/result pair, not between them
                 if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                     for (const deferred of deferredMessages) {
-                        result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext));
+                        result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext, rootAuthorPubkey));
                     }
                     deferredMessages.length = 0;
                 }
@@ -1234,7 +1299,7 @@ export class ConversationStore {
             if (pendingToolCalls.size > 0) {
                 deferredMessages.push({ entry, truncationContext });
             } else {
-                result.push(this.entryToMessage(entry, agentPubkey, truncationContext));
+                result.push(this.entryToMessage(entry, agentPubkey, truncationContext, rootAuthorPubkey));
             }
         }
 
@@ -1287,7 +1352,7 @@ export class ConversationStore {
         // Flush any remaining deferred messages
         // (edge case: messages deferred but no tool-results ever arrived)
         for (const deferred of deferredMessages) {
-            result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext));
+            result.push(this.entryToMessage(deferred.entry, agentPubkey, deferred.truncationContext, rootAuthorPubkey));
         }
 
         if (prunedDelegationCompletions > 0) {

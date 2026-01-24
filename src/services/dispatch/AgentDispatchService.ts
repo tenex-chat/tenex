@@ -536,6 +536,8 @@ export class AgentDispatchService {
                     agent: targetAgent,
                     conversationId,
                     message: event.content,
+                    senderPubkey: event.pubkey,
+                    eventId: event.id,
                     agentSpan,
                 });
 
@@ -604,6 +606,8 @@ export class AgentDispatchService {
         agent: AgentInstance;
         conversationId: string;
         message: string;
+        senderPubkey: string;
+        eventId?: string;
         agentSpan: ReturnType<typeof tracer.startSpan>;
     }): boolean {
         const {
@@ -611,6 +615,8 @@ export class AgentDispatchService {
             agent,
             conversationId,
             message,
+            senderPubkey,
+            eventId,
             agentSpan,
         } = params;
 
@@ -625,7 +631,8 @@ export class AgentDispatchService {
             agent.pubkey,
             conversationId,
             activeRal.ralNumber,
-            message
+            message,
+            { senderPubkey, eventId }
         );
 
         if (activeRal.isStreaming) {

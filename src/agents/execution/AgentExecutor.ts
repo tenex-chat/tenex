@@ -33,6 +33,7 @@ import { NudgeService } from "@/services/nudge";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry, extractPendingDelegations } from "@/services/ral";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
 import type { AISdkTool, ToolRegistryContext } from "@/tools/types";
@@ -106,6 +107,27 @@ export class AgentExecutor {
     constructor(private standaloneContext?: StandaloneAgentContext) {
         // Initialize supervision heuristics
         registerDefaultHeuristics();
+    }
+
+    /**
+     * Warm user profile cache for injection sender pubkeys (best-effort, non-blocking).
+     * This fires off profile warming but doesn't await it - if names aren't cached
+     * in time, attribution gracefully falls back to "User".
+     */
+    private warmSenderPubkeys(injections: Array<{ senderPubkey?: string }>): void {
+        const senderPubkeys = injections
+            .map((i) => i.senderPubkey)
+            .filter((pk): pk is string => !!pk);
+
+        if (senderPubkeys.length > 0) {
+            // Fire-and-forget with a timeout to avoid stalling
+            const pubkeyService = getPubkeyService();
+            void pubkeyService.warmUserProfiles(senderPubkeys).catch((error) => {
+                logger.debug("[AgentExecutor] Best-effort profile warming failed", {
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+        }
     }
 
     /**
@@ -880,15 +902,15 @@ export class AgentExecutor {
         }
         // === END RAL CLEANUP ===
 
-        const eventContext = createEventContext(context, completionEvent?.usage?.model);
-
-        // Use accumulated runtime from result (captured before RAL cleanup in executeStreaming)
-        const accumulatedRuntime = result.accumulatedRuntime;
+        // Note: LLM runtime is consumed by AgentPublisher.consumeAndEnhanceContext()
+        // which adds the incremental runtime to each published event
+        const eventContext = createEventContext(context, {
+            model: completionEvent?.usage?.model,
+        });
 
         trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
             has_pending_delegations: hasPendingDelegations,
-            "llm_runtime_ms": accumulatedRuntime,
         });
 
         let responseEvent: NDKEvent | undefined;
@@ -906,12 +928,10 @@ export class AgentExecutor {
         } else {
             // Final completion - use complete() (kind:1, with p-tag)
             // Always publish completion even if empty to mark conversation as complete
-            // Include accumulated LLM runtime in completion event
             responseEvent = await agentPublisher.complete(
                 {
                     content: completionEvent.message,
                     usage: completionEvent.usage,
-                    llmRuntime: accumulatedRuntime,
                 },
                 eventContext
             );
@@ -971,6 +991,9 @@ export class AgentExecutor {
         const ephemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
 
         if (initialInjections.length > 0) {
+            // Best-effort profile warming (non-blocking)
+            this.warmSenderPubkeys(initialInjections);
+
             for (const injection of initialInjections) {
                 if (injection.ephemeral) {
                     // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
@@ -981,6 +1004,8 @@ export class AgentExecutor {
                     });
                 } else {
                     // Non-ephemeral injections are persisted to ConversationStore
+                    // Include eventId from original Nostr event for deduplication
+                    // (prevents duplicate insertion via both addEvent and injection paths)
                     conversationStore.addMessage({
                         pubkey: context.triggeringEvent.pubkey,
                         ral: ralNumber,
@@ -988,6 +1013,8 @@ export class AgentExecutor {
                         messageType: "text",
                         targetedPubkeys: [context.agent.pubkey],
                         suppressAttribution: injection.suppressAttribution,
+                        senderPubkey: injection.senderPubkey,
+                        eventId: injection.eventId,
                     });
                 }
             }
@@ -1443,7 +1470,9 @@ export class AgentExecutor {
                 const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
 
                 if (newInjections.length > 0) {
-                    // Separate ephemeral vs non-ephemeral injections
+                    // Best-effort profile warming (non-blocking)
+                    this.warmSenderPubkeys(newInjections);
+
                     for (const injection of newInjections) {
                         if (injection.ephemeral) {
                             // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
@@ -1454,6 +1483,8 @@ export class AgentExecutor {
                             });
                         } else {
                             // Non-ephemeral injections are persisted to ConversationStore
+                            // Include eventId from original Nostr event for deduplication
+                            // (prevents duplicate insertion via both addEvent and injection paths)
                             conversationStore.addMessage({
                                 pubkey: context.triggeringEvent.pubkey,
                                 ral: ralNumber,
@@ -1461,6 +1492,8 @@ export class AgentExecutor {
                                 messageType: "text",
                                 targetedPubkeys: [context.agent.pubkey],
                                 suppressAttribution: injection.suppressAttribution,
+                                senderPubkey: injection.senderPubkey,
+                                eventId: injection.eventId,
                             });
                         }
                     }
