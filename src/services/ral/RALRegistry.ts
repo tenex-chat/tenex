@@ -95,6 +95,66 @@ export class RALRegistry {
   }
 
   /**
+   * Atomically merge new pending delegations into the registry.
+   * This method handles concurrent delegation calls safely by doing an atomic
+   * read-modify-write operation - it reads existing delegations, deduplicates,
+   * and writes back in a single operation without a read-then-write pattern
+   * that could drop updates.
+   *
+   * @param agentPubkey - The agent's pubkey
+   * @param conversationId - The conversation ID
+   * @param ralNumber - The RAL number for this execution
+   * @param newDelegations - New delegations to merge
+   */
+  mergePendingDelegations(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number,
+    newDelegations: PendingDelegation[]
+  ): void {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      logger.warn("[RALRegistry] No RAL found to merge pending delegations", {
+        agentPubkey: agentPubkey.substring(0, 8),
+        conversationId: conversationId.substring(0, 8),
+        ralNumber,
+      });
+      return;
+    }
+
+    const key = this.makeKey(agentPubkey, conversationId);
+    const convDelegations = this.getOrCreateConversationDelegations(key);
+    ral.lastActivityAt = Date.now();
+
+    // Atomically add new delegations, deduplicating by delegationConversationId
+    for (const d of newDelegations) {
+      // Skip if already exists (dedupe)
+      if (convDelegations.pending.has(d.delegationConversationId)) {
+        continue;
+      }
+
+      // Ensure ralNumber is set
+      const delegation = { ...d, ralNumber };
+      convDelegations.pending.set(d.delegationConversationId, delegation);
+
+      // Register delegation conversation ID -> RAL mappings (for routing delegation responses)
+      this.delegationToRal.set(d.delegationConversationId, { key, ralNumber });
+
+      // For followup delegations, also map the followup event ID
+      if (d.type === "followup" && d.followupEventId) {
+        this.delegationToRal.set(d.followupEventId, { key, ralNumber });
+      }
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.delegations_merged", {
+      "ral.id": ral.id,
+      "ral.number": ralNumber,
+      "delegation.new_count": newDelegations.length,
+      "delegation.total_pending": convDelegations.pending.size,
+    });
+  }
+
+  /**
    * Get completed delegations for a conversation, optionally filtered by RAL number
    */
   getConversationCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): CompletedDelegation[] {

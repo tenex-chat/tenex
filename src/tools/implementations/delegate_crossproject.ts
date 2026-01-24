@@ -2,8 +2,8 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
-import { PendingDelegationsRegistry } from "@/services/ral";
-import type { StopExecutionSignal } from "@/services/ral/types";
+import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -25,7 +25,12 @@ const delegateCrossProjectSchema = z.object({
 });
 
 type DelegateCrossProjectInput = z.infer<typeof delegateCrossProjectSchema>;
-type DelegateCrossProjectOutput = StopExecutionSignal;
+
+interface DelegateCrossProjectOutput {
+    success: boolean;
+    message: string;
+    delegationConversationId: string;
+}
 
 async function executeDelegateCrossProject(
     input: DelegateCrossProjectInput,
@@ -113,19 +118,35 @@ async function executeDelegateCrossProject(
     // Register with PendingDelegationsRegistry for q-tag correlation
     PendingDelegationsRegistry.register(context.agent.pubkey, context.conversationId, chatEvent.id);
 
+    // Register pending delegation in RALRegistry for response routing
+    // Uses atomic merge to safely handle concurrent delegation calls
+    const ralRegistry = RALRegistry.getInstance();
+    const newDelegation: PendingDelegation = {
+        type: "external" as const,
+        delegationConversationId: chatEvent.id,
+        recipientPubkey: agentPubkey,
+        senderPubkey: context.agent.pubkey,
+        prompt: content,
+        projectId: fullProjectId,
+        ralNumber: context.ralNumber,
+    };
+
+    ralRegistry.mergePendingDelegations(
+        context.agent.pubkey,
+        context.conversationId,
+        context.ralNumber,
+        [newDelegation]
+    );
+
+    logger.info("[delegate_crossproject] Delegation registered, agent continues without blocking", {
+        delegationConversationId: chatEvent.id,
+    });
+
+    // Return normal result - agent continues without blocking
     return {
-        __stopExecution: true,
-        pendingDelegations: [
-            {
-                type: "external" as const,
-                delegationConversationId: chatEvent.id,
-                recipientPubkey: agentPubkey,
-                senderPubkey: context.agent.pubkey,
-                prompt: content,
-                projectId: fullProjectId,
-                ralNumber: context.ralNumber,
-            },
-        ],
+        success: true,
+        message: `Delegated to agent '${agentSlug}' in project '${projectId}'. The agent will respond when ready.`,
+        delegationConversationId: chatEvent.id,
     };
 }
 

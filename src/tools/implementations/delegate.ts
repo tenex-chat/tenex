@@ -1,7 +1,7 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import type { PendingDelegation, StopExecutionSignal } from "@/services/ral/types";
+import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
@@ -40,7 +40,11 @@ interface DelegateInput {
   delegations: DelegationItem[];
 }
 
-type DelegateOutput = StopExecutionSignal;
+interface DelegateOutput {
+  success: boolean;
+  message: string;
+  delegationConversationIds: string[];
+}
 
 async function executeDelegate(
   input: DelegateInput,
@@ -152,17 +156,28 @@ async function executeDelegate(
     throw new Error("No valid recipients provided.");
   }
 
-  const stopSignal: DelegateOutput = {
-    __stopExecution: true as const,
-    pendingDelegations,
-  };
+  // Register pending delegations in RALRegistry for response routing
+  // Uses atomic merge to safely handle concurrent delegation calls
+  ralRegistry.mergePendingDelegations(
+    context.agent.pubkey,
+    context.conversationId,
+    context.ralNumber,
+    pendingDelegations
+  );
 
-  logger.info("[delegate] Published delegations, returning stop signal", {
+  const delegationConversationIds = pendingDelegations.map(d => d.delegationConversationId);
+
+  logger.info("[delegate] Published delegations, agent continues without blocking", {
     count: pendingDelegations.length,
-    delegationConversationIds: pendingDelegations.map(d => d.delegationConversationId),
+    delegationConversationIds,
   });
 
-  return stopSignal;
+  // Return normal result - agent continues without blocking
+  return {
+    success: true,
+    message: `Delegated ${pendingDelegations.length} task(s). The agent(s) will respond when ready.`,
+    delegationConversationIds,
+  };
 }
 
 export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
