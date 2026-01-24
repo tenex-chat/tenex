@@ -199,6 +199,58 @@ export class PubkeyService {
         return this.getUserProfile(pubkey);
     }
 
+    private readonly MAX_CONCURRENT_FETCHES = 10;
+
+    /**
+     * Warm the cache for multiple user pubkeys.
+     * This pre-fetches kind:0 profiles so that getNameSync() returns real names
+     * instead of the default "User" value.
+     *
+     * @param pubkeys Array of pubkeys to warm the cache for
+     * @returns Map of pubkey to resolved display name
+     */
+    async warmUserProfiles(pubkeys: Hexpubkey[]): Promise<Map<Hexpubkey, string>> {
+        const results = new Map<Hexpubkey, string>();
+
+        // Deduplicate pubkeys and filter out agent pubkeys (they don't need profile warming)
+        const uniquePubkeys = [...new Set(pubkeys)];
+        const userPubkeys = uniquePubkeys.filter((pk) => !this.getAgentSlug(pk));
+
+        if (userPubkeys.length === 0) {
+            return results;
+        }
+
+        logger.debug("[PUBKEY_SERVICE] Warming user profile cache", {
+            count: userPubkeys.length,
+            dedupedFrom: pubkeys.length,
+        });
+
+        // Fetch in batches to avoid thundering-herd fetches
+        for (let i = 0; i < userPubkeys.length; i += this.MAX_CONCURRENT_FETCHES) {
+            const batch = userPubkeys.slice(i, i + this.MAX_CONCURRENT_FETCHES);
+            await Promise.all(
+                batch.map(async (pubkey) => {
+                    try {
+                        const name = await this.getName(pubkey);
+                        results.set(pubkey, name);
+                    } catch (error) {
+                        logger.warn("[PUBKEY_SERVICE] Failed to warm profile", {
+                            pubkey: pubkey.substring(0, 8),
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+                        results.set(pubkey, this.DEFAULT_USER_NAME);
+                    }
+                })
+            );
+        }
+
+        logger.debug("[PUBKEY_SERVICE] Profile cache warmed", {
+            count: results.size,
+        });
+
+        return results;
+    }
+
     /**
      * Clear the entire cache
      */
