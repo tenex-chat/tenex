@@ -21,19 +21,30 @@ import {
 } from "../ConversationStore";
 
 // Mock PubkeyService for attribution tests
+const mockPubkeyNames: Record<string, string> = {
+    "transparent-pk": "transparent",
+    "agent1-pk": "agent1",
+    "agent2-pk": "agent2",
+    "pablo-pk": "Pablo",
+    "user-pubkey-xyz": "User",
+    "agent1-pubkey-abc": "agent1",
+    "agent2-pubkey-def": "agent2",
+    "owner-pubkey": "ProjectOwner",
+    "interloper-pubkey": "Interloper",
+};
+
 const mockGetName = mock(async (pubkey: string) => {
-    const names: Record<string, string> = {
-        "transparent-pk": "transparent",
-        "agent1-pk": "agent1",
-        "agent2-pk": "agent2",
-        "pablo-pk": "Pablo",
-    };
-    return names[pubkey] ?? "Unknown";
+    return mockPubkeyNames[pubkey] ?? "Unknown";
+});
+
+const mockGetNameSync = mock((pubkey: string) => {
+    return mockPubkeyNames[pubkey] ?? "Unknown";
 });
 
 mock.module("@/services/PubkeyService", () => ({
     getPubkeyService: () => ({
         getName: mockGetName,
+        getNameSync: mockGetNameSync,
     }),
 }));
 
@@ -757,6 +768,94 @@ describe("ConversationStore", () => {
             expect(store.hasEventId("published-event-id")).toBe(true);
             expect(messages[index].eventId).toBe("published-event-id");
         });
+
+        it("should deduplicate messages by eventId", () => {
+            // =====================================================================
+            // BUG: Duplicate message insertion in delegation injection flow
+            // =====================================================================
+            //
+            // When a user sends a message during a delegation (supervision/injection),
+            // the message was inserted TWICE via different code paths:
+            //
+            // 1. Nostr Event Path (AgentDispatchService → ConversationStore.addEvent()):
+            //    - Adds message WITH eventId
+            //
+            // 2. Injection Path (AgentExecutor → conversationStore.addMessage()):
+            //    - Originally added message WITHOUT eventId (deduplication failed)
+            //    - Now fixed to include eventId for proper deduplication
+            //
+            // The LLM would see the same message twice, causing confusion about
+            // who sent the message.
+            //
+            // FIX: addMessage() now checks if eventId already exists and skips
+            // the duplicate message, returning -1 to signal deduplication.
+            // =====================================================================
+
+            // First insert - Nostr event path
+            const index1 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Quick update about the poems",
+                messageType: "text",
+                eventId: "nostr-event-abc123",
+            });
+
+            expect(index1).toBe(0);
+            expect(store.getAllMessages()).toHaveLength(1);
+            expect(store.hasEventId("nostr-event-abc123")).toBe(true);
+
+            // Second insert - Injection path with same eventId
+            // (after fix: injection path now includes eventId)
+            const index2 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Quick update about the poems",
+                messageType: "text",
+                eventId: "nostr-event-abc123", // Same eventId
+                senderPubkey: USER_PUBKEY, // Injection adds sender attribution
+            });
+
+            // Should be deduplicated - returns -1 and message is NOT added
+            expect(index2).toBe(-1);
+            expect(store.getAllMessages()).toHaveLength(1);
+        });
+
+        it("should allow messages without eventId (no deduplication)", () => {
+            // Messages without eventId should always be added (backwards compatibility)
+            const index1 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "First message",
+                messageType: "text",
+            });
+
+            const index2 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Second message",
+                messageType: "text",
+            });
+
+            expect(index1).toBe(0);
+            expect(index2).toBe(1);
+            expect(store.getAllMessages()).toHaveLength(2);
+        });
+
+        it("should allow messages with different eventIds", () => {
+            const index1 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "First event",
+                messageType: "text",
+                eventId: "event-111",
+            });
+
+            const index2 = store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Second event",
+                messageType: "text",
+                eventId: "event-222",
+            });
+
+            expect(index1).toBe(0);
+            expect(index2).toBe(1);
+            expect(store.getAllMessages()).toHaveLength(2);
+        });
     });
 
     describe("Persistence", () => {
@@ -807,8 +906,155 @@ describe("ConversationStore", () => {
         });
     });
 
-    describe("Message Attribution Formatting", () => {
-        // Use pubkeys that map to our mock names
+    describe("Unexpected Sender Attribution", () => {
+        // Test the [Note: Message from {name}] prefix for messages from unexpected senders
+        // Expected sender = author of the root conversation event
+        const OWNER_PUBKEY = "owner-pubkey";
+        const INTERLOPER_PUBKEY = "interloper-pubkey";
+
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+            mockGetNameSync.mockClear();
+        });
+
+        it("should NOT add attribution prefix when sender matches root author", async () => {
+            // First message establishes the root author (owner)
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Initial message from owner",
+                messageType: "text",
+            });
+
+            // Subsequent message from owner with senderPubkey (e.g., from injection)
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Follow-up from owner",
+                messageType: "text",
+                senderPubkey: OWNER_PUBKEY, // Same as root author
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            // Both messages should have NO attribution prefix
+            expect(messages).toHaveLength(2);
+            expect(messages[0].content).toBe("Initial message from owner");
+            expect(messages[1].content).toBe("Follow-up from owner");
+        });
+
+        it("should add attribution prefix when sender differs from root author", async () => {
+            // First message establishes the root author (owner)
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Initial message from owner",
+                messageType: "text",
+            });
+
+            // Message injected by someone else (interloper)
+            store.addMessage({
+                pubkey: OWNER_PUBKEY, // pubkey in store still reflects context
+                content: "Message from interloper",
+                messageType: "text",
+                senderPubkey: INTERLOPER_PUBKEY, // Different from root author!
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            expect(messages).toHaveLength(2);
+            expect(messages[0].content).toBe("Initial message from owner");
+            // Second message should have attribution prefix
+            expect(messages[1].content).toBe("[Note: Message from Interloper]\nMessage from interloper");
+        });
+
+        it("should NOT add attribution prefix when senderPubkey is not set", async () => {
+            // Messages without senderPubkey (historical or non-injected) get no prefix
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Message one",
+                messageType: "text",
+                // No senderPubkey
+            });
+
+            store.addMessage({
+                pubkey: INTERLOPER_PUBKEY,
+                content: "Message two",
+                messageType: "text",
+                // No senderPubkey
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            expect(messages).toHaveLength(2);
+            // No prefix for either message
+            expect(messages[0].content).toBe("Message one");
+            expect(messages[1].content).toBe("Message two");
+        });
+
+        it("should use PubkeyService.getNameSync to resolve sender name", async () => {
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Initial message",
+                messageType: "text",
+            });
+
+            store.addMessage({
+                pubkey: OWNER_PUBKEY,
+                content: "Interloper message",
+                messageType: "text",
+                senderPubkey: INTERLOPER_PUBKEY,
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            // PubkeyService.getNameSync should have been called with the interloper pubkey
+            expect(mockGetNameSync).toHaveBeenCalledWith(INTERLOPER_PUBKEY);
+        });
+
+        it("should handle empty conversation gracefully", async () => {
+            // No messages in conversation
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            expect(messages).toHaveLength(0);
+        });
+
+        it("should attribute project owner intervention in delegated conversation", async () => {
+            // Simulate a delegation: delegator starts conversation
+            const DELEGATOR_PUBKEY = "agent1-pubkey-abc";
+            const PROJECT_OWNER = "owner-pubkey";
+
+            // Delegator's initial message (root author)
+            store.addMessage({
+                pubkey: DELEGATOR_PUBKEY,
+                content: "Please research this topic",
+                messageType: "text",
+            });
+
+            // Project owner intervenes with injected message
+            store.addMessage({
+                pubkey: DELEGATOR_PUBKEY, // Context pubkey
+                content: "Actually, focus on the architecture",
+                messageType: "text",
+                senderPubkey: PROJECT_OWNER, // Real sender is project owner
+            });
+
+            const ral = store.createRal(AGENT1_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+
+            expect(messages).toHaveLength(2);
+            expect(messages[0].content).toBe("Please research this topic");
+            expect(messages[1].content).toBe("[Note: Message from ProjectOwner]\nActually, focus on the architecture");
+        });
+    });
+
+    describe("Message Attribution Formatting (Deprecated - No Prefixes)", () => {
+        // These tests verify that the OLD [@sender -> @recipient] format is NO LONGER added.
+        // Less capable models were copying the prefix format in their outputs.
+        // Attribution prefixes are now ONLY added for unexpected senders via senderPubkey.
+        // See "Unexpected Sender Attribution" tests for the current attribution system.
         const TRANSPARENT_PK = "transparent-pk";
         const AGENT1_PK = "agent1-pk";
         const AGENT2_PK = "agent2-pk";
@@ -821,8 +1067,8 @@ describe("ConversationStore", () => {
             mockGetName.mockClear();
         });
 
-        it("should prefix own message with [@self -> @recipient]", async () => {
-            // Transparent sends a message to Pablo
+        it("should NOT add attribution prefix to own messages (deprecated)", async () => {
+            // Transparent sends a message to Pablo - no prefix added
             store.addMessage({
                 pubkey: TRANSPARENT_PK,
                 ral: 1,
@@ -836,17 +1082,16 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("assistant");
-            expect(messages[0].content).toBe("[@transparent -> @Pablo] Hello Pablo!");
+            expect(messages[0].content).toBe("Hello Pablo!"); // No prefix
         });
 
-        it("should prefix own broadcast with [@self]", async () => {
-            // Transparent broadcasts (no recipient)
+        it("should NOT add attribution prefix to own broadcast (deprecated)", async () => {
+            // Transparent broadcasts (no recipient) - no prefix added
             store.addMessage({
                 pubkey: TRANSPARENT_PK,
                 ral: 1,
                 content: "Announcement to all",
                 messageType: "text",
-                // No targetedPubkeys = broadcast
             });
             store.ensureRalActive(TRANSPARENT_PK, 1);
 
@@ -854,28 +1099,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("assistant");
-            expect(messages[0].content).toBe("[@transparent] Announcement to all");
+            expect(messages[0].content).toBe("Announcement to all"); // No prefix
         });
 
-        it("should skip attribution prefix when suppressAttribution is true", async () => {
-            store.addMessage({
-                pubkey: PABLO_PK,
-                content: "# DELEGATION COMPLETED",
-                messageType: "text",
-                targetedPubkeys: [TRANSPARENT_PK],
-                suppressAttribution: true,
-            });
-            store.ensureRalActive(TRANSPARENT_PK, 1);
-
-            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("# DELEGATION COMPLETED");
-        });
-
-        it("should prefix message TO agent from user with [@sender -> @self]", async () => {
-            // Pablo sends message to Transparent
+        it("should NOT add attribution prefix to user messages (deprecated)", async () => {
+            // Pablo sends message to Transparent - no prefix added
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Hello Transparent!",
@@ -888,11 +1116,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("[@Pablo -> @transparent] Hello Transparent!");
+            expect(messages[0].content).toBe("Hello Transparent!"); // No prefix
         });
 
-        it("should prefix message TO agent from another agent with [@sender -> @self]", async () => {
-            // Agent1 sends message to Transparent
+        it("should NOT add attribution prefix to agent-to-agent messages (deprecated)", async () => {
+            // Agent1 sends message to Transparent - no prefix added
             store.addMessage({
                 pubkey: AGENT1_PK,
                 ral: 1,
@@ -907,11 +1135,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("[@agent1 -> @transparent] Hey Transparent, can you help?");
+            expect(messages[0].content).toBe("Hey Transparent, can you help?"); // No prefix
         });
 
-        it("should prefix observed user-to-agent message with [@sender -> @recipient]", async () => {
-            // Pablo sends message to Agent1, Transparent is observing
+        it("should NOT add attribution prefix to observed messages (deprecated)", async () => {
+            // Pablo sends message to Agent1, Transparent is observing - no prefix
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Agent1, what color?",
@@ -923,36 +1151,16 @@ describe("ConversationStore", () => {
             const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
 
             expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("user"); // All non-self messages are "user"
-            expect(messages[0].content).toBe("[@Pablo -> @agent1] Agent1, what color?");
+            expect(messages[0].role).toBe("user");
+            expect(messages[0].content).toBe("Agent1, what color?"); // No prefix
         });
 
-        it("should prefix observed agent-to-agent message with [@sender -> @recipient]", async () => {
-            // Agent1 sends to Agent2, Transparent is observing
-            store.addMessage({
-                pubkey: AGENT1_PK,
-                ral: 1,
-                content: "Agent2, I need your analysis",
-                messageType: "text",
-                targetedPubkeys: [AGENT2_PK],
-            });
-            store.completeRal(AGENT1_PK, 1);
-            store.ensureRalActive(TRANSPARENT_PK, 1);
-
-            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("user"); // All non-self messages are "user"
-            expect(messages[0].content).toBe("[@agent1 -> @agent2] Agent2, I need your analysis");
-        });
-
-        it("should prefix user broadcast with [@sender]", async () => {
-            // Pablo broadcasts to all agents
+        it("should NOT add attribution prefix to user broadcasts (deprecated)", async () => {
+            // Pablo broadcasts to all agents - no prefix added
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Everyone, listen up!",
                 messageType: "text",
-                // No targetedPubkeys = broadcast
             });
             store.ensureRalActive(TRANSPARENT_PK, 1);
 
@@ -960,24 +1168,7 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("[@Pablo] Everyone, listen up!");
-        });
-
-        it("should format multiple recipients correctly", async () => {
-            // Pablo sends to both Agent1 and Agent2
-            store.addMessage({
-                pubkey: PABLO_PK,
-                content: "Both of you, collaborate!",
-                messageType: "text",
-                targetedPubkeys: [AGENT1_PK, AGENT2_PK],
-            });
-            store.ensureRalActive(TRANSPARENT_PK, 1);
-
-            const messages = await store.buildMessagesForRal(TRANSPARENT_PK, 1);
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0].role).toBe("user"); // Observing
-            expect(messages[0].content).toBe("[@Pablo -> @agent1, @agent2] Both of you, collaborate!");
+            expect(messages[0].content).toBe("Everyone, listen up!"); // No prefix
         });
 
         it("should exclude other active RAL messages from buildMessagesForRal", async () => {
