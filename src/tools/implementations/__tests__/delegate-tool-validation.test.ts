@@ -70,10 +70,11 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation is allowed
+            // Self-delegation is allowed - now returns normal result (no stop signal)
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
         });
 
         it("should allow self-delegation by pubkey", async () => {
@@ -91,10 +92,11 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation is allowed
+            // Self-delegation is allowed - now returns normal result (no stop signal)
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
         });
 
         it("should allow self in multiple recipients", async () => {
@@ -113,11 +115,11 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation is allowed
+            // Self-delegation is allowed - now returns normal result (no stop signal)
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
-            expect(result.pendingDelegations).toHaveLength(2);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(2);
         });
     });
 
@@ -224,9 +226,11 @@ describe("Delegation tools - RAL isolation", () => {
 
             // This should NOT throw an error - the bug was that it would check RAL 1
             // (because getState() returns highest RAL) and block the delegation
+            // Now returns normal result (no stop signal) - agent continues without blocking
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
         });
 
         it("should allow delegation even when current RAL has pending delegations", async () => {
@@ -255,12 +259,182 @@ describe("Delegation tools - RAL isolation", () => {
             };
 
             // Should succeed - multiple pending delegations are now allowed
+            // Now returns normal result (no stop signal) - agent continues without blocking
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
-            expect(result.__stopExecution).toBe(true);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
         });
 
         // NOTE: Test "should require ralNumber in context" removed - ralNumber is now required by ToolExecutionContext type
+    });
+});
+
+describe("Delegation tools - RALRegistry state verification", () => {
+    const conversationId = "test-conversation-id";
+    let registry: RALRegistry;
+
+    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
+        agent: {
+            slug: "self-agent",
+            name: "Self Agent",
+            pubkey: "agent-pubkey-123",
+        } as AgentInstance,
+        conversationId,
+        triggeringEvent: {
+            tags: [],
+        } as any,
+        agentPublisher: {
+            delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
+        } as any,
+        ralNumber,
+        projectBasePath: "/tmp/test",
+        workingDirectory: "/tmp/test",
+        currentBranch: "main",
+        getConversation: () => ({
+            getRootEventId: () => conversationId,
+            getTodos: () => [],
+        }) as any,
+    });
+
+    beforeEach(() => {
+        // Reset singleton for testing
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+        registry = RALRegistry.getInstance();
+    });
+
+    describe("delegate tool", () => {
+        it("should register pending delegation in RALRegistry after successful delegation", async () => {
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+            const context = createMockContext(ralNumber);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "Test task" }
+                ],
+            };
+
+            // Execute the delegation
+            const result = await delegateTool.execute(input);
+            expect(result.success).toBe(true);
+
+            // Verify RALRegistry state
+            const pendingDelegations = registry.getConversationPendingDelegations(
+                agentPubkey,
+                conversationId,
+                ralNumber
+            );
+            expect(pendingDelegations).toHaveLength(1);
+            expect(pendingDelegations[0].recipientPubkey).toBe("other-pubkey-456");
+            expect(pendingDelegations[0].prompt).toBe("Test task");
+            expect(pendingDelegations[0].ralNumber).toBe(ralNumber);
+        });
+
+        it("should register multiple pending delegations correctly", async () => {
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+            const context = createMockContext(ralNumber);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "Task 1" },
+                    { recipient: "other-agent", prompt: "Task 2" },
+                ],
+            };
+
+            const result = await delegateTool.execute(input);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(2);
+
+            // Verify RALRegistry has both delegations
+            const pendingDelegations = registry.getConversationPendingDelegations(
+                agentPubkey,
+                conversationId,
+                ralNumber
+            );
+            expect(pendingDelegations).toHaveLength(2);
+        });
+
+        it("should atomically merge delegations from concurrent calls without losing any", async () => {
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+
+            // Pre-seed with existing delegation (simulating concurrent call)
+            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+                {
+                    delegationConversationId: "pre-existing-delegation",
+                    recipientPubkey: "pre-existing-recipient",
+                    senderPubkey: agentPubkey,
+                    prompt: "Pre-existing task",
+                    ralNumber,
+                },
+            ]);
+
+            // Now execute another delegation
+            const context = createMockContext(ralNumber);
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "New task" }
+                ],
+            };
+
+            const result = await delegateTool.execute(input);
+            expect(result.success).toBe(true);
+
+            // Verify both delegations exist (atomic merge didn't drop the pre-existing one)
+            const pendingDelegations = registry.getConversationPendingDelegations(
+                agentPubkey,
+                conversationId,
+                ralNumber
+            );
+            expect(pendingDelegations).toHaveLength(2);
+
+            const preExisting = pendingDelegations.find(d => d.delegationConversationId === "pre-existing-delegation");
+            expect(preExisting).toBeDefined();
+            expect(preExisting?.prompt).toBe("Pre-existing task");
+        });
+
+        it("should deduplicate delegations with the same delegationConversationId", async () => {
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId);
+
+            // Add a delegation manually
+            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+                {
+                    delegationConversationId: "fixed-delegation-id",
+                    recipientPubkey: "other-pubkey-456",
+                    senderPubkey: agentPubkey,
+                    prompt: "Original task",
+                    ralNumber,
+                },
+            ]);
+
+            // Try to add the same delegation again
+            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+                {
+                    delegationConversationId: "fixed-delegation-id",
+                    recipientPubkey: "other-pubkey-456",
+                    senderPubkey: agentPubkey,
+                    prompt: "Duplicate task",
+                    ralNumber,
+                },
+            ]);
+
+            // Should still only have one delegation
+            const pendingDelegations = registry.getConversationPendingDelegations(
+                agentPubkey,
+                conversationId,
+                ralNumber
+            );
+            expect(pendingDelegations).toHaveLength(1);
+            expect(pendingDelegations[0].prompt).toBe("Original task"); // First one wins
+        });
     });
 });
 
