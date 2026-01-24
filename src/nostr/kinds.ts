@@ -15,6 +15,7 @@ export const NDKKind = {
     // Standard NIP kinds
     Text: 1 as BaseNDKKind, // Regular text note (kind:1) - unified conversation format
     EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
+    Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
     AgentRequest: 4133 as BaseNDKKind, // NIP-90 Agent Request
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
