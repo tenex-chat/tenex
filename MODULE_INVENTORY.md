@@ -76,10 +76,12 @@ Use this section to understand each service’s scope and dependencies:
 | `OperationsStatusService` & `status/` | `src/services/status/` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
 | `ProjectContext` + `ProjectContextStore` | `src/services/projects/` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
 | `PubkeyService` | `src/services/PubkeyService.ts` | Provides caching and lookup for pubkey display names from Nostr. |
+| `TrustPubkeyService` | `src/services/trust-pubkeys/` | Determines if a pubkey should be trusted (heeded or ignored). A pubkey is trusted if it's whitelisted in config, the backend's own pubkey, or a registered agent. Enforces precedence: whitelisted > backend > agent. Provides both async (`isTrusted`) and sync (`isTrustedSync`) checks with backend pubkey caching. |
 | `RAG*` services | `src/services/rag/` | Manage LanceDB collections, document ingestion, query APIs, subscriptions, and embedding integration (`EmbeddingProviderFactory`, `RagSubscriptionService`). Tools in `src/tools/implementations/rag_*` should call these. |
 | `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
 | `MCP` services | `src/services/mcp/` | Install/manage MCP servers, expose them to dynamic tools and CLI setup flows. |
+| `PromptCompilerService` | `src/services/prompt-compiler/` | Compiles agent lessons with user comments into optimized system prompts (TIN-10). Uses LLM to synthesize lessons + NIP-22 comments into base prompts, with disk caching at `~/.tenex/agents/prompts/`. One instance per agent, registered during `ProjectRuntime.start()`. Handles subscription to kind 1111 comment events filtered by `#K: [4129]`. |
 
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.
 
