@@ -53,6 +53,15 @@ export class SubscriptionFilterBuilder {
         );
         filters.push(...lessonFilters);
 
+        // Add lesson comment filters (for prompt compilation)
+        const lessonCommentFilter = this.buildLessonCommentFilter(
+            config.agentPubkeys,
+            config.whitelistedPubkeys
+        );
+        if (lessonCommentFilter) {
+            filters.push(lessonCommentFilter);
+        }
+
         // Add report filter
         const reportFilter = this.buildReportFilter(config.knownProjects);
         if (reportFilter) {
@@ -150,6 +159,35 @@ export class SubscriptionFilterBuilder {
     }
 
     /**
+     * Build filter for lesson comments (kind 1111 - NIP-22)
+     * Monitors comments on lessons from whitelisted authors that mention our agents.
+     * These comments are used by the PromptCompilerService to refine lessons.
+     * @param agentPubkeys - Set of agent pubkeys (for filtering by #p tag)
+     * @param whitelistedPubkeys - Set of whitelisted author pubkeys
+     * @returns NDKFilter for lesson comments or null if no agents
+     */
+    static buildLessonCommentFilter(
+        agentPubkeys: Set<Hexpubkey>,
+        whitelistedPubkeys: Set<Hexpubkey>
+    ): NDKFilter | null {
+        if (agentPubkeys.size === 0 || whitelistedPubkeys.size === 0) {
+            return null;
+        }
+
+        // NIP-22 comment filter:
+        // - kind: NDKKind.Comment (1111)
+        // - #K: [NDKKind.AgentLesson] (comments on lesson events)
+        // - authors: whitelisted pubkeys only
+        // - #p: agent pubkeys (comments mentioning our agents)
+        return {
+            kinds: [NDKKind.Comment],
+            "#K": [String(NDKKind.AgentLesson)], // Comments on kind 4129 (lessons)
+            "#p": Array.from(agentPubkeys),
+            authors: Array.from(whitelistedPubkeys),
+        };
+    }
+
+    /**
      * Build filter for report events (kind 30023 - NDKArticle)
      * Monitors reports tagged with our project
      * @param knownProjects - Set of project A-tags (format: "31933:authorPubkey:dTag")
@@ -195,12 +233,14 @@ export class SubscriptionFilterBuilder {
         projectTaggedCount: number;
         agentMentionsCount: number;
         lessonFilters: number;
+        lessonCommentFilter: boolean;
         reportFilter: boolean;
     } {
         let projectFilter = false;
         let projectTaggedCount = 0;
         let agentMentionsCount = 0;
         let lessonFilters = 0;
+        let lessonCommentFilter = false;
         let reportFilter = false;
 
         for (const filter of filters) {
@@ -210,11 +250,14 @@ export class SubscriptionFilterBuilder {
             if (filter["#a"] && !filter.kinds?.includes(30023)) {
                 projectTaggedCount = (filter["#a"] as string[]).length;
             }
-            if (filter["#p"]) {
+            if (filter["#p"] && !filter.kinds?.includes(NDKKind.Comment)) {
                 agentMentionsCount = (filter["#p"] as string[]).length;
             }
             if (filter.kinds?.includes(NDKKind.AgentLesson)) {
                 lessonFilters++;
+            }
+            if (filter.kinds?.includes(NDKKind.Comment)) {
+                lessonCommentFilter = true;
             }
             if (filter.kinds?.includes(30023)) {
                 reportFilter = true;
@@ -227,6 +270,7 @@ export class SubscriptionFilterBuilder {
             projectTaggedCount,
             agentMentionsCount,
             lessonFilters,
+            lessonCommentFilter,
             reportFilter,
         };
     }
