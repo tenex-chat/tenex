@@ -13,11 +13,13 @@ import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { PairingManager } from "@/services/pairing";
+import { PromptCompilerService } from "@/services/prompt-compiler";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -156,6 +158,14 @@ export class ProjectRuntime {
             });
             this.context.pairingManager = pairingManager;
 
+            // Initialize prompt compilers for each agent (TIN-10)
+            await this.initializePromptCompilers();
+
+            // Warm user profile cache for whitelisted pubkeys and project owner
+            // This ensures getNameSync() returns real names instead of "User"
+            // for message attribution in delegations
+            await this.warmUserProfileCache();
+
             // Initialize event handler
             this.eventHandler = new EventHandler();
             await this.eventHandler.initialize();
@@ -254,33 +264,52 @@ export class ProjectRuntime {
 
         // Stop status publisher
         if (this.statusPublisher) {
+            process.stdout.write(chalk.gray("   Stopping status publisher..."));
             await this.statusPublisher.stopPublishing();
             this.statusPublisher = null;
+            console.log(chalk.gray(" done"));
         }
 
         // Stop operations status publisher
         if (this.operationsStatusPublisher) {
+            process.stdout.write(chalk.gray("   Stopping operations status..."));
             this.operationsStatusPublisher.stop();
             this.operationsStatusPublisher = null;
+            console.log(chalk.gray(" done"));
         }
 
         // Cleanup event handler
         if (this.eventHandler) {
+            process.stdout.write(chalk.gray("   Cleaning up event handler..."));
             await this.eventHandler.cleanup();
             this.eventHandler = null;
+            console.log(chalk.gray(" done"));
         }
 
         // Save conversation state
+        process.stdout.write(chalk.gray("   Saving conversations..."));
         await ConversationStore.cleanup();
+        console.log(chalk.gray(" done"));
 
         // Stop all active pairings to clean up subscriptions
         if (this.context?.pairingManager) {
+            process.stdout.write(chalk.gray("   Stopping pairings..."));
             this.context.pairingManager.stopAll();
+            console.log(chalk.gray(" done"));
+        }
+
+        // Stop all prompt compilers
+        if (this.context) {
+            process.stdout.write(chalk.gray("   Stopping prompt compilers..."));
+            this.context.stopAllPromptCompilers();
+            console.log(chalk.gray(" done"));
         }
 
         // Release our reference to the prefix KV store (but don't close it -
         // it's a daemon-global resource that outlives individual project runtimes)
+        process.stdout.write(chalk.gray("   Releasing storage..."));
         await prefixKVStore.close();
+        console.log(chalk.gray(" done"));
 
         // Clear context
         this.context = null;
@@ -294,7 +323,6 @@ export class ProjectRuntime {
             : 0;
         console.log(chalk.green(`✅ Project stopped: ${chalk.bold(projectTitle)}`));
         console.log(chalk.gray(`   Uptime: ${uptime}s | Events processed: ${this.eventCount}`));
-        console.log();
     }
 
     /**
@@ -486,6 +514,107 @@ export class ProjectRuntime {
                 stack: error instanceof Error ? error.stack : undefined,
             });
             // Don't throw - allow project to start even if MCP initialization fails
+        }
+    }
+
+    /**
+     * Initialize PromptCompilerService for each agent in the project (TIN-10).
+     * This enables lesson comments to be routed to their respective compilers.
+     */
+    private async initializePromptCompilers(): Promise<void> {
+        if (!this.context) {
+            logger.warn("[ProjectRuntime] Cannot initialize prompt compilers - context not ready");
+            return;
+        }
+
+        const ndk = getNDK();
+        const { config: loadedConfig } = await config.loadConfig();
+        const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
+
+        let initializedCount = 0;
+        for (const agent of this.context.agents.values()) {
+            try {
+                const compiler = new PromptCompilerService(
+                    agent.pubkey,
+                    whitelistArray,
+                    ndk
+                );
+
+                // Register the compiler with the context
+                this.context.setPromptCompiler(agent.pubkey, compiler);
+
+                // Start the subscription for lesson comments
+                compiler.subscribe();
+
+                initializedCount++;
+                logger.debug("[ProjectRuntime] Initialized prompt compiler for agent", {
+                    agentSlug: agent.slug,
+                    agentPubkey: agent.pubkey.substring(0, 8),
+                });
+            } catch (error) {
+                logger.error("[ProjectRuntime] Failed to initialize prompt compiler for agent", {
+                    agentSlug: agent.slug,
+                    agentPubkey: agent.pubkey.substring(0, 8),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                // Continue with other agents - don't block startup
+            }
+        }
+
+        if (initializedCount > 0) {
+            logger.info(`[ProjectRuntime] Initialized ${initializedCount} prompt compiler(s)`, {
+                projectId: this.projectId,
+            });
+        }
+    }
+
+    /**
+     * Warm the user profile cache for whitelisted pubkeys and project owner.
+     * This ensures that getNameSync() returns real user names instead of "User"
+     * when attributing messages in delegations.
+     */
+    private async warmUserProfileCache(): Promise<void> {
+        try {
+            const { config: loadedConfig } = await config.loadConfig();
+            const pubkeysToWarm: Set<string> = new Set();
+
+            // Add whitelisted pubkeys
+            const whitelistedPubkeys = loadedConfig.whitelistedPubkeys ?? [];
+            for (const pk of whitelistedPubkeys) {
+                if (pk) pubkeysToWarm.add(pk);
+            }
+
+            // Add project owner pubkey
+            if (this.project.pubkey) {
+                pubkeysToWarm.add(this.project.pubkey);
+            }
+
+            if (pubkeysToWarm.size === 0) {
+                logger.debug("[ProjectRuntime] No user pubkeys to warm");
+                return;
+            }
+
+            trace.getActiveSpan()?.addEvent("project_runtime.warming_user_profiles", {
+                "profiles.count": pubkeysToWarm.size,
+            });
+
+            const pubkeyService = getPubkeyService();
+            const results = await pubkeyService.warmUserProfiles(Array.from(pubkeysToWarm));
+
+            logger.debug("[ProjectRuntime] Warmed user profile cache", {
+                projectId: this.projectId,
+                count: results.size,
+            });
+
+            trace.getActiveSpan()?.addEvent("project_runtime.user_profiles_warmed", {
+                "profiles.warmed": results.size,
+            });
+        } catch (error) {
+            // Don't block startup if profile warming fails
+            logger.warn("[ProjectRuntime] Failed to warm user profile cache", {
+                projectId: this.projectId,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 

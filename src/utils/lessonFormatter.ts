@@ -45,3 +45,26 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
 
     return header + formattedLessons;
 }
+
+/**
+ * The standard lesson_learn tool reminder to encourage agents to continue learning.
+ */
+export const LESSON_LEARN_REMINDER =
+    "Remember to use the `lesson_learn` tool when you discover new insights or patterns.";
+
+/**
+ * Format lessons for inclusion in a system prompt.
+ * Includes the formatted lessons + the lesson_learn tool reminder.
+ * This is the single source of truth for lesson prompt formatting.
+ *
+ * @param lessons The agent's lessons
+ * @returns Formatted lessons with reminder, or empty string if no lessons
+ */
+export function formatLessonsWithReminder(lessons: NDKAgentLesson[]): string {
+    if (lessons.length === 0) {
+        return "";
+    }
+
+    const formattedLessons = formatLessonsForAgent(lessons);
+    return `${formattedLessons}\n\n${LESSON_LEARN_REMINDER}`;
+}
