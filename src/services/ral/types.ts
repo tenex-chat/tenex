@@ -95,6 +95,10 @@ export interface QueuedInjection {
   suppressAttribution?: boolean;
   /** If true, message is included in LLM context but NOT persisted to ConversationStore */
   ephemeral?: boolean;
+  /** Original sender pubkey (for message attribution when sender differs from expected) */
+  senderPubkey?: string;
+  /** Original Nostr event ID (for deduplication - prevents double-insertion via both addEvent and injection paths) */
+  eventId?: string;
 }
 
 export interface RALRegistryEntry {
@@ -130,6 +134,8 @@ export interface RALRegistryEntry {
   executionSpanId?: string;
   /** Accumulated LLM runtime in milliseconds across all streaming sessions */
   accumulatedRuntime: number;
+  /** Last reported runtime in milliseconds - used to calculate incremental runtime */
+  lastReportedRuntime: number;
   /** Timestamp when current LLM stream started (for calculating duration) */
   llmStreamStartTime?: number;
 }

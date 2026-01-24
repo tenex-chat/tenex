@@ -182,6 +182,7 @@ export class RALRegistry {
       traceId: traceContext?.traceId,
       executionSpanId: traceContext?.spanId,
       accumulatedRuntime: 0,
+      lastReportedRuntime: 0,
     };
 
     // Get or create the conversation's RAL map
@@ -352,6 +353,52 @@ export class RALRegistry {
         "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
       });
     }
+  }
+
+  /**
+   * Get the unreported runtime (runtime accumulated since last publish) and mark it as reported.
+   * Returns the unreported runtime in milliseconds, then resets the counter.
+   * This is used for incremental runtime reporting in agent events.
+   */
+  consumeUnreportedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return 0;
+
+    const unreported = ral.accumulatedRuntime - ral.lastReportedRuntime;
+
+    // Guard against NaN or negative deltas (defensive programming)
+    // Repair lastReportedRuntime to prevent permanent suppression of future runtime
+    if (!Number.isFinite(unreported) || unreported < 0) {
+      logger.warn("[RALRegistry] Invalid runtime delta", {
+        unreported,
+        accumulated: ral.accumulatedRuntime,
+        lastReported: ral.lastReportedRuntime,
+      });
+      ral.lastReportedRuntime = ral.accumulatedRuntime;
+      return 0;
+    }
+
+    ral.lastReportedRuntime = ral.accumulatedRuntime;
+
+    if (unreported > 0) {
+      trace.getActiveSpan()?.addEvent("ral.runtime_consumed", {
+        "ral.number": ralNumber,
+        "ral.unreported_runtime_ms": unreported,
+        "ral.accumulated_runtime_ms": ral.accumulatedRuntime,
+      });
+    }
+
+    return unreported;
+  }
+
+  /**
+   * Get the unreported runtime without consuming it.
+   * Use consumeUnreportedRuntime() when publishing events.
+   */
+  getUnreportedRuntime(agentPubkey: string, conversationId: string, ralNumber: number): number {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) return 0;
+    return ral.accumulatedRuntime - ral.lastReportedRuntime;
   }
 
   /**
@@ -626,7 +673,7 @@ export class RALRegistry {
     conversationId: string,
     ralNumber: number,
     message: string,
-    options?: { suppressAttribution?: boolean; ephemeral?: boolean }
+    options?: { suppressAttribution?: boolean; ephemeral?: boolean; senderPubkey?: string; eventId?: string }
   ): void {
     this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
@@ -640,7 +687,7 @@ export class RALRegistry {
     ralNumber: number,
     role: "system" | "user",
     message: string,
-    options?: { suppressAttribution?: boolean; ephemeral?: boolean }
+    options?: { suppressAttribution?: boolean; ephemeral?: boolean; senderPubkey?: string; eventId?: string }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -666,6 +713,8 @@ export class RALRegistry {
       queuedAt: Date.now(),
       suppressAttribution: options?.suppressAttribution,
       ephemeral: options?.ephemeral,
+      senderPubkey: options?.senderPubkey,
+      eventId: options?.eventId,
     });
 
     // Add telemetry for ephemeral injection queuing (useful for debugging supervision re-engagement)

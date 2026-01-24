@@ -18,8 +18,7 @@ export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
     summary?: string;
-    /** Accumulated LLM runtime in milliseconds for this execution chain */
-    llmRuntime?: number;
+    // Note: llmRuntime is now tracked via EventContext.llmRuntime for all events
 }
 
 export interface ConversationIntent {
@@ -130,6 +129,10 @@ export interface EventContext {
     model?: string;
     cost?: number; // LLM cost in USD
     ralNumber: number; // RAL number for this execution - required for all conversational events
+    /** Incremental LLM runtime in milliseconds since last event was published */
+    llmRuntime?: number;
+    /** Total accumulated LLM runtime for this RAL (used in completion events) */
+    llmRuntimeTotal?: number;
 }
 
 /**
@@ -179,11 +182,7 @@ export class AgentEventEncoder {
             this.addLLMUsageTags(event, intent.usage);
         }
 
-        // Add LLM runtime tag if available
-        if (intent.llmRuntime !== undefined && intent.llmRuntime > 0) {
-            event.tag(["llm-runtime", intent.llmRuntime.toString(), "ms"]);
-        }
-
+        // Note: LLM runtime is now added via addStandardTags() using context.llmRuntime
         this.addStandardTags(event, context);
         this.forwardBranchTag(event, context);
 
@@ -390,6 +389,16 @@ export class AgentEventEncoder {
         }
         if (context.executionTime) {
             event.tag(["execution-time", context.executionTime.toString()]);
+        }
+
+        // LLM runtime (incremental since last publish)
+        if (context.llmRuntime !== undefined && context.llmRuntime > 0) {
+            event.tag(["llm-runtime", context.llmRuntime.toString(), "ms"]);
+        }
+
+        // LLM runtime total (for completion events - used by delegation aggregation)
+        if (context.llmRuntimeTotal !== undefined && context.llmRuntimeTotal > 0) {
+            event.tag(["llm-runtime-total", context.llmRuntimeTotal.toString(), "ms"]);
         }
 
         // RAL metadata

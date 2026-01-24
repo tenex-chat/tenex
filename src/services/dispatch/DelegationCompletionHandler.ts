@@ -63,17 +63,21 @@ export async function handleDelegationCompletion(
                 "etag.index": i,
             });
 
-            // Extract llm-runtime tag from completion event (if present)
-            // This is the total LLM runtime from the delegation chain
+            // Extract llm-runtime-total tag from completion event (if present)
+            // This is the total LLM runtime for the entire delegation (not incremental)
+            // We prefer llm-runtime-total over llm-runtime because runtime reporting is now incremental
+            // Fallback to llm-runtime for backward compatibility with older agents
             let llmRuntime: number | undefined;
-            const llmRuntimeTag = event.tags.find((tag) => tag[0] === "llm-runtime");
+            const llmRuntimeTotalTag = event.tags.find((tag) => tag[0] === "llm-runtime-total");
+            const llmRuntimeTag = llmRuntimeTotalTag ?? event.tags.find((tag) => tag[0] === "llm-runtime");
             if (llmRuntimeTag && llmRuntimeTag[1]) {
                 const parsed = parseInt(llmRuntimeTag[1], 10);
-                if (!isNaN(parsed)) {
+                if (!isNaN(parsed) && parsed >= 0) {
                     llmRuntime = parsed;
-                    span.addEvent("extracted_llm_runtime", {
+                    span.addEvent("extracted_llm_runtime_total", {
                         "delegation.event_id": eTag,
-                        "llm_runtime_ms": llmRuntime,
+                        "llm_runtime_total_ms": llmRuntime,
+                        "tag_source": llmRuntimeTotalTag ? "llm-runtime-total" : "llm-runtime",
                     });
                 }
             }
