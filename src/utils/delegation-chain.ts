@@ -32,6 +32,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ConversationStore, type DelegationChainEntry } from "@/conversations/ConversationStore";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 
 /**
@@ -86,11 +87,14 @@ export function buildDelegationChain(
 
     /**
      * Helper to resolve a pubkey to a display name.
-     * Returns the agent slug if known, or "User" if it's the project owner.
+     * Returns the agent slug if known, or the user's name from their Nostr profile if it's the project owner.
+     * Uses PubkeyService.getNameSync() which returns cached profile name or "User" as fallback.
      */
     const resolveDisplayName = (pubkey: string): { displayName: string; isUser: boolean } => {
         if (pubkey === projectOwnerPubkey) {
-            return { displayName: "User", isUser: true };
+            // Use PubkeyService to get the user's display name from their Nostr profile
+            const displayName = getPubkeyService().getNameSync(pubkey);
+            return { displayName, isUser: true };
         }
 
         if (projectContext) {
