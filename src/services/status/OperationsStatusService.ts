@@ -203,20 +203,8 @@ export class OperationsStatusService {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.TenexOperationsStatus;
 
-        // Build runtime payload with elapsed time and state for each agent
-        // Note: runtime object is keyed by agentPubkey, so concurrent ops by same agent will overwrite
-        const runtime: Record<string, { elapsed_ms: number; state: RALState }> = {};
-        const now = Date.now();
-        for (const op of operations) {
-            const elapsedMs = now - op.registeredAt;
-            runtime[op.agentPubkey] = {
-                elapsed_ms: elapsedMs,  // Wall-clock time since operation registration
-                state: op.ralState ?? 'IDLE',
-            };
-        }
-
-        // Set content as JSON payload
-        event.content = JSON.stringify({ runtime });
+        // Content is empty - runtime is now tracked in agent publisher events
+        event.content = "";
 
         // Single e-tag for the event being processed
         event.tag(["e", eventId]);
@@ -249,7 +237,6 @@ export class OperationsStatusService {
             operationCount: operations.length,
             type: isCleanup ? "cleanup" : "active",
             pTags: Array.from(agentPubkeys).map((p) => p.substring(0, 8)),
-            runtime,
         });
     }
 }

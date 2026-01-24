@@ -21,7 +21,7 @@ import {
     type LessonIntent,
     type ToolUseIntent,
 } from "./AgentEventEncoder";
-import { PendingDelegationsRegistry } from "@/services/ral";
+import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 
 /**
  * Configuration for delegation events.
@@ -91,6 +91,35 @@ export class AgentPublisher {
     }
 
     /**
+     * Consume unreported runtime from RAL and enhance context with it.
+     * This ensures each published event gets the incremental runtime since last publish.
+     *
+     * IMPORTANT: Always consumes from RAL to advance lastReportedRuntime, even when
+     * explicit llmRuntime is provided. This prevents double-counting on subsequent events.
+     */
+    private consumeAndEnhanceContext(context: EventContext): EventContext {
+        const ralRegistry = RALRegistry.getInstance();
+
+        // Always consume to advance lastReportedRuntime (prevents double-counting)
+        const unreportedRuntime = ralRegistry.consumeUnreportedRuntime(
+            this.agent.pubkey,
+            context.conversationId,
+            context.ralNumber
+        );
+
+        // If context already has llmRuntime set explicitly, use that value
+        // (but we still consumed above to advance the counter)
+        if (context.llmRuntime !== undefined) {
+            return context;
+        }
+
+        return {
+            ...context,
+            llmRuntime: unreportedRuntime > 0 ? unreportedRuntime : undefined,
+        };
+    }
+
+    /**
      * Safely publish an event with error handling.
      * Logs warnings on publish failure or 0-relay success.
      */
@@ -141,9 +170,26 @@ export class AgentPublisher {
     /**
      * Publish a completion event.
      * Creates and publishes a properly tagged completion event with p-tag.
+     * Includes both incremental runtime (llm-runtime) and total runtime (llm-runtime-total).
      */
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
-        const event = this.encoder.encodeCompletion(intent, context);
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+
+        // For completion events, include the total accumulated runtime for the entire RAL
+        // This allows delegation aggregation to get the correct total runtime
+        const ralRegistry = RALRegistry.getInstance();
+        const totalRuntime = ralRegistry.getAccumulatedRuntime(
+            this.agent.pubkey,
+            context.conversationId,
+            context.ralNumber
+        );
+
+        const contextWithTotal: EventContext = {
+            ...enhancedContext,
+            llmRuntimeTotal: totalRuntime > 0 ? totalRuntime : undefined,
+        };
+
+        const event = this.encoder.encodeCompletion(intent, contextWithTotal);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -157,7 +203,8 @@ export class AgentPublisher {
      * Used when agent has text output but delegations are still pending.
      */
     async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        const event = this.encoder.encodeConversation(intent, context);
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeConversation(intent, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -170,6 +217,7 @@ export class AgentPublisher {
      * Publish a delegation event
      */
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
+        const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -185,15 +233,15 @@ export class AgentPublisher {
         }
 
         // Add standard metadata (project tag, model, cost, execution time, etc)
-        this.encoder.addStandardTags(event, context);
+        this.encoder.addStandardTags(event, enhancedContext);
 
         // Forward branch tag from triggering event if not explicitly set
         if (!config.branch) {
-            this.encoder.forwardBranchTag(event, context);
+            this.encoder.forwardBranchTag(event, enhancedContext);
         }
 
         // Add delegation tag linking to parent conversation
-        this.addDelegationTag(event, context);
+        this.addDelegationTag(event, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -209,6 +257,7 @@ export class AgentPublisher {
      * Publish an ask event using the multi-question format.
      */
     async ask(config: AskConfig, context: EventContext): Promise<string> {
+        const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -240,8 +289,8 @@ export class AgentPublisher {
 
         // No e-tag: ask events start separate conversations (like delegate)
 
-        // Add project a-tag (required for event routing)
-        this.encoder.aTagProject(event);
+        // Add standard metadata (project tag, model, cost, execution time, runtime, etc)
+        this.encoder.addStandardTags(event, enhancedContext);
 
         // Add ask marker
         event.tags.push(["ask", "true"]);
@@ -250,14 +299,14 @@ export class AgentPublisher {
         event.tags.push(["t", "ask"]);
 
         // Add delegation tag linking to parent conversation
-        this.addDelegationTag(event, context);
+        this.addDelegationTag(event, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, "ask");
 
         // Register with PendingDelegationsRegistry for q-tag correlation
-        PendingDelegationsRegistry.register(this.agent.pubkey, context.conversationId, event.id);
+        PendingDelegationsRegistry.register(this.agent.pubkey, enhancedContext.conversationId, event.id);
 
         return event.id;
     }
@@ -274,6 +323,7 @@ export class AgentPublisher {
         },
         context: EventContext
     ): Promise<string> {
+        const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
         event.kind = NDKKind.Text; // kind:1 - unified conversation format
@@ -290,11 +340,11 @@ export class AgentPublisher {
             event.tags.push(["e", params.replyToEventId]);
         }
 
-        // Add standard metadata (project tag, model, cost, execution time, etc)
-        this.encoder.addStandardTags(event, context);
+        // Add standard metadata (project tag, model, cost, execution time, runtime, etc)
+        this.encoder.addStandardTags(event, enhancedContext);
 
         // Forward branch tag from triggering event
-        this.encoder.forwardBranchTag(event, context);
+        this.encoder.forwardBranchTag(event, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -308,7 +358,8 @@ export class AgentPublisher {
      * Creates and publishes an error notification event.
      */
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
-        const event = this.encoder.encodeError(intent, context);
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeError(intent, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -321,7 +372,8 @@ export class AgentPublisher {
      * Publish a lesson learned event.
      */
     async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
-        const lessonEvent = this.encoder.encodeLesson(intent, context, this.agent);
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const lessonEvent = this.encoder.encodeLesson(intent, enhancedContext, this.agent);
 
         injectTraceContext(lessonEvent);
         await this.agent.sign(lessonEvent);
@@ -335,7 +387,8 @@ export class AgentPublisher {
      * Creates and publishes an event with tool name and output tags.
      */
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
-        const event = this.encoder.encodeToolUse(intent, context);
+        const enhancedContext = this.consumeAndEnhanceContext(context);
+        const event = this.encoder.encodeToolUse(intent, enhancedContext);
 
         injectTraceContext(event);
         await this.agent.sign(event);
@@ -603,6 +656,88 @@ export class AgentPublisher {
                 agentPubkey: signer.pubkey.substring(0, 8),
             });
             // Don't throw - contact list is not critical
+        }
+    }
+
+    /**
+     * Publishes a kind:0 profile event for the TENEX backend daemon.
+     * This identifies the backend as an entity on nostr.
+     *
+     * @param signer The backend's NDKPrivateKeySigner
+     * @param backendName The name for the backend profile (default: "tenex backend")
+     * @param whitelistedPubkeys Array of pubkeys to include as contacts
+     */
+    static async publishBackendProfile(
+        signer: NDKPrivateKeySigner,
+        backendName: string = "tenex backend",
+        whitelistedPubkeys?: string[]
+    ): Promise<void> {
+        try {
+            // Deterministically select avatar based on pubkey (same logic as agents)
+            const avatarFamilies = [
+                "lorelei",
+                "miniavs",
+                "dylan",
+                "pixel-art",
+                "rings",
+                "avataaars",
+            ];
+            const familyIndex =
+                Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
+            const avatarStyle = avatarFamilies[familyIndex];
+            const seed = signer.pubkey;
+            const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
+
+            const profile = {
+                name: backendName,
+                description: "TENEX Backend Daemon - Multi-agent orchestration system",
+                picture: avatarUrl,
+            };
+
+            const profileEvent = new NDKEvent(getNDK(), {
+                kind: 0,
+                pubkey: signer.pubkey,
+                content: JSON.stringify(profile),
+                tags: [],
+            });
+
+            // Add p-tags for all whitelisted pubkeys
+            if (whitelistedPubkeys && whitelistedPubkeys.length > 0) {
+                for (const pubkey of whitelistedPubkeys) {
+                    if (pubkey && pubkey !== signer.pubkey) {
+                        profileEvent.tags.push(["p", pubkey]);
+                    }
+                }
+            }
+
+            // Add bot tag to indicate this is an automated system
+            profileEvent.tags.push(["bot"]);
+
+            // Add tenex tag for discoverability
+            profileEvent.tags.push(["t", "tenex"]);
+
+            // Add tenex-backend tag to distinguish from agents
+            profileEvent.tags.push(["t", "tenex-backend"]);
+
+            await profileEvent.sign(signer, { pTags: false });
+
+            try {
+                await profileEvent.publish();
+                logger.info("Published TENEX backend profile", {
+                    pubkey: signer.pubkey.substring(0, 8),
+                    name: backendName,
+                });
+            } catch (publishError) {
+                logger.warn("Failed to publish backend profile (may already exist)", {
+                    error: publishError,
+                    pubkey: signer.pubkey.substring(0, 8),
+                });
+            }
+        } catch (error) {
+            logger.error("Failed to create backend profile", {
+                error,
+            });
+            // Don't throw - backend profile is not critical for operation
         }
     }
 
