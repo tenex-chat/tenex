@@ -7,6 +7,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 // Mock functions that will be used by the mocked modules
 const mockConversationStoreGet = vi.fn();
 const mockConversationStoreGetCachedEvent = vi.fn();
+const mockGetNameSync = vi.fn();
 
 // Mock dependencies - must be before imports that use them
 vi.mock("@/conversations/ConversationStore", () => ({
@@ -27,6 +28,12 @@ vi.mock("@/services/projects", () => ({
             };
             return agents[pubkey];
         },
+    }),
+}));
+
+vi.mock("@/services/PubkeyService", () => ({
+    getPubkeyService: () => ({
+        getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
     }),
 }));
 
@@ -198,11 +205,15 @@ describe("delegation-chain utilities", () => {
         beforeEach(() => {
             mockConversationStoreGet.mockReset();
             mockConversationStoreGetCachedEvent.mockReset();
+            mockGetNameSync.mockReset();
+            // Default behavior: return "User" for any pubkey (fallback behavior)
+            mockGetNameSync.mockReturnValue("User");
         });
 
         afterEach(() => {
             mockConversationStoreGet.mockReset();
             mockConversationStoreGetCachedEvent.mockReset();
+            mockGetNameSync.mockReset();
         });
 
         it("should return undefined for direct user messages (no delegation tag)", () => {
@@ -344,6 +355,27 @@ describe("delegation-chain utilities", () => {
             expect(result).toHaveLength(2);
             expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
             expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" }); // Full ID stored
+        });
+
+        it("should use PubkeyService to resolve user display name from Nostr profile", () => {
+            const event = {
+                pubkey: "project-owner-pubkey",
+                tags: [["delegation", "parent-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            mockConversationStoreGet.mockReturnValue(undefined);
+            // Mock PubkeyService returning a real user name instead of fallback "User"
+            mockGetNameSync.mockReturnValue("Pablo");
+
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey");
+
+            expect(result).toBeDefined();
+            expect(result).toHaveLength(2);
+            // Should use "Pablo" from PubkeyService instead of hardcoded "User"
+            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" });
+            // Verify PubkeyService was called with the project owner pubkey
+            expect(mockGetNameSync).toHaveBeenCalledWith("project-owner-pubkey");
         });
 
         it("should walk up multi-level delegation chains with correct full ordering", () => {
