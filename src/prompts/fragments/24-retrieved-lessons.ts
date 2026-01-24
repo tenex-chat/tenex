@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { formatLessonsForAgent } from "@/utils/lessonFormatter";
+import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -17,15 +17,8 @@ export const retrievedLessonsFragment: PromptFragment<RetrievedLessonsArgs> = {
         // Get only this agent's lessons
         const myLessons = agentLessons.get(agent.pubkey) || [];
 
-        if (myLessons.length === 0) {
-            return ""; // No lessons learned yet
-        }
-
-        // Use the formatter to create formatted lessons
-        const formattedLessons = formatLessonsForAgent(myLessons);
-
-        // Add the lesson_learn tool reminder if lessons exist
-        return `${formattedLessons}\n\nRemember to use the \`lesson_learn\` tool when you discover new insights or patterns.`;
+        // Use centralized formatter (handles empty case and adds reminder)
+        return formatLessonsWithReminder(myLessons);
     },
 };
 

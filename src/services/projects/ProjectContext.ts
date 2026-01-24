@@ -3,6 +3,7 @@ import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PairingManager } from "@/services/pairing";
+import type { PromptCompilerService } from "@/services/prompt-compiler";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
@@ -70,6 +71,13 @@ export class ProjectContext {
      * MCP manager for this project's MCP tool access
      */
     public mcpManager?: MCPManager;
+
+    /**
+     * Prompt compilers for agents in this project
+     * Key: agent pubkey, Value: PromptCompilerService instance
+     * Used to compile lessons + comments into optimized system prompts
+     */
+    private readonly promptCompilers: Map<Hexpubkey, PromptCompilerService> = new Map();
 
     constructor(project: NDKProject, agentRegistry: AgentRegistry) {
         this.project = project;
@@ -227,6 +235,57 @@ export class ProjectContext {
      */
     getAllLessons(): NDKAgentLesson[] {
         return Array.from(this.agentLessons.values()).flat();
+    }
+
+    // =====================================================================================
+    // PROMPT COMPILER MANAGEMENT
+    // =====================================================================================
+
+    /**
+     * Set the prompt compiler for an agent
+     * @param agentPubkey The agent's public key
+     * @param compiler The PromptCompilerService instance
+     */
+    setPromptCompiler(agentPubkey: Hexpubkey, compiler: PromptCompilerService): void {
+        this.promptCompilers.set(agentPubkey, compiler);
+    }
+
+    /**
+     * Get the prompt compiler for an agent
+     * @param agentPubkey The agent's public key
+     * @returns The PromptCompilerService instance or undefined if not set
+     */
+    getPromptCompiler(agentPubkey: Hexpubkey): PromptCompilerService | undefined {
+        return this.promptCompilers.get(agentPubkey);
+    }
+
+    /**
+     * Check if a prompt compiler exists for an agent
+     * @param agentPubkey The agent's public key
+     * @returns True if a compiler exists for this agent
+     */
+    hasPromptCompiler(agentPubkey: Hexpubkey): boolean {
+        return this.promptCompilers.has(agentPubkey);
+    }
+
+    /**
+     * Get all prompt compilers
+     * @returns Map of agent pubkeys to their PromptCompilerService instances
+     */
+    getAllPromptCompilers(): Map<Hexpubkey, PromptCompilerService> {
+        return new Map(this.promptCompilers);
+    }
+
+    /**
+     * Stop all prompt compiler subscriptions
+     * Called during project shutdown
+     */
+    stopAllPromptCompilers(): void {
+        for (const [pubkey, compiler] of this.promptCompilers) {
+            logger.debug("Stopping prompt compiler", { agentPubkey: pubkey.substring(0, 8) });
+            compiler.stop();
+        }
+        this.promptCompilers.clear();
     }
 
     // =====================================================================================

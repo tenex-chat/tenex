@@ -13,6 +13,7 @@ export interface TenexConfig {
     // Global fields
     whitelistedPubkeys?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
+    backendName?: string; // Name for the TENEX backend profile (default: "tenex backend")
     projectsBase?: string; // Base directory for all projects (default: ~/tenex)
     relays?: string[]; // Nostr relay URLs
     blossomServerUrl?: string; // Blossom server URL for blob uploads (default: https://blossom.primal.net)
@@ -48,6 +49,7 @@ export interface TenexConfig {
 export const TenexConfigSchema = z.object({
     whitelistedPubkeys: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),
+    backendName: z.string().optional(),
     projectsBase: z.string().optional(),
     relays: z.array(z.string()).optional(),
     blossomServerUrl: z.string().optional(),

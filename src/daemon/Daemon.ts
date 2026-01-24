@@ -4,6 +4,7 @@ import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance } from "@/agents/types";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
@@ -116,10 +117,15 @@ export class Daemon {
             await initNDK();
             this.ndk = getNDK();
 
-            // 6. Initialize runtime lifecycle manager
+            // 6. Publish backend profile (kind:0)
+            const backendSigner = await config.getBackendSigner();
+            const backendName = loadedConfig.backendName || "tenex backend";
+            await AgentPublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
+
+            // 7. Initialize runtime lifecycle manager
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
 
-            // 7. Initialize subscription manager (before discovery)
+            // 8. Initialize subscription manager (before discovery)
             this.subscriptionManager = new SubscriptionManager(
                 this.ndk,
                 this.handleIncomingEvent.bind(this), // Pass event handler
@@ -127,17 +133,17 @@ export class Daemon {
                 this.routingLogger
             );
 
-            // 8. Start subscription immediately
+            // 9. Start subscription immediately
             // Projects will be discovered naturally as events arrive
             await this.subscriptionManager.start();
 
-            // 9. Start local streaming socket
+            // 10. Start local streaming socket
             this.streamTransport = new UnixSocketTransport();
             await this.streamTransport.start();
             streamPublisher.setTransport(this.streamTransport);
             logger.info("Local streaming socket started", { path: this.streamTransport.getSocketPath() });
 
-            // 10. Setup graceful shutdown
+            // 11. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -267,6 +273,14 @@ export class Daemon {
             addRoutingEvent(span, "lesson_event", { reason: "kind_4129" });
             await this.handleLessonEvent(event);
             await logDropped(this.routingLogger, event, "Lesson event - hydrated into active runtimes only");
+            return;
+        }
+
+        // Handle lesson comment events (kind 1111 with #K: ["4129"])
+        if (eventType === "lesson_comment") {
+            addRoutingEvent(span, "lesson_comment_event", { reason: "kind_1111_K_4129" });
+            await this.handleLessonCommentEvent(event);
+            await logDropped(this.routingLogger, event, "Lesson comment - routed to prompt compilers");
             return;
         }
 
@@ -668,11 +682,120 @@ export class Daemon {
     }
 
     /**
+     * Handle lesson comment events (kind 1111 with #K: ["4129"])
+     * Routes comments to the appropriate PromptCompilerService for prompt refinement.
+     */
+    private async handleLessonCommentEvent(event: NDKEvent): Promise<void> {
+        const span = lessonTracer.startSpan("tenex.lesson_comment.received", {
+            attributes: {
+                "comment.event_id": event.id?.substring(0, 16) || "unknown",
+                "comment.author": event.pubkey?.substring(0, 16) || "unknown",
+                "comment.created_at": event.created_at || 0,
+            },
+        });
+
+        try {
+            // Verify author is whitelisted
+            if (!this.whitelistedPubkeys.includes(event.pubkey)) {
+                span.setAttribute("comment.rejected", true);
+                span.setAttribute("comment.rejection_reason", "not_whitelisted");
+                span.end();
+                return;
+            }
+
+            // Extract the lesson event ID from the root 'e' tag
+            const rootETag = event.tags.find(
+                (tag) => tag[0] === "e" && tag[3] === "root"
+            );
+            const lessonEventId = rootETag?.[1] || event.tags.find((tag) => tag[0] === "e")?.[1];
+
+            if (!lessonEventId) {
+                span.setAttribute("comment.rejected", true);
+                span.setAttribute("comment.rejection_reason", "no_lesson_reference");
+                span.end();
+                return;
+            }
+
+            span.setAttribute("comment.lesson_event_id", lessonEventId.substring(0, 16));
+
+            // Get the agent pubkey from p-tag
+            const agentPubkey = event.tagValue("p");
+            if (!agentPubkey) {
+                span.setAttribute("comment.rejected", true);
+                span.setAttribute("comment.rejection_reason", "no_agent_reference");
+                span.end();
+                return;
+            }
+
+            span.setAttribute("comment.agent_pubkey", agentPubkey.substring(0, 16));
+
+            // Route to active runtimes that have this agent
+            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+            let routedCount = 0;
+
+            for (const [projectId, runtime] of activeRuntimes) {
+                const context = runtime.getContext();
+                if (!context) continue;
+
+                const agent = context.getAgentByPubkey(agentPubkey);
+                if (!agent) continue;
+
+                // Get the PromptCompilerService for this agent
+                const compiler = context.getPromptCompiler(agentPubkey);
+                if (compiler) {
+                    compiler.addComment({
+                        id: event.id || "",
+                        pubkey: event.pubkey,
+                        content: event.content,
+                        lessonEventId,
+                        createdAt: event.created_at || 0,
+                    });
+                    routedCount++;
+
+                    span.addEvent("comment_routed", {
+                        "project.id": projectId,
+                        "agent.slug": agent.slug,
+                    });
+
+                    logger.debug("Routed lesson comment to prompt compiler", {
+                        projectId,
+                        agentSlug: agent.slug,
+                        commentId: event.id?.substring(0, 8),
+                        lessonEventId: lessonEventId.substring(0, 8),
+                    });
+                } else {
+                    // Log when routing is skipped due to missing compiler
+                    logger.warn("Skipping lesson comment routing - no prompt compiler registered", {
+                        projectId,
+                        agentSlug: agent.slug,
+                        agentPubkey: agentPubkey.substring(0, 8),
+                        commentId: event.id?.substring(0, 8),
+                    });
+
+                    span.addEvent("comment_routing_skipped", {
+                        "project.id": projectId,
+                        "agent.slug": agent.slug,
+                        "reason": "no_prompt_compiler",
+                    });
+                }
+            }
+
+            span.setAttribute("comment.routed_count", routedCount);
+            span.end();
+        } catch (error) {
+            span.setAttribute("error", true);
+            span.setAttribute("error.message", error instanceof Error ? error.message : String(error));
+            span.end();
+            throw error;
+        }
+    }
+
+    /**
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
         const shutdown = async (): Promise<void> => {
-            console.log("\nShutting down...");
+            console.log("\nShutting down gracefully...");
             if (!this.isRunning) {
                 process.exit(0);
             }
@@ -681,35 +804,51 @@ export class Daemon {
 
             try {
                 if (this.streamTransport) {
+                    process.stdout.write("Stopping stream transport...");
                     await this.streamTransport.stop();
                     streamPublisher.setTransport(null);
                     this.streamTransport = null;
+                    console.log(" done");
                 }
 
                 if (this.subscriptionManager) {
+                    process.stdout.write("Stopping subscriptions...");
                     this.subscriptionManager.stop();
+                    console.log(" done");
                 }
 
                 if (this.runtimeLifecycle) {
+                    const stats = this.runtimeLifecycle.getStats();
+                    if (stats.activeCount > 0) {
+                        console.log(`Stopping ${stats.activeCount} project runtime(s)...`);
+                    }
                     await this.runtimeLifecycle.stopAllRuntimes();
                 }
 
                 // Close the global prefix KV store (after all runtimes are stopped)
+                process.stdout.write("Closing storage...");
                 await prefixKVStore.forceClose();
+                console.log(" done");
 
-                for (const handler of this.shutdownHandlers) {
-                    await handler();
+                if (this.shutdownHandlers.length > 0) {
+                    process.stdout.write("Running shutdown handlers...");
+                    for (const handler of this.shutdownHandlers) {
+                        await handler();
+                    }
+                    console.log(" done");
                 }
 
                 if (this.lockfile) {
                     await this.lockfile.release();
                 }
 
+                process.stdout.write("Flushing telemetry...");
                 const conversationSpanManager = getConversationSpanManager();
                 conversationSpanManager.shutdown();
-
                 await shutdownTelemetry();
+                console.log(" done");
 
+                console.log("Shutdown complete.");
                 process.exit(0);
             } catch (error) {
                 logger.error("Error during shutdown", { error });
