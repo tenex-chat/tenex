@@ -291,10 +291,11 @@ export class AgentEventDecoder {
      */
     static classifyForDaemon(
         event: NDKEvent
-    ): "never_route" | "project" | "lesson" | "conversation" | "boot" | "unknown" {
+    ): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" | "unknown" {
         if (this.isNeverRouteKind(event)) return "never_route";
         if (this.isProjectEvent(event)) return "project";
         if (this.isLessonEvent(event)) return "lesson";
+        if (this.isLessonCommentEvent(event)) return "lesson_comment";
         if (event.kind === NDKKind.Text) {
             return "conversation";
         }
@@ -302,6 +303,18 @@ export class AgentEventDecoder {
             return "boot";
         }
         return "unknown";
+    }
+
+    /**
+     * Check if an event is a lesson comment (kind NDKKind.Comment with #K: [NDKKind.AgentLesson])
+     * @param event - The event to check
+     * @returns True if this is a lesson comment event
+     */
+    static isLessonCommentEvent(event: NDKEvent): boolean {
+        if (event.kind !== NDKKind.Comment) return false;
+        // NIP-22: #K tag indicates the kind of the root event
+        const kTag = event.tagValue("K");
+        return kTag === String(NDKKind.AgentLesson); // Comments on lessons
     }
 
     /**
