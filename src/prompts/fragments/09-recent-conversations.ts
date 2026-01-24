@@ -14,6 +14,7 @@ import type { PromptFragment } from "../core/types";
 interface RecentConversationsArgs {
     agent: AgentInstance;
     currentConversationId?: string;
+    projectId?: string;
 }
 
 interface RecentConversationEntry {
@@ -60,12 +61,16 @@ function sanitizeForPrompt(text: string, maxLength: number = MAX_SUMMARY_LENGTH)
  */
 function loadRecentConversations(
     agentPubkey: string,
-    currentConversationId?: string
+    currentConversationId?: string,
+    projectId?: string
 ): RecentConversationEntry[] {
     const now = Math.floor(Date.now() / 1000);
     const cutoffTime = now - TWENTY_FOUR_HOURS_IN_SECONDS;
 
-    const conversationIds = ConversationStore.listConversationIdsFromDisk();
+    // Use project-specific listing if projectId is provided, otherwise fall back to current project
+    const conversationIds = projectId
+        ? ConversationStore.listConversationIdsFromDiskForProject(projectId)
+        : ConversationStore.listConversationIdsFromDisk();
     const candidateEntries: RecentConversationEntry[] = [];
 
     for (const conversationId of conversationIds) {
@@ -76,7 +81,10 @@ function loadRecentConversations(
 
         try {
             // Single disk read: gets metadata + participation check together
-            const preview = ConversationStore.readConversationPreview(conversationId, agentPubkey);
+            // Use project-aware method when projectId is provided for full scoping
+            const preview = projectId
+                ? ConversationStore.readConversationPreviewForProject(conversationId, agentPubkey, projectId)
+                : ConversationStore.readConversationPreview(conversationId, agentPubkey);
             if (!preview) continue;
 
             // Skip conversations older than 24 hours
@@ -117,8 +125,8 @@ function loadRecentConversations(
 export const recentConversationsFragment: PromptFragment<RecentConversationsArgs> = {
     id: "recent-conversations",
     priority: 9, // Early in the prompt, after identity but before other context
-    template: ({ agent, currentConversationId }) => {
-        const recentConversations = loadRecentConversations(agent.pubkey, currentConversationId);
+    template: ({ agent, currentConversationId, projectId }) => {
+        const recentConversations = loadRecentConversations(agent.pubkey, currentConversationId, projectId);
 
         if (recentConversations.length === 0) {
             return ""; // No recent conversations to show
