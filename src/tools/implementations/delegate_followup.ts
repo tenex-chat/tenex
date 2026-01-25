@@ -125,7 +125,7 @@ async function executeDelegateFollowup(
     success: true,
     message: "Follow-up sent. The agent will respond when ready.",
     delegationConversationId: truncateConversationId(delegation_conversation_id),
-    followupEventId: truncateConversationId(followupEventId),
+    followupEventId, // Keep full event ID - this is a Nostr event ID, not a conversation ID
   };
 }
 
