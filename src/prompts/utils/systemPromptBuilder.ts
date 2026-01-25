@@ -145,20 +145,34 @@ async function addCoreAgentFragments(
         // Get team-memorized reports (visible to ALL agents)
         const teamMemorizedReports = reportService.getTeamMemorizedReports();
 
-        // Combine and deduplicate by slug, using "latest publishedAt wins" semantics
-        // This ensures updates to memorized reports are reflected, not stale versions
-        const reportsBySlug = new Map<string, typeof teamMemorizedReports[0]>();
+        // Combine and deduplicate by slug with scope-aware semantics:
+        // 1. Team memos ALWAYS take precedence (they must appear for ALL agents)
+        // 2. Within each scope (team vs agent), latest publishedAt wins
+        // 3. Agent-only reports are only included if no team memo exists with the same slug
 
-        // Process all reports, keeping the one with the latest publishedAt for each slug
-        const allReports = [...teamMemorizedReports, ...agentMemorizedReports];
-        for (const report of allReports) {
-            const existing = reportsBySlug.get(report.slug);
+        // Step 1: Deduplicate team reports by slug (latest wins within team scope)
+        const teamBySlug = new Map<string, typeof teamMemorizedReports[0]>();
+        for (const report of teamMemorizedReports) {
+            const existing = teamBySlug.get(report.slug);
             if (!existing || (report.publishedAt || 0) > (existing.publishedAt || 0)) {
-                reportsBySlug.set(report.slug, report);
+                teamBySlug.set(report.slug, report);
             }
         }
 
-        const combinedReports = Array.from(reportsBySlug.values());
+        // Step 2: Deduplicate agent reports by slug (latest wins within agent scope)
+        const agentBySlug = new Map<string, typeof agentMemorizedReports[0]>();
+        for (const report of agentMemorizedReports) {
+            const existing = agentBySlug.get(report.slug);
+            if (!existing || (report.publishedAt || 0) > (existing.publishedAt || 0)) {
+                agentBySlug.set(report.slug, report);
+            }
+        }
+
+        // Step 3: Combine - team memos first, then agent-only (excluding slugs already in team)
+        const combinedReports = [
+            ...Array.from(teamBySlug.values()),
+            ...Array.from(agentBySlug.values()).filter(r => !teamBySlug.has(r.slug)),
+        ];
 
         if (combinedReports.length > 0) {
             builder.add("memorized-reports", { reports: combinedReports });
