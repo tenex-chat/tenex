@@ -8,5 +8,4 @@ export {
     PromptCompilerService,
     type LessonComment,
     type CompiledPromptCacheEntry,
-    type CompileResult,
 } from "./prompt-compiler-service";

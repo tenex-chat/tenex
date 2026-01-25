@@ -537,7 +537,8 @@ export class ProjectRuntime {
                 const compiler = new PromptCompilerService(
                     agent.pubkey,
                     whitelistArray,
-                    ndk
+                    ndk,
+                    this.context
                 );
 
                 // Register the compiler with the context

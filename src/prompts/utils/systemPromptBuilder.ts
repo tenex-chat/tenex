@@ -194,24 +194,22 @@ const EOSE_TIMEOUT_MS = 5000; // 5 seconds
  * This function:
  * 1. Waits for EOSE to ensure all lesson comments are received (with timeout)
  * 2. Calls compile() to synthesize lessons + comments into the base prompt
- * 3. Falls back to simple concatenation if compilation didn't occur or fails
+ * 3. Falls back to simple concatenation if compilation fails
+ *
+ * Note: The service retrieves lessons internally from ProjectContext.
  *
  * @param compiler The PromptCompilerService for this agent
- * @param lessons The agent's lessons
+ * @param lessons The agent's lessons (used for fallback formatting if compilation fails)
  * @param basePrompt The system prompt without lessons
+ * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
  * @returns The compiled prompt with lessons integrated
  */
 async function compileLessonsIntoPrompt(
     compiler: PromptCompilerService,
     lessons: NDKAgentLesson[],
-    basePrompt: string
+    basePrompt: string,
+    agentDefinitionEventId?: string
 ): Promise<string> {
-    // Skip EOSE wait if there are no lessons (no comments to wait for)
-    if (lessons.length === 0) {
-        logger.debug("No lessons to compile, returning base prompt");
-        return basePrompt;
-    }
-
     try {
         // Wait for EOSE with timeout to prevent indefinite blocking
         await Promise.race([
@@ -232,29 +230,21 @@ async function compileLessonsIntoPrompt(
 
     try {
         // Compile lessons + comments into the base prompt
-        const result = await compiler.compile(lessons, basePrompt);
-
-        // If compilation didn't occur (no LLM config or LLM failed), use fallback formatting
-        if (!result.compiled && result.lessonsCount > 0) {
-            logger.info("PromptCompilerService returned compiled=false, using fallback formatting", {
-                lessonsCount: result.lessonsCount,
-            });
-            return formatFallbackLessons(lessons, basePrompt);
-        }
+        // The service retrieves lessons internally from ProjectContext
+        const compiledPrompt = await compiler.compile(basePrompt, agentDefinitionEventId);
 
         logger.debug("✅ Compiled lessons into prompt using PromptCompilerService", {
-            lessonsCount: lessons.length,
             basePromptLength: basePrompt.length,
-            compiledPromptLength: result.prompt.length,
-            actuallyCompiled: result.compiled,
+            compiledPromptLength: compiledPrompt.length,
         });
 
-        return result.prompt;
+        return compiledPrompt;
     } catch (error) {
         logger.error("Failed to compile lessons with PromptCompilerService, using fallback", {
             error: error instanceof Error ? error.message : String(error),
         });
 
+        // Fallback to simple concatenation if compilation fails
         return formatFallbackLessons(lessons, basePrompt);
     }
 }
@@ -315,7 +305,14 @@ export async function buildSystemPromptMessages(
  * Builds the main system prompt content.
  *
  * Uses PromptCompilerService (TIN-10) when available to synthesize lessons + comments
- * into the base prompt. Falls back to simple lesson concatenation otherwise.
+ * into the agent's BASE INSTRUCTIONS ONLY. The compiled result (base instructions + lessons)
+ * is then used when building fragments.
+ *
+ * IMPORTANT: The compiled prompt should contain ONLY:
+ * - Agent base instructions (from agent.instructions)
+ * - Lessons learned (merged by LLM)
+ *
+ * Fragments (project context, worktrees, available agents, etc.) are added AFTER compilation.
  */
 async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise<string> {
     const {
@@ -345,22 +342,51 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     const usePromptCompiler = !!promptCompiler;
 
+    // If PromptCompilerService is available, compile lessons into ONLY the base instructions
+    // The compiled result replaces agent.instructions for fragment building
+    let compiledInstructions: string | undefined;
+    if (promptCompiler) {
+        const lessons = agentLessons?.get(agent.pubkey) || [];
+        // CRITICAL: Pass ONLY agent.instructions (base instructions), NOT the full system prompt
+        // This ensures the cache contains only base instructions + lessons, not runtime fragments
+        const baseInstructions = agent.instructions || "";
+        compiledInstructions = await compileLessonsIntoPrompt(
+            promptCompiler,
+            lessons,
+            baseInstructions,
+            agent.eventId
+        );
+
+        logger.debug("✅ Compiled lessons into base instructions", {
+            agentName: agent.name,
+            baseInstructionsLength: baseInstructions.length,
+            compiledLength: compiledInstructions.length,
+        });
+    }
+
+    // Create an agent copy with compiled instructions (if available)
+    // This ensures fragments use the compiled version instead of raw instructions
+    const agentForFragments: AgentInstance = compiledInstructions
+        ? { ...agent, instructions: compiledInstructions }
+        : agent;
+
     const systemPromptBuilder = new PromptBuilder();
 
     // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
+    // NOTE: Uses agentForFragments which has compiled instructions (lessons merged in)
     systemPromptBuilder.add("agent-identity", {
-        agent,
+        agent: agentForFragments,
         projectTitle: project.tagValue("title") || "Unknown Project",
         projectOwnerPubkey: project.pubkey,
         workingDirectory,
     });
 
     // Add agent home directory context
-    systemPromptBuilder.add("agent-home-directory", { agent });
+    systemPromptBuilder.add("agent-home-directory", { agent: agentForFragments });
 
     // Add recent conversations context (short-term memory)
     systemPromptBuilder.add("recent-conversations", {
-        agent,
+        agent: agentForFragments,
         currentConversationId: conversation.getId(),
         projectId: project.dTag || project.tagValue("d"),
     });
@@ -370,7 +396,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     if (conversation?.metadata?.delegationChain && conversation.metadata.delegationChain.length > 0) {
         systemPromptBuilder.add("delegation-chain", {
             delegationChain: conversation.metadata.delegationChain,
-            currentAgentPubkey: agent.pubkey,
+            currentAgentPubkey: agentForFragments.pubkey,
             currentConversationId: conversation.getId(),
         });
     }
@@ -393,34 +419,26 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
                 workingDirectory,
                 currentBranch,
                 projectBasePath,
-                agent,
+                agent: agentForFragments,
             },
         });
     }
 
     // Add core agent fragments using shared composition
-    await addCoreAgentFragments(systemPromptBuilder, agent, conversation, mcpManager);
+    await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager);
 
-    // Handle lessons: either via PromptCompilerService or via simple fragment
+    // Handle lessons: ONLY add via fragment if NOT using PromptCompilerService
+    // When using compiler, lessons are already merged into compiledInstructions
     if (!usePromptCompiler) {
         // No compiler available - add lessons via fragment
-        addLessonsViaFragment(systemPromptBuilder, agent, agentLessons);
+        addLessonsViaFragment(systemPromptBuilder, agentForFragments, agentLessons);
     }
 
     // Add agent-specific fragments
-    addAgentFragments(systemPromptBuilder, agent, availableAgents, options.projectManagerPubkey);
+    addAgentFragments(systemPromptBuilder, agentForFragments, availableAgents, options.projectManagerPubkey);
 
-    // Build the base prompt
-    const basePrompt = await systemPromptBuilder.build();
-
-    // If PromptCompilerService is available, compile lessons into the base prompt
-    if (promptCompiler) {
-        const lessons = agentLessons?.get(agent.pubkey) || [];
-        return compileLessonsIntoPrompt(promptCompiler, lessons, basePrompt);
-    }
-
-    // Return the base prompt (lessons were already added via fragment above)
-    return basePrompt;
+    // Build and return the complete prompt with all fragments
+    return systemPromptBuilder.build();
 }
 
 /**
