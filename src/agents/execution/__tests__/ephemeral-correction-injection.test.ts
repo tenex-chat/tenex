@@ -71,7 +71,7 @@ describe("Ephemeral Correction Message Injection", () => {
                 CONVERSATION_ID,
                 ralNumber,
                 "Ephemeral supervision correction",
-                { ephemeral: true, suppressAttribution: true }
+                { ephemeral: true }
             );
 
             const state = registry.getRAL(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
@@ -84,7 +84,6 @@ describe("Ephemeral Correction Message Injection", () => {
             // Second injection SHOULD be ephemeral
             expect(state?.queuedInjections[1].content).toBe("Ephemeral supervision correction");
             expect(state?.queuedInjections[1].ephemeral).toBe(true);
-            expect(state?.queuedInjections[1].suppressAttribution).toBe(true);
         });
 
         it("should preserve ephemeral flag when consuming injections", () => {
@@ -145,7 +144,7 @@ describe("Ephemeral Correction Message Injection", () => {
                 CONVERSATION_ID,
                 ralNumber,
                 correctionMessage,
-                { ephemeral: true, suppressAttribution: true }
+                { ephemeral: true }
             );
 
             // Consume injections (simulating executeStreaming re-run)

@@ -102,7 +102,6 @@ export async function setupStreamExecution(
                     content: injection.content,
                     messageType: "text",
                     targetedPubkeys: [context.agent.pubkey],
-                    suppressAttribution: injection.suppressAttribution,
                     senderPubkey: injection.senderPubkey,
                     eventId: injection.eventId,
                 });

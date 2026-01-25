@@ -6,7 +6,6 @@ import { logger } from "@/utils/logger";
 import { context as otelContext, propagation, trace } from "@opentelemetry/api";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentEventEncoder } from "./AgentEventEncoder";
-import { AgentProfilePublisher } from "./AgentProfilePublisher";
 import type {
     AskConfig,
     CompletionIntent,
@@ -377,26 +376,4 @@ export class AgentPublisher {
 
         return event;
     }
-
-    // ===== Delegate to AgentProfilePublisher for backwards compatibility =====
-
-    /**
-     * @deprecated Use AgentProfilePublisher.publishAgentProfile instead
-     */
-    static publishAgentProfile = AgentProfilePublisher.publishAgentProfile;
-
-    /**
-     * @deprecated Use AgentProfilePublisher.publishAgentRequest instead
-     */
-    static publishAgentRequest = AgentProfilePublisher.publishAgentRequest;
-
-    /**
-     * @deprecated Use AgentProfilePublisher.publishContactList instead
-     */
-    static publishContactList = AgentProfilePublisher.publishContactList;
-
-    /**
-     * @deprecated Use AgentProfilePublisher.publishBackendProfile instead
-     */
-    static publishBackendProfile = AgentProfilePublisher.publishBackendProfile;
 }

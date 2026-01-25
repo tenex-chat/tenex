@@ -85,8 +85,7 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
                 agentPubkey,
                 conversationId,
                 ralNumber,
-                resultsMessage,
-                { suppressAttribution: true }
+                resultsMessage
             );
         }
 
