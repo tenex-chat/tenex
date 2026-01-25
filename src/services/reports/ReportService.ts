@@ -13,6 +13,7 @@ export interface ReportData {
     content: string;
     hashtags?: string[];
     memorize?: boolean;
+    memorizeTeam?: boolean;
 }
 
 export interface ReportInfo {
@@ -27,6 +28,7 @@ export interface ReportInfo {
     projectReference?: string;
     isDeleted?: boolean;
     isMemorized?: boolean;
+    isMemorizedTeam?: boolean;
 }
 
 export interface ReportSummary {
@@ -96,6 +98,11 @@ export class ReportService {
         // Add memorize tag if requested - this marks the report for system prompt injection
         if (data.memorize) {
             article.tags.push(["t", "memorize"]);
+        }
+
+        // Add memorize_team tag if requested - this marks the report for ALL agents' system prompts
+        if (data.memorizeTeam) {
+            article.tags.push(["t", "memorize_team"]);
         }
 
         // Tag the current project using a-tag
@@ -369,9 +376,9 @@ export class ReportService {
      * Convert an NDKArticle to ReportInfo
      */
     private articleToReportInfo(article: NDKArticle): ReportInfo {
-        // Extract hashtags from tags (excluding the "memorize" tag)
+        // Extract hashtags from tags (excluding the "memorize" and "memorize_team" tags)
         const hashtags = article.tags
-            .filter((tag) => tag[0] === "t" && tag[1] !== "memorize")
+            .filter((tag) => tag[0] === "t" && tag[1] !== "memorize" && tag[1] !== "memorize_team")
             .map((tag) => tag[1]);
 
         // Extract project reference if present
@@ -383,8 +390,11 @@ export class ReportService {
         // Check if deleted
         const isDeleted = article.tags.some((tag) => tag[0] === "deleted");
 
-        // Check if memorized
+        // Check if memorized (for the authoring agent only)
         const isMemorized = article.tags.some((tag) => tag[0] === "t" && tag[1] === "memorize");
+
+        // Check if team-memorized (for ALL agents in the project)
+        const isMemorizedTeam = article.tags.some((tag) => tag[0] === "t" && tag[1] === "memorize_team");
 
         // Get author npub
         const authorNpub = article.author.npub;
@@ -401,6 +411,7 @@ export class ReportService {
             projectReference,
             isDeleted,
             isMemorized,
+            isMemorizedTeam,
         };
     }
 
@@ -451,6 +462,34 @@ export class ReportService {
 
         // Sort by published date (oldest first)
         activeReports.sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
+
+        return activeReports;
+    }
+
+    /**
+     * Get team-memorized reports (reports tagged with memorize_team=true).
+     * These reports are injected into ALL agents' system prompts.
+     * Uses cached reports for instant lookup.
+     */
+    getTeamMemorizedReports(): ReportInfo[] {
+        const projectCtx = getProjectContext();
+        if (!projectCtx?.project) {
+            throw new Error("No project context available");
+        }
+
+        // Get team-memorized reports from cache
+        const reports = projectCtx.getTeamMemorizedReports();
+
+        // Filter out deleted reports (should already be excluded, but double-check)
+        const activeReports = reports.filter((report) => !report.isDeleted);
+
+        // Sort by published date (oldest first - so they appear in chronological order in the prompt)
+        activeReports.sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
+
+        logger.debug("📚 Retrieved team-memorized reports from cache", {
+            count: activeReports.length,
+            slugs: activeReports.map((r) => r.slug),
+        });
 
         return activeReports;
     }

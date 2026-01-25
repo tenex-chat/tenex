@@ -21,6 +21,12 @@ const reportWriteSchema = z.object({
         .describe(
             "When true, the report content will be automatically added to this agent's system prompt as persistent context. Use this for reports that are fundamental to your role (e.g., architecture decisions, domain knowledge, project conventions) that you want to always have available."
         ),
+    memorize_team: z
+        .boolean()
+        .default(false)
+        .describe(
+            "⚠️ HIGH CONTEXT COST - When true, the report content will be injected into the system prompt of ALL agents in the project, not just the authoring agent. Use ONLY for SHORT documents that are critical for EVERY agent to know. Examples: critical project-wide conventions, emergency procedures, or announcements that affect all agents. NEVER use for long documents or agent-specific information."
+        ),
 });
 
 type ReportWriteInput = z.infer<typeof reportWriteSchema>;
@@ -38,12 +44,13 @@ async function executeReportWrite(
     input: ReportWriteInput,
     context: ToolExecutionContext
 ): Promise<ReportWriteOutput> {
-    const { slug, title, summary, content, hashtags, memorize } = input;
+    const { slug, title, summary, content, hashtags, memorize, memorize_team } = input;
 
     logger.info("📝 Writing report", {
         slug,
         title,
         memorize,
+        memorize_team,
         agent: context.agent.name,
     });
 
@@ -57,19 +64,24 @@ async function executeReportWrite(
             content,
             hashtags,
             memorize,
+            memorizeTeam: memorize_team,
         },
         context.agent
     );
 
-    const memorizeMessage = memorize
-        ? " This report has been memorized and will be included in your system prompt."
-        : "";
+    let memorizeMessage = "";
+    if (memorize_team) {
+        memorizeMessage = " ⚠️ This report has been team-memorized and will be included in the system prompt of ALL agents in the project.";
+    } else if (memorize) {
+        memorizeMessage = " This report has been memorized and will be included in your system prompt.";
+    }
 
     logger.info("✅ Report written successfully", {
         slug,
         articleId: result.encodedId,
         addressableRef: result.addressableRef,
         memorize,
+        memorize_team,
         agent: context.agent.name,
     });
 
@@ -119,6 +131,24 @@ Reports are stored on Nostr network and accessible via slug. Updates existing re
 - Any content you want persisted across all future conversations
 
 When memorize=true, a "memorize" tag is added to the article and the content will be automatically injected into your system prompt.
+
+**Memorize Team Parameter** (⚠️ USE WITH EXTREME CAUTION):
+Set memorize_team=true ONLY when the report MUST be visible to EVERY agent in the project.
+
+⚠️ **HIGH CONTEXT WINDOW COST** - This injects content into ALL agents' system prompts!
+
+**ONLY use memorize_team for:**
+- Critical project-wide conventions that ALL agents must follow
+- Emergency procedures or time-sensitive announcements
+- Extremely short (<500 chars) shared context that every agent needs
+
+**NEVER use memorize_team for:**
+- Long documents (architecture docs, specs, etc.)
+- Agent-specific information
+- Content that only some agents need
+- General documentation (use regular reports instead)
+
+When memorize_team=true, a "memorize_team" tag is added and the content will be injected into the system prompt of ALL agents.
 
 See also: lesson_learn (for behavioral insights)`,
         inputSchema: reportWriteSchema,

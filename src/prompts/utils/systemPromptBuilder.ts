@@ -133,14 +133,45 @@ async function addCoreAgentFragments(
     }
 
     // Add memorized reports - retrieved from cache (no async fetch needed)
+    // This includes both:
+    // 1. Agent-specific memorized reports (memorize=true) - only for the authoring agent
+    // 2. Team-memorized reports (memorize_team=true) - for ALL agents in the project
     try {
         const reportService = new ReportService();
-        const memorizedReports = reportService.getMemorizedReports(agent.pubkey);
-        if (memorizedReports.length > 0) {
-            builder.add("memorized-reports", { reports: memorizedReports });
+
+        // Get agent's own memorized reports
+        const agentMemorizedReports = reportService.getMemorizedReports(agent.pubkey);
+
+        // Get team-memorized reports (visible to ALL agents)
+        const teamMemorizedReports = reportService.getTeamMemorizedReports();
+
+        // Combine and deduplicate (in case an agent's report has both tags)
+        const allReportSlugs = new Set<string>();
+        const combinedReports = [];
+
+        // Add team reports first (higher priority, visible to all)
+        for (const report of teamMemorizedReports) {
+            if (!allReportSlugs.has(report.slug)) {
+                allReportSlugs.add(report.slug);
+                combinedReports.push(report);
+            }
+        }
+
+        // Add agent's own memorized reports
+        for (const report of agentMemorizedReports) {
+            if (!allReportSlugs.has(report.slug)) {
+                allReportSlugs.add(report.slug);
+                combinedReports.push(report);
+            }
+        }
+
+        if (combinedReports.length > 0) {
+            builder.add("memorized-reports", { reports: combinedReports });
             logger.debug("📚 Added memorized reports to system prompt (from cache)", {
                 agent: agent.name,
-                count: memorizedReports.length,
+                agentReportsCount: agentMemorizedReports.length,
+                teamReportsCount: teamMemorizedReports.length,
+                totalCount: combinedReports.length,
             });
         }
     } catch (error) {

@@ -409,6 +409,14 @@ export class ProjectContext {
     }
 
     /**
+     * Get all team-memorized reports (reports tagged with memorize_team=true).
+     * These reports are injected into ALL agents' system prompts.
+     */
+    getTeamMemorizedReports(): ReportInfo[] {
+        return Array.from(this.reports.values()).filter((report) => report.isMemorizedTeam);
+    }
+
+    /**
      * Get reports by hashtag
      */
     getReportsByHashtag(hashtag: string): ReportInfo[] {
@@ -470,9 +478,9 @@ export class ProjectContext {
      * Convert an NDKArticle to ReportInfo (extracted from ReportService)
      */
     private articleToReportInfo(article: NDKArticle): ReportInfo {
-        // Extract hashtags from tags (excluding the "memorize" tag)
+        // Extract hashtags from tags (excluding the "memorize" and "memorize_team" tags)
         const hashtags = article.tags
-            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize")
+            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize" && tag[1] !== "memorize_team")
             .map((tag: string[]) => tag[1]);
 
         // Extract project reference if present
@@ -484,9 +492,14 @@ export class ProjectContext {
         // Check if deleted
         const isDeleted = article.tags.some((tag: string[]) => tag[0] === "deleted");
 
-        // Check if memorized
+        // Check if memorized (for the authoring agent only)
         const isMemorized = article.tags.some(
             (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
+        );
+
+        // Check if team-memorized (for ALL agents in the project)
+        const isMemorizedTeam = article.tags.some(
+            (tag: string[]) => tag[0] === "t" && tag[1] === "memorize_team"
         );
 
         // Get author npub
@@ -504,6 +517,7 @@ export class ProjectContext {
             projectReference,
             isDeleted,
             isMemorized,
+            isMemorizedTeam,
         };
     }
 
