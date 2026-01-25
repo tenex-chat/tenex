@@ -8,6 +8,7 @@ import { ConversationStore } from "../conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { NDKEventMetadata } from "../events/NDKEventMetadata";
 import { getProjectContext } from "@/services/projects";
+import { getLocalReportStore } from "@/services/reports";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
@@ -485,13 +486,40 @@ export class EventHandler {
             // Convert to NDKArticle
             const article = NDKArticle.from(event);
 
+            // Check if report is deleted
+            const isDeleted = article.tags.some((tag: string[]) => tag[0] === "deleted");
+
             // Add to project context cache
             projectCtx.addReportFromArticle(article);
+
+            // Hydrate local storage if this event is newer than local copy
+            // Skip deleted reports - we don't want to hydrate them
+            if (!isDeleted && article.dTag && article.content) {
+                const localStore = getLocalReportStore();
+                const eventCreatedAt = event.created_at || Math.floor(Date.now() / 1000);
+
+                // Format content for local storage (matching report_write format)
+                const formattedContent = this.formatReportForLocalStorage(article);
+
+                const hydrated = await localStore.hydrateFromNostr(
+                    article.dTag,
+                    formattedContent,
+                    event.id,
+                    eventCreatedAt
+                );
+
+                if (hydrated) {
+                    trace.getActiveSpan()?.addEvent("event_handler.report_hydrated", {
+                        "report.slug": article.dTag,
+                        "report.eventId": event.id.substring(0, 12),
+                    });
+                }
+            }
 
             trace.getActiveSpan()?.addEvent("event_handler.report_cached", {
                 "report.slug": article.dTag || "",
                 "report.author": event.pubkey.substring(0, 8),
-                "report.isDeleted": article.tags.some((tag: string[]) => tag[0] === "deleted"),
+                "report.isDeleted": isDeleted,
                 "report.isMemorized": article.tags.some(
                     (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
                 ),
@@ -502,6 +530,45 @@ export class EventHandler {
                 error: formatAnyError(error),
             });
         }
+    }
+
+    /**
+     * Format an NDKArticle for local storage
+     */
+    private formatReportForLocalStorage(article: NDKArticle): string {
+        const lines: string[] = [];
+
+        // Add title
+        if (article.title) {
+            lines.push(`# ${article.title}`);
+            lines.push("");
+        }
+
+        // Add summary
+        if (article.summary) {
+            lines.push(`> ${article.summary}`);
+            lines.push("");
+        }
+
+        // Extract hashtags (excluding memorize tag)
+        const hashtags = article.tags
+            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize")
+            .map((tag: string[]) => tag[1]);
+
+        if (hashtags.length > 0) {
+            lines.push(`**Tags:** ${hashtags.map((t) => `#${t}`).join(" ")}`);
+            lines.push("");
+        }
+
+        lines.push("---");
+        lines.push("");
+
+        // Add content
+        if (article.content) {
+            lines.push(article.content);
+        }
+
+        return lines.join("\n");
     }
 
     private handleDefaultEvent(_event: NDKEvent): void {
