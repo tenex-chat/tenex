@@ -5,6 +5,7 @@ import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
+import { truncateConversationId } from "@/utils/delegation-chain";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
@@ -146,7 +147,7 @@ async function executeDelegateCrossProject(
     return {
         success: true,
         message: `Delegated to agent '${agentSlug}' in project '${projectId}'. The agent will respond when ready.`,
-        delegationConversationId: chatEvent.id,
+        delegationConversationId: truncateConversationId(chatEvent.id),
     };
 }
 
