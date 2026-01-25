@@ -1,108 +1,29 @@
 import type { ToolExecutionContext } from "@/tools/types";
-import { ReportService } from "@/services/reports";
+import { getLocalReportStore, InvalidSlugError } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
+import { nip19 } from "nostr-tools";
 
 const reportReadSchema = z.object({
     identifier: z
         .string()
-        .describe("The slug (d-tag) or naddr1... identifier of the article to read"),
+        .describe("The report identifier - can be a slug (e.g., 'my-report'), an naddr (e.g., 'naddr1...'), or a nostr: URI (e.g., 'nostr:naddr1...')"),
 });
 
 type ReportReadInput = z.infer<typeof reportReadSchema>;
 
 interface ReportReadOutput {
     success: boolean;
-    article?: {
-        id: string;
-        slug: string;
-        title?: string;
-        summary?: string;
-        content?: string;
-        author?: string;
-        publishedAt?: number;
-        hashtags?: string[];
-        projectReference?: string;
-    };
-    humanReadable?: string;
+    slug?: string;
+    content?: string;
     message?: string;
 }
 
 /**
- * Format article data for display
- */
-function formatArticleContent(article: ReportReadOutput["article"]): string {
-    if (!article) {
-        return "No article data available";
-    }
-
-    const sections: string[] = [];
-
-    // Title section
-    if (article.title) {
-        sections.push(`# ${article.title}`);
-        sections.push(""); // Empty line for spacing
-    }
-
-    // Metadata section
-    const metadata: string[] = [];
-
-    if (article.slug) {
-        metadata.push(`**Slug:** ${article.slug}`);
-    }
-
-    if (article.author) {
-        metadata.push(`**Author:** ${article.author}`);
-    }
-
-    if (article.publishedAt) {
-        const date = new Date(article.publishedAt * 1000);
-        metadata.push(`**Published:** ${date.toLocaleString()}`);
-    }
-
-    if (article.hashtags && article.hashtags.length > 0) {
-        metadata.push(`**Tags:** ${article.hashtags.map((tag) => `#${tag}`).join(", ")}`);
-    }
-
-    if (metadata.length > 0) {
-        sections.push(metadata.join("\n"));
-        sections.push(""); // Empty line for spacing
-    }
-
-    // Summary section
-    if (article.summary) {
-        sections.push("## Summary");
-        sections.push(article.summary);
-        sections.push(""); // Empty line for spacing
-    }
-
-    // Content section
-    if (article.content) {
-        sections.push("## Content");
-        sections.push(article.content);
-        sections.push(""); // Empty line for spacing
-    }
-
-    // Reference section
-    if (article.projectReference) {
-        sections.push("---");
-        sections.push(`**Project Reference:** ${article.projectReference}`);
-    }
-
-    if (article.id) {
-        if (!article.projectReference) {
-            sections.push("---");
-        }
-        sections.push(`**Nostr ID:** ${article.id}`);
-    }
-
-    return sections.join("\n").trim();
-}
-
-/**
  * Core implementation of report reading functionality
+ * Reads exclusively from local file storage
  */
 async function executeReportRead(
     input: ReportReadInput,
@@ -110,66 +31,106 @@ async function executeReportRead(
 ): Promise<ReportReadOutput> {
     const { identifier } = input;
 
-    logger.info("📖 Reading report", {
+    logger.info("📖 Reading report from local storage", {
         identifier,
         agent: context.agent.name,
     });
 
-    const reportService = new ReportService();
+    const localStore = getLocalReportStore();
+
+    // Clean the identifier - extract slug if it's an naddr or has nostr: prefix
+    let slug = identifier;
 
     // Remove nostr: prefix if present
-    const cleanIdentifier = identifier.startsWith("nostr:") ? identifier.slice(6) : identifier;
+    if (slug.startsWith("nostr:")) {
+        slug = slug.slice(6);
+    }
 
-    // Reports are project-scoped - any agent can read any report in the project
-    const report = await reportService.readReport(cleanIdentifier);
+    // If it looks like an naddr, decode it to extract the slug (d-tag)
+    // Reports are NDKArticle events (kind 30023)
+    if (slug.startsWith("naddr1")) {
+        try {
+            const decoded = nip19.decode(slug);
+            if (decoded.type === "naddr") {
+                // Verify this is a report (kind 30023) - NDKArticle
+                if (decoded.data.kind !== 30023) {
+                    return {
+                        success: false,
+                        message: `Invalid naddr kind ${decoded.data.kind} - report_read only accepts kind 30023 (NDKArticle) naddrs. Got: ${identifier}`,
+                    };
+                }
+                if (decoded.data.identifier) {
+                    slug = decoded.data.identifier;
+                    logger.debug("📖 Decoded naddr to slug", {
+                        originalIdentifier: identifier,
+                        extractedSlug: slug,
+                        kind: decoded.data.kind,
+                        agent: context.agent.name,
+                    });
+                } else {
+                    return {
+                        success: false,
+                        message: `Invalid naddr format - missing identifier (d-tag) in: ${identifier}`,
+                    };
+                }
+            } else {
+                return {
+                    success: false,
+                    message: `Invalid naddr format - could not extract report slug from: ${identifier}`,
+                };
+            }
+        } catch (decodeError) {
+            logger.warn("📖 Failed to decode naddr identifier", {
+                identifier,
+                error: decodeError instanceof Error ? decodeError.message : String(decodeError),
+                agent: context.agent.name,
+            });
+            return {
+                success: false,
+                message: `Failed to decode naddr identifier: ${identifier}. Please provide a valid slug or naddr.`,
+            };
+        }
+    }
 
-    if (!report) {
-        logger.info("📭 No report found", {
-            identifier,
+    // Validate the slug for path safety
+    try {
+        localStore.validateSlug(slug);
+    } catch (error) {
+        if (error instanceof InvalidSlugError) {
+            return {
+                success: false,
+                message: error.message,
+            };
+        }
+        throw error;
+    }
+
+    // Read from local storage
+    const content = await localStore.readReport(slug);
+
+    if (!content) {
+        logger.info("📭 No local report found", {
+            slug,
+            path: localStore.getReportPath(slug),
             agent: context.agent.name,
         });
 
         return {
             success: false,
-            message: `No report found with identifier: ${identifier}`,
+            message: `No report found with slug: ${slug}. The report may not have been written yet or synced from Nostr.`,
         };
     }
 
-    // Check if the report is deleted
-    if (report.isDeleted) {
-        logger.info("🗑️ Report is deleted", {
-            identifier,
-            agent: context.agent.name,
-        });
-
-        return {
-            success: false,
-            message: `Report "${identifier}" has been deleted`,
-        };
-    }
-
-    logger.info("✅ Report read successfully", {
-        slug: report.slug,
-        title: report.title,
+    logger.info("✅ Report read successfully from local storage", {
+        slug,
+        contentLength: content.length,
         agent: context.agent.name,
     });
 
-    const articleData = {
-        id: report.id,
-        slug: report.slug,
-        title: report.title,
-        summary: report.summary,
-        content: report.content,
-        author: report.author,
-        publishedAt: report.publishedAt,
-        hashtags: report.hashtags,
-        projectReference: report.projectReference,
-    };
-
     return {
         success: true,
-        article: articleData,
-        humanReadable: formatArticleContent(articleData),
+        slug,
+        content,
     };
 }
 
@@ -178,7 +139,7 @@ async function executeReportRead(
  */
 export function createReportReadTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: "Read a report by slug or naddr identifier",
+        description: "Read a report by slug identifier",
 
         inputSchema: reportReadSchema,
 

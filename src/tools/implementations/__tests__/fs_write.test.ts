@@ -30,6 +30,34 @@ mock.module("@/lib/agent-home", () => ({
     ensureAgentHomeDirectory: () => true,
 }));
 
+// Create a mock LocalReportStore that uses current env at check time
+class MockLocalReportStore {
+    getReportsDir(): string {
+        const basePath = process.env.TENEX_BASE_DIR || "/tmp/tenex-default";
+        return path.join(basePath, "reports");
+    }
+
+    isPathInReportsDir(inputPath: string): boolean {
+        const normalizedPath = inputPath.replace(/\\/g, "/");
+        const normalizedReportsDir = this.getReportsDir().replace(/\\/g, "/");
+        return normalizedPath.startsWith(normalizedReportsDir + "/") ||
+               normalizedPath === normalizedReportsDir;
+    }
+}
+
+const mockStoreInstance = new MockLocalReportStore();
+
+mock.module("@/services/reports", () => ({
+    getLocalReportStore: () => mockStoreInstance,
+    LocalReportStore: MockLocalReportStore,
+    InvalidSlugError: class InvalidSlugError extends Error {
+        constructor(slug: string, reason: string) {
+            super(`Invalid report slug "${slug}": ${reason}`);
+            this.name = "InvalidSlugError";
+        }
+    },
+}));
+
 // Dynamic import after mock setup
 const { createFsWriteTool } = await import("../fs_write");
 
@@ -207,6 +235,79 @@ describe("fs_write tool", () => {
         it("should return human-readable description", () => {
             const readable = writeTool.getHumanReadableContent?.({ path: "/test/file.txt" });
             expect(readable).toBe("Writing /test/file.txt");
+        });
+    });
+
+    describe("reports directory protection", () => {
+        it("should block writes to the reports directory", async () => {
+            // Mock the TENEX_BASE_DIR to control the reports directory location
+            const originalEnv = process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = testDir;
+
+            try {
+                const reportsFile = path.join(testDir, "reports", "my-report.md");
+
+                await expect(
+                    writeTool.execute({
+                        path: reportsFile,
+                        content: "Trying to bypass report_write",
+                        allowOutsideWorkingDirectory: true,
+                    })
+                ).rejects.toThrow("Cannot write to reports directory directly");
+            } finally {
+                // Restore original env
+                if (originalEnv !== undefined) {
+                    process.env.TENEX_BASE_DIR = originalEnv;
+                } else {
+                    delete process.env.TENEX_BASE_DIR;
+                }
+            }
+        });
+
+        it("should block writes to subdirectories within reports", async () => {
+            const originalEnv = process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = testDir;
+
+            try {
+                const nestedReportsFile = path.join(testDir, "reports", "subdir", "deep-report.md");
+
+                await expect(
+                    writeTool.execute({
+                        path: nestedReportsFile,
+                        content: "Nested bypass attempt",
+                        allowOutsideWorkingDirectory: true,
+                    })
+                ).rejects.toThrow("Cannot write to reports directory directly");
+            } finally {
+                if (originalEnv !== undefined) {
+                    process.env.TENEX_BASE_DIR = originalEnv;
+                } else {
+                    delete process.env.TENEX_BASE_DIR;
+                }
+            }
+        });
+
+        it("should include helpful error message pointing to report_write", async () => {
+            const originalEnv = process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = testDir;
+
+            try {
+                const reportsFile = path.join(testDir, "reports", "test.md");
+
+                await expect(
+                    writeTool.execute({
+                        path: reportsFile,
+                        content: "test",
+                        allowOutsideWorkingDirectory: true,
+                    })
+                ).rejects.toThrow("report_write");
+            } finally {
+                if (originalEnv !== undefined) {
+                    process.env.TENEX_BASE_DIR = originalEnv;
+                } else {
+                    delete process.env.TENEX_BASE_DIR;
+                }
+            }
         });
     });
 });
