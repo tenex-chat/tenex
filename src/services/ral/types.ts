@@ -136,8 +136,10 @@ export interface RALRegistryEntry {
   accumulatedRuntime: number;
   /** Last reported runtime in milliseconds - used to calculate incremental runtime */
   lastReportedRuntime: number;
-  /** Timestamp when current LLM stream started (for calculating duration) */
+  /** Timestamp when current LLM stream started (for calculating duration) - immutable for stream lifetime */
   llmStreamStartTime?: number;
+  /** Checkpoint timestamp for incremental runtime reporting mid-stream (resets on each consume) */
+  lastRuntimeCheckpointAt?: number;
 }
 
 export interface StopExecutionSignal {
