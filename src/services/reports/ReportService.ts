@@ -5,6 +5,7 @@ import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
+import { articleToReportInfo } from "./articleUtils";
 
 export interface ReportData {
     slug: string;
@@ -205,7 +206,7 @@ export class ReportService {
             return null;
         }
 
-        const reportInfo = this.articleToReportInfo(article);
+        const reportInfo = articleToReportInfo(article);
 
         // Add to cache for future lookups
         projectCtx.addReport(reportInfo);
@@ -373,54 +374,11 @@ export class ReportService {
     }
 
     /**
-     * Convert an NDKArticle to ReportInfo
-     */
-    private articleToReportInfo(article: NDKArticle): ReportInfo {
-        // Extract hashtags from tags (excluding the "memorize" and "memorize_team" tags)
-        const hashtags = article.tags
-            .filter((tag) => tag[0] === "t" && tag[1] !== "memorize" && tag[1] !== "memorize_team")
-            .map((tag) => tag[1]);
-
-        // Extract project reference if present
-        const projectTag = article.tags.find(
-            (tag) => tag[0] === "a" && tag[1]?.includes(":31933:")
-        );
-        const projectReference = projectTag ? projectTag[1] : undefined;
-
-        // Check if deleted
-        const isDeleted = article.tags.some((tag) => tag[0] === "deleted");
-
-        // Check if memorized (for the authoring agent only)
-        const isMemorized = article.tags.some((tag) => tag[0] === "t" && tag[1] === "memorize");
-
-        // Check if team-memorized (for ALL agents in the project)
-        const isMemorizedTeam = article.tags.some((tag) => tag[0] === "t" && tag[1] === "memorize_team");
-
-        // Get author npub
-        const authorNpub = article.author.npub;
-
-        return {
-            id: `nostr:${article.encode()}`,
-            slug: article.dTag || "",
-            title: article.title,
-            summary: article.summary,
-            content: article.content,
-            author: authorNpub,
-            publishedAt: article.published_at,
-            hashtags: hashtags.length > 0 ? hashtags : undefined,
-            projectReference,
-            isDeleted,
-            isMemorized,
-            isMemorizedTeam,
-        };
-    }
-
-    /**
      * Get memorized reports for a specific agent.
-     * Returns reports that have the "memorize" tag.
+     * Returns reports that have the "memorize" tag authored by that agent.
      * Uses cached reports for instant lookup.
      */
-    getMemorizedReports(agentPubkey: string): ReportInfo[] {
+    getMemorizedReportsForAgent(agentPubkey: string): ReportInfo[] {
         const projectCtx = getProjectContext();
         if (!projectCtx?.project) {
             throw new Error("No project context available");
