@@ -31,6 +31,8 @@ type ReportWriteOutput = {
     message: string;
     /** Addressable event references for a-tagging on the tool use event */
     referencedAddressableEvents: string[];
+    /** Warning messages for non-fatal issues (e.g., local write failed but Nostr succeeded) */
+    warnings?: string[];
 };
 
 /**
@@ -121,6 +123,8 @@ async function executeReportWrite(
     const createdAt = Math.floor(Date.now() / 1000);
 
     // Try to save locally, but don't fail if Nostr publish succeeded
+    let localWriteFailed = false;
+    let localWriteError: string | undefined;
     try {
         await localStore.writeReport(slug, formattedContent, {
             addressableRef: result.addressableRef,
@@ -134,9 +138,11 @@ async function executeReportWrite(
         });
     } catch (localError) {
         // Nostr publish succeeded but local save failed - log warning but don't throw
+        localWriteFailed = true;
+        localWriteError = localError instanceof Error ? localError.message : String(localError);
         logger.warn("⚠️ Report published to Nostr but local save failed", {
             slug,
-            error: localError instanceof Error ? localError.message : String(localError),
+            error: localWriteError,
             nostrId: result.encodedId,
         });
         // Continue - the report is live on Nostr and will be hydrated later
@@ -161,6 +167,14 @@ async function executeReportWrite(
         result.addressableRef
     );
 
+    // Build warnings array if there were any non-fatal issues
+    const warnings: string[] = [];
+    if (localWriteFailed) {
+        warnings.push(
+            `Local write failed (${localWriteError}). Report is published to Nostr and will be hydrated from subscription.`
+        );
+    }
+
     return {
         success: true,
         articleId: `nostr:${result.encodedId}`,
@@ -168,6 +182,8 @@ async function executeReportWrite(
         message: `Report "${title}" published successfully.${memorizeMessage}`,
         // Include addressable reference for ToolExecutionTracker to add as a-tag
         referencedAddressableEvents: [result.addressableRef],
+        // Include warnings if any non-fatal issues occurred
+        ...(warnings.length > 0 && { warnings }),
     };
 }
 
