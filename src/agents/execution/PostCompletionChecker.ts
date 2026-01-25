@@ -205,7 +205,7 @@ export async function checkPostCompletion(
                     context.conversationId,
                     ralNumber,
                     supervisionResult.correctionAction.message,
-                    { ephemeral: true, suppressAttribution: true }
+                    { ephemeral: true }
                 );
             }
 

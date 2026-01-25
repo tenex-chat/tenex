@@ -12,7 +12,6 @@ export interface ConversationEntry {
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
-    suppressAttribution?: boolean; // @deprecated - No longer used. Attribution prefixes are never added to LLM input.
     /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
     senderPubkey?: string;
 }
@@ -22,8 +21,6 @@ export interface Injection {
     role: "user" | "system";
     content: string;
     queuedAt: number;
-    /** @deprecated - No longer used. Attribution prefixes are never added to LLM input. */
-    suppressAttribution?: boolean;
 }
 
 /**

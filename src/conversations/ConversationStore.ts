@@ -434,7 +434,6 @@ export class ConversationStore {
                 content: injection.content,
                 messageType: "text",
                 targetedPubkeys: injection.role === "user" ? [agentPubkey] : undefined,
-                suppressAttribution: injection.suppressAttribution,
             });
         }
         return toConsume;

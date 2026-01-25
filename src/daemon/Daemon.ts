@@ -4,7 +4,7 @@ import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance } from "@/agents/types";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
@@ -120,7 +120,7 @@ export class Daemon {
             // 6. Publish backend profile (kind:0)
             const backendSigner = await config.getBackendSigner();
             const backendName = loadedConfig.backendName || "tenex backend";
-            await AgentPublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
+            await AgentProfilePublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
 
             // 7. Initialize runtime lifecycle manager
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);

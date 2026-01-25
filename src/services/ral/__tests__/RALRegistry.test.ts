@@ -412,57 +412,6 @@ describe("RALRegistry", () => {
     });
   });
 
-  describe("setCurrentTool", () => {
-    it("should set current tool and toolStartedAt", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.currentTool).toBe("fs_read");
-      expect(state?.toolStartedAt).toBeDefined();
-    });
-
-    it("should clear current tool when set to undefined", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, undefined);
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.currentTool).toBeUndefined();
-      expect(state?.toolStartedAt).toBeUndefined();
-    });
-
-    it("should handle setCurrentTool for non-existent RAL gracefully", () => {
-      expect(() => {
-        registry.setCurrentTool("nonexistent", conversationId, 1, "fs_read");
-      }).not.toThrow();
-    });
-
-    it("should update activeTools for backward compatibility (ACTING state)", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
-
-      const state = registry.getState(agentPubkey, conversationId);
-      // setCurrentTool should now update activeTools so ACTING state is reachable
-      expect(state?.activeTools.size).toBe(1);
-      expect(state?.currentTool).toBe("fs_read");
-    });
-
-    it("should clear activeTools when tool is set to undefined", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
-
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, "fs_read");
-      registry.setCurrentTool(agentPubkey, conversationId, ralNumber, undefined);
-
-      const state = registry.getState(agentPubkey, conversationId);
-      expect(state?.activeTools.size).toBe(0);
-      expect(state?.currentTool).toBeUndefined();
-    });
-  });
-
   describe("setToolActive (concurrent tool tracking)", () => {
     it("should track multiple concurrent tools", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);
