@@ -501,8 +501,8 @@ export class EventHandler {
                 // Format content for local storage (matching report_write format)
                 const formattedContent = this.formatReportForLocalStorage(article);
 
-                // Construct addressable reference (pubkey:kind:d-tag)
-                const addressableRef = `${event.pubkey}:${event.kind}:${article.dTag}`;
+                // Construct addressable reference in NIP-33 format: kind:pubkey:d-tag
+                const addressableRef = `${event.kind}:${event.pubkey}:${article.dTag}`;
 
                 const hydrated = await localStore.hydrateFromNostr(
                     article.dTag,

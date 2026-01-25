@@ -18,7 +18,7 @@ export class InvalidSlugError extends Error {
  * Metadata stored alongside each local report to track its Nostr origin
  */
 export interface LocalReportMetadata {
-    /** Addressable reference (pubkey:kind:slug) used as stable identifier */
+    /** Addressable reference in NIP-33 format (kind:pubkey:identifier) */
     addressableRef: string;
     /** Unix timestamp when the report was created/published */
     createdAt: number;
