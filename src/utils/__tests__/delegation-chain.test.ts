@@ -621,10 +621,10 @@ describe("delegation-chain utilities", () => {
             expect(result![1].displayName).toBe("claude-code");
         });
 
-        it("should detect and re-compute legacy chains where origin has conversationId", () => {
-            // LEGACY SEMANTICS: Under the OLD semantic, the origin entry had a conversationId.
-            // Under the NEW semantic (Option B - Store on Recipient), origin should NOT have a conversationId.
-            // This test verifies that legacy chains are detected and re-computed.
+        it("should trust stored chains as authoritative (even with legacy format)", () => {
+            // HISTORICAL NOTE: Legacy chains may have conversationId on the origin entry,
+            // but we now trust stored chains as authoritative and don't re-compute them.
+            // This simplifies the logic and the stored format is stable going forward.
 
             const event = {
                 pubkey: "agent-pubkey-exec",
@@ -643,23 +643,18 @@ describe("delegation-chain utilities", () => {
                 tags: [["delegation", "pm-conv-id-1234567890"]],
             };
 
-            // Mock pm-wip's conversation with a LEGACY stored chain
-            // LEGACY SEMANTICS: Origin (User) HAS a conversationId - this is the bug marker
+            // Mock pm-wip's conversation with a stored chain (even if it has legacy format)
+            // The key point: stored chains are now trusted as authoritative
             const mockPmStore = {
                 metadata: {
                     delegationChain: [
-                        // LEGACY: Origin has a conversationId (this should NOT happen under new semantics)
-                        { pubkey: "user-pubkey", displayName: "User", isUser: true, conversationId: "legacy-wrong-conv-id" },
+                        // Even if origin has conversationId (legacy format), we trust this stored chain
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true, conversationId: "legacy-conv-id" },
                         { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "user-conv-id-1234567890" },
                     ],
                 },
                 getAllMessages: () => [{ pubkey: "user-pubkey" }],
                 getRootEventId: () => "pm-root-event",
-            };
-
-            // Mock the cached root event for pm conversation (User is origin - no further delegation)
-            const mockPmRootEvent = {
-                tags: [], // No delegation tag - User started it
             };
 
             mockConversationStoreGet.mockImplementation((convId: string) => {
@@ -670,7 +665,6 @@ describe("delegation-chain utilities", () => {
 
             mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
                 if (eventId === "exec-root-event") return mockExecRootEvent;
-                if (eventId === "pm-root-event") return mockPmRootEvent;
                 return undefined;
             });
 
@@ -679,22 +673,19 @@ describe("delegation-chain utilities", () => {
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
 
-            // Verify the chain was re-computed with CORRECT semantics:
-            // Under NEW semantics: origin has NO conversationId
+            // The stored chain is trusted and used directly (including any legacy format quirks)
+            // User entry is taken from stored chain as-is
             expect(result![0].displayName).toBe("User");
-            expect(result![0].conversationId).toBeUndefined(); // Origin should NOT have conversationId
+            expect(result![0].conversationId).toBe("legacy-conv-id"); // Stored value is preserved
             expect(result![0].isUser).toBe(true);
 
-            // pm-wip was delegated TO in pm-conv-id-1234567890
-            // (the conversation where User delegated to pm, which we found via exec-root-event delegation tag)
+            // pm-wip from stored chain
             expect(result![1].displayName).toBe("pm-wip");
-            expect(result![1].conversationId).toBe("pm-conv-id-1234567890");
+            expect(result![1].conversationId).toBe("user-conv-id-1234567890");
 
-            // exec is the immediate delegator (event.pubkey), added after walking
-            // Since exec was not found during the walk (exec initiated exec-conv, but is not the initiator of visited convs),
-            // it falls back to parentConversationId = exec-conv-id-1234567890
+            // exec is the immediate delegator, added after using the stored chain
             expect(result![2].displayName).toBe("execution-coordinator");
-            expect(result![2].conversationId).toBe("exec-conv-id-1234567890");
+            expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
 
             // claude was delegated TO in exec-conv-id-1234567890
             expect(result![3].displayName).toBe("claude-code");
