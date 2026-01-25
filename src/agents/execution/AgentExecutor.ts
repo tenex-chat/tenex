@@ -1,107 +1,49 @@
-import type { AgentInstance } from "@/agents/types";
-import {
-    supervisorOrchestrator,
-    registerDefaultHeuristics,
-    updateKnownAgentSlugs,
-    type PostCompletionContext,
-    type PreToolContext,
-} from "@/agents/supervision";
-import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
+/**
+ * AgentExecutor - Orchestrates agent execution with LLM streaming
+ *
+ * This is the main entry point for executing agent tasks. It coordinates:
+ * - RAL (Request/Assignement/Loop) lifecycle management
+ * - Stream setup and execution via extracted modules
+ * - Post-completion supervision checks
+ * - Event publishing
+ *
+ * The heavy lifting is delegated to:
+ * - StreamSetup: Pre-stream configuration (tools, messages, injections)
+ * - StreamExecutionHandler: LLM streaming with event processing
+ * - PostCompletionChecker: Supervision heuristics
+ * - RALResolver: RAL lifecycle resolution
+ */
+
+import { registerDefaultHeuristics } from "@/agents/supervision";
+import { checkPostCompletion } from "./PostCompletionChecker";
+import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
-import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
-import {
-    LLMService,
-    type ChunkTypeChangeEvent,
-    type CompleteEvent,
-    type ContentEvent,
-    type RawChunkEvent,
-    type ReasoningEvent,
-    type SessionCapturedEvent,
-    type StreamErrorEvent,
-    type ToolDidExecuteEvent,
-    type ToolWillExecuteEvent,
-} from "@/llm/service";
-import { streamPublisher } from "@/llm";
-import { llmServiceFactory } from "@/llm/LLMServiceFactory";
-import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
+import { formatAnyError } from "@/lib/error-formatter";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { config as configService } from "@/services/ConfigService";
-import { NudgeService } from "@/services/nudge";
-import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
+import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
-import { RALRegistry, extractPendingDelegations } from "@/services/ral";
+import { RALRegistry } from "@/services/ral";
 import { getPubkeyService } from "@/services/PubkeyService";
-import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { getToolsObject } from "@/tools/registry";
-import type { AISdkTool, ToolRegistryContext } from "@/tools/types";
+import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
-import type {
-    Tool as CoreTool,
-    LanguageModel,
-    ModelMessage,
-    StepResult,
-    ToolCallPart,
-    ToolResultPart,
-    ToolSet,
-    TypedToolCall,
-    TypedToolResult,
-} from "ai";
-import chalk from "chalk";
-import { MessageCompiler } from "./MessageCompiler";
-import { MessageSyncer } from "./MessageSyncer";
-import { SessionManager } from "./SessionManager";
+import type { ModelMessage } from "ai";
 import { ToolExecutionTracker } from "./ToolExecutionTracker";
-import type { ExecutionContext, RALExecutionContext, StandaloneAgentContext, StreamExecutionResult } from "./types";
+import { setupStreamExecution } from "./StreamSetup";
+import { StreamExecutionHandler } from "./StreamExecutionHandler";
+import type {
+    ExecutionContext,
+    FullRuntimeContext,
+    LLMCompletionRequest,
+    StandaloneAgentContext,
+    StreamExecutionResult,
+} from "./types";
 
 const tracer = trace.getTracer("tenex.agent-executor");
-
-/**
- * Full runtime context for executor methods.
- * Extends ToolRegistryContext with:
- * - agent: AgentInstance (full agent type, not just ToolAgentInfo)
- * - Execution-specific flags from ExecutionContext
- */
-type FullRuntimeContext = Omit<ToolRegistryContext, "agent"> & {
-    agent: AgentInstance;
-    isDelegationCompletion?: boolean;
-    hasPendingDelegations?: boolean;
-};
-
-export interface LLMCompletionRequest {
-    messages: ModelMessage[];
-    tools?: Record<string, CoreTool>;
-}
-
-/**
- * Extract the text content from the last user message in the conversation.
- * Handles both simple string content and complex content arrays (with text parts).
- */
-function extractLastUserMessage(messages: ModelMessage[]): string | undefined {
-    // Find the last user message
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg.role === "user") {
-            // Handle simple string content
-            if (typeof msg.content === "string") {
-                return msg.content;
-            }
-            // Handle complex content arrays (e.g., [{ type: "text", text: "hello" }])
-            if (Array.isArray(msg.content)) {
-                const textParts = msg.content
-                    .filter((part): part is { type: "text"; text: string } => part.type === "text")
-                    .map(part => part.text);
-                return textParts.join("\n");
-            }
-        }
-    }
-    return undefined;
-}
 
 export class AgentExecutor {
     constructor(private standaloneContext?: StandaloneAgentContext) {
@@ -111,8 +53,6 @@ export class AgentExecutor {
 
     /**
      * Warm user profile cache for injection sender pubkeys (best-effort, non-blocking).
-     * This fires off profile warming but doesn't await it - if names aren't cached
-     * in time, attribution gracefully falls back to "User".
      */
     private warmSenderPubkeys(injections: Array<{ senderPubkey?: string }>): void {
         const senderPubkeys = injections
@@ -120,7 +60,6 @@ export class AgentExecutor {
             .filter((pk): pk is string => !!pk);
 
         if (senderPubkeys.length > 0) {
-            // Fire-and-forget with a timeout to avoid stalling
             const pubkeyService = getPubkeyService();
             void pubkeyService.warmUserProfiles(senderPubkeys).catch((error) => {
                 logger.debug("[AgentExecutor] Best-effort profile warming failed", {
@@ -135,22 +74,19 @@ export class AgentExecutor {
      * Creates stub context for tool schema extraction - runtime deps are never called.
      */
     async prepareLLMRequest(
-        agent: AgentInstance,
+        agent: { slug: string; tools?: string[] },
         initialPrompt: string,
         originalEvent: NDKEvent,
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
-        // Stub context for tool schema extraction only.
-        // Runtime dependencies are typed but never actually invoked.
         const context: ToolRegistryContext = {
-            agent,
+            agent: agent as ToolRegistryContext["agent"],
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id,
             projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
             currentBranch: "main",
-            // Stubs for required runtime fields (never called during schema extraction)
             agentPublisher: {} as AgentPublisher,
             ralNumber: 0,
             conversationStore: {} as ConversationStore,
@@ -162,12 +98,7 @@ export class AgentExecutor {
         if (conversationHistory.length > 0) {
             messages = [...conversationHistory];
         } else {
-            messages = [
-                {
-                    role: "user",
-                    content: initialPrompt,
-                },
-            ];
+            messages = [{ role: "user", content: initialPrompt }];
         }
 
         const toolNames = agent.tools || [];
@@ -193,120 +124,17 @@ export class AgentExecutor {
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
-                const ralRegistry = RALRegistry.getInstance();
-
-                // Check for a resumable RAL (one with completed delegations ready to continue)
-                const resumableRal = ralRegistry.findResumableRAL(
-                    context.agent.pubkey,
-                    context.conversationId
-                );
-
-                // Also check for RAL with queued injections (e.g., pairing checkpoint)
-                const injectionRal = !resumableRal
-                    ? ralRegistry.findRALWithInjections(
-                          context.agent.pubkey,
-                          context.conversationId
-                      )
-                    : undefined;
-
-                let ralNumber: number;
-                let isResumption = false;
-
-                if (resumableRal) {
-                    // Resume existing RAL instead of creating a new one
-                    ralNumber = resumableRal.ralNumber;
-                    isResumption = true;
-
-                    // Get delegations from conversation storage
-                    const completedDelegations = ralRegistry.getConversationCompletedDelegations(
-                        context.agent.pubkey, context.conversationId, resumableRal.ralNumber
-                    );
-                    const pendingDelegations = ralRegistry.getConversationPendingDelegations(
-                        context.agent.pubkey, context.conversationId, resumableRal.ralNumber
-                    );
-
-                    // Calculate MAX llmRuntime from completed delegations
-                    // For parallel delegations, we take the longest one (critical path)
-                    const maxDelegationRuntime = completedDelegations.reduce((max, d) => {
-                        return Math.max(max, d.llmRuntime ?? 0);
-                    }, 0);
-
-                    // Add delegation runtime to parent's accumulated runtime
-                    if (maxDelegationRuntime > 0) {
-                        ralRegistry.addToAccumulatedRuntime(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            maxDelegationRuntime
-                        );
-                    }
-
-                    // Inject delegation results into the RAL as user message
-                    // Include pending delegations so agent knows what's still outstanding
-                    const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
-                        completedDelegations,
-                        pendingDelegations
-                    );
-                    if (resultsMessage) {
-                        ralRegistry.queueUserMessage(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            resultsMessage,
-                            { suppressAttribution: true }
-                        );
-                    }
-
-                    // Don't clear completedDelegations here - they'll be cleared when the RAL ends.
-                    // This allows subsequent executions to see all completions, not just new ones.
-
-                    span.addEvent("executor.ral_resumed", {
-                        "ral.number": ralNumber,
-                        "delegation.completed_count": completedDelegations.length,
-                        "delegation.pending_count": pendingDelegations.length,
-                        "delegation.max_runtime_ms": maxDelegationRuntime,
-                    });
-                } else if (injectionRal) {
-                    // Resume RAL with queued injections (pairing checkpoint)
-                    ralNumber = injectionRal.ralNumber;
-                    isResumption = true;
-
-                    const injectionRalPending = ralRegistry.getConversationPendingDelegations(
-                        context.agent.pubkey, context.conversationId, injectionRal.ralNumber
-                    );
-                    span.addEvent("executor.ral_resumed_for_injection", {
-                        "ral.number": ralNumber,
-                        "injection.count": injectionRal.queuedInjections.length,
-                        pending_delegations: injectionRalPending.length,
-                    });
-                } else {
-                    // Create a new RAL for this execution
-                    // Pass trace context so stop events can be correlated
-                    const spanContext = span.spanContext();
-                    ralNumber = ralRegistry.create(
-                        context.agent.pubkey,
-                        context.conversationId,
-                        context.triggeringEvent.id,
-                        { traceId: spanContext.traceId, spanId: spanContext.spanId }
-                    );
-                }
-
-                span.setAttributes({
-                    "ral.number": ralNumber,
-                    "ral.is_resumption": isResumption,
+                const { ralNumber, isResumption } = await resolveRAL({
+                    agentPubkey: context.agent.pubkey,
+                    conversationId: context.conversationId,
+                    triggeringEventId: context.triggeringEvent.id,
+                    span,
                 });
 
-                // Store ralNumber in context for use throughout execution
-                const contextWithRal = {
-                    ...context,
-                    ralNumber,
-                };
-
-                // Prepare execution context with all necessary components
+                const contextWithRal = { ...context, ralNumber };
                 const { fullContext, toolTracker, agentPublisher, cleanup } =
                     this.prepareExecution(contextWithRal);
 
-                // Add execution context to span
                 const conversation = fullContext.getConversation();
                 if (conversation) {
                     span.setAttributes({
@@ -314,7 +142,6 @@ export class AgentExecutor {
                     });
                 }
 
-                // Display execution start in console
                 span.addEvent("executor.started", {
                     ral_number: ralNumber,
                     is_resumption: isResumption,
@@ -342,10 +169,9 @@ export class AgentExecutor {
                     errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
 
                 const displayMessage = isCreditsError
-                    ? "⚠️ Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
-                    : `⚠️ Unable to process your request due to an error: ${errorMessage}`;
+                    ? "Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
+                    : `Unable to process your request due to an error: ${errorMessage}`;
 
-                // Publish error to user
                 const conversation = context.getConversation();
                 if (conversation) {
                     const agentPublisher = new AgentPublisher(context.agent);
@@ -353,15 +179,13 @@ export class AgentExecutor {
                         await agentPublisher.error(
                             {
                                 message: displayMessage,
-                                errorType: isCreditsError
-                                    ? "insufficient_credits"
-                                    : "execution_error",
+                                errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                             },
                             {
                                 triggeringEvent: context.triggeringEvent,
                                 rootEvent: { id: conversation.getRootEventId() },
                                 conversationId: conversation.id,
-                                ralNumber: 0, // Error during execution - no active RAL
+                                ralNumber: 0,
                             }
                         );
                     } catch (publishError) {
@@ -391,7 +215,6 @@ export class AgentExecutor {
 
     /**
      * Prepare execution context with all necessary components.
-     * Returns a FullRuntimeContext with all required runtime dependencies.
      */
     private prepareExecution(
         context: ExecutionContext & { ralNumber: number }
@@ -403,20 +226,13 @@ export class AgentExecutor {
     } {
         const toolTracker = new ToolExecutionTracker();
         const agentPublisher = new AgentPublisher(context.agent);
-
-        // Get ConversationStore for this conversation (required)
-        // Uses static registry to ensure we get the cached store with all messages
         const conversationStore = ConversationStore.getOrLoad(context.conversationId);
         const projectContext = getProjectContext();
 
-        // Check for active pairings for this agent
         const hasActivePairings = projectContext.pairingManager
-            ? projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey)
-                  .length > 0
+            ? projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey).length > 0
             : false;
 
-        // Build fullContext with all required runtime dependencies
-        // Override getConversation to return non-nullable (we've verified the store exists)
         const fullContext: FullRuntimeContext = {
             agent: context.agent,
             conversationId: context.conversationId,
@@ -431,7 +247,6 @@ export class AgentExecutor {
             alphaMode: context.alphaMode,
             hasActivePairings,
             mcpManager: projectContext.mcpManager,
-            // Execution-specific flags
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,
         };
@@ -445,156 +260,6 @@ export class AgentExecutor {
         };
 
         return { fullContext, toolTracker, agentPublisher, cleanup };
-    }
-
-    /**
-     * Wrap tools with pre-tool supervision checks
-     * This intercepts tool execution to run heuristics before the tool executes
-     */
-    private wrapToolsWithSupervision(
-        toolsObject: Record<string, CoreTool<unknown, unknown>>,
-        context: FullRuntimeContext
-    ): Record<string, CoreTool<unknown, unknown>> {
-        const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
-        const ralRegistry = RALRegistry.getInstance();
-
-        for (const [toolName, tool] of Object.entries(toolsObject)) {
-            // Skip tools without execute function
-            if (!tool.execute) {
-                wrappedTools[toolName] = tool;
-                continue;
-            }
-
-            // Preserve the original tool's properties
-            const originalExecute = tool.execute.bind(tool);
-
-            // Create wrapped tool
-            wrappedTools[toolName] = {
-                ...tool,
-                execute: async (input: unknown, options: ToolExecutionOptions) => {
-                    try {
-                        // Build PreToolContext for this tool
-                        const conversation = context.getConversation();
-                        const conversationStore = context.conversationStore;
-
-                        // Get todos for the agent to populate hasTodoList
-                        const todos = conversationStore.getTodos(context.agent.pubkey);
-                        const hasTodoList = todos.length > 0;
-
-                        // Get system prompt and conversation history
-                        const projectContext = getProjectContext();
-
-                        // Fetch nudge content if triggering event has nudge tags
-                        const preToolNudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
-                        const preToolNudgeContent = preToolNudgeEventIds.length > 0
-                            ? await NudgeService.getInstance().fetchNudges(preToolNudgeEventIds)
-                            : "";
-
-                        const systemPromptMessages = await buildSystemPromptMessages({
-                            agent: context.agent,
-                            project: projectContext.project,
-                            conversation,
-                            projectBasePath: context.projectBasePath,
-                            workingDirectory: context.workingDirectory,
-                            currentBranch: context.currentBranch,
-                            availableAgents: Array.from(projectContext.agents.values()),
-                            mcpManager: projectContext.mcpManager,
-                            agentLessons: projectContext.agentLessons,
-                            nudgeContent: preToolNudgeContent,
-                        });
-                        const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
-
-                        // Build conversation history from ConversationStore
-                        const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber);
-
-                        // Get available tools
-                        const toolNames = context.agent.tools || [];
-                        const toolsForContext = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
-
-                        // Build PreToolContext
-                        const preToolContext: PreToolContext = {
-                            agentSlug: context.agent.slug,
-                            agentPubkey: context.agent.pubkey,
-                            toolName,
-                            toolArgs: input,
-                            hasTodoList,
-                            systemPrompt,
-                            conversationHistory: conversationMessages,
-                            availableTools: toolsForContext,
-                        };
-
-                        // Run pre-tool supervision check
-                        logger.debug(`[AgentExecutor] Running pre-tool supervision for "${toolName}"`, {
-                            agent: context.agent.slug,
-                            hasTodoList,
-                        });
-
-                        // Build executionId for heuristic enforcement tracking
-                        const preToolExecutionId = `${context.agent.pubkey}:${context.conversationId}:${context.ralNumber}`;
-                        const supervisionResult = await supervisorOrchestrator.checkPreTool(preToolContext, preToolExecutionId);
-
-                        // If supervision detected a violation, block the tool
-                        if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
-                            logger.warn(
-                                `[AgentExecutor] Pre-tool supervision blocked "${toolName}" execution`,
-                                {
-                                    agent: context.agent.slug,
-                                    heuristic: supervisionResult.heuristicId,
-                                    actionType: supervisionResult.correctionAction.type,
-                                }
-                            );
-
-                            // Mark this heuristic as enforced so it won't fire again in this RAL
-                            if (supervisionResult.heuristicId) {
-                                supervisorOrchestrator.markHeuristicEnforced(preToolExecutionId, supervisionResult.heuristicId);
-                            }
-
-                            // Queue correction message if available (for both inject-message and block-tool)
-                            if (
-                                supervisionResult.correctionAction.message &&
-                                supervisionResult.correctionAction.reEngage
-                            ) {
-                                ralRegistry.queueUserMessage(
-                                    context.agent.pubkey,
-                                    context.conversationId,
-                                    context.ralNumber,
-                                    supervisionResult.correctionAction.message
-                                );
-                            }
-
-                            // Return a blocked execution message
-                            return `Tool execution blocked: ${supervisionResult.correctionAction.message || "This tool cannot be executed at this time."}`;
-                        }
-
-                        // No violation - execute the original tool
-                        logger.debug(`[AgentExecutor] Pre-tool supervision passed for "${toolName}"`, {
-                            agent: context.agent.slug,
-                        });
-
-                        return await originalExecute(input, options);
-                    } catch (error) {
-                        logger.error("[AgentExecutor] Error during pre-tool supervision check", {
-                            tool: toolName,
-                            error: formatAnyError(error),
-                        });
-                        // On supervision error, allow tool to execute (fail-safe)
-                        return await originalExecute(input, options);
-                    }
-                },
-            };
-
-            // Preserve non-enumerable properties like getHumanReadableContent
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const toolWithCustomProps = tool as any;
-            if (toolWithCustomProps.getHumanReadableContent) {
-                Object.defineProperty(wrappedTools[toolName], "getHumanReadableContent", {
-                    value: toolWithCustomProps.getHumanReadableContent,
-                    enumerable: false,
-                });
-            }
-        }
-
-        return wrappedTools;
     }
 
     /**
@@ -618,15 +283,11 @@ export class AgentExecutor {
             throw streamError;
         }
 
-        // Error already handled - error event was published as finalization
         if (result.kind === "error-handled") {
             return undefined;
         }
 
-        // Execution was aborted - check reason
         if (result.aborted) {
-            // Check if this was an injection abort (mid-execution message arrived)
-            // If so, return silently - a new execution will be spawned that includes the injection
             if (result.abortReason === INJECTION_ABORT_REASON) {
                 trace.getActiveSpan()?.addEvent("executor.aborted_for_injection", {
                     "ral.number": ralNumber,
@@ -639,54 +300,35 @@ export class AgentExecutor {
                 return undefined;
             }
 
-            // User-initiated stop - publish stopped message
             const eventContext = createEventContext(context);
             const responseEvent = await agentPublisher.complete(
                 { content: "Manually stopped by user" },
                 eventContext
             );
-
-            // Add event to conversation history
             await ConversationStore.addEvent(context.conversationId, responseEvent);
-
             return responseEvent;
         }
 
         const completionEvent = result.event;
-
-        // Determine if we should wait for more delegations.
-        // We intentionally keep a snapshot of "started with pending delegations" for delegation
-        // completion runs. That snapshot is stable across concurrent completions, and prevents
-        // a race where another delegation finishes mid-run and temporarily empties the shared
-        // pending list, which would incorrectly trigger a completion publish.
-        // HOWEVER, we must also honor delegations created *during* this run (e.g., ask/delegate),
-        // or we'll incorrectly publish a completion even though we've just spawned new work.
-        // The rule: wait if we started with pending delegations OR there are currently any.
         const ralRegistry = RALRegistry.getInstance();
 
-        // Get pending delegations from conversation storage
         const currentPendingDelegations = ralRegistry.getConversationPendingDelegations(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
-        // For non-delegation-completion executions, this reduces to "current pending > 0".
-        // For delegation-completion executions, we combine the snapshot with the live list.
         const startedWithPendingDelegations = Boolean(
             context.isDelegationCompletion && context.hasPendingDelegations
         );
         const hasPendingDelegations = startedWithPendingDelegations || currentPendingDelegations.length > 0;
 
-        // If agent generated no meaningful response and we're waiting for delegations, don't publish anything
-        // This handles the case where the agent only called delegate() without outputting any text
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
         if (!hasMessageContent && hasPendingDelegations) {
             trace.getActiveSpan()?.addEvent("executor.awaiting_delegations", {
                 "ral.number": ralNumber,
                 "delegation.pending_count": currentPendingDelegations.length,
             });
-
             return undefined;
         }
 
@@ -694,191 +336,21 @@ export class AgentExecutor {
             throw new Error("LLM execution completed without producing a completion event");
         }
 
-        // === POST-COMPLETION SUPERVISION CHECK ===
-        // Run heuristics to detect suspicious agent behavior before publishing
-        const executionId = `${context.agent.pubkey}:${context.conversationId}:${ralNumber}`;
-
-        logger.info("[AgentExecutor] Running supervision check", {
-            agent: context.agent.slug,
+        // Post-completion supervision check
+        const supervisionCheckResult = await checkPostCompletion({
+            agent: context.agent,
+            context,
+            conversationStore: context.conversationStore,
             ralNumber,
+            completionEvent,
         });
 
-        // Check if we've exceeded max retries for supervision
-        if (supervisorOrchestrator.hasExceededMaxRetries(executionId)) {
-            logger.warn("[AgentExecutor] Supervision max retries exceeded, publishing anyway", {
-                agent: context.agent.slug,
-                ralNumber,
-            });
-            supervisorOrchestrator.clearState(executionId);
-        } else {
-            // Build supervision context
-            const conversationStore = context.conversationStore;
-            const projectContext = getProjectContext();
-
-            // Get tool calls from conversation store
-            const storeMessages = conversationStore?.getAllMessages() || [];
-            const toolCallsMade = storeMessages
-                .filter(m => m.ral === ralNumber && m.messageType === "tool-call" && m.toolData)
-                .flatMap(m => m.toolData?.map(td => {
-                    if (td.type === "tool-call" && "toolName" in td) {
-                        return td.toolName;
-                    }
-                    return undefined;
-                }).filter(Boolean) as string[] || []);
-
-            // Build the system prompt for context
-            const conversation = context.getConversation();
-
-            // Fetch nudge content if triggering event has nudge tags
-            const postCompletionNudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
-            const postCompletionNudgeContent = postCompletionNudgeEventIds.length > 0
-                ? await NudgeService.getInstance().fetchNudges(postCompletionNudgeEventIds)
-                : "";
-
-            const systemPromptMessages = conversation ? await buildSystemPromptMessages({
-                agent: context.agent,
-                project: projectContext.project,
-                conversation,
-                projectBasePath: context.projectBasePath,
-                workingDirectory: context.workingDirectory,
-                currentBranch: context.currentBranch,
-                availableAgents: Array.from(projectContext.agents.values()),
-                mcpManager: projectContext.mcpManager,
-                agentLessons: projectContext.agentLessons,
-                nudgeContent: postCompletionNudgeContent,
-            }) : [];
-            const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
-
-            // Update known agent slugs for delegation heuristic
-            updateKnownAgentSlugs(Array.from(projectContext.agents.values()).map(a => a.slug));
-
-            // Build conversation history
-            const conversationMessages = conversationStore
-                ? await conversationStore.buildMessagesForRal(context.agent.pubkey, ralNumber)
-                : [];
-
-            const toolNames = context.agent.tools || [];
-            const toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
-
-            // Check todo state for supervision context
-            const todos = conversationStore
-                ? conversationStore.getTodos(context.agent.pubkey)
-                : [];
-            const hasTodoList = todos.length > 0;
-            const hasBeenNudgedAboutTodos = conversationStore
-                ? conversationStore.hasBeenNudgedAboutTodos(context.agent.pubkey)
-                : false;
-            const hasBeenRemindedAboutTodos = conversationStore
-                ? conversationStore.hasBeenRemindedAboutTodos(context.agent.pubkey)
-                : false;
-
-            const supervisionContext: PostCompletionContext = {
-                agentSlug: context.agent.slug,
-                agentPubkey: context.agent.pubkey,
-                messageContent: completionEvent.message || "",
-                toolCallsMade,
-                systemPrompt,
-                conversationHistory: conversationMessages,
-                availableTools: toolsObject,
-                hasTodoList,
-                hasBeenNudgedAboutTodos,
-                hasBeenRemindedAboutTodos,
-                todos: todos.map((t) => ({
-                    id: t.id,
-                    title: t.title,
-                    status: t.status,
-                    description: t.description,
-                })),
-            };
-
-            const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext, executionId);
-
-            if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
-                trace.getActiveSpan()?.addEvent("executor.supervision_violation", {
-                    "ral.number": ralNumber,
-                    "heuristic.id": supervisionResult.heuristicId || "unknown",
-                    "action.type": supervisionResult.correctionAction.type,
-                });
-
-                logger.info("[AgentExecutor] Supervision detected violation", {
-                    agent: context.agent.slug,
-                    heuristic: supervisionResult.heuristicId,
-                    actionType: supervisionResult.correctionAction.type,
-                });
-
-                // Mark agent as nudged if this was the todo nudge heuristic
-                if (supervisionResult.heuristicId === "consecutive-tools-without-todo" && conversationStore) {
-                    conversationStore.setNudgedAboutTodos(context.agent.pubkey);
-                    await conversationStore.save();
-                }
-
-                // Mark agent as reminded if this was the todo reminder heuristic
-                if (supervisionResult.heuristicId === "todo-reminder" && conversationStore) {
-                    conversationStore.setRemindedAboutTodos(context.agent.pubkey);
-                    await conversationStore.save();
-                }
-
-                if (supervisionResult.correctionAction.type === "suppress-publish" &&
-                    supervisionResult.correctionAction.reEngage) {
-                    // Add telemetry for supervision correction diagnosis
-                    trace.getActiveSpan()?.addEvent("executor.supervision_correction", {
-                        "has_message": !!supervisionResult.correctionAction.message,
-                        "message_length": supervisionResult.correctionAction.message?.length || 0,
-                        "heuristic.id": supervisionResult.heuristicId || "unknown",
-                        "action.type": supervisionResult.correctionAction.type,
-                        "action.reEngage": supervisionResult.correctionAction.reEngage,
-                    });
-
-                    // Increment retry count
-                    supervisorOrchestrator.incrementRetryCount(executionId);
-
-                    // Mark this heuristic as enforced so it won't fire again in this RAL
-                    if (supervisionResult.heuristicId) {
-                        supervisorOrchestrator.markHeuristicEnforced(executionId, supervisionResult.heuristicId);
-                    }
-
-                    // Inject correction message as ephemeral user message
-                    // Ephemeral = influences re-execution but NOT persisted to ConversationStore
-                    if (supervisionResult.correctionAction.message) {
-                        ralRegistry.queueUserMessage(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            supervisionResult.correctionAction.message,
-                            { ephemeral: true, suppressAttribution: true }
-                        );
-                    }
-
-                    // Re-execute the agent
-                    return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
-                } else if (supervisionResult.correctionAction.type === "inject-message" &&
-                    supervisionResult.correctionAction.message) {
-                    // Queue message for agent's next execution (no re-engage)
-                    ralRegistry.queueSystemMessage(
-                        context.agent.pubkey,
-                        context.conversationId,
-                        ralNumber,
-                        supervisionResult.correctionAction.message
-                    );
-                }
-            } else {
-                logger.info("[AgentExecutor] Supervision check passed", {
-                    agent: context.agent.slug,
-                    ralNumber,
-                });
-            }
+        if (supervisionCheckResult.shouldReEngage) {
+            return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
         }
-        // === END SUPERVISION CHECK ===
 
-        // === RAL CLEANUP ===
-        // Clear RAL AFTER supervision check passes (or max retries exceeded).
-        // This ensures supervision correction messages can be queued before RAL is cleared.
-        // If supervision triggered re-engagement, we already returned above, so this only
-        // runs for successful completions.
+        // RAL cleanup
         const conversationStore = context.conversationStore;
-
-        // Re-check pending delegations for final cleanup decision
-        // (startedWithPendingDelegations was already computed above, reuse it)
         const finalPendingDelegationsForCleanup = ralRegistry.getConversationPendingDelegations(
             context.agent.pubkey,
             context.conversationId,
@@ -887,8 +359,6 @@ export class AgentExecutor {
 
         if (finalPendingDelegationsForCleanup.length === 0 && !startedWithPendingDelegations) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
-
-            // Complete RAL in ConversationStore and persist
             conversationStore.completeRal(context.agent.pubkey, ralNumber);
             await conversationStore.save();
 
@@ -900,10 +370,7 @@ export class AgentExecutor {
                 "ral.number": ralNumber,
             });
         }
-        // === END RAL CLEANUP ===
 
-        // Note: LLM runtime is consumed by AgentPublisher.consumeAndEnhanceContext()
-        // which adds the incremental runtime to each published event
         const eventContext = createEventContext(context, {
             model: completionEvent?.usage?.model,
         });
@@ -916,9 +383,6 @@ export class AgentExecutor {
         let responseEvent: NDKEvent | undefined;
 
         if (hasPendingDelegations) {
-            // Mid-loop response - use conversation() (kind:1, no p-tag)
-            // Skip if content is empty - interim text was already published via chunk-type-change
-            // events in executeStreaming. Publishing empty content would be noise.
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
                     { content: completionEvent.message, usage: completionEvent.usage },
@@ -926,18 +390,12 @@ export class AgentExecutor {
                 );
             }
         } else {
-            // Final completion - use complete() (kind:1, with p-tag)
-            // Always publish completion even if empty to mark conversation as complete
             responseEvent = await agentPublisher.complete(
-                {
-                    content: completionEvent.message,
-                    usage: completionEvent.usage,
-                },
+                { content: completionEvent.message, usage: completionEvent.usage },
                 eventContext
             );
         }
 
-        // Add event to conversation history if we published one
         if (responseEvent) {
             await ConversationStore.addEvent(context.conversationId, responseEvent);
 
@@ -946,8 +404,6 @@ export class AgentExecutor {
                 is_completion: !hasPendingDelegations,
             });
 
-            // Advance cursor AFTER response is in ConversationStore.
-            // This ensures the cursor points to the last message the agent knows about.
             result.messageCompiler.advanceCursor();
         }
 
@@ -956,929 +412,37 @@ export class AgentExecutor {
 
     /**
      * Execute streaming and return the result.
-     * Uses discriminated union: 'complete' for success, 'error-handled' when error already published.
+     * Delegates to StreamSetup for configuration and StreamExecutionHandler for execution.
      */
     private async executeStreaming(
         context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
         ralNumber: number
     ): Promise<StreamExecutionResult> {
-        const toolNames = context.agent.tools || [];
-        let toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
-
-        // Wrap tools with pre-tool supervision checks
-        toolsObject = this.wrapToolsWithSupervision(toolsObject, context);
-
-        const sessionManager = new SessionManager(context.agent, context.conversationId, context.workingDirectory);
-        const { sessionId } = sessionManager.getSession();
-
-        const ralRegistry = RALRegistry.getInstance();
-        const conversationStore = context.conversationStore;
-
-        // Register RAL in ConversationStore
-        conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
-
-        // Consume any pending injections BEFORE building messages
-        // This ensures supervision correction messages are included in the initial LLM context
-        // (not delayed until prepareStep, which would miss the first LLM turn)
-        const initialInjections = ralRegistry.getAndConsumeInjections(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        // Collect ephemeral messages to pass to MessageCompiler (don't persist these)
-        const ephemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
-
-        if (initialInjections.length > 0) {
-            // Best-effort profile warming (non-blocking)
-            this.warmSenderPubkeys(initialInjections);
-
-            for (const injection of initialInjections) {
-                if (injection.ephemeral) {
-                    // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
-                    // but don't become permanent conversation history - pass directly to MessageCompiler
-                    ephemeralMessages.push({
-                        role: injection.role,
-                        content: injection.content,
-                    });
-                } else {
-                    // Non-ephemeral injections are persisted to ConversationStore
-                    // Include eventId from original Nostr event for deduplication
-                    // (prevents duplicate insertion via both addEvent and injection paths)
-                    conversationStore.addMessage({
-                        pubkey: context.triggeringEvent.pubkey,
-                        ral: ralNumber,
-                        content: injection.content,
-                        messageType: "text",
-                        targetedPubkeys: [context.agent.pubkey],
-                        suppressAttribution: injection.suppressAttribution,
-                        senderPubkey: injection.senderPubkey,
-                        eventId: injection.eventId,
-                    });
-                }
-            }
-
-            trace.getActiveSpan()?.addEvent("executor.initial_injections_consumed", {
-                "ral.number": ralNumber,
-                "injection.count": initialInjections.length,
-                "injection.ephemeral_count": ephemeralMessages.length,
-            });
-        }
-
-        const projectContext = getProjectContext();
-        const conversation = context.getConversation();
-        if (!conversation) {
-            throw new Error(`Conversation ${context.conversationId} not found`);
-        }
-
-        // Fetch nudge content if triggering event has nudge tags
-        const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
-        const nudgeContent = nudgeEventIds.length > 0
-            ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
-            : "";
-
-        const abortSignal = llmOpsRegistry.registerOperation(context);
-
-        // === META MODEL RESOLUTION ===
-        // If the agent's llmConfig is a meta model, resolve which variant to use
-        // Priority: 1) variant override from change_model tool, 2) keywords in first user message
-        let resolvedConfigName: string | undefined;
-        let metaModelSystemPrompt: string | undefined;
-        let variantSystemPrompt: string | undefined;
-
-        if (configService.isMetaModelConfig(context.agent.llmConfig)) {
-            // Check for a variant override set by the change_model tool
-            const variantOverride = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
-
-            // Get the first user message from the conversation store for keyword detection
-            // (only used if no override is set)
-            const firstUserMessage = conversationStore.getFirstUserMessage();
-
-            const resolution = configService.resolveMetaModel(
-                context.agent.llmConfig,
-                firstUserMessage?.content,
-                variantOverride // Pass override if set
-            );
-
-            if (resolution.isMetaModel) {
-                resolvedConfigName = resolution.configName;
-                metaModelSystemPrompt = resolution.metaModelSystemPrompt;
-                variantSystemPrompt = resolution.variantSystemPrompt;
-
-                // If keywords were stripped (and no override was used), update the message in the conversation store
-                if (!variantOverride &&
-                    resolution.strippedMessage !== undefined &&
-                    resolution.strippedMessage !== firstUserMessage?.content &&
-                    firstUserMessage) {
-                    conversationStore.updateMessageContent(
-                        firstUserMessage.id,
-                        resolution.strippedMessage
-                    );
-                }
-
-                trace.getActiveSpan()?.addEvent("executor.meta_model_resolved", {
-                    "meta_model.original_config": context.agent.llmConfig,
-                    "meta_model.resolved_config": resolvedConfigName,
-                    "meta_model.variant": resolution.variantName || "default",
-                    "meta_model.used_override": !!variantOverride,
-                });
-            }
-        }
-
-        // Track the current model for dynamic model switching
-        // This is used in prepareStep to detect when change_model tool has switched variants
-        // and to persist the switched model across all subsequent steps
-        let lastUsedVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
-        let currentModel: LanguageModel | undefined; // Holds the switched model to persist across steps
-        const isMetaModel = configService.isMetaModelConfig(context.agent.llmConfig);
-
-        const llmService = context.agent.createLLMService({
-            tools: toolsObject,
-            sessionId,
-            workingDirectory: context.workingDirectory,
-            conversationId: context.conversationId,
-            resolvedConfigName,
-            // Register message injector when Claude Code stream starts (for mid-execution message injection)
-            onStreamStart: (injector) => {
-                llmOpsRegistry.setMessageInjector(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    injector
-                );
-                logger.debug("[AgentExecutor] Message injector registered", {
-                    agent: context.agent.slug,
-                    conversationId: context.conversationId.substring(0, 8),
-                });
-            },
-        });
-
-        const messageCompiler = new MessageCompiler(
-            llmService.provider,
-            sessionManager,
-            conversationStore
-        );
-
-        const pendingDelegations = ralRegistry.getConversationPendingDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-        const completedDelegations = ralRegistry.getConversationCompletedDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        const { messages, counts, mode } = await messageCompiler.compile({
-            agent: context.agent,
-            project: projectContext.project,
-            conversation,
-            projectBasePath: context.projectBasePath,
-            workingDirectory: context.workingDirectory,
-            currentBranch: context.currentBranch,
-            availableAgents: Array.from(projectContext.agents.values()),
-            mcpManager: projectContext.mcpManager,
-            agentLessons: projectContext.agentLessons,
-            nudgeContent,
-            respondingToPubkey: context.triggeringEvent.pubkey,
-            pendingDelegations,
-            completedDelegations,
+        // Setup stream execution (tools, messages, injections, meta model)
+        const setup = await setupStreamExecution(
+            context,
+            toolTracker,
             ralNumber,
-            // Meta model system prompts (only present if agent uses a meta model)
-            metaModelSystemPrompt,
-            variantSystemPrompt,
-            // Ephemeral messages for supervision corrections (not persisted)
-            ephemeralMessages,
-        });
-
-        trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
-            "ral.number": ralNumber,
-            "message.count": counts.total,
-            "system_prompt.count": counts.systemPrompt,
-            "conversation.count": counts.conversation,
-            "message.mode": mode,
-        });
-
-        const agentPublisher = context.agentPublisher;
-        const eventContext = createEventContext(context, llmService.model);
-
-        let contentBuffer = "";
-        let reasoningBuffer = "";
-        let result: StreamExecutionResult | undefined;
-
-        const flushReasoningBuffer = async (): Promise<void> => {
-            if (reasoningBuffer.trim().length > 0) {
-                await agentPublisher.conversation(
-                    { content: reasoningBuffer, isReasoning: true },
-                    eventContext
-                );
-                reasoningBuffer = "";
-            }
-        };
-
-        // Flush content buffer to publish interim text as kind:1 events.
-        // This is called on chunk-type-change (e.g., text -> tool-call) so users see
-        // real-time text output before tool execution, not just the final message.
-        // IMPORTANT: LLMService clears cachedContentForComplete on chunk-type-change,
-        // so we must publish here BEFORE that happens or the text is lost.
-        // See: src/llm/service.ts chunk-type-change handler
-        const flushContentBuffer = async (): Promise<void> => {
-            if (contentBuffer.trim().length > 0) {
-                await agentPublisher.conversation(
-                    { content: contentBuffer },
-                    eventContext
-                );
-                contentBuffer = "";
-            }
-        };
-
-        llmService.on("content", (event: ContentEvent) => {
-            process.stdout.write(chalk.white(event.delta));
-            contentBuffer += event.delta;
-        });
-
-        llmService.on("reasoning", (event: ReasoningEvent) => {
-            process.stdout.write(chalk.gray(event.delta));
-            reasoningBuffer += event.delta;
-        });
-
-        llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
-            // Flush reasoning buffer when switching away from reasoning
-            if (event.from === "reasoning-delta") {
-                await flushReasoningBuffer();
-            }
-            // Flush content buffer when switching away from text content (e.g., to tool calls).
-            // This publishes interim text as kind:1 events so users see real-time output.
-            // Must happen BEFORE LLMService clears cachedContentForComplete on chunk-type-change.
-            if (event.from === "text-delta") {
-                await flushContentBuffer();
-            }
-        });
-
-        llmService.on("complete", (event: CompleteEvent) => {
-            // DIAGNOSTIC: Track when complete event is received
-            const completeReceivedTime = Date.now();
-            executionSpan?.addEvent("executor.complete_received", {
-                "complete.received_at": completeReceivedTime,
-                "complete.message_length": event.message?.length ?? 0,
-                "complete.steps_count": event.steps?.length ?? 0,
-                "complete.finish_reason": event.finishReason ?? "unknown",
-                "complete.result_already_set": result !== undefined,
-                "complete.result_kind": result?.kind ?? "none",
-                "ral.number": ralNumber,
-            });
-
-            // Only set result if no error already occurred
-            // accumulatedRuntime is set later after stream completes (before RAL cleanup)
-            if (!result) {
-                result = { kind: "complete", event, messageCompiler, accumulatedRuntime: 0 };
-                executionSpan?.addEvent("executor.result_set_to_complete", {
-                    "ral.number": ralNumber,
-                });
-            } else {
-                executionSpan?.addEvent("executor.complete_ignored_result_exists", {
-                    "existing_result.kind": result.kind,
-                    "ral.number": ralNumber,
-                });
-            }
-        });
-
-        llmService.on("stream-error", async (event: StreamErrorEvent) => {
-            logger.error("[AgentExecutor] Stream error from LLMService", event);
-            // Set result FIRST to prevent complete handler from overwriting
-            result = { kind: "error-handled" };
-
-            try {
-                const { message: errorMessage, errorType } = formatStreamError(event.error);
-                await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
-            } catch (publishError) {
-                logger.error("Failed to publish stream error event", {
-                    error: formatAnyError(publishError),
-                });
-            }
-        });
-
-        llmService.on(
-            "session-captured",
-            ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
-                sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
-            }
+            { warmSenderPubkeys: this.warmSenderPubkeys.bind(this) }
         );
 
-        llmService.on("tool-will-execute", async (event: ToolWillExecuteEvent) => {
-            const argsStr = event.args !== undefined ? JSON.stringify(event.args) : "";
-            const argsPreview = argsStr.substring(0, 50);
-            console.log(
-                chalk.yellow(
-                    `\n🔧 ${event.toolName}(${argsPreview}${argsStr.length > 50 ? "..." : ""})`
-                )
-            );
-
-            // Track tool as active by its unique toolCallId (supports concurrent tool execution)
-            ralRegistry.setToolActive(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber,
-                event.toolCallId,
-                true, // isActive
-                event.toolName
-            );
-
-            // Add tool-call message to ConversationStore for persistence
-            conversationStore.addMessage({
-                pubkey: context.agent.pubkey,
-                ral: ralNumber,
-                content: "",
-                messageType: "tool-call",
-                toolData: [
-                    {
-                        type: "tool-call",
-                        toolCallId: event.toolCallId,
-                        toolName: event.toolName,
-                        input: event.args ?? {},
-                    },
-                ] as ToolCallPart[],
-            });
-
-            const toolEvent = await toolTracker.trackExecution({
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                args: event.args,
-                toolsObject,
-                agentPublisher,
-                eventContext,
-                usage: event.usage,
-            });
-
-            // Add tool event to conversation history so it's visible in future turns
-            // (delegation tools return null - they publish on completion with delegation event IDs)
-            if (toolEvent) {
-                await ConversationStore.addEvent(context.conversationId, toolEvent);
-            }
+        // Create and execute stream handler
+        const handler = new StreamExecutionHandler({
+            context,
+            toolTracker,
+            ralNumber,
+            toolsObject: setup.toolsObject,
+            sessionManager: setup.sessionManager,
+            llmService: setup.llmService,
+            messageCompiler: setup.messageCompiler,
+            nudgeContent: setup.nudgeContent,
+            ephemeralMessages: setup.ephemeralMessages,
+            abortSignal: setup.abortSignal,
+            metaModelSystemPrompt: setup.metaModelSystemPrompt,
+            variantSystemPrompt: setup.variantSystemPrompt,
         });
 
-        llmService.on("tool-did-execute", async (event: ToolDidExecuteEvent) => {
-            // Add tool-result message to ConversationStore for persistence
-            // Capture the message index so we can link it with the tool event ID later
-            const toolResultMessageIndex = conversationStore.addMessage({
-                pubkey: context.agent.pubkey,
-                ral: ralNumber,
-                content: "",
-                messageType: "tool-result",
-                toolData: [
-                    {
-                        type: "tool-result" as const,
-                        toolCallId: event.toolCallId,
-                        toolName: event.toolName,
-                        output:
-                            event.result !== undefined
-                                ? { type: "json" as const, value: event.result }
-                                : { type: "text" as const, value: "" },
-                    },
-                ] as ToolResultPart[],
-            });
-
-            // Check for StopExecutionSignal in tool result (handles both direct and MCP-wrapped formats)
-            // This is critical for Claude Code where onStopCheck doesn't run because tool execution
-            // happens inside a single doStream call. We register pending delegations here so the
-            // completion logic knows to wait instead of publishing a final response.
-            const delegationsFromResult = extractPendingDelegations(event.result);
-            if (delegationsFromResult && delegationsFromResult.length > 0) {
-                trace.getActiveSpan()?.addEvent("executor.delegation_detected_in_tool_result", {
-                    "ral.number": ralNumber,
-                    "tool.name": event.toolName,
-                    "delegation.count": delegationsFromResult.length,
-                });
-
-                // Merge with any existing delegations (in case of multiple delegation tools in same step)
-                const existingDelegations = ralRegistry.getConversationPendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                const mergedDelegations = [...existingDelegations];
-                for (const newDelegation of delegationsFromResult) {
-                    if (!mergedDelegations.some(d => d.delegationConversationId === newDelegation.delegationConversationId)) {
-                        mergedDelegations.push(newDelegation);
-                    }
-                }
-
-                ralRegistry.setPendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber,
-                    mergedDelegations
-                );
-
-                logger.info("[AgentExecutor] Registered pending delegations from tool result", {
-                    agent: context.agent.slug,
-                    ralNumber,
-                    toolName: event.toolName,
-                    delegationCount: delegationsFromResult.length,
-                    totalPending: mergedDelegations.length,
-                });
-            }
-
-            // Complete tracking and get the tool event ID
-            const toolEventId = await toolTracker.completeExecution({
-                toolCallId: event.toolCallId,
-                result: event.result,
-                error: event.error ?? false,
-                agentPubkey: context.agent.pubkey,
-            });
-
-            // Link the tool event ID to the ConversationStore message
-            // This enables truncated tool results to be fetched via their eventId
-            if (toolEventId) {
-                conversationStore.setEventId(toolResultMessageIndex, toolEventId);
-            }
-
-            // Mark tool as no longer active - state transitions back to STREAMING or REASONING if no other tools running
-            ralRegistry.setToolActive(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber,
-                event.toolCallId,
-                false, // isActive
-                event.toolName
-            );
-        });
-
-        const executionSpan = trace.getActiveSpan();
-
-        // Explicit execution context for callback coordination
-        const execContext: RALExecutionContext = {
-            accumulatedMessages: messages,
-        };
-
-        try {
-            // Mark this RAL as streaming and start timing LLM runtime
-            ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, true);
-            const lastUserMessage = extractLastUserMessage(messages);
-            ralRegistry.startLLMStream(context.agent.pubkey, context.conversationId, ralNumber, lastUserMessage);
-
-            // prepareStep: async, rebuilds messages from ConversationStore on every step
-            // This ensures injections and tool results are always included
-            // Also handles dynamic model switching via change_model tool
-            const prepareStep = async (step: {
-                messages: ModelMessage[];
-                stepNumber: number;
-                steps: Array<{
-                    toolCalls: Array<{ toolName: string }>;
-                    text: string;
-                    reasoningText?: string;
-                    usage?: { inputTokens?: number; outputTokens?: number };
-                    providerMetadata?: {
-                        openrouter?: {
-                            usage?: {
-                                promptTokens?: number;
-                                completionTokens?: number;
-                                totalTokens?: number;
-                                cost?: number;
-                                promptTokensDetails?: { cachedTokens?: number };
-                                completionTokensDetails?: { reasoningTokens?: number };
-                            };
-                        };
-                    };
-                }>;
-            }): Promise<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined> => {
-                // Pass steps to LLM service for usage tracking (makes usage available for tool events)
-                llmService.updateUsageFromSteps(step.steps);
-
-                // Update execution context with latest messages
-                execContext.accumulatedMessages = step.messages;
-
-                // Sync any tool calls/results from AI SDK to ConversationStore
-                // This ensures we never lose data (e.g., tool errors that didn't emit events)
-                const syncer = new MessageSyncer(
-                    conversationStore,
-                    context.agent.pubkey,
-                    ralNumber
-                );
-                syncer.syncFromSDK(step.messages);
-
-                // Process any new injections - persist them to ConversationStore
-                const newInjections = ralRegistry.getAndConsumeInjections(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                // Collect mid-step ephemeral messages for MessageCompiler
-                const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
-
-                if (newInjections.length > 0) {
-                    // Best-effort profile warming (non-blocking)
-                    this.warmSenderPubkeys(newInjections);
-
-                    for (const injection of newInjections) {
-                        if (injection.ephemeral) {
-                            // Ephemeral injections (e.g., supervision corrections) influence this LLM turn
-                            // but don't become permanent conversation history
-                            midStepEphemeralMessages.push({
-                                role: injection.role,
-                                content: injection.content,
-                            });
-                        } else {
-                            // Non-ephemeral injections are persisted to ConversationStore
-                            // Include eventId from original Nostr event for deduplication
-                            // (prevents duplicate insertion via both addEvent and injection paths)
-                            conversationStore.addMessage({
-                                pubkey: context.triggeringEvent.pubkey,
-                                ral: ralNumber,
-                                content: injection.content,
-                                messageType: "text",
-                                targetedPubkeys: [context.agent.pubkey],
-                                suppressAttribution: injection.suppressAttribution,
-                                senderPubkey: injection.senderPubkey,
-                                eventId: injection.eventId,
-                            });
-                        }
-                    }
-
-                    if (executionSpan) {
-                        executionSpan.addEvent("ral_injection.process", {
-                            "injection.message_count": newInjections.length,
-                            "injection.ephemeral_count": midStepEphemeralMessages.length,
-                            "ral.number": ralNumber,
-                        });
-                    }
-                }
-
-                const pendingDelegations = ralRegistry.getConversationPendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
-                    agent: context.agent,
-                    project: projectContext.project,
-                    conversation,
-                    projectBasePath: context.projectBasePath,
-                    workingDirectory: context.workingDirectory,
-                    currentBranch: context.currentBranch,
-                    availableAgents: Array.from(projectContext.agents.values()),
-                    mcpManager: projectContext.mcpManager,
-                    agentLessons: projectContext.agentLessons,
-                    nudgeContent,
-                    respondingToPubkey: context.triggeringEvent.pubkey,
-                    pendingDelegations,
-                    completedDelegations,
-                    ralNumber,
-                    // Merge initial ephemeral messages (from before stream started) with mid-step ones
-                    // Initial ephemeral messages (e.g., supervision corrections queued before executeOnce)
-                    // must persist across ALL prepareStep rebuilds, not just the first compile call
-                    ephemeralMessages: [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
-                        ? [...ephemeralMessages, ...midStepEphemeralMessages]
-                        : undefined,
-                });
-
-                // For Claude Code session resumption (delta mode), returning empty messages
-                // breaks the SDK's session reconstruction. The session already has full context
-                // from the initial call, so we should keep the original messages.
-                if (mode === "delta" && rebuiltMessages.length === 0) {
-                    logger.debug("[AgentExecutor] prepareStep: delta mode with no new messages, keeping original");
-                    return undefined;
-                }
-
-                // === DYNAMIC MODEL SWITCHING ===
-                // Check if the change_model tool has switched variants since the last step
-                // If so, create a new model instance and return it to the AI SDK
-                // IMPORTANT: Once switched, we must continue returning the model on every step,
-                // otherwise AI SDK will fall back to the initial model.
-
-                if (isMetaModel) {
-                    const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
-
-                    if (currentVariant !== lastUsedVariant) {
-                        // Variant changed! Resolve to the new configuration
-                        const resolution = configService.resolveMetaModel(
-                            context.agent.llmConfig,
-                            undefined, // No keyword detection, use override
-                            currentVariant
-                        );
-
-                        if (resolution.isMetaModel) {
-                            // Get the resolved LLM configuration
-                            const newLlmConfig = configService.getLLMConfig(resolution.configName);
-
-                            // Create a new language model from the registry
-                            try {
-                                const registry = llmServiceFactory.getRegistry();
-                                const newModel = LLMService.createLanguageModelFromRegistry(
-                                    newLlmConfig.provider,
-                                    newLlmConfig.model,
-                                    registry
-                                );
-
-                                // Log before updating tracking state
-                                const previousVariant = lastUsedVariant;
-
-                                executionSpan?.addEvent("executor.model_switched", {
-                                    "ral.number": ralNumber,
-                                    "meta_model.previous_variant": previousVariant || "default",
-                                    "meta_model.new_variant": currentVariant || "default",
-                                    "meta_model.new_config": resolution.configName,
-                                    "meta_model.new_provider": newLlmConfig.provider,
-                                    "meta_model.new_model": newLlmConfig.model,
-                                });
-
-                                logger.info("[AgentExecutor] Dynamic model switch via change_model tool", {
-                                    agent: context.agent.slug,
-                                    previousVariant: previousVariant || "default",
-                                    newVariant: currentVariant || "default",
-                                    newConfig: resolution.configName,
-                                });
-
-                                // Update tracking state after logging
-                                lastUsedVariant = currentVariant;
-                                // Store the model so we return it on every subsequent step
-                                currentModel = newModel;
-                            } catch (modelError) {
-                                logger.error("[AgentExecutor] Failed to create new model for variant switch", {
-                                    error: formatAnyError(modelError),
-                                    variant: currentVariant,
-                                    config: resolution.configName,
-                                });
-                                // Continue with existing model on error
-                            }
-                        }
-                    }
-                }
-
-                // Always return the current model if we've switched, to persist across all steps
-                return currentModel
-                    ? { model: currentModel, messages: rebuiltMessages }
-                    : { messages: rebuiltMessages };
-            };
-
-            const onStopCheck = async (steps: StepResult<Record<string, AISdkTool>>[]): Promise<boolean> => {
-                if (steps.length === 0) return false;
-
-                const lastStep = steps[steps.length - 1];
-                const toolResults = lastStep.toolResults ?? [];
-
-                for (const toolResult of toolResults) {
-                    // Check for StopExecutionSignal (handles both direct and MCP-wrapped formats)
-                    const pendingDelegations = extractPendingDelegations(toolResult.output);
-                    if (pendingDelegations) {
-
-                        executionSpan?.addEvent("executor.delegation_stop", {
-                            "ral.number": ralNumber,
-                            "delegation.count": pendingDelegations.length,
-                        });
-
-                        // Build complete messages including the current step's tool calls and results.
-                        // execContext.accumulatedMessages has messages up to but not including this step.
-                        // We need to add the assistant's tool calls and the tool results.
-                        const toolCalls = lastStep.toolCalls ?? [];
-                        const messagesWithToolCalls: ModelMessage[] = [
-                            ...execContext.accumulatedMessages,
-                        ];
-
-                        // Add assistant message with tool calls (if any)
-                        if (toolCalls.length > 0) {
-                            messagesWithToolCalls.push({
-                                role: "assistant",
-                                content: toolCalls.map((tc: TypedToolCall<ToolSet>) => ({
-                                    type: "tool-call" as const,
-                                    toolCallId: tc.toolCallId,
-                                    toolName: tc.toolName,
-                                    // AI SDK TypedToolCall and ModelMessage both use 'input'
-                                    input: tc.input !== undefined ? tc.input : {},
-                                })),
-                            });
-                        }
-
-                        // Add tool results
-                        if (toolResults.length > 0) {
-                            messagesWithToolCalls.push({
-                                role: "tool",
-                                content: toolResults.map((tr: TypedToolResult<ToolSet>) => ({
-                                    type: "tool-result" as const,
-                                    toolCallId: tr.toolCallId,
-                                    toolName: tr.toolName,
-                                    // Wrap output in LanguageModelV2ToolResultOutput format
-                                    // The AI SDK expects { type: 'json', value: ... } for object outputs
-                                    output:
-                                        tr.output !== undefined
-                                            ? { type: "json" as const, value: tr.output }
-                                            : { type: "text" as const, value: "" },
-                                })),
-                            });
-                        }
-
-                        // Merge pending delegations instead of replacing them
-                        const existingDelegations = ralRegistry.getConversationPendingDelegations(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber
-                        );
-
-                        // Merge and deduplicate by delegationConversationId
-                        const mergedDelegations = [...existingDelegations];
-                        for (const newDelegation of pendingDelegations) {
-                            if (
-                                !mergedDelegations.some(
-                                    (d) =>
-                                        d.delegationConversationId ===
-                                        newDelegation.delegationConversationId
-                                )
-                            ) {
-                                mergedDelegations.push(newDelegation);
-                            }
-                        }
-
-                        ralRegistry.setPendingDelegations(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            mergedDelegations
-                        );
-
-                        // Tool calls and results are already added to ConversationStore
-                        // via tool-will-execute and tool-did-execute handlers.
-                        // Just save the store state (don't complete RAL - pending delegations).
-                        conversationStore.save();
-
-                        // Mark as not streaming - execution is pausing for delegation
-                        ralRegistry.setStreaming(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber,
-                            false
-                        );
-
-                        // Stop execution - a new execution will be spawned when:
-                        // 1. Delegation completes (via normal event routing)
-                        // 2. User sends a new message (via normal event routing)
-                        // The new execution will pick up via findResumableRAL/findRALWithInjections
-                        return true;
-                    }
-                }
-
-                return false;
-            };
-
-            // Subscribe to raw chunks and forward to local streaming socket
-            llmService.on("raw-chunk", (event: RawChunkEvent) => {
-                logger.debug("[AgentExecutor] raw-chunk received", {
-                    chunkType: event.chunk.type,
-                    agentPubkey: context.agent.pubkey.substring(0, 8),
-                });
-                streamPublisher.write({
-                    agent_pubkey: context.agent.pubkey,
-                    conversation_id: context.conversationId,
-                    data: event.chunk,
-                });
-            });
-
-            // Add TENEX-specific attributes to the active span (ai.streamText.doStream)
-            // This makes our context visible in Jaeger traces from the AI SDK
-            const activeSpan = trace.getActiveSpan();
-            if (activeSpan) {
-                activeSpan.setAttributes({
-                    "tenex.agent.slug": context.agent.slug,
-                    "tenex.agent.name": context.agent.name,
-                    "tenex.agent.pubkey": context.agent.pubkey,
-                    "tenex.conversation.id": context.conversationId,
-                    "tenex.ral.number": ralNumber,
-                    "tenex.delegation.chain":
-                        conversationStore.metadata.delegationChain
-                            ?.map((e) => e.displayName)
-                            .join(" -> ") ?? "",
-                });
-            }
-
-            await llmService.stream(messages, toolsObject, {
-                abortSignal,
-                prepareStep,
-                onStopCheck,
-            });
-
-            // DIAGNOSTIC: Track when stream method returns (after for-await loop completes)
-            // At this point, onFinish should have been called (AI SDK v6 awaits it in flush())
-            const streamReturnTime = Date.now();
-            executionSpan?.addEvent("executor.stream_returned", {
-                "stream.return_time": streamReturnTime,
-                "stream.result_set": result !== undefined,
-                "stream.result_kind": result?.kind ?? "undefined",
-                "ral.number": ralNumber,
-            });
-        } catch (streamError) {
-            // Check if this was an abort from a stop signal (kind 24134)
-            if (abortSignal.aborted) {
-                executionSpan?.addEvent("executor.aborted_by_stop_signal", {
-                    "ral.number": ralNumber,
-                    "agent.slug": context.agent.slug,
-                    "conversation.id": context.conversationId,
-                });
-                logger.info("[AgentExecutor] Execution aborted by stop signal", {
-                    agent: context.agent.slug,
-                    ralNumber,
-                    conversationId: context.conversationId.substring(0, 8),
-                });
-                throw streamError;
-            }
-
-            // Only publish error if not already handled by stream-error event
-            if (result?.kind !== "error-handled") {
-                result = { kind: "error-handled" };
-                try {
-                    const { message: errorMessage, errorType } = formatStreamError(streamError);
-                    await agentPublisher.error({ message: errorMessage, errorType }, eventContext);
-                } catch (publishError) {
-                    logger.error("Failed to publish stream error event", {
-                        error: formatAnyError(publishError),
-                    });
-                }
-            }
-            throw streamError;
-        } finally {
-            // Mark as no longer streaming and finalize LLM runtime
-            ralRegistry.endLLMStream(context.agent.pubkey, context.conversationId, ralNumber);
-            ralRegistry.setStreaming(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber,
-                false
-            );
-
-            llmOpsRegistry.completeOperation(context);
-            llmService.removeAllListeners();
-
-            // Clear LLM span ID to prevent memory leaks
-            const currentSpan = trace.getActiveSpan();
-            if (currentSpan) {
-                clearLLMSpanId(currentSpan.spanContext().traceId);
-            }
-        }
-
-        // Flush any remaining reasoning buffer
-        if (reasoningBuffer.trim().length > 0) {
-            await flushReasoningBuffer();
-        }
-
-        if (!sessionId && llmService.provider === PROVIDER_IDS.CLAUDE_CODE && result?.kind === "complete") {
-            sessionManager.saveLastSentEventId(context.triggeringEvent.id);
-        }
-
-        // Capture accumulated runtime for caller (executeOnce handles RAL cleanup AFTER supervision)
-        const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        // NOTE: RAL cleanup is now done in executeOnce() AFTER supervision check.
-        // This ensures supervision correction messages can be queued before RAL is cleared.
-
-        // DIAGNOSTIC: Log state right before the critical result check
-        // This helps debug race conditions where onFinish/complete event may not have fired
-        const resultCheckTime = Date.now();
-        executionSpan?.addEvent("executor.result_check", {
-            "result.check_time": resultCheckTime,
-            "result.is_defined": result !== undefined,
-            "result.kind": result?.kind ?? "undefined",
-            "ral.number": ralNumber,
-            "stream.accumulated_runtime_ms": accumulatedRuntime,
-            "agent.slug": context.agent.slug,
-        });
-
-        if (!result) {
-            // DIAGNOSTIC: Capture detailed state for debugging this rare failure case
-            executionSpan?.addEvent("executor.result_undefined_error", {
-                "error.type": "missing_result",
-                "ral.number": ralNumber,
-                "stream.accumulated_runtime_ms": accumulatedRuntime,
-                "agent.slug": context.agent.slug,
-                "agent.pubkey": context.agent.pubkey.substring(0, 8),
-                "conversation.id": context.conversationId.substring(0, 8),
-                "llm.provider": llmService.provider,
-                "llm.model": llmService.model,
-            });
-            throw new Error("LLM stream completed without emitting complete or stream-error event");
-        }
-
-        // Set aborted flag and reason if stop signal was triggered
-        if (result.kind === "complete" && abortSignal.aborted) {
-            result.aborted = true;
-            // AbortSignal.reason contains the reason passed to abort()
-            result.abortReason = typeof abortSignal.reason === "string" ? abortSignal.reason : undefined;
-        }
-
-        // Add accumulated runtime to result for use by executeOnce
-        if (result.kind === "complete") {
-            result.accumulatedRuntime = accumulatedRuntime;
-        }
-
-        return result;
+        return handler.execute(setup.messages);
     }
 }

@@ -1,0 +1,352 @@
+/**
+ * Message builder for converting ConversationStore entries to LLM messages.
+ *
+ * This module handles the complex logic of building ModelMessages from
+ * ConversationEntry records, including:
+ * - Tool call/result ordering for AI SDK validation
+ * - Orphaned tool call reconciliation
+ * - Message deference during pending tool execution
+ * - Delegation completion pruning
+ * - Message attribution for unexpected senders
+ */
+import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
+import { trace } from "@opentelemetry/api";
+import type { ConversationEntry } from "./types";
+import { getPubkeyService } from "@/services/PubkeyService";
+import { convertToMultimodalContent } from "./utils/multimodal-content";
+import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
+
+export interface MessageBuilderContext {
+    /**
+     * The pubkey of the agent viewing/building messages
+     */
+    viewingAgentPubkey: string;
+    /**
+     * The current RAL number for the execution
+     */
+    ralNumber: number;
+    /**
+     * Set of currently active RAL numbers for the agent
+     */
+    activeRals: Set<number>;
+    /**
+     * Index offset when processing a slice of messages (default 0)
+     */
+    indexOffset?: number;
+    /**
+     * Total message count for truncation context
+     */
+    totalMessages: number;
+    /**
+     * Root author pubkey for attribution detection
+     */
+    rootAuthorPubkey?: string;
+}
+
+/**
+ * Derive the appropriate role for a message based on viewer perspective.
+ *
+ * Rules:
+ * - assistant: Only for the viewing agent's own messages
+ * - user: All other messages (regardless of targeting)
+ * - tool: Tool results (fixed)
+ *
+ * Note: Attribution context is not added to LLM input. Role simply distinguishes
+ * between the agent's own messages and messages from others.
+ */
+function deriveRole(
+    entry: ConversationEntry,
+    viewingAgentPubkey: string
+): "user" | "assistant" | "tool" {
+    // Tool messages have fixed roles
+    if (entry.messageType === "tool-call") return "assistant";
+    if (entry.messageType === "tool-result") return "tool";
+
+    // Text messages - assistant for own, user for everything else
+    if (entry.pubkey === viewingAgentPubkey) {
+        return "assistant"; // Own messages
+    }
+
+    return "user"; // All non-self messages
+}
+
+/**
+ * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+ *
+ * Note: Most attribution prefixes are NOT added to LLM input to avoid models
+ * copying the format. However, when a message comes from an UNEXPECTED sender
+ * (different from the root conversation author), we add a prose-style prefix:
+ *   [Note: Message from {senderName}]
+ *
+ * This allows agents to know when they receive messages from someone other
+ * than their delegator (e.g., project owner intervening in a delegation).
+ *
+ * For text messages containing image URLs, the content is converted to
+ * multimodal format (TextPart + ImagePart array) for AI SDK compatibility.
+ */
+function entryToMessage(
+    entry: ConversationEntry,
+    viewingAgentPubkey: string,
+    truncationContext: TruncationContext | undefined,
+    rootAuthorPubkey: string | undefined
+): ModelMessage {
+    const role = deriveRole(entry, viewingAgentPubkey);
+
+    if (entry.messageType === "tool-call" && entry.toolData) {
+        return { role: "assistant", content: entry.toolData as ToolCallPart[] };
+    }
+
+    if (entry.messageType === "tool-result" && entry.toolData) {
+        // Apply truncation for buried tool results to save context
+        const toolData = truncationContext
+            ? processToolResult(entry.toolData as ToolResultPart[], truncationContext)
+            : (entry.toolData as ToolResultPart[]);
+        return { role: "tool", content: toolData };
+    }
+
+    // Text message - check if attribution prefix needed for unexpected sender
+    let messageContent = entry.content;
+
+    // Add attribution prefix when:
+    // 1. Message has a senderPubkey (was injected with sender tracking)
+    // 2. senderPubkey differs from root conversation author (unexpected sender)
+    if (entry.senderPubkey && rootAuthorPubkey && entry.senderPubkey !== rootAuthorPubkey) {
+        const senderName = getPubkeyService().getNameSync(entry.senderPubkey);
+        messageContent = `[Note: Message from ${senderName}]\n${messageContent}`;
+    }
+
+    // Convert to multimodal format if content contains image URLs
+    // This allows the AI SDK to fetch and process images automatically
+    const content = convertToMultimodalContent(messageContent);
+
+    return { role, content } as ModelMessage;
+}
+
+/**
+ * Build ModelMessages from conversation entries.
+ *
+ * This function handles the complex logic of:
+ * 1. Filtering messages by RAL visibility rules
+ * 2. Ensuring tool-call/tool-result ordering for AI SDK validation
+ * 3. Deferring non-tool messages while tool-calls are pending
+ * 4. Injecting synthetic results for orphaned tool-calls
+ * 5. Pruning superseded delegation completion messages
+ *
+ * The AI SDK (Vercel AI) validates that every tool-call message is immediately
+ * followed by its corresponding tool-result message. This function ensures
+ * that validation passes even when messages arrive out of order.
+ */
+export async function buildMessagesFromEntries(
+    entries: ConversationEntry[],
+    ctx: MessageBuilderContext
+): Promise<ModelMessage[]> {
+    const {
+        viewingAgentPubkey,
+        ralNumber,
+        activeRals,
+        indexOffset = 0,
+        totalMessages,
+        rootAuthorPubkey,
+    } = ctx;
+
+    const result: ModelMessage[] = [];
+    const delegationCompletionPrefix = "# DELEGATION COMPLETED";
+
+    // Track latest delegation completion for each RAL (to prune superseded ones)
+    const latestDelegationCompletionIndexByRal = new Map<number, number>();
+    const getDelegationCompletionRal = (entry: ConversationEntry): number | undefined => {
+        if (entry.messageType !== "text") return undefined;
+        if (typeof entry.ral !== "number") return undefined;
+        if (!entry.content.trimStart().startsWith(delegationCompletionPrefix)) return undefined;
+        if (!(entry.targetedPubkeys?.includes(viewingAgentPubkey) ?? false)) return undefined;
+        return entry.ral;
+    };
+
+    // First pass: identify latest delegation completion for each RAL
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const ral = getDelegationCompletionRal(entry);
+        if (ral !== undefined) {
+            latestDelegationCompletionIndexByRal.set(ral, i);
+        }
+    }
+
+    let prunedDelegationCompletions = 0;
+
+    // ============================================================================
+    // TOOL-CALL / TOOL-RESULT ORDERING FIX
+    // ============================================================================
+    //
+    // The AI SDK (Vercel AI) validates that every tool-call message is immediately
+    // followed by its corresponding tool-result message. If any other message type
+    // (user, assistant text, system) appears between a tool-call and its result,
+    // the SDK throws: "Tool result is missing for tool call <id>"
+    //
+    // PROBLEM 1: User messages arriving mid-tool-execution
+    // ----------------------------------------------------
+    // Messages are stored in ConversationStore in chronological order:
+    //   1. Agent issues tool-call (stored immediately)
+    //   2. User sends a new message (stored while tool executes)
+    //   3. Tool completes, result stored
+    //
+    // This results in: [tool-call, user-message, tool-result]
+    // But AI SDK requires: [tool-call, tool-result, user-message]
+    //
+    // PROBLEM 2: Orphaned tool-calls from RAL interruption
+    // ----------------------------------------------------
+    // When a RAL is aborted mid-execution (e.g., due to a delegation completion
+    // triggering an injection), tool-calls may be stored but their results never
+    // recorded. The tool continues executing in the background, but the stream
+    // handler that would record the result has been torn down.
+    //
+    // When the RAL resumes, it has orphaned tool-calls with no matching results.
+    //
+    // SOLUTION:
+    // ---------
+    // 1. Track pending tool-calls (those without results yet)
+    // 2. Defer non-tool messages while tool-calls are pending
+    // 3. Flush deferred messages only after all pending results arrive
+    // 4. For orphaned tool-calls (no result ever stored), inject synthetic
+    //    error results to satisfy the AI SDK validation
+    //
+    // ============================================================================
+
+    // Map of toolCallId -> {toolName, resultIndex} for pending tool-calls
+    // resultIndex tracks where the synthetic result should be inserted if needed
+    const pendingToolCalls = new Map<string, { toolName: string; resultIndex: number }>();
+
+    // Messages deferred because they arrived while tool-calls were pending
+    const deferredMessages: Array<{ entry: ConversationEntry; truncationContext: TruncationContext }> = [];
+
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+
+        // Skip superseded delegation completions
+        const ral = getDelegationCompletionRal(entry);
+        if (ral !== undefined) {
+            const latestIndex = latestDelegationCompletionIndexByRal.get(ral);
+            if (latestIndex !== undefined && latestIndex !== i) {
+                prunedDelegationCompletions += 1;
+                continue;
+            }
+        }
+
+        // Create truncation context for tool result processing
+        const truncationContext: TruncationContext = {
+            currentIndex: indexOffset + i,
+            totalMessages,
+            eventId: entry.eventId,
+        };
+
+        // Helper to check if entry should be included based on RAL visibility
+        const shouldInclude = (): boolean => {
+            // User messages (no RAL) - always include
+            if (!entry.ral) return true;
+
+            // Same agent
+            if (entry.pubkey === viewingAgentPubkey) {
+                if (entry.ral === ralNumber) return true; // Current RAL
+                if (activeRals.has(entry.ral)) return false; // Other active RAL - skip
+                return true; // Completed RAL
+            }
+
+            // Other agent's message - only include text content
+            return entry.messageType === "text" && !!entry.content;
+        };
+
+        if (!shouldInclude()) continue;
+
+        // TOOL-CALL: Add to result and register as pending
+        if (entry.messageType === "tool-call" && entry.toolData) {
+            const resultIndex = result.length;
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+
+            for (const part of entry.toolData as ToolCallPart[]) {
+                pendingToolCalls.set(part.toolCallId, {
+                    toolName: part.toolName,
+                    // Result should be inserted right after the tool-call message
+                    resultIndex: resultIndex + 1,
+                });
+            }
+            continue;
+        }
+
+        // TOOL-RESULT: Add to result and mark tool-call as resolved
+        if (entry.messageType === "tool-result" && entry.toolData) {
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+
+            for (const part of entry.toolData as ToolResultPart[]) {
+                pendingToolCalls.delete(part.toolCallId);
+            }
+
+            // All tool-calls resolved - flush deferred messages now
+            if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
+                for (const deferred of deferredMessages) {
+                    result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey));
+                }
+                deferredMessages.length = 0;
+            }
+            continue;
+        }
+
+        // NON-TOOL MESSAGE (user/assistant text, system, etc.)
+        // If tool-calls are pending, defer this message
+        if (pendingToolCalls.size > 0) {
+            deferredMessages.push({ entry, truncationContext });
+        } else {
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+        }
+    }
+
+    // ============================================================================
+    // ORPHANED TOOL-CALL RECONCILIATION
+    // ============================================================================
+    // If we reach the end of all entries and still have pending tool-calls,
+    // those are orphans - tool-calls whose results were never stored.
+    //
+    // We insert synthetic error results at the correct positions to maintain
+    // valid message structure for the AI SDK.
+    // ============================================================================
+    if (pendingToolCalls.size > 0) {
+        // Sort by resultIndex descending so splice operations don't shift indices
+        const orphans = Array.from(pendingToolCalls.entries())
+            .sort((a, b) => b[1].resultIndex - a[1].resultIndex);
+
+        for (const [toolCallId, info] of orphans) {
+            const syntheticResult: ModelMessage = {
+                role: "tool",
+                content: [{
+                    type: "tool-result" as const,
+                    toolCallId,
+                    toolName: info.toolName,
+                    output: {
+                        type: "text" as const,
+                        value: "[Error: Tool execution was interrupted - result unavailable]",
+                    },
+                }] as ToolResultPart[],
+            };
+            // Insert synthetic result right after the tool-call
+            result.splice(info.resultIndex, 0, syntheticResult);
+        }
+
+        // Log for debugging/monitoring orphaned tool-calls in production
+        trace.getActiveSpan?.()?.addEvent("conversation.orphaned_tool_calls_reconciled", {
+            "orphan.count": pendingToolCalls.size,
+            "orphan.tool_call_ids": Array.from(pendingToolCalls.keys()).join(","),
+        });
+    }
+
+    // Flush any remaining deferred messages
+    for (const deferred of deferredMessages) {
+        result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey));
+    }
+
+    if (prunedDelegationCompletions > 0) {
+        trace.getActiveSpan?.()?.addEvent("conversation.delegation_completion_pruned", {
+            "delegation.pruned_count": prunedDelegationCompletions,
+            "delegation.kept_count": latestDelegationCompletionIndexByRal.size,
+        });
+    }
+
+    return result;
+}

@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { Tool as CoreTool, ModelMessage } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -6,6 +6,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { CompleteEvent } from "@/llm/service";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { ToolRegistryContext } from "@/tools/types";
 import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 
 /**
@@ -83,4 +84,26 @@ export interface RALExecutionContext {
      * Contains messages up to but not including the current step.
      */
     accumulatedMessages: ModelMessage[];
+}
+
+/**
+ * Full runtime context for executor methods.
+ * Extends ToolRegistryContext with:
+ * - agent: AgentInstance (full agent type, not just ToolAgentInfo)
+ * - Execution-specific flags from ExecutionContext
+ */
+export type FullRuntimeContext = Omit<ToolRegistryContext, "agent"> & {
+    agent: AgentInstance;
+    isDelegationCompletion?: boolean;
+    hasPendingDelegations?: boolean;
+};
+
+/**
+ * Request object for LLM completion preparation.
+ * Created by prepareLLMRequest() for external callers that need to prepare
+ * an LLM request without executing it (e.g., schema extraction).
+ */
+export interface LLMCompletionRequest {
+    messages: ModelMessage[];
+    tools?: Record<string, CoreTool>;
 }

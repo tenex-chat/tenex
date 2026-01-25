@@ -140,3 +140,86 @@ export interface MessageInjector {
  * Used by agent providers that support mid-stream message injection.
  */
 export type OnStreamStartCallback = (injector: MessageInjector) => void;
+
+// ============================================================================
+// LLMService Event Types
+// ============================================================================
+
+import type { AISdkTool } from "@/tools/types";
+import type { StepResult, TextStreamPart } from "ai";
+
+/**
+ * Content delta event
+ */
+export interface ContentEvent {
+    delta: string;
+}
+
+/**
+ * Chunk type change event
+ */
+export interface ChunkTypeChangeEvent {
+    from: string | undefined;
+    to: string;
+}
+
+/**
+ * Tool will execute event
+ */
+export interface ToolWillExecuteEvent {
+    toolName: string;
+    toolCallId: string;
+    args: unknown;
+    /** Cumulative usage from previous steps (if available) */
+    usage?: LanguageModelUsageWithCostUsd;
+}
+
+/**
+ * Tool did execute event
+ */
+export interface ToolDidExecuteEvent {
+    toolName: string;
+    toolCallId: string;
+    result: unknown;
+    error?: boolean;
+}
+
+/**
+ * Completion event
+ */
+export interface CompleteEvent {
+    message: string;
+    steps: StepResult<Record<string, AISdkTool>>[];
+    usage: LanguageModelUsageWithCostUsd;
+    finishReason?: string;
+    reasoning?: string;
+}
+
+/**
+ * Stream error event
+ */
+export interface StreamErrorEvent {
+    error: unknown;
+}
+
+/**
+ * Session captured event
+ */
+export interface SessionCapturedEvent {
+    sessionId: string;
+}
+
+/**
+ * Reasoning delta event
+ */
+export interface ReasoningEvent {
+    delta: string;
+}
+
+/**
+ * Raw chunk event - emitted for every valid chunk from the AI SDK stream
+ * Allows consumers to process raw chunks without LLMService knowing about their use case
+ */
+export interface RawChunkEvent {
+    chunk: TextStreamPart<Record<string, AISdkTool>>;
+}

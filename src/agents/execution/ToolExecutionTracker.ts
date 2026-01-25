@@ -1,60 +1,16 @@
 /**
- * ToolExecutionTracker - Manages the lifecycle of tool executions during LLM streaming
+ * ToolExecutionTracker - Manages tool execution lifecycle during LLM streaming.
  *
- * This class provides a centralized way to track tool executions from start to completion,
- * coordinating between asynchronous tool execution events and ensuring proper correlation
- * between Nostr events, tool results, and filesystem persistence.
+ * Tracks executions from start to completion, coordinating between async events and
+ * ensuring proper correlation between Nostr events, tool results, and persistence.
  *
- * ## Overview
- *
- * During LLM streaming, tools are executed asynchronously. When the LLM decides to use a tool:
- * 1. A 'tool-will-execute' event fires when the tool starts
- * 2. The tracker publishes a Nostr event announcing the tool execution
- * 3. The tool executes (potentially taking significant time)
- * 4. A 'tool-did-execute' event fires when the tool completes
- * 5. The tracker correlates the result with the original Nostr event
- * 6. Tool input/output is persisted to filesystem for conversation reconstruction
- *
- * ## Key Responsibilities
- *
- * - **Event Correlation**: Matches tool results with their initial execution events
- * - **Nostr Publishing**: Publishes tool execution announcements to the Nostr network
- * - **State Management**: Tracks execution state (pending → completed/failed)
- * - **Persistence**: Stores tool messages to filesystem for conversation history
- * - **Human Readability**: Generates user-friendly descriptions of tool executions
- *
- * ## Design Decisions
- *
- * - Uses a Map for O(1) lookup of executions by toolCallId
- * - Stores minimal state to reduce memory footprint
- * - Delegates Nostr publishing to AgentPublisher for separation of concerns
- * - Maintains immutability of execution records for consistency
- *
- * @example
- * ```typescript
- * const tracker = new ToolExecutionTracker();
- *
- * // When tool starts executing
- * await tracker.trackExecution({
- *   toolCallId: 'call_123',
- *   toolName: 'search',
- *   args: { query: 'TypeScript' },
- *   toolsObject: availableTools,
- *   agentPublisher: publisher,
- *   eventContext: context
- * });
- *
- * // When tool completes
- * await tracker.completeExecution({
- *   toolCallId: 'call_123',
- *   result: { results: [...] },
- *   error: false,
- *   agentPubkey: 'agent_pubkey_123'
- * });
- * ```
+ * Responsibilities:
+ * - Event Correlation: Matches tool results with their initial execution events
+ * - Nostr Publishing: Publishes tool execution announcements
+ * - Persistence: Stores tool messages for conversation history
  */
 
-import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
+import { isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { EventContext } from "@/nostr/AgentEventEncoder";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -63,6 +19,7 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
+import { extractErrorDetails, getHumanReadableContent } from "./ToolResultUtils";
 
 /**
  * Tools that publish addressable events and need delayed tool use event publishing.
@@ -195,7 +152,7 @@ export class ToolExecutionTracker {
         }
 
         // Generate human-readable content for the tool execution
-        const humanContent = this.getHumanReadableContent(toolName, args, toolsObject);
+        const humanContent = getHumanReadableContent(toolName, args, toolsObject);
 
         // Store the execution state BEFORE async operations to prevent race conditions
         const execution: TrackedExecution = {
@@ -296,7 +253,7 @@ export class ToolExecutionTracker {
         // Log errors explicitly for visibility
         if (error) {
             // Extract error details for better logging
-            const errorDetails = this.extractErrorDetails(result);
+            const errorDetails = extractErrorDetails(result);
 
             logger.error("[ToolExecutionTracker] Tool execution failed", {
                 toolName: execution.toolName,
@@ -490,93 +447,6 @@ export class ToolExecutionTracker {
         logger.debug("[ToolExecutionTracker] Cleared all tracked executions", {
             previousSize,
         });
-    }
-
-    /**
-     * Generate human-readable content for a tool execution
-     *
-     * This method attempts to generate a user-friendly description of what the tool
-     * is doing by:
-     * 1. Checking if the tool has a custom getHumanReadableContent method
-     * 2. For MCP tools, formatting the tool name in a readable way
-     * 3. Falling back to a generic "Executing <toolname>" message
-     *
-     * @param toolName - Name of the tool being executed
-     * @param args - Arguments passed to the tool
-     * @param toolsObject - Available tools that may have custom formatters
-     * @returns Human-readable description of the tool execution
-     */
-    private getHumanReadableContent(
-        toolName: string,
-        args: unknown,
-        toolsObject: Record<string, AISdkTool>
-    ): string {
-        // Check if the tool has a custom human-readable content generator
-        const tool = toolsObject[toolName];
-        const customContent = tool?.getHumanReadableContent?.(args);
-
-        if (customContent) {
-            return customContent;
-        }
-
-        // Special formatting for MCP tools
-        if (toolName.startsWith("mcp__")) {
-            return `Executing ${formatMcpToolName(toolName)}`;
-        }
-
-        // Default format
-        return `Executing ${toolName}`;
-    }
-
-    /**
-     * Extract error details from a tool result for better logging and telemetry.
-     * Handles various error result formats from AI SDK and shell tool.
-     *
-     * @param result - The tool result that may contain error information
-     * @returns Error details or null if not an error result
-     */
-    private extractErrorDetails(result: unknown): { message: string; type: string } | null {
-        if (typeof result !== "object" || result === null) {
-            return null;
-        }
-
-        const res = result as Record<string, unknown>;
-
-        // AI SDK error-text format
-        if (res.type === "error-text" && typeof res.text === "string") {
-            return { message: res.text, type: "error-text" };
-        }
-
-        // AI SDK error-json format
-        if (res.type === "error-json" && typeof res.json === "object") {
-            const errorJson = res.json as Record<string, unknown>;
-            const message = errorJson.message || errorJson.error || JSON.stringify(errorJson);
-            return { message: String(message), type: "error-json" };
-        }
-
-        // Shell tool structured error format
-        if (res.type === "shell-error") {
-            const shellError = res as {
-                error?: string;
-                exitCode?: number | null;
-                stderr?: string;
-            };
-            const message = shellError.error ||
-                shellError.stderr ||
-                `Exit code: ${shellError.exitCode}`;
-            return { message, type: "shell-error" };
-        }
-
-        // Generic error object with message property
-        if (typeof res.error === "string") {
-            return { message: res.error, type: "generic" };
-        }
-
-        if (typeof res.message === "string") {
-            return { message: res.message, type: "generic" };
-        }
-
-        return null;
     }
 
     /**

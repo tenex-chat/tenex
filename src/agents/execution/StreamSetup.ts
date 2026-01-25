@@ -1,0 +1,248 @@
+/**
+ * StreamSetup - Handles pre-stream setup for LLM execution
+ *
+ * This module contains the setup logic that prepares everything needed
+ * before streaming begins: tool wrapping, session management, injection processing,
+ * meta model resolution, and initial message compilation.
+ */
+
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { config as configService } from "@/services/ConfigService";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { NudgeService } from "@/services/nudge";
+import { getProjectContext } from "@/services/projects";
+import { RALRegistry } from "@/services/ral";
+import { getToolsObject } from "@/tools/registry";
+import { logger } from "@/utils/logger";
+import type { ModelMessage } from "ai";
+import { trace } from "@opentelemetry/api";
+import type { LLMService } from "@/llm/service";
+import { MessageCompiler } from "./MessageCompiler";
+import { SessionManager } from "./SessionManager";
+import type { ToolExecutionTracker } from "./ToolExecutionTracker";
+import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
+import type { FullRuntimeContext } from "./types";
+import type { AISdkTool } from "@/tools/types";
+
+/**
+ * Result of stream setup
+ */
+export interface StreamSetupResult {
+    toolsObject: Record<string, AISdkTool>;
+    sessionManager: SessionManager;
+    llmService: LLMService;
+    messageCompiler: MessageCompiler;
+    messages: ModelMessage[];
+    ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
+    nudgeContent: string;
+    abortSignal: AbortSignal;
+    metaModelSystemPrompt?: string;
+    variantSystemPrompt?: string;
+}
+
+/**
+ * Interface for injection processing
+ */
+export interface InjectionProcessor {
+    warmSenderPubkeys(injections: Array<{ senderPubkey?: string }>): void;
+}
+
+/**
+ * Set up everything needed for stream execution
+ */
+export async function setupStreamExecution(
+    context: FullRuntimeContext,
+    _toolTracker: ToolExecutionTracker, // Reserved for future use
+    ralNumber: number,
+    injectionProcessor: InjectionProcessor
+): Promise<StreamSetupResult> {
+    const toolNames = context.agent.tools || [];
+    let toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+
+    // Wrap tools with pre-tool supervision checks
+    toolsObject = wrapToolsWithSupervision(toolsObject, context);
+
+    const sessionManager = new SessionManager(
+        context.agent,
+        context.conversationId,
+        context.workingDirectory
+    );
+    const { sessionId } = sessionManager.getSession();
+
+    const ralRegistry = RALRegistry.getInstance();
+    const conversationStore = context.conversationStore;
+
+    // Register RAL in ConversationStore
+    conversationStore.ensureRalActive(context.agent.pubkey, ralNumber);
+
+    // Consume any pending injections BEFORE building messages
+    const initialInjections = ralRegistry.getAndConsumeInjections(
+        context.agent.pubkey,
+        context.conversationId,
+        ralNumber
+    );
+
+    // Collect ephemeral messages to pass to MessageCompiler
+    const ephemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
+
+    if (initialInjections.length > 0) {
+        // Best-effort profile warming (non-blocking)
+        injectionProcessor.warmSenderPubkeys(initialInjections);
+
+        for (const injection of initialInjections) {
+            if (injection.ephemeral) {
+                ephemeralMessages.push({
+                    role: injection.role,
+                    content: injection.content,
+                });
+            } else {
+                conversationStore.addMessage({
+                    pubkey: context.triggeringEvent.pubkey,
+                    ral: ralNumber,
+                    content: injection.content,
+                    messageType: "text",
+                    targetedPubkeys: [context.agent.pubkey],
+                    suppressAttribution: injection.suppressAttribution,
+                    senderPubkey: injection.senderPubkey,
+                    eventId: injection.eventId,
+                });
+            }
+        }
+
+        trace.getActiveSpan()?.addEvent("executor.initial_injections_consumed", {
+            "ral.number": ralNumber,
+            "injection.count": initialInjections.length,
+            "injection.ephemeral_count": ephemeralMessages.length,
+        });
+    }
+
+    const projectContext = getProjectContext();
+    const conversation = context.getConversation();
+    if (!conversation) {
+        throw new Error(`Conversation ${context.conversationId} not found`);
+    }
+
+    // Fetch nudge content if triggering event has nudge tags
+    const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+    const nudgeContent =
+        nudgeEventIds.length > 0
+            ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
+            : "";
+
+    const abortSignal = llmOpsRegistry.registerOperation(context);
+
+    // === META MODEL RESOLUTION ===
+    let resolvedConfigName: string | undefined;
+    let metaModelSystemPrompt: string | undefined;
+    let variantSystemPrompt: string | undefined;
+
+    if (configService.isMetaModelConfig(context.agent.llmConfig)) {
+        const variantOverride = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+        const firstUserMessage = conversationStore.getFirstUserMessage();
+
+        const resolution = configService.resolveMetaModel(
+            context.agent.llmConfig,
+            firstUserMessage?.content,
+            variantOverride
+        );
+
+        if (resolution.isMetaModel) {
+            resolvedConfigName = resolution.configName;
+            metaModelSystemPrompt = resolution.metaModelSystemPrompt;
+            variantSystemPrompt = resolution.variantSystemPrompt;
+
+            if (
+                !variantOverride &&
+                resolution.strippedMessage !== undefined &&
+                resolution.strippedMessage !== firstUserMessage?.content &&
+                firstUserMessage
+            ) {
+                conversationStore.updateMessageContent(firstUserMessage.id, resolution.strippedMessage);
+            }
+
+            trace.getActiveSpan()?.addEvent("executor.meta_model_resolved", {
+                "meta_model.original_config": context.agent.llmConfig,
+                "meta_model.resolved_config": resolvedConfigName,
+                "meta_model.variant": resolution.variantName || "default",
+                "meta_model.used_override": !!variantOverride,
+            });
+        }
+    }
+
+    const llmService = context.agent.createLLMService({
+        tools: toolsObject,
+        sessionId,
+        workingDirectory: context.workingDirectory,
+        conversationId: context.conversationId,
+        resolvedConfigName,
+        onStreamStart: (injector) => {
+            llmOpsRegistry.setMessageInjector(
+                context.agent.pubkey,
+                context.conversationId,
+                injector
+            );
+            logger.debug("[StreamSetup] Message injector registered", {
+                agent: context.agent.slug,
+                conversationId: context.conversationId.substring(0, 8),
+            });
+        },
+    });
+
+    const messageCompiler = new MessageCompiler(
+        llmService.provider,
+        sessionManager,
+        conversationStore
+    );
+
+    const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+        context.agent.pubkey,
+        context.conversationId,
+        ralNumber
+    );
+    const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+        context.agent.pubkey,
+        context.conversationId,
+        ralNumber
+    );
+
+    const { messages, counts, mode } = await messageCompiler.compile({
+        agent: context.agent,
+        project: projectContext.project,
+        conversation,
+        projectBasePath: context.projectBasePath,
+        workingDirectory: context.workingDirectory,
+        currentBranch: context.currentBranch,
+        availableAgents: Array.from(projectContext.agents.values()),
+        mcpManager: projectContext.mcpManager,
+        agentLessons: projectContext.agentLessons,
+        nudgeContent,
+        respondingToPubkey: context.triggeringEvent.pubkey,
+        pendingDelegations,
+        completedDelegations,
+        ralNumber,
+        metaModelSystemPrompt,
+        variantSystemPrompt,
+        ephemeralMessages,
+    });
+
+    trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
+        "ral.number": ralNumber,
+        "message.count": counts.total,
+        "system_prompt.count": counts.systemPrompt,
+        "conversation.count": counts.conversation,
+        "message.mode": mode,
+    });
+
+    return {
+        toolsObject,
+        sessionManager,
+        llmService,
+        messageCompiler,
+        messages,
+        ephemeralMessages,
+        nudgeContent,
+        abortSignal,
+        metaModelSystemPrompt,
+        variantSystemPrompt,
+    };
+}
