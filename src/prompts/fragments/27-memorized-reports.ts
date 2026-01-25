@@ -3,8 +3,11 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Memorized reports fragment - injects reports marked with memorize=true
+ * Memorized reports fragment - injects reports marked with memorize=true or memorize_team=true
  * into the agent's system prompt for persistent context.
+ *
+ * - memorize=true: Report is only injected into the authoring agent's system prompt
+ * - memorize_team=true: Report is injected into ALL agents' system prompts in the project
  */
 interface MemorizedReportsArgs {
     reports: ReportInfo[];
@@ -18,21 +21,52 @@ export const memorizedReportsFragment: PromptFragment<MemorizedReportsArgs> = {
             return ""; // No memorized reports
         }
 
+        // Separate team-wide reports from agent-specific reports
+        const teamReports = reports.filter((r) => r.isMemorizedTeam);
+        const agentReports = reports.filter((r) => !r.isMemorizedTeam);
+
         const parts: string[] = [];
         parts.push("## Memorized Knowledge\n");
-        parts.push(
-            "The following reports have been memorized and represent persistent knowledge for your role:\n"
-        );
 
-        for (const report of reports) {
-            parts.push(`### ${report.title || report.slug}`);
-            if (report.summary) {
-                parts.push(`*${report.summary}*\n`);
+        // Add team-wide reports first (if any)
+        if (teamReports.length > 0) {
+            parts.push("### Team-Wide Knowledge\n");
+            parts.push("*The following knowledge is shared across ALL agents in this project:*\n");
+
+            for (const report of teamReports) {
+                parts.push(`#### ${report.title || report.slug}`);
+                if (report.summary) {
+                    parts.push(`*${report.summary}*\n`);
+                }
+                if (report.content) {
+                    parts.push(report.content);
+                }
+                parts.push(""); // Empty line between reports
             }
-            if (report.content) {
-                parts.push(report.content);
+        }
+
+        // Add agent-specific reports (if any)
+        if (agentReports.length > 0) {
+            if (teamReports.length > 0) {
+                parts.push("### Agent-Specific Knowledge\n");
+                parts.push("*The following knowledge is specific to your role:*\n");
+            } else {
+                parts.push(
+                    "The following reports have been memorized and represent persistent knowledge for your role:\n"
+                );
             }
-            parts.push(""); // Empty line between reports
+
+            for (const report of agentReports) {
+                const heading = teamReports.length > 0 ? "####" : "###";
+                parts.push(`${heading} ${report.title || report.slug}`);
+                if (report.summary) {
+                    parts.push(`*${report.summary}*\n`);
+                }
+                if (report.content) {
+                    parts.push(report.content);
+                }
+                parts.push(""); // Empty line between reports
+            }
         }
 
         return parts.join("\n");
