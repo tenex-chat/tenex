@@ -117,7 +117,7 @@ describe("LocalReportStore", () => {
     describe("writeReport and readReport", () => {
         it("should write and read reports correctly", async () => {
             const metadata = {
-                addressableRef: "pubkey:30023:test-slug",
+                addressableRef: "30023:pubkey:test-slug",
                 createdAt: Math.floor(Date.now() / 1000),
                 slug: "test-slug",
             };
@@ -130,7 +130,7 @@ describe("LocalReportStore", () => {
 
         it("should reject invalid slugs on write", async () => {
             const metadata = {
-                addressableRef: "pubkey:30023:bad",
+                addressableRef: "30023:pubkey:bad",
                 createdAt: Math.floor(Date.now() / 1000),
                 slug: "../escape",
             };
@@ -155,7 +155,7 @@ describe("LocalReportStore", () => {
             const result = await store.hydrateFromNostr(
                 "new-report",
                 "# From Nostr",
-                "pubkey:30023:new-report",
+                "30023:pubkey:new-report",
                 Math.floor(Date.now() / 1000)
             );
 
@@ -170,7 +170,7 @@ describe("LocalReportStore", () => {
 
             // Write old version
             await store.writeReport("test-report", "# Old Content", {
-                addressableRef: "pubkey:30023:test-report",
+                addressableRef: "30023:pubkey:test-report",
                 createdAt: oldTimestamp,
                 slug: "test-report",
             });
@@ -179,7 +179,7 @@ describe("LocalReportStore", () => {
             const result = await store.hydrateFromNostr(
                 "test-report",
                 "# New Content",
-                "pubkey:30023:test-report",
+                "30023:pubkey:test-report",
                 newTimestamp
             );
 
@@ -194,7 +194,7 @@ describe("LocalReportStore", () => {
 
             // Write new version first
             await store.writeReport("test-report", "# New Content", {
-                addressableRef: "pubkey:30023:test-report",
+                addressableRef: "30023:pubkey:test-report",
                 createdAt: newTimestamp,
                 slug: "test-report",
             });
@@ -203,7 +203,7 @@ describe("LocalReportStore", () => {
             const result = await store.hydrateFromNostr(
                 "test-report",
                 "# Old Content",
-                "pubkey:30023:test-report",
+                "30023:pubkey:test-report",
                 oldTimestamp
             );
 

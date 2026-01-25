@@ -1,6 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { PendingDelegationsRegistry } from "@/services/ral";
-import { ReportService, getLocalReportStore } from "@/services/reports";
+import { ReportService, getLocalReportStore, InvalidSlugError } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -86,7 +86,21 @@ async function executeReportWrite(
     const reportService = new ReportService();
     const localStore = getLocalReportStore();
 
-    // Step 1: Publish to Nostr
+    // Step 1: Validate slug BEFORE publishing to Nostr
+    // This prevents orphaned Nostr reports that can't be read back locally
+    try {
+        localStore.validateSlug(slug);
+    } catch (error) {
+        if (error instanceof InvalidSlugError) {
+            throw new Error(
+                `Invalid report slug "${slug}": ${error.message}. ` +
+                    "Slugs can only contain alphanumeric characters, hyphens, and underscores."
+            );
+        }
+        throw error;
+    }
+
+    // Step 2: Publish to Nostr
     const result = await reportService.writeReport(
         {
             slug,
@@ -99,7 +113,7 @@ async function executeReportWrite(
         context.agent
     );
 
-    // Step 2: Save to local storage
+    // Step 3: Save to local storage
     // Format the content for local storage
     const formattedContent = formatReportContent({ title, summary, content, hashtags });
 

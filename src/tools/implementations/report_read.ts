@@ -47,16 +47,32 @@ async function executeReportRead(
     }
 
     // If it looks like an naddr, decode it to extract the slug (d-tag)
+    // Reports are NDKArticle events (kind 30023)
     if (slug.startsWith("naddr1")) {
         try {
             const decoded = nip19.decode(slug);
-            if (decoded.type === "naddr" && decoded.data.identifier) {
-                slug = decoded.data.identifier;
-                logger.debug("📖 Decoded naddr to slug", {
-                    originalIdentifier: identifier,
-                    extractedSlug: slug,
-                    agent: context.agent.name,
-                });
+            if (decoded.type === "naddr") {
+                // Verify this is a report (kind 30023) - NDKArticle
+                if (decoded.data.kind !== 30023) {
+                    return {
+                        success: false,
+                        message: `Invalid naddr kind ${decoded.data.kind} - report_read only accepts kind 30023 (NDKArticle) naddrs. Got: ${identifier}`,
+                    };
+                }
+                if (decoded.data.identifier) {
+                    slug = decoded.data.identifier;
+                    logger.debug("📖 Decoded naddr to slug", {
+                        originalIdentifier: identifier,
+                        extractedSlug: slug,
+                        kind: decoded.data.kind,
+                        agent: context.agent.name,
+                    });
+                } else {
+                    return {
+                        success: false,
+                        message: `Invalid naddr format - missing identifier (d-tag) in: ${identifier}`,
+                    };
+                }
             } else {
                 return {
                     success: false,
