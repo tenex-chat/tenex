@@ -5,6 +5,7 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PairingManager } from "@/services/pairing";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
 import type { ReportInfo } from "@/services/reports/ReportService";
+import { articleToReportInfo } from "@/services/reports/articleUtils";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
@@ -348,7 +349,7 @@ export class ProjectContext {
      * Converts the article to ReportInfo and adds to cache
      */
     addReportFromArticle(article: NDKArticle): void {
-        const report = this.articleToReportInfo(article);
+        const report = articleToReportInfo(article);
         this.addReport(report);
     }
 
@@ -472,53 +473,6 @@ export class ProjectContext {
 
         // Assume it's already a hex pubkey
         return report.author;
-    }
-
-    /**
-     * Convert an NDKArticle to ReportInfo (extracted from ReportService)
-     */
-    private articleToReportInfo(article: NDKArticle): ReportInfo {
-        // Extract hashtags from tags (excluding the "memorize" and "memorize_team" tags)
-        const hashtags = article.tags
-            .filter((tag: string[]) => tag[0] === "t" && tag[1] !== "memorize" && tag[1] !== "memorize_team")
-            .map((tag: string[]) => tag[1]);
-
-        // Extract project reference if present
-        const projectTag = article.tags.find(
-            (tag: string[]) => tag[0] === "a" && tag[1]?.includes(":31933:")
-        );
-        const projectReference = projectTag ? projectTag[1] : undefined;
-
-        // Check if deleted
-        const isDeleted = article.tags.some((tag: string[]) => tag[0] === "deleted");
-
-        // Check if memorized (for the authoring agent only)
-        const isMemorized = article.tags.some(
-            (tag: string[]) => tag[0] === "t" && tag[1] === "memorize"
-        );
-
-        // Check if team-memorized (for ALL agents in the project)
-        const isMemorizedTeam = article.tags.some(
-            (tag: string[]) => tag[0] === "t" && tag[1] === "memorize_team"
-        );
-
-        // Get author npub
-        const authorNpub = article.author.npub;
-
-        return {
-            id: `nostr:${article.encode()}`,
-            slug: article.dTag || "",
-            title: article.title,
-            summary: article.summary,
-            content: article.content,
-            author: authorNpub,
-            publishedAt: article.published_at,
-            hashtags: hashtags.length > 0 ? hashtags : undefined,
-            projectReference,
-            isDeleted,
-            isMemorized,
-            isMemorizedTeam,
-        };
     }
 
     /**

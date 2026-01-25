@@ -140,30 +140,25 @@ async function addCoreAgentFragments(
         const reportService = new ReportService();
 
         // Get agent's own memorized reports
-        const agentMemorizedReports = reportService.getMemorizedReports(agent.pubkey);
+        const agentMemorizedReports = reportService.getMemorizedReportsForAgent(agent.pubkey);
 
         // Get team-memorized reports (visible to ALL agents)
         const teamMemorizedReports = reportService.getTeamMemorizedReports();
 
-        // Combine and deduplicate (in case an agent's report has both tags)
-        const allReportSlugs = new Set<string>();
-        const combinedReports = [];
+        // Combine and deduplicate by slug, using "latest publishedAt wins" semantics
+        // This ensures updates to memorized reports are reflected, not stale versions
+        const reportsBySlug = new Map<string, typeof teamMemorizedReports[0]>();
 
-        // Add team reports first (higher priority, visible to all)
-        for (const report of teamMemorizedReports) {
-            if (!allReportSlugs.has(report.slug)) {
-                allReportSlugs.add(report.slug);
-                combinedReports.push(report);
+        // Process all reports, keeping the one with the latest publishedAt for each slug
+        const allReports = [...teamMemorizedReports, ...agentMemorizedReports];
+        for (const report of allReports) {
+            const existing = reportsBySlug.get(report.slug);
+            if (!existing || (report.publishedAt || 0) > (existing.publishedAt || 0)) {
+                reportsBySlug.set(report.slug, report);
             }
         }
 
-        // Add agent's own memorized reports
-        for (const report of agentMemorizedReports) {
-            if (!allReportSlugs.has(report.slug)) {
-                allReportSlugs.add(report.slug);
-                combinedReports.push(report);
-            }
-        }
+        const combinedReports = Array.from(reportsBySlug.values());
 
         if (combinedReports.length > 0) {
             builder.add("memorized-reports", { reports: combinedReports });
