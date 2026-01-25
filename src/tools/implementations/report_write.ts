@@ -1,6 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { PendingDelegationsRegistry } from "@/services/ral";
-import { ReportService } from "@/services/reports";
+import { ReportService, getLocalReportStore } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -33,6 +33,42 @@ type ReportWriteOutput = {
     referencedAddressableEvents: string[];
 };
 
+/**
+ * Format report content for local storage with metadata header
+ */
+function formatReportContent(data: {
+    title: string;
+    summary: string;
+    content: string;
+    hashtags?: string[];
+}): string {
+    const lines: string[] = [];
+
+    // Add title
+    lines.push(`# ${data.title}`);
+    lines.push("");
+
+    // Add summary
+    if (data.summary) {
+        lines.push(`> ${data.summary}`);
+        lines.push("");
+    }
+
+    // Add hashtags if present
+    if (data.hashtags && data.hashtags.length > 0) {
+        lines.push(`**Tags:** ${data.hashtags.map((t) => `#${t}`).join(" ")}`);
+        lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("");
+
+    // Add content
+    lines.push(data.content);
+
+    return lines.join("\n");
+}
+
 // Core implementation - extracted from existing execute function
 async function executeReportWrite(
     input: ReportWriteInput,
@@ -48,7 +84,9 @@ async function executeReportWrite(
     });
 
     const reportService = new ReportService();
+    const localStore = getLocalReportStore();
 
+    // Step 1: Publish to Nostr
     const result = await reportService.writeReport(
         {
             slug,
@@ -60,6 +98,31 @@ async function executeReportWrite(
         },
         context.agent
     );
+
+    // Step 2: Save to local storage
+    // Format the content for local storage
+    const formattedContent = formatReportContent({ title, summary, content, hashtags });
+
+    // Get the event ID from the naddr-encoded result
+    // The created_at is now (since we just published)
+    const createdAt = Math.floor(Date.now() / 1000);
+
+    // Extract event ID from the encodedId - we need to decode the naddr
+    // For now, we'll use the addressableRef which contains the pubkey and slug
+    // The event ID would need to be retrieved from NDK, but we can use a placeholder
+    // and update it when we receive the event via subscription
+    const eventId = result.addressableRef; // Using addressable ref as a stable identifier
+
+    await localStore.writeReport(slug, formattedContent, {
+        eventId,
+        createdAt,
+        slug,
+    });
+
+    logger.info("📁 Report saved to local storage", {
+        slug,
+        path: localStore.getReportPath(slug),
+    });
 
     const memorizeMessage = memorize
         ? " This report has been memorized and will be included in your system prompt."
