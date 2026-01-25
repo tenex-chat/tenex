@@ -781,10 +781,9 @@ export class RALRegistry {
     agentPubkey: string,
     conversationId: string,
     ralNumber: number,
-    message: string,
-    options?: { suppressAttribution?: boolean }
+    message: string
   ): void {
-    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message, options);
+    this.queueMessage(agentPubkey, conversationId, ralNumber, "system", message);
   }
 
   /**
@@ -795,7 +794,7 @@ export class RALRegistry {
     conversationId: string,
     ralNumber: number,
     message: string,
-    options?: { suppressAttribution?: boolean; ephemeral?: boolean; senderPubkey?: string; eventId?: string }
+    options?: { ephemeral?: boolean; senderPubkey?: string; eventId?: string }
   ): void {
     this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
@@ -809,7 +808,7 @@ export class RALRegistry {
     ralNumber: number,
     role: "system" | "user",
     message: string,
-    options?: { suppressAttribution?: boolean; ephemeral?: boolean; senderPubkey?: string; eventId?: string }
+    options?: { ephemeral?: boolean; senderPubkey?: string; eventId?: string }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -833,7 +832,6 @@ export class RALRegistry {
       role,
       content: message,
       queuedAt: Date.now(),
-      suppressAttribution: options?.suppressAttribution,
       ephemeral: options?.ephemeral,
       senderPubkey: options?.senderPubkey,
       eventId: options?.eventId,
@@ -871,64 +869,6 @@ export class RALRegistry {
     });
 
     return injections;
-  }
-
-  /**
-   * Set current tool being executed.
-   * @deprecated Use setToolActive instead for proper concurrent tool tracking.
-   *
-   * This method maintains backward compatibility by:
-   * - Using a fixed synthetic toolCallId (__legacy_tool__) for activeTools tracking
-   * - Ensuring legacy callers can still reach ACTING state
-   */
-  setCurrentTool(agentPubkey: string, conversationId: string, ralNumber: number, toolName: string | undefined): void {
-    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
-    if (!ral) return;
-
-    // Use a synthetic toolCallId for legacy callers that don't have a real toolCallId
-    const legacyToolCallId = "__legacy_tool__";
-
-    if (toolName) {
-      // Tool is starting - add to activeTools and set currentTool
-      const now = Date.now();
-      ral.activeTools.set(legacyToolCallId, { name: toolName, startedAt: now });
-      ral.currentTool = toolName;
-      ral.toolStartedAt = now;
-    } else {
-      // Tool is ending - remove from activeTools
-      ral.activeTools.delete(legacyToolCallId);
-      // Update currentTool to another active tool if any remain
-      if (ral.activeTools.size === 0) {
-        ral.currentTool = undefined;
-        ral.toolStartedAt = undefined;
-      } else {
-        // Set currentTool to one of the remaining active tools, including its start time
-        // Safe to use ! assertion: we're in the else branch where activeTools.size > 0
-        const remainingToolInfo = ral.activeTools.values().next().value!;
-        ral.currentTool = remainingToolInfo.name;
-        ral.toolStartedAt = remainingToolInfo.startedAt;
-      }
-      // Clean up abort controller
-      const key = this.makeKey(agentPubkey, conversationId);
-      this.abortControllers.delete(this.makeAbortKey(key, ralNumber));
-    }
-
-    ral.lastActivityAt = Date.now();
-
-    // Derive state from activeTools:
-    // - If any tools are active: ACTING
-    // - If no tools but streaming: STREAMING
-    // - If no tools and not streaming: REASONING
-    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
-    if (ral.activeTools.size > 0) {
-      newState = 'ACTING';
-    } else if (ral.isStreaming) {
-      newState = 'STREAMING';
-    } else {
-      newState = 'REASONING';
-    }
-
-    llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
   }
 
   /**

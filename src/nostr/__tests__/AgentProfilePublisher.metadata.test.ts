@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
-import { AgentPublisher } from "../AgentPublisher";
+import { AgentProfilePublisher } from "../AgentProfilePublisher";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
 
@@ -37,7 +37,7 @@ mock.module("@/agents/AgentStorage", () => ({
     },
 }));
 
-describe("AgentPublisher - Agent Metadata in Kind:0", () => {
+describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let mockPublish: any;
     let mockSign: any;
     let publishSpy: ReturnType<typeof spyOn>;
@@ -90,7 +90,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 useCriteria: "Use when testing is needed",
             };
 
-            await AgentPublisher.publishAgentProfile(
+            await AgentProfilePublisher.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -157,7 +157,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
 
             const ndkAgentEventId = "a".repeat(64); // Valid hex event ID
 
-            await AgentPublisher.publishAgentProfile(
+            await AgentProfilePublisher.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -220,7 +220,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
                 // No instructions or useCriteria
             };
 
-            await AgentPublisher.publishAgentProfile(
+            await AgentProfilePublisher.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -270,7 +270,7 @@ describe("AgentPublisher - Agent Metadata in Kind:0", () => {
             signer.pubkey, // This should be filtered out
         ];
 
-        await AgentPublisher.publishAgentProfile(
+        await AgentProfilePublisher.publishAgentProfile(
             signer,
             "TestAgent",
             "Tester",

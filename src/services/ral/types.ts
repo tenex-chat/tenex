@@ -92,7 +92,6 @@ export interface QueuedInjection {
   role: InjectionRole;
   content: string;
   queuedAt: number;
-  suppressAttribution?: boolean;
   /** If true, message is included in LLM context but NOT persisted to ConversationStore */
   ephemeral?: boolean;
   /** Original sender pubkey (for message attribution when sender differs from expected) */
@@ -118,11 +117,9 @@ export interface RALRegistryEntry {
    * Value contains tool name (for display) and startedAt timestamp (for duration tracking).
    */
   activeTools: Map<string, { name: string; startedAt: number }>;
-  /**
-   * @deprecated Use activeTools instead. Kept for backward compatibility during transition.
-   * Will be removed in a future version.
-   */
+  /** Most recently started tool name (derived from activeTools, for display only) */
   currentTool?: string;
+  /** Start time of the most recently started tool (derived from activeTools, for display only) */
   toolStartedAt?: number;
   createdAt: number;
   lastActivityAt: number;

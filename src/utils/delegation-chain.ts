@@ -151,46 +151,31 @@ export function buildDelegationChain(
         // Check if this parent conversation has its own delegation chain already computed
         const parentChain = parentStore.metadata.delegationChain;
         if (parentChain && parentChain.length > 0) {
-            // Check for legacy semantics: under the OLD semantic, the origin entry HAD a conversationId.
-            // Under the NEW semantic (Option B - Store on Recipient), origin should NOT have a conversationId.
-            // If the first entry (origin) has a conversationId, this is a legacy chain that needs re-computation.
-            const isLegacyChain = parentChain[0].conversationId !== undefined;
-
-            if (isLegacyChain) {
-                // Legacy chain detected - do NOT trust it, continue walking to re-compute
-                logger.debug("[delegation-chain] Legacy chain detected (origin has conversationId), re-computing", {
-                    conversationId: currentParentId,
-                    originEntry: parentChain[0].displayName,
-                    originConvId: parentChain[0].conversationId,
-                });
-                // Fall through to continue walking up the chain manually
-            } else {
-                // The stored chain uses new semantics - it's authoritative
-                // Clear any collectedAncestors that overlap with the stored chain
-                const storedPubkeys = new Set(parentChain.map(e => e.pubkey));
-                for (let i = collectedAncestors.length - 1; i >= 0; i--) {
-                    if (storedPubkeys.has(collectedAncestors[i].pubkey)) {
-                        seenPubkeys.delete(collectedAncestors[i].pubkey);
-                        collectedAncestors.splice(i, 1);
-                    }
+            // The stored chain is authoritative - use it
+            // Clear any collectedAncestors that overlap with the stored chain
+            const storedPubkeys = new Set(parentChain.map(e => e.pubkey));
+            for (let i = collectedAncestors.length - 1; i >= 0; i--) {
+                if (storedPubkeys.has(collectedAncestors[i].pubkey)) {
+                    seenPubkeys.delete(collectedAncestors[i].pubkey);
+                    collectedAncestors.splice(i, 1);
                 }
-
-                // Use the parent's already-computed chain (it's already in oldest-first order)
-                // Clone entries to avoid mutating stored chain
-                for (const entry of parentChain) {
-                    if (!seenPubkeys.has(entry.pubkey)) {
-                        seenPubkeys.add(entry.pubkey);
-                        chain.push({ ...entry });
-                    }
-                }
-
-                // The immediate delegator (event.pubkey) was delegated TO in currentParentId
-                // (this is the conversation where the stored chain ends, where they work)
-                immediateDelegatorConvId = currentParentId;
-
-                // We have the full ancestry from the stored chain - stop walking
-                break;
             }
+
+            // Use the parent's already-computed chain (it's already in oldest-first order)
+            // Clone entries to avoid mutating stored chain
+            for (const entry of parentChain) {
+                if (!seenPubkeys.has(entry.pubkey)) {
+                    seenPubkeys.add(entry.pubkey);
+                    chain.push({ ...entry });
+                }
+            }
+
+            // The immediate delegator (event.pubkey) was delegated TO in currentParentId
+            // (this is the conversation where the stored chain ends, where they work)
+            immediateDelegatorConvId = currentParentId;
+
+            // We have the full ancestry from the stored chain - stop walking
+            break;
         }
 
         // Get the first message to find who initiated this conversation

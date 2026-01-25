@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
-import { AgentPublisher } from "@/nostr/AgentPublisher";
+import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
@@ -208,7 +208,7 @@ export class AgentRegistry {
 
                 const signer = new NDKPrivateKeySigner(storedAgent.nsec);
 
-                await AgentPublisher.publishAgentProfile(
+                await AgentProfilePublisher.publishAgentProfile(
                     signer,
                     agent.name,
                     agent.role,
