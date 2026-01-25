@@ -107,6 +107,15 @@ export class AgentPublisher {
             context.ralNumber
         );
 
+        // DEBUG: Temporary logging to diagnose llm-runtime issue
+        logger.info("[AgentPublisher.consumeAndEnhanceContext]", {
+            agent: this.agent.slug,
+            pubkey: this.agent.pubkey.substring(0, 8),
+            conv: context.conversationId.substring(0, 8),
+            ral: context.ralNumber,
+            unreportedMs: unreportedRuntime,
+        });
+
         // If context already has llmRuntime set explicitly, use that value
         // (but we still consumed above to advance the counter)
         if (context.llmRuntime !== undefined) {

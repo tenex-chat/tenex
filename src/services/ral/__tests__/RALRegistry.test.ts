@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 
@@ -904,6 +904,177 @@ describe("RALRegistry", () => {
       const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
       expect(completed).toHaveLength(1);
       expect(completed[0].delegationConversationId).toBe("del-123");
+    });
+  });
+
+  describe("llm-runtime mid-stream calculation", () => {
+    // Use Bun's setSystemTime for deterministic tests
+    let startTime: number;
+
+    beforeEach(() => {
+      startTime = 1000000; // Fixed start time
+      setSystemTime(new Date(startTime));
+    });
+
+    afterEach(() => {
+      // Reset to real time
+      setSystemTime();
+    });
+
+    it("should return non-zero runtime when consumed during active LLM stream", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start the LLM stream
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
+
+      // Advance time by 50ms
+      setSystemTime(new Date(startTime + 50));
+
+      // Consume runtime DURING the stream (this is what happens when events are published mid-stream)
+      const runtime = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+
+      // This is the key test: runtime should be exactly 50ms
+      expect(runtime).toBe(50);
+    });
+
+    it("should return incremental runtime on subsequent mid-stream consumes", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start the LLM stream
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
+
+      // Advance 30ms and consume first runtime
+      setSystemTime(new Date(startTime + 30));
+      const runtime1 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+
+      // Advance another 30ms and consume second runtime
+      setSystemTime(new Date(startTime + 60));
+      const runtime2 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+
+      // Both should be exactly 30ms (incremental, not cumulative)
+      expect(runtime1).toBe(30);
+      expect(runtime2).toBe(30);
+
+      // The total should be exactly 60ms
+      expect(runtime1 + runtime2).toBe(60);
+    });
+
+    it("should not double-count runtime after endLLMStream", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start stream and advance 30ms
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
+      setSystemTime(new Date(startTime + 30));
+
+      // Consume mid-stream (should get 30ms)
+      const runtime1 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime1).toBe(30);
+
+      // Advance another 20ms and end the stream
+      setSystemTime(new Date(startTime + 50));
+      registry.endLLMStream(agentPubkey, conversationId, ralNumber);
+
+      // Consume again after end (should get the 20ms between consume and endLLMStream)
+      const runtime2 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime2).toBe(20);
+
+      // Total accumulated should be 50ms
+      const totalAccumulated = registry.getAccumulatedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(totalAccumulated).toBe(50);
+    });
+
+    it("should return 0 runtime when no stream is active and no prior accumulation", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // No stream started, consume should return 0
+      const runtime = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime).toBe(0);
+    });
+
+    it("should return correct runtime when consuming after multiple start/end cycles", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // First stream cycle: 20ms
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "message 1");
+      setSystemTime(new Date(startTime + 20));
+      registry.endLLMStream(agentPubkey, conversationId, ralNumber);
+
+      // Consume after first cycle
+      const runtime1 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime1).toBe(20);
+
+      // Second stream cycle
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "message 2");
+      setSystemTime(new Date(startTime + 40));
+
+      // Consume during second stream
+      const runtime2 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime2).toBe(20);
+
+      // Advance 10ms more and end second stream
+      setSystemTime(new Date(startTime + 50));
+      registry.endLLMStream(agentPubkey, conversationId, ralNumber);
+
+      // Consume remaining
+      const runtime3 = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(runtime3).toBe(10);
+
+      // Total accumulated should be 50ms
+      const totalAccumulated = registry.getAccumulatedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(totalAccumulated).toBe(50);
+    });
+
+    it("should handle getUnreportedRuntime (non-consuming) during active stream", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
+      setSystemTime(new Date(startTime + 30));
+
+      // Get without consuming (preview) - should be 30ms
+      const preview = registry.getUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(preview).toBe(30);
+
+      // Preview should not affect the value
+      const preview2 = registry.getUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(preview2).toBe(30);
+
+      // Actual consume should return the same 30ms
+      const consumed = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+      expect(consumed).toBe(30);
+    });
+
+    it("should preserve llmStreamStartTime for accurate stream_duration_ms in telemetry", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Start stream
+      registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
+
+      // Advance 30ms and consume mid-stream
+      setSystemTime(new Date(startTime + 30));
+      registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
+
+      // Advance another 20ms
+      setSystemTime(new Date(startTime + 50));
+
+      // Get the RAL to verify llmStreamStartTime is preserved
+      const ral = registry.getRAL(agentPubkey, conversationId, ralNumber);
+      expect(ral?.llmStreamStartTime).toBeDefined();
+      // Verify the checkpoint was updated (moved from start time to after the consume)
+      expect(ral?.lastRuntimeCheckpointAt).toBe(startTime + 30);
+      // The original start time should still be preserved
+      expect(ral?.llmStreamStartTime).toBe(startTime);
+
+      // End stream - stream_duration_ms should be 50ms (total), not 20ms (since checkpoint)
+      // We verify this indirectly by checking the total accumulated
+      registry.endLLMStream(agentPubkey, conversationId, ralNumber);
+
+      // After ending, both timestamps should be cleared
+      const ralAfter = registry.getRAL(agentPubkey, conversationId, ralNumber);
+      expect(ralAfter?.llmStreamStartTime).toBeUndefined();
+      expect(ralAfter?.lastRuntimeCheckpointAt).toBeUndefined();
+
+      // Total should be 50ms
+      expect(ralAfter?.accumulatedRuntime).toBe(50);
     });
   });
 
