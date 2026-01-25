@@ -1,9 +1,10 @@
 import type { ToolExecutionContext } from "@/tools/types";
-import { getLocalReportStore } from "@/services/reports";
+import { getLocalReportStore, InvalidSlugError } from "@/services/reports";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
+import { nip19 } from "nostr-tools";
 
 const reportReadSchema = z.object({
     identifier: z
@@ -45,18 +46,47 @@ async function executeReportRead(
         slug = slug.slice(6);
     }
 
-    // If it looks like an naddr, we can't easily extract the slug without decoding
-    // For now, we'll assume local storage uses slugs directly
-    // naddr identifiers should still work via Nostr hydration
+    // If it looks like an naddr, decode it to extract the slug (d-tag)
     if (slug.startsWith("naddr1")) {
-        logger.warn("📖 naddr identifiers are not directly supported for local reads", {
-            identifier,
-            agent: context.agent.name,
-        });
-        return {
-            success: false,
-            message: `Please use the report slug instead of naddr identifier. naddr: ${identifier}`,
-        };
+        try {
+            const decoded = nip19.decode(slug);
+            if (decoded.type === "naddr" && decoded.data.identifier) {
+                slug = decoded.data.identifier;
+                logger.debug("📖 Decoded naddr to slug", {
+                    originalIdentifier: identifier,
+                    extractedSlug: slug,
+                    agent: context.agent.name,
+                });
+            } else {
+                return {
+                    success: false,
+                    message: `Invalid naddr format - could not extract report slug from: ${identifier}`,
+                };
+            }
+        } catch (decodeError) {
+            logger.warn("📖 Failed to decode naddr identifier", {
+                identifier,
+                error: decodeError instanceof Error ? decodeError.message : String(decodeError),
+                agent: context.agent.name,
+            });
+            return {
+                success: false,
+                message: `Failed to decode naddr identifier: ${identifier}. Please provide a valid slug or naddr.`,
+            };
+        }
+    }
+
+    // Validate the slug for path safety
+    try {
+        localStore.validateSlug(slug);
+    } catch (error) {
+        if (error instanceof InvalidSlugError) {
+            return {
+                success: false,
+                message: error.message,
+            };
+        }
+        throw error;
     }
 
     // Read from local storage

@@ -1,16 +1,26 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, relative } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
+
+/**
+ * Error thrown when a slug fails validation
+ */
+export class InvalidSlugError extends Error {
+    constructor(slug: string, reason: string) {
+        super(`Invalid report slug "${slug}": ${reason}`);
+        this.name = "InvalidSlugError";
+    }
+}
 
 /**
  * Metadata stored alongside each local report to track its Nostr origin
  */
 export interface LocalReportMetadata {
-    /** Nostr event ID of the report */
-    eventId: string;
-    /** Unix timestamp when the report was created on Nostr */
+    /** Addressable reference (pubkey:kind:slug) used as stable identifier */
+    addressableRef: string;
+    /** Unix timestamp when the report was created/published */
     createdAt: number;
     /** The slug (d-tag) of the report */
     slug: string;
@@ -45,6 +55,72 @@ export class LocalReportStore {
     }
 
     /**
+     * Validate a slug to prevent path traversal attacks.
+     * Slugs must:
+     * - Not be empty
+     * - Not contain path separators (/, \)
+     * - Not contain parent directory references (..)
+     * - Not start or end with dots
+     * - Only contain alphanumeric characters, hyphens, underscores
+     *
+     * @param slug The slug to validate
+     * @throws InvalidSlugError if the slug is invalid
+     */
+    validateSlug(slug: string): void {
+        if (!slug || slug.trim() === "") {
+            throw new InvalidSlugError(slug, "slug cannot be empty");
+        }
+
+        // Check for path separators
+        if (slug.includes("/") || slug.includes("\\")) {
+            throw new InvalidSlugError(slug, "slug cannot contain path separators (/ or \\)");
+        }
+
+        // Check for parent directory references
+        if (slug.includes("..")) {
+            throw new InvalidSlugError(slug, "slug cannot contain parent directory references (..)");
+        }
+
+        // Check for leading/trailing dots (could be hidden files or special dirs)
+        if (slug.startsWith(".") || slug.endsWith(".")) {
+            throw new InvalidSlugError(slug, "slug cannot start or end with a dot");
+        }
+
+        // Only allow safe characters: alphanumeric, hyphens, underscores
+        const safeSlugPattern = /^[a-zA-Z0-9_-]+$/;
+        if (!safeSlugPattern.test(slug)) {
+            throw new InvalidSlugError(
+                slug,
+                "slug can only contain alphanumeric characters, hyphens (-), and underscores (_)"
+            );
+        }
+    }
+
+    /**
+     * Get a safe, validated path for a report file.
+     * Validates the slug and ensures the resulting path is within the reports directory.
+     *
+     * @param slug The report slug
+     * @param extension The file extension (default: "md")
+     * @returns The validated file path
+     * @throws InvalidSlugError if the slug is invalid or path escapes the reports directory
+     */
+    private getSafePath(slug: string, extension: "md" | "json" = "md"): string {
+        this.validateSlug(slug);
+
+        const baseDir = extension === "md" ? this.getReportsDir() : this.getMetadataDir();
+        const filePath = resolve(join(baseDir, `${slug}.${extension}`));
+
+        // Double-check: ensure resolved path is still within the base directory
+        const relativePath = relative(baseDir, filePath);
+        if (relativePath.startsWith("..") || relativePath.includes("..")) {
+            throw new InvalidSlugError(slug, "resolved path escapes the reports directory");
+        }
+
+        return filePath;
+    }
+
+    /**
      * Ensure the reports and metadata directories exist
      */
     async ensureDirectories(): Promise<void> {
@@ -54,16 +130,18 @@ export class LocalReportStore {
 
     /**
      * Get the file path for a report's content
+     * @throws InvalidSlugError if the slug is invalid
      */
     getReportPath(slug: string): string {
-        return join(this.getReportsDir(), `${slug}.md`);
+        return this.getSafePath(slug, "md");
     }
 
     /**
      * Get the file path for a report's metadata
+     * @throws InvalidSlugError if the slug is invalid
      */
     private getMetadataPath(slug: string): string {
-        return join(this.getMetadataDir(), `${slug}.json`);
+        return this.getSafePath(slug, "json");
     }
 
     /**
@@ -88,7 +166,7 @@ export class LocalReportStore {
             slug,
             path: reportPath,
             contentLength: content.length,
-            eventId: metadata.eventId.substring(0, 12),
+            addressableRef: metadata.addressableRef.substring(0, 20),
         });
     }
 
@@ -173,14 +251,14 @@ export class LocalReportStore {
      * Hydrate local storage from a Nostr event if it's newer
      * @param slug The report slug (d-tag)
      * @param content The report content
-     * @param eventId The Nostr event ID
+     * @param addressableRef The addressable reference (pubkey:kind:slug)
      * @param createdAt The Nostr event's created_at timestamp
      * @returns true if the local copy was updated
      */
     async hydrateFromNostr(
         slug: string,
         content: string,
-        eventId: string,
+        addressableRef: string,
         createdAt: number
     ): Promise<boolean> {
         const isNewer = await this.isNewerThanLocal(slug, createdAt);
@@ -194,14 +272,14 @@ export class LocalReportStore {
         }
 
         await this.writeReport(slug, content, {
-            eventId,
+            addressableRef,
             createdAt,
             slug,
         });
 
         logger.info("📁 Hydrated local report from Nostr", {
             slug,
-            eventId: eventId.substring(0, 12),
+            addressableRef: addressableRef.substring(0, 20),
             createdAt,
         });
 

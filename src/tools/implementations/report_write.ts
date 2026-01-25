@@ -103,26 +103,30 @@ async function executeReportWrite(
     // Format the content for local storage
     const formattedContent = formatReportContent({ title, summary, content, hashtags });
 
-    // Get the event ID from the naddr-encoded result
     // The created_at is now (since we just published)
     const createdAt = Math.floor(Date.now() / 1000);
 
-    // Extract event ID from the encodedId - we need to decode the naddr
-    // For now, we'll use the addressableRef which contains the pubkey and slug
-    // The event ID would need to be retrieved from NDK, but we can use a placeholder
-    // and update it when we receive the event via subscription
-    const eventId = result.addressableRef; // Using addressable ref as a stable identifier
+    // Try to save locally, but don't fail if Nostr publish succeeded
+    try {
+        await localStore.writeReport(slug, formattedContent, {
+            addressableRef: result.addressableRef,
+            createdAt,
+            slug,
+        });
 
-    await localStore.writeReport(slug, formattedContent, {
-        eventId,
-        createdAt,
-        slug,
-    });
-
-    logger.info("📁 Report saved to local storage", {
-        slug,
-        path: localStore.getReportPath(slug),
-    });
+        logger.info("📁 Report saved to local storage", {
+            slug,
+            path: localStore.getReportPath(slug),
+        });
+    } catch (localError) {
+        // Nostr publish succeeded but local save failed - log warning but don't throw
+        logger.warn("⚠️ Report published to Nostr but local save failed", {
+            slug,
+            error: localError instanceof Error ? localError.message : String(localError),
+            nostrId: result.encodedId,
+        });
+        // Continue - the report is live on Nostr and will be hydrated later
+    }
 
     const memorizeMessage = memorize
         ? " This report has been memorized and will be included in your system prompt."

@@ -501,17 +501,20 @@ export class EventHandler {
                 // Format content for local storage (matching report_write format)
                 const formattedContent = this.formatReportForLocalStorage(article);
 
+                // Construct addressable reference (pubkey:kind:d-tag)
+                const addressableRef = `${event.pubkey}:${event.kind}:${article.dTag}`;
+
                 const hydrated = await localStore.hydrateFromNostr(
                     article.dTag,
                     formattedContent,
-                    event.id,
+                    addressableRef,
                     eventCreatedAt
                 );
 
                 if (hydrated) {
                     trace.getActiveSpan()?.addEvent("event_handler.report_hydrated", {
                         "report.slug": article.dTag,
-                        "report.eventId": event.id.substring(0, 12),
+                        "report.addressableRef": addressableRef.substring(0, 20),
                     });
                 }
             }
