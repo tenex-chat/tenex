@@ -6,7 +6,7 @@ import type { AISdkTool } from "@/tools/types";
 import { resolveRecipientToPubkey } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
-import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
+import { wouldCreateCircularDelegation, truncateConversationId } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
@@ -165,7 +165,7 @@ async function executeDelegate(
     pendingDelegations
   );
 
-  const delegationConversationIds = pendingDelegations.map(d => d.delegationConversationId);
+  const delegationConversationIds = pendingDelegations.map(d => truncateConversationId(d.delegationConversationId));
 
   logger.info("[delegate] Published delegations, agent continues without blocking", {
     count: pendingDelegations.length,
