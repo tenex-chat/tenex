@@ -37,7 +37,7 @@ mock.module("@/agents/AgentStorage", () => ({
     },
 }));
 
-describe("AgentPublisher - Agent Metadata in Kind:0", () => {
+describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let mockPublish: any;
     let mockSign: any;
     let publishSpy: ReturnType<typeof spyOn>;

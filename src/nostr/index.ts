@@ -7,6 +7,7 @@ export type {
     EventContext,
 } from "./AgentEventEncoder";
 export { AgentEventEncoder } from "./AgentEventEncoder";
+export { AgentProfilePublisher } from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
 export { getNDK } from "./ndkClient";
 export {
