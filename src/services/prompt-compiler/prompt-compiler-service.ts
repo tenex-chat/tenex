@@ -2,15 +2,17 @@
  * Prompt Compiler Service (TIN-10)
  *
  * Compiles agent lessons with user comments into optimized system prompts.
- * Uses LLM to synthesize lessons + comments into the base prompt.
+ * Uses LLM to intelligently merge:
+ * - Agent base instructions
+ * - Lessons (retrieved from ProjectContext)
+ * - Optional additionalSystemPrompt
  *
- * Single-file YAGNI implementation:
- * - Nostr subscription for kind 1111 events (comments on lessons)
- * - Filter by whitelisted authors and #K: ["4129"] (NIP-22)
- * - Track EOSE state with waitForEOSE() method
- * - Disk cache at .tenex/agents/prompts/{agentPubkey}.json
- * - LLM compilation with dedicated prompt-compilation config
- * - Freshness logic: recompile if max(created_at) > cache timestamp OR basePrompt hash changed
+ * Key behaviors:
+ * - Retrieves lessons internally from ProjectContext (not passed as parameter)
+ * - Uses generateText (not generateObject) for natural prompt integration
+ * - Returns only the compiled prompt string (not a structured object)
+ * - On LLM failure: throws error (consumer handles fallback)
+ * - Cache hash uses agentDefinitionEventId when provided, or basePromptHash for local agents
  */
 
 import * as fs from "node:fs/promises";
@@ -23,7 +25,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
 import { logger } from "@/utils/logger";
-import { z } from "zod";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 
 // =====================================================================================
 // TYPES
@@ -59,17 +61,6 @@ export interface CompiledPromptCacheEntry {
     basePromptHash: string;
 }
 
-/**
- * Result of compile() indicating whether compilation actually occurred
- */
-export interface CompileResult {
-    /** The prompt (either compiled or base) */
-    prompt: string;
-    /** Whether LLM compilation actually occurred */
-    compiled: boolean;
-    /** Number of lessons that were provided */
-    lessonsCount: number;
-}
 
 // =====================================================================================
 // PROMPT COMPILER SERVICE
@@ -83,6 +74,7 @@ export class PromptCompilerService {
     private ndk: NDK;
     private agentPubkey: Hexpubkey;
     private whitelistedPubkeys: Set<Hexpubkey>;
+    private projectContext: ProjectContext;
 
     /** Subscription for kind 1111 (comment) events */
     private subscription: NDKSubscription | null = null;
@@ -98,10 +90,16 @@ export class PromptCompilerService {
     /** Cache directory */
     private cacheDir: string;
 
-    constructor(agentPubkey: Hexpubkey, whitelistedPubkeys: Hexpubkey[], ndk: NDK) {
+    constructor(
+        agentPubkey: Hexpubkey,
+        whitelistedPubkeys: Hexpubkey[],
+        ndk: NDK,
+        projectContext: ProjectContext
+    ) {
         this.agentPubkey = agentPubkey;
         this.whitelistedPubkeys = new Set(whitelistedPubkeys);
         this.ndk = ndk;
+        this.projectContext = projectContext;
 
         // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
         this.cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
@@ -308,63 +306,77 @@ export class PromptCompilerService {
 
     /**
      * Compile lessons and their comments into a system prompt.
-     * Uses caching based on maxCreatedAt and basePrompt hash.
+     * Uses LLM to intelligently merge agent base instructions with lessons.
      *
-     * @param lessons The agent's lessons
      * @param basePrompt The base system prompt to enhance
-     * @returns CompileResult indicating whether compilation occurred and the resulting prompt
+     * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
+     * @param additionalSystemPrompt Optional additional instructions to integrate
+     * @returns The compiled prompt string
+     * @throws Error if LLM compilation fails (consumer should handle fallback)
      */
-    async compile(lessons: NDKAgentLesson[], basePrompt: string): Promise<CompileResult> {
-        // If no lessons, return base prompt directly (skip compilation)
-        if (lessons.length === 0) {
-            logger.debug("PromptCompilerService: no lessons, returning base prompt", {
+    async compile(
+        basePrompt: string,
+        agentDefinitionEventId?: string,
+        additionalSystemPrompt?: string
+    ): Promise<string> {
+        // Retrieve lessons from ProjectContext
+        const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
+
+        // If no lessons and no additional prompt, return base prompt directly
+        if (lessons.length === 0 && !additionalSystemPrompt) {
+            logger.debug("PromptCompilerService: no lessons or additional prompt, returning base prompt", {
                 agentPubkey: this.agentPubkey.substring(0, 8),
             });
-            return { prompt: basePrompt, compiled: false, lessonsCount: 0 };
+            return basePrompt;
         }
 
         // Calculate freshness inputs
         const maxCreatedAt = this.calculateMaxCreatedAt(lessons);
-        const basePromptHash = this.hashString(basePrompt);
+        // Create deterministic cache key from all relevant inputs:
+        // - agentDefinitionEventId (when provided for non-local agents)
+        // - basePrompt (always included - captures local agent definition changes)
+        // - additionalSystemPrompt (captures dynamic context changes)
+        const cacheHash = this.hashString(JSON.stringify({
+            agentDefinitionEventId: agentDefinitionEventId || null,
+            basePrompt,
+            additionalSystemPrompt: additionalSystemPrompt || null,
+        }));
 
         // Check cache
         const cached = await this.readCache();
         if (cached) {
             const cacheValid =
                 cached.maxCreatedAt >= maxCreatedAt &&
-                cached.basePromptHash === basePromptHash;
+                cached.basePromptHash === cacheHash;
 
             if (cacheValid) {
                 logger.debug("PromptCompilerService: returning cached prompt", {
                     agentPubkey: this.agentPubkey.substring(0, 8),
                     cacheAge: Date.now() - cached.timestamp * 1000,
                 });
-                // Cached compilation was successful
-                return { prompt: cached.compiledPrompt, compiled: true, lessonsCount: lessons.length };
+                return cached.compiledPrompt;
             }
 
             logger.debug("PromptCompilerService: cache stale, recompiling", {
                 agentPubkey: this.agentPubkey.substring(0, 8),
                 cachedMaxCreatedAt: cached.maxCreatedAt,
                 currentMaxCreatedAt: maxCreatedAt,
-                basePromptHashMatch: cached.basePromptHash === basePromptHash,
+                cacheHashMatch: cached.basePromptHash === cacheHash,
             });
         }
 
         // Compile with LLM
-        const compileResult = await this.compileWithLLM(lessons, basePrompt);
+        const compiledPrompt = await this.compileWithLLM(lessons, basePrompt, additionalSystemPrompt);
 
-        // Only cache if compilation actually happened
-        if (compileResult.compiled) {
-            await this.writeCache({
-                compiledPrompt: compileResult.prompt,
-                timestamp: Math.floor(Date.now() / 1000),
-                maxCreatedAt,
-                basePromptHash,
-            });
-        }
+        // Cache the result
+        await this.writeCache({
+            compiledPrompt,
+            timestamp: Math.floor(Date.now() / 1000),
+            maxCreatedAt,
+            basePromptHash: cacheHash,
+        });
 
-        return { ...compileResult, lessonsCount: lessons.length };
+        return compiledPrompt;
     }
 
     /**
@@ -392,21 +404,26 @@ export class PromptCompilerService {
     }
 
     /**
-     * Compile lessons + comments into a prompt using the LLM
-     * @returns Result indicating whether compilation occurred
+     * Compile lessons + comments into a prompt using the LLM.
+     * Uses generateText to naturally integrate lessons into the base prompt.
+     *
+     * @param lessons The agent's lessons
+     * @param basePrompt The base system prompt to enhance
+     * @param additionalSystemPrompt Optional additional instructions to integrate
+     * @returns The compiled prompt string
+     * @throws Error if LLM compilation fails
      */
     private async compileWithLLM(
         lessons: NDKAgentLesson[],
-        basePrompt: string
-    ): Promise<{ prompt: string; compiled: boolean }> {
-        // Get LLM configuration - use prompt-compilation config if set, otherwise summarization, otherwise default
+        basePrompt: string,
+        additionalSystemPrompt?: string
+    ): Promise<string> {
+        // Get LLM configuration - use promptCompilation config if set, then summarization, then default
         const { llms } = await config.loadConfig();
-        const configName = llms.summarization || llms.default; // TODO: Add prompt-compilation config option
+        const configName = llms.promptCompilation || llms.summarization || llms.default;
 
         if (!configName) {
-            logger.warn("PromptCompilerService: no LLM config available, caller should fall back to simple formatting");
-            // Return compiled: false to signal that lessons were NOT integrated
-            return { prompt: basePrompt, compiled: false };
+            throw new Error("PromptCompilerService: no LLM config available for prompt compilation");
         }
 
         const llmConfig = config.getLLMConfig(configName);
@@ -415,7 +432,7 @@ export class PromptCompilerService {
             sessionId: `prompt-compiler-${this.agentPubkey.substring(0, 8)}`,
         });
 
-        // Format lessons with their comments
+        // Format lessons with their comments (all lessons, regardless of comments)
         const lessonsWithComments = lessons.map((lesson) => {
             const comments = this.getCommentsForLesson(lesson.id || "");
             return {
@@ -428,64 +445,62 @@ export class PromptCompilerService {
             };
         });
 
-        // Build compilation prompt
-        const systemPrompt = `You are a prompt compiler that integrates lessons learned by an AI agent into their base system prompt.
+        // Build compilation prompt with emphasis on natural integration
+        const systemPrompt = `You are a prompt compiler that rewrites and integrates lessons learned by an AI agent into their base system prompt.
 
 Your task:
-1. Analyze the provided lessons and any comments/refinements from the user
-2. Synthesize the lessons into clear, actionable guidance
-3. Integrate them naturally into the base prompt structure
-4. Resolve any contradictions (newer lessons/comments take precedence)
-5. Remove redundancy while preserving important nuances
+1. Rewrite the base prompt to naturally incorporate the provided lessons
+2. Integrate lessons as natural parts of the instructions, not as separate sections
+3. Resolve any contradictions (newer lessons/comments take precedence)
+4. Remove redundancy while preserving important nuances
+5. You may restructure and reformat the prompt for better clarity
 
 Guidelines:
-- Preserve the original structure and tone of the base prompt
-- Add lessons as natural extensions, not bolted-on sections
+- Lessons should feel like they were always part of the original instructions
 - If a comment refines or corrects a lesson, use the refined version
 - Keep the result concise but comprehensive
 - Do NOT add meta-commentary about the compilation process
+- Do NOT mention that lessons were integrated
 
 Output ONLY the compiled prompt, nothing else.`;
 
-        const userPrompt = `## Base Prompt
+        // Build user prompt with all inputs
+        let userPrompt = `## Base Prompt
 
 ${basePrompt}
 
 ## Lessons to Integrate
 
-${JSON.stringify(lessonsWithComments, null, 2)}
+${JSON.stringify(lessonsWithComments, null, 2)}`;
 
-Please compile these lessons into the base prompt.`;
+        // Add additional system prompt if provided
+        if (additionalSystemPrompt) {
+            userPrompt += `
 
-        try {
-            const { object: result } = await llmService.generateObject(
-                [
-                    { role: "system", content: systemPrompt },
-                    { role: "user", content: userPrompt },
-                ],
-                z.object({
-                    compiledPrompt: z.string().describe("The compiled system prompt with lessons integrated"),
-                })
-            );
+## Additional Instructions
 
-            logger.info("PromptCompilerService: compiled prompt successfully", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-                lessonsCount: lessons.length,
-                commentsCount: this.getTotalCommentsCount(),
-                basePromptLength: basePrompt.length,
-                compiledLength: result.compiledPrompt.length,
-            });
-
-            return { prompt: result.compiledPrompt, compiled: true };
-        } catch (error) {
-            logger.error("PromptCompilerService: LLM compilation failed, caller should fall back", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-                error: error instanceof Error ? error.message : String(error),
-            });
-
-            // Return compiled: false to signal caller should use fallback formatting
-            return { prompt: basePrompt, compiled: false };
+${additionalSystemPrompt}`;
         }
+
+        userPrompt += `
+
+Please rewrite and compile this into a unified, cohesive prompt.`;
+
+        const { text: compiledPrompt } = await llmService.generateText([
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ]);
+
+        logger.info("PromptCompilerService: compiled prompt successfully", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+            lessonsCount: lessons.length,
+            commentsCount: this.getTotalCommentsCount(),
+            basePromptLength: basePrompt.length,
+            compiledLength: compiledPrompt.length,
+            hasAdditionalPrompt: !!additionalSystemPrompt,
+        });
+
+        return compiledPrompt;
     }
 
     // =====================================================================================

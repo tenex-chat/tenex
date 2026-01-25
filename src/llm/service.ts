@@ -11,6 +11,7 @@ import {
     type TextStreamPart,
     extractReasoningMiddleware,
     generateObject,
+    generateText,
     streamText,
     wrapLanguageModel,
 } from "ai";
@@ -408,7 +409,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             messages,
             schema,
             temperature: this.temperature,
-            maxTokens: this.maxTokens,
+            maxOutputTokens: this.maxTokens,
             ...(tools && Object.keys(tools).length > 0 ? { tools } : {}),
 
             // ✨ Enable full AI SDK telemetry
@@ -464,6 +465,61 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 };
             },
             "Generate structured object",
+            startTime
+        );
+    }
+
+    /**
+     * Generate plain text output using AI SDK's generateText.
+     * Unlike generateObject, this returns unstructured text directly from the model.
+     */
+    async generateText(
+        messages: ModelMessage[]
+    ): Promise<{ text: string; usage: LanguageModelUsageWithCostUsd }> {
+        const startTime = Date.now();
+
+        return this.withErrorHandling(
+            async () => {
+                trace.getActiveSpan()?.addEvent("llm.generate_text_start", {
+                    "llm.provider": this.provider,
+                    "llm.model": this.model,
+                    "messages.count": messages.length,
+                });
+
+                const languageModel = this.getLanguageModel();
+                const result = await generateText({
+                    model: languageModel,
+                    messages,
+                    temperature: this.temperature,
+                    maxOutputTokens: this.maxTokens,
+
+                    // ✨ Enable full AI SDK telemetry
+                    experimental_telemetry: this.getTelemetryConfig(),
+
+                    providerOptions: {
+                        openrouter: {
+                            usage: { include: true },
+                            user: getTraceCorrelationId(),
+                            metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                        },
+                    },
+                });
+
+                const duration = Date.now() - startTime;
+
+                trace.getActiveSpan()?.addEvent("llm.generate_text_complete", {
+                    "llm.provider": this.provider,
+                    "llm.model": this.model,
+                    "llm.duration_ms": duration,
+                    "text.length": result.text.length,
+                });
+
+                return {
+                    text: result.text,
+                    usage: result.usage,
+                };
+            },
+            "Generate text",
             startTime
         );
     }
