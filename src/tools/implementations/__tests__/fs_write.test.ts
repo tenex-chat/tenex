@@ -30,6 +30,34 @@ mock.module("@/lib/agent-home", () => ({
     ensureAgentHomeDirectory: () => true,
 }));
 
+// Create a mock LocalReportStore that uses current env at check time
+class MockLocalReportStore {
+    getReportsDir(): string {
+        const basePath = process.env.TENEX_BASE_DIR || "/tmp/tenex-default";
+        return path.join(basePath, "reports");
+    }
+
+    isPathInReportsDir(inputPath: string): boolean {
+        const normalizedPath = inputPath.replace(/\\/g, "/");
+        const normalizedReportsDir = this.getReportsDir().replace(/\\/g, "/");
+        return normalizedPath.startsWith(normalizedReportsDir + "/") ||
+               normalizedPath === normalizedReportsDir;
+    }
+}
+
+const mockStoreInstance = new MockLocalReportStore();
+
+mock.module("@/services/reports", () => ({
+    getLocalReportStore: () => mockStoreInstance,
+    LocalReportStore: MockLocalReportStore,
+    InvalidSlugError: class InvalidSlugError extends Error {
+        constructor(slug: string, reason: string) {
+            super(`Invalid report slug "${slug}": ${reason}`);
+            this.name = "InvalidSlugError";
+        }
+    },
+}));
+
 // Dynamic import after mock setup
 const { createFsWriteTool } = await import("../fs_write");
 
