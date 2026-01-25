@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
+import { getLocalReportStore } from "@/services/reports";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -29,6 +30,16 @@ async function executeWriteFile(
 ): Promise<string> {
     if (!path.startsWith("/")) {
         throw new Error(`Path must be absolute, got: ${path}`);
+    }
+
+    // Block writes to the reports directory - agents must use report_write instead
+    const localReportStore = getLocalReportStore();
+    if (localReportStore.isPathInReportsDir(path)) {
+        throw new Error(
+            `Cannot write to reports directory directly. ` +
+            `Path "${path}" is within the protected reports directory. ` +
+            `Use the report_write tool instead to create or update reports.`
+        );
     }
 
     // Check if path is within working directory (using secure path normalization)
