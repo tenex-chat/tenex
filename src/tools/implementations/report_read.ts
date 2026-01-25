@@ -9,7 +9,7 @@ import { nip19 } from "nostr-tools";
 const reportReadSchema = z.object({
     identifier: z
         .string()
-        .describe("The slug of the report to read"),
+        .describe("The report identifier - can be a slug (e.g., 'my-report'), an naddr (e.g., 'naddr1...'), or a nostr: URI (e.g., 'nostr:naddr1...')"),
 });
 
 type ReportReadInput = z.infer<typeof reportReadSchema>;

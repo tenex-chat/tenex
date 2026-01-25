@@ -251,7 +251,7 @@ export class LocalReportStore {
      * Hydrate local storage from a Nostr event if it's newer
      * @param slug The report slug (d-tag)
      * @param content The report content
-     * @param addressableRef The addressable reference (pubkey:kind:slug)
+     * @param addressableRef The addressable reference in NIP-33 format (kind:pubkey:identifier)
      * @param createdAt The Nostr event's created_at timestamp
      * @returns true if the local copy was updated
      */
