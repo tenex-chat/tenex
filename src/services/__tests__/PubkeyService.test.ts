@@ -43,34 +43,43 @@ describe("PubkeyService", () => {
         mockProjectContextInitialized = true;
 
         // Setup mock project context with agents
+        const agentsMap = new Map<string, AgentInstance>([
+            [
+                "code-writer",
+                {
+                    name: "Code Writer",
+                    slug: "code-writer",
+                    pubkey: "agent1-pubkey",
+                    role: "developer",
+                    llmConfig: "default",
+                    tools: [],
+                    signer: {} as any,
+                },
+            ],
+            [
+                "tester",
+                {
+                    name: "Tester",
+                    slug: "tester",
+                    pubkey: "agent2-pubkey",
+                    role: "tester",
+                    llmConfig: "default",
+                    tools: [],
+                    signer: {} as any,
+                },
+            ],
+        ]);
+
+        // Build pubkey -> agent map for getAgentByPubkey
+        const agentsByPubkey = new Map<string, AgentInstance>();
+        for (const agent of agentsMap.values()) {
+            agentsByPubkey.set(agent.pubkey, agent);
+        }
+
         mockProjectContext = {
             pubkey: "project-pubkey",
-            agents: new Map<string, AgentInstance>([
-                [
-                    "code-writer",
-                    {
-                        name: "Code Writer",
-                        slug: "code-writer",
-                        pubkey: "agent1-pubkey",
-                        role: "developer",
-                        llmConfig: "default",
-                        tools: [],
-                        signer: {} as any,
-                    },
-                ],
-                [
-                    "tester",
-                    {
-                        name: "Tester",
-                        slug: "tester",
-                        pubkey: "agent2-pubkey",
-                        role: "tester",
-                        llmConfig: "default",
-                        tools: [],
-                        signer: {} as any,
-                    },
-                ],
-            ]),
+            agents: agentsMap,
+            getAgentByPubkey: (pubkey: string) => agentsByPubkey.get(pubkey),
         };
 
         // Clear any cached data
@@ -92,7 +101,7 @@ describe("PubkeyService", () => {
             mockProjectContextInitialized = false;
 
             const name = await service.getName("agent1-pubkey");
-            expect(name).toBe("User"); // Falls back to default
+            expect(name).toBe("agent1-pubke"); // Falls back to shortened pubkey (12 chars)
         });
     });
 
@@ -151,11 +160,11 @@ describe("PubkeyService", () => {
             expect(name).toBe("alice123");
         });
 
-        it("should return default name if profile is empty", async () => {
+        it("should return shortened pubkey if profile is empty", async () => {
             mockNdkFetchEvent = null;
 
             const name = await service.getName("user-without-profile");
-            expect(name).toBe("User");
+            expect(name).toBe("user-without"); // First 12 chars (PREFIX_LENGTH)
         });
 
         it("should handle malformed profile content", async () => {
@@ -165,7 +174,7 @@ describe("PubkeyService", () => {
             };
 
             const name = await service.getName("user-with-bad-profile");
-            expect(name).toBe("User");
+            expect(name).toBe("user-with-ba"); // First 12 chars (PREFIX_LENGTH)
         });
     });
 
@@ -219,9 +228,9 @@ describe("PubkeyService", () => {
             expect(name).toBe("Dave");
         });
 
-        it("should return default name if not cached", () => {
+        it("should return shortened pubkey if not cached", () => {
             const name = service.getNameSync("uncached-user-pubkey");
-            expect(name).toBe("User");
+            expect(name).toBe("uncached-use"); // First 12 chars (PREFIX_LENGTH)
         });
     });
 });

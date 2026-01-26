@@ -13,10 +13,25 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-// Mock PubkeyService
+// Mock agent registry - simulates known agents in the system
+const mockAgentPubkeyToSlug: Map<string, string> = new Map([
+    ["agent-pubkey-claude-code", "claude-code"],
+    ["agent-pubkey-architect", "architect-orchestrator"],
+    ["agent-pubkey-debugger", "debugger"],
+]);
+
+// Mock PubkeyService - returns agent slug for known agents, truncated pubkey otherwise
 mock.module("@/services/PubkeyService", () => ({
     getPubkeyService: () => ({
-        getNameSync: (pk: string) => pk.slice(0, 8),
+        getNameSync: (pk: string) => {
+            // Return agent slug if this pubkey belongs to a registered agent
+            const agentSlug = mockAgentPubkeyToSlug.get(pk);
+            if (agentSlug) {
+                return agentSlug;
+            }
+            // Fall back to truncated pubkey (PREFIX_LENGTH = 12)
+            return pk.slice(0, 12);
+        },
     }),
 }));
 
@@ -109,18 +124,18 @@ describe("conversation_get Tool", () => {
                     {
                         messageType: "text",
                         content: "Hello",
-                        pubkey: "user-pub1",
+                        pubkey: "user-pub1234abcdef", // 12+ chars for truncation test
                         eventId: "event-1",
                         timestamp: 1700000000000,
                     },
                     {
                         messageType: "text",
                         content: "Hi there!",
-                        pubkey: "agent-pu",
+                        pubkey: "agent-pu1234abcdef", // 12+ chars for truncation test
                         eventId: "event-2",
                         timestamp: 1700000002000, // +2 seconds
                         ral: {},
-                        targetedPubkeys: ["user-pub1"],
+                        targetedPubkeys: ["user-pub1234abcdef"],
                     },
                 ],
             };
@@ -137,8 +152,8 @@ describe("conversation_get Tool", () => {
             // Should contain formatted lines
             const lines = messages.split("\n");
             expect(lines).toHaveLength(2);
-            expect(lines[0]).toBe("[+0] [@user-pub] Hello");
-            expect(lines[1]).toBe("[+2] [@agent-pu -> @user-pub] Hi there!");
+            expect(lines[0]).toBe("[+0] [@user-pub1234] Hello");
+            expect(lines[1]).toBe("[+2] [@agent-pu1234 -> @user-pub1234] Hi there!");
         });
 
         it("should not include metadata field", async () => {
@@ -212,7 +227,7 @@ describe("conversation_get Tool", () => {
                     {
                         messageType: "text",
                         content: "No target message",
-                        pubkey: "user-pubkey",
+                        pubkey: "user-pubkey123456", // 16 chars - truncated to 12
                         eventId: "event-1",
                         timestamp: 1700000000000,
                     },
@@ -223,7 +238,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@user-pub] No target message");
+            expect(messages).toBe("[+0] [@user-pubkey1] No target message");
             expect(messages).not.toContain("->");
         });
 
@@ -234,10 +249,10 @@ describe("conversation_get Tool", () => {
                     {
                         messageType: "text",
                         content: "Single target",
-                        pubkey: "sender-pk",
+                        pubkey: "sender-pk123456", // 15 chars - truncated to 12
                         eventId: "event-1",
                         timestamp: 1700000000000,
-                        targetedPubkeys: ["target-pk"],
+                        targetedPubkeys: ["target-pk123456"], // 15 chars - truncated to 12
                     },
                 ],
             };
@@ -246,7 +261,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@sender-p -> @target-p] Single target");
+            expect(messages).toBe("[+0] [@sender-pk123 -> @target-pk123] Single target");
         });
 
         it("should show comma-separated targets for multiple targets", async () => {
@@ -256,10 +271,10 @@ describe("conversation_get Tool", () => {
                     {
                         messageType: "text",
                         content: "Multi target",
-                        pubkey: "sender-pk",
+                        pubkey: "sender-pk123456", // 15 chars - truncated to 12
                         eventId: "event-1",
                         timestamp: 1700000000000,
-                        targetedPubkeys: ["target-1p", "target-2p"],
+                        targetedPubkeys: ["target-1pk12345", "target-2pk12345"], // 15 chars each - truncated to 12
                     },
                 ],
             };
@@ -268,12 +283,12 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "test-conversation-id" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@sender-p -> @target-1, @target-2] Multi target");
+            expect(messages).toBe("[+0] [@sender-pk123 -> @target-1pk12, @target-2pk12] Multi target");
         });
     });
 
     describe("Tool Call and Result Merging", () => {
-        it("should skip tool-results by default (no merging)", async () => {
+        it("should skip tool-calls and tool-results by default (includeToolResults=false)", async () => {
             mockConversationData = {
                 id: "test-conversation-id",
                 messages: [
@@ -317,12 +332,13 @@ describe("conversation_get Tool", () => {
             const messages = (result.conversation as any).messages;
             const lines = messages.split("\n");
 
-            // Should have 3 lines: text, tool-call (no result), text
-            expect(lines).toHaveLength(3);
+            // Should have only 2 lines: text messages only (no tool-call or tool-result)
+            expect(lines).toHaveLength(2);
             expect(lines[0]).toContain("Hello");
-            expect(lines[1]).toContain("[tool-use test_tool");
-            expect(lines[1]).not.toContain("[tool-result");
-            expect(lines[2]).toContain("Thanks!");
+            expect(lines[0]).not.toContain("[tool-use");
+            expect(lines[1]).toContain("Thanks!");
+            expect(messages).not.toContain("[tool-use");
+            expect(messages).not.toContain("[tool-result");
         });
 
         it("should merge tool-call and tool-result into single line when includeToolResults=true", async () => {
@@ -590,6 +606,164 @@ describe("conversation_get Tool", () => {
             expect(lines[0]).toContain("result1");
             expect(lines[1]).toContain("tool2");
             expect(lines[1]).toContain("result2");
+        });
+    });
+
+    describe("Pubkey Fallback Regression", () => {
+        it("should fall back to truncated pubkey (12 chars) for uncached pubkeys - never 'User'", async () => {
+            // This test prevents regression to the original bug where uncached pubkeys
+            // would be displayed as "User" instead of their truncated pubkey.
+            // The mock PubkeyService.getNameSync returns pk.slice(0, 12) to simulate
+            // the real behavior of returning PREFIX_LENGTH-truncated pubkeys.
+            const uncachedPubkey = "abc123def456789xyz"; // 18 chars - longer than PREFIX_LENGTH
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Message from uncached user",
+                        pubkey: uncachedPubkey,
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+
+            // CRITICAL: Should NEVER show "User" - must show truncated pubkey
+            expect(messages).not.toContain("@User");
+            expect(messages).not.toContain("[@User]");
+
+            // Should show the first 12 characters of the pubkey (PREFIX_LENGTH)
+            // "abc123def456789xyz" -> "abc123def456"
+            expect(messages).toContain("@abc123def456");
+            expect(messages).toBe("[+0] [@abc123def456] Message from uncached user");
+        });
+
+        it("should handle multiple uncached pubkeys with distinct truncated names", async () => {
+            // Verifies that different uncached pubkeys get their own truncated identifiers
+            const pubkey1 = "user1abcdef123456789";
+            const pubkey2 = "user2zyxwvu987654321";
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First message",
+                        pubkey: pubkey1,
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Reply",
+                        pubkey: pubkey2,
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                        ral: {},
+                        targetedPubkeys: [pubkey1],
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Both should use truncated pubkeys, not "User"
+            expect(lines[0]).toBe("[+0] [@user1abcdef1] First message");
+            expect(lines[1]).toBe("[+1] [@user2zyxwvu9 -> @user1abcdef1] Reply");
+
+            // Double-check no "User" anywhere
+            expect(messages).not.toContain("@User");
+        });
+    });
+
+    describe("Agent Name Resolution", () => {
+        it("should resolve agent pubkeys to their slugs", async () => {
+            // Uses pubkeys registered in mockAgentPubkeyToSlug
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Starting the task",
+                        pubkey: "agent-pubkey-claude-code", // Registered agent
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "I'll handle architecture",
+                        pubkey: "agent-pubkey-architect", // Another registered agent
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                        targetedPubkeys: ["agent-pubkey-claude-code"],
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should show agent slugs, NOT truncated pubkeys
+            expect(lines[0]).toBe("[+0] [@claude-code] Starting the task");
+            expect(lines[1]).toBe("[+1] [@architect-orchestrator -> @claude-code] I'll handle architecture");
+
+            // Should NOT contain truncated pubkeys for registered agents
+            expect(messages).not.toContain("agent-pubkey");
+        });
+
+        it("should handle mixed agent and user messages", async () => {
+            const userPubkey = "user123456789abcdef"; // 18 chars - not registered
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello agents",
+                        pubkey: userPubkey, // Human user (not registered)
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Hi! I can help",
+                        pubkey: "agent-pubkey-claude-code", // Registered agent
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                        targetedPubkeys: [userPubkey],
+                    },
+                    {
+                        messageType: "text",
+                        content: "Investigating...",
+                        pubkey: "agent-pubkey-debugger", // Another registered agent
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // User should show truncated pubkey (first 12 chars)
+            expect(lines[0]).toBe("[+0] [@user12345678] Hello agents");
+            // Agents should show their slugs
+            expect(lines[1]).toBe("[+1] [@claude-code -> @user12345678] Hi! I can help");
+            expect(lines[2]).toBe("[+2] [@debugger] Investigating...");
         });
     });
 });

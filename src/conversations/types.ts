@@ -30,11 +30,11 @@ export interface Injection {
 export interface DelegationChainEntry {
     /** The pubkey of the participant */
     pubkey: string;
-    /** The display name (agent slug or "User") */
+    /** The display name (agent slug or shortened pubkey) */
     displayName: string;
     /** Whether this is the project owner/human user */
     isUser: boolean;
-    /** The conversation ID where this delegation occurred (12-char truncated hex) */
+    /** The conversation ID where this delegation occurred (full ID, truncated only at display time) */
     conversationId?: string;
 }
 

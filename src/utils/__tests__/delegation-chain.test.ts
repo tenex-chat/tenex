@@ -616,8 +616,8 @@ describe("delegation-chain utilities", () => {
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
-            // Full order validation: unknown first, current agent last
-            expect(result![0].displayName).toBe("unknown1");
+            // Full order validation: unknown first (12-char prefix), current agent last
+            expect(result![0].displayName).toBe("unknown12345"); // PREFIX_LENGTH=12
             expect(result![1].displayName).toBe("claude-code");
         });
 
