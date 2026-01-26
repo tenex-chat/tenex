@@ -17,7 +17,7 @@
  * - Uses generateText (not generateObject) for natural prompt integration
  * - Returns only the Effective Agent Instructions string (not a structured object)
  * - On LLM failure: throws error (consumer handles fallback)
- * - Cache hash (cacheInputsHash) uses agentDefinitionEventId when provided, else baseAgentInstructions hash
+ * - Cache hash (cacheInputsHash) includes: agentDefinitionEventId (nullable), baseAgentInstructions, additionalSystemPrompt
  */
 
 import * as fs from "node:fs/promises";
@@ -62,7 +62,7 @@ export interface EffectiveInstructionsCacheEntry {
     timestamp: number;
     /** max(created_at) of lessons AND comments used */
     maxCreatedAt: number;
-    /** SHA-256 hash of cache-relevant inputs: agentDefinitionEventId (if provided) OR baseAgentInstructions hash, plus additionalSystemPrompt */
+    /** SHA-256 hash of cache inputs: agentDefinitionEventId (nullable), baseAgentInstructions, additionalSystemPrompt */
     cacheInputsHash: string;
 }
 
