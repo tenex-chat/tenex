@@ -7,6 +7,10 @@
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
+import {
+    createExpectedError,
+    isExpectedHttpError,
+} from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { NodeHtmlMarkdown } from "node-html-markdown";
 import { tool } from "ai";
@@ -58,7 +62,10 @@ async function fetchUrl(urlString: string): Promise<FetchResult> {
     });
 
     if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // Expected HTTP errors (4xx) - will be handled in executeWebFetch
+        const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        (error as Error & { status?: number }).status = response.status;
+        throw error;
     }
 
     const finalUrl = response.url;
@@ -86,7 +93,7 @@ const webFetchSchema = z.object({
 
 type WebFetchInput = z.infer<typeof webFetchSchema>;
 
-async function executeWebFetch(input: WebFetchInput): Promise<string> {
+async function executeWebFetch(input: WebFetchInput): Promise<string | { type: "error-text"; text: string }> {
     const { url } = input;
 
     try {
@@ -98,6 +105,13 @@ async function executeWebFetch(input: WebFetchInput): Promise<string> {
             result.content
         );
     } catch (error) {
+        // Check for expected HTTP errors (4xx client errors like 404)
+        const status = (error as Error & { status?: number }).status;
+        if (status !== undefined && isExpectedHttpError(status)) {
+            return createExpectedError(`HTTP ${status} error fetching "${url}": ${formatAnyError(error)}`);
+        }
+
+        // Unexpected errors still throw (they'll be caught by the SDK)
         throw new Error(`Failed to fetch URL "${url}": ${formatAnyError(error)}`);
     }
 }

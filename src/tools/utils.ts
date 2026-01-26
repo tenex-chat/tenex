@@ -161,3 +161,100 @@ export function parseNumericInput(
 
     return result;
 }
+
+// =============================================================================
+// Expected Error Handling Contract
+// =============================================================================
+//
+// PRINCIPLE:
+// - Expected failures (ENOENT, EACCES, "not found", etc.) → Return error-text object
+// - Unexpected failures (null pointer, invariant violation) → Throw exception
+//
+// RATIONALE:
+// When tools throw exceptions, the AI SDK wraps them in tool-error chunks.
+// However, OpenRouter/Gemini providers don't always convert these properly,
+// causing silent stream failures. Returning error-text objects ensures the
+// error is properly communicated back to the LLM.
+// =============================================================================
+
+/**
+ * Expected error result type - AI SDK format for tool errors
+ * This format is recognized by ChunkHandler and ToolResultUtils
+ */
+export interface ExpectedErrorResult {
+    type: "error-text";
+    text: string;
+}
+
+/**
+ * Expected filesystem error codes that should return error-text instead of throwing
+ */
+const EXPECTED_FS_ERROR_CODES = new Set(["ENOENT", "EACCES", "EISDIR", "EPERM", "ENOTDIR"]);
+
+/**
+ * Check if an error is an expected filesystem error (file not found, permission denied, etc.)
+ * These should return error-text objects rather than throwing exceptions.
+ */
+export function isExpectedFsError(error: unknown): boolean {
+    if (error instanceof Error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return code !== undefined && EXPECTED_FS_ERROR_CODES.has(code);
+    }
+    return false;
+}
+
+/**
+ * Expected HTTP status codes that should return error-text instead of throwing
+ */
+const EXPECTED_HTTP_STATUS_CODES = new Set([400, 401, 403, 404, 405, 408, 410, 429, 451]);
+
+/**
+ * Check if an HTTP status code is an expected error (client errors, not found, etc.)
+ */
+export function isExpectedHttpError(status: number): boolean {
+    return EXPECTED_HTTP_STATUS_CODES.has(status);
+}
+
+/**
+ * Check if an error message indicates an expected "not found" condition
+ */
+export function isExpectedNotFoundError(error: unknown): boolean {
+    if (error instanceof Error) {
+        const message = error.message.toLowerCase();
+        return (
+            message.includes("not found") ||
+            message.includes("does not exist") ||
+            message.includes("no such") ||
+            message.includes("cannot find")
+        );
+    }
+    return false;
+}
+
+/**
+ * Create an expected error result object (error-text format)
+ * Use this when a tool encounters an expected failure condition.
+ */
+export function createExpectedError(message: string): ExpectedErrorResult {
+    return { type: "error-text", text: message };
+}
+
+/**
+ * Get a human-readable description of a filesystem error code
+ */
+export function getFsErrorDescription(code: string | undefined): string {
+    switch (code) {
+        case "ENOENT":
+            return "File or directory not found";
+        case "EACCES":
+            return "Permission denied";
+        case "EISDIR":
+            return "Expected a file but found a directory";
+        case "EPERM":
+            return "Operation not permitted";
+        case "ENOTDIR":
+            return "Expected a directory but found a file";
+        default:
+            return "Filesystem error";
+    }
+}

@@ -2,6 +2,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
+import {
+    createExpectedError,
+    getFsErrorDescription,
+    isExpectedFsError,
+} from "@/tools/utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -118,6 +123,15 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
 
                 return await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
+                // Expected errors (file not found, permission denied, etc.) return error-text
+                // This ensures the error is properly communicated to the LLM without stream failures
+                if (isExpectedFsError(error)) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    const description = getFsErrorDescription(code);
+                    return createExpectedError(`${description}: ${path}`);
+                }
+
+                // Unexpected errors still throw (they'll be caught by the SDK)
                 throw new Error(`Failed to edit ${path}: ${formatAnyError(error)}`);
             }
         },
