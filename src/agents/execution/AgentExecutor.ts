@@ -318,10 +318,25 @@ export class AgentExecutor {
             ralNumber
         );
 
+        // NOTE: startedWithPendingDelegations is a snapshot from dispatch time, used ONLY for
+        // conservative RAL lifetime management (line ~380). It should NOT be used for the publish
+        // mode decision because delegations may have completed during execution.
+        // See: https://github.com/TENEX/TENEX-ff3ssq/issues/XXX (stale delegation state bug)
         const startedWithPendingDelegations = Boolean(
             context.isDelegationCompletion && context.hasPendingDelegations
         );
-        const hasPendingDelegations = startedWithPendingDelegations || currentPendingDelegations.length > 0;
+        // FIX: Only use current state for publish decision, not stale snapshot
+        const hasPendingDelegations = currentPendingDelegations.length > 0;
+
+        // DIAGNOSTIC: Trace the exact values used in hasPendingDelegations decision
+        trace.getActiveSpan()?.addEvent("executor.pending_delegations_decision", {
+            "context.isDelegationCompletion": context.isDelegationCompletion ?? false,
+            "context.hasPendingDelegations_snapshot": context.hasPendingDelegations ?? false,
+            "startedWithPendingDelegations_for_ral_cleanup": startedWithPendingDelegations,
+            "currentPendingDelegations.length": currentPendingDelegations.length,
+            "hasPendingDelegations_final": hasPendingDelegations,
+            "fix_applied": "uses only currentPendingDelegations, not stale snapshot",
+        });
 
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
         if (!hasMessageContent && hasPendingDelegations) {
