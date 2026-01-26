@@ -400,12 +400,12 @@ describe("Delegation tools - RALRegistry state verification", () => {
             expect(preExisting?.prompt).toBe("Pre-existing task");
         });
 
-        it("should deduplicate delegations with the same delegationConversationId", async () => {
+        it("should merge fields into existing delegations with the same delegationConversationId", async () => {
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId);
 
             // Add a delegation manually
-            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+            const { insertedCount: firstInserted } = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
                 {
                     delegationConversationId: "fixed-delegation-id",
                     recipientPubkey: "other-pubkey-456",
@@ -414,26 +414,36 @@ describe("Delegation tools - RALRegistry state verification", () => {
                     ralNumber,
                 },
             ]);
+            expect(firstInserted).toBe(1);
 
-            // Try to add the same delegation again
-            registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
+            // Try to add the same delegation again with different metadata
+            // This simulates a followup re-registering the delegation with new fields (e.g., followupEventId)
+            const { insertedCount, mergedCount } = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
                 {
+                    type: "followup" as const,
                     delegationConversationId: "fixed-delegation-id",
                     recipientPubkey: "other-pubkey-456",
                     senderPubkey: agentPubkey,
-                    prompt: "Duplicate task",
+                    prompt: "Updated prompt for followup",
+                    followupEventId: "followup-event-xyz",
                     ralNumber,
                 },
             ]);
 
-            // Should still only have one delegation
+            // Should still only have one delegation, but merged
+            expect(insertedCount).toBe(0);
+            expect(mergedCount).toBe(1);
+
             const pendingDelegations = registry.getConversationPendingDelegations(
                 agentPubkey,
                 conversationId,
                 ralNumber
             );
             expect(pendingDelegations).toHaveLength(1);
-            expect(pendingDelegations[0].prompt).toBe("Original task"); // First one wins
+            // Merged entry should have the updated fields
+            expect(pendingDelegations[0].prompt).toBe("Updated prompt for followup");
+            expect(pendingDelegations[0].type).toBe("followup");
+            expect(pendingDelegations[0].followupEventId).toBe("followup-event-xyz");
         });
     });
 });

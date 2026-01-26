@@ -112,32 +112,29 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                 "delegation.count": delegationsFromResult.length,
             });
 
-            const existingDelegations = ralRegistry.getConversationPendingDelegations(
-                context.agent.pubkey,
-                context.conversationId,
-                ralNumber
-            );
-
-            const mergedDelegations = [...existingDelegations];
-            for (const newDelegation of delegationsFromResult) {
-                if (!mergedDelegations.some(d => d.delegationConversationId === newDelegation.delegationConversationId)) {
-                    mergedDelegations.push(newDelegation);
-                }
-            }
-
-            ralRegistry.setPendingDelegations(
+            // Use atomic merge to safely handle concurrent tool executions
+            // that may each produce delegation results
+            const { insertedCount, mergedCount } = ralRegistry.mergePendingDelegations(
                 context.agent.pubkey,
                 context.conversationId,
                 ralNumber,
-                mergedDelegations
+                delegationsFromResult
             );
+
+            const totalPending = ralRegistry.getConversationPendingDelegations(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            ).length;
 
             logger.info("[ToolEventHandlers] Registered pending delegations from tool result", {
                 agent: context.agent.slug,
                 ralNumber,
                 toolName: event.toolName,
                 delegationCount: delegationsFromResult.length,
-                totalPending: mergedDelegations.length,
+                insertedCount,
+                mergedCount,
+                totalPending,
             });
         }
 

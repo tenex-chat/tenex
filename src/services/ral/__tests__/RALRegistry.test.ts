@@ -800,6 +800,441 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("mergePendingDelegations", () => {
+    it("should insert new delegations and return correct counts", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      const delegations: PendingDelegation[] = [
+        {
+          type: "delegate",
+          delegationConversationId: "del-1",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task 1",
+          ralNumber,
+        },
+        {
+          type: "delegate",
+          delegationConversationId: "del-2",
+          recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
+          prompt: "Task 2",
+          ralNumber,
+        },
+      ];
+
+      const result = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
+
+      expect(result.insertedCount).toBe(2);
+      expect(result.mergedCount).toBe(0);
+
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending).toHaveLength(2);
+    });
+
+    it("should merge fields into existing entries instead of skipping duplicates", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // First: add a basic delegation
+      const initialDelegation: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Original prompt",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [initialDelegation]);
+
+      // Second: merge with followup that adds followupEventId
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "del-1", // Same ID
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up prompt",
+        followupEventId: "followup-event-123", // NEW field
+        ralNumber,
+      };
+
+      const result = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      expect(result.insertedCount).toBe(0);
+      expect(result.mergedCount).toBe(1);
+
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending).toHaveLength(1);
+      // Should have merged fields
+      expect(pending[0].type).toBe("followup");
+      expect(pending[0].prompt).toBe("Follow-up prompt");
+      expect(pending[0].followupEventId).toBe("followup-event-123");
+    });
+
+    it("should register followupEventId in delegationToRal mapping when merging", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Add initial delegation
+      const initialDelegation: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Original",
+        ralNumber,
+      };
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [initialDelegation]);
+
+      // Merge with followup that has followupEventId
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        followupEventId: "followup-event-456",
+        ralNumber,
+      };
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Both the original ID and followup ID should route to the same RAL
+      expect(registry.getRalKeyForDelegation("del-1")).toBeDefined();
+      expect(registry.getRalKeyForDelegation("followup-event-456")).toBeDefined();
+    });
+
+    it("should handle concurrent merge calls safely", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Simulate two concurrent delegation batches
+      const batch1: PendingDelegation[] = [
+        {
+          type: "delegate",
+          delegationConversationId: "del-1",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task 1",
+          ralNumber,
+        },
+      ];
+
+      const batch2: PendingDelegation[] = [
+        {
+          type: "delegate",
+          delegationConversationId: "del-2",
+          recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
+          prompt: "Task 2",
+          ralNumber,
+        },
+      ];
+
+      // Both should succeed without dropping the other's updates
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, batch1);
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, batch2);
+
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending).toHaveLength(2);
+      expect(pending.find(d => d.delegationConversationId === "del-1")).toBeDefined();
+      expect(pending.find(d => d.delegationConversationId === "del-2")).toBeDefined();
+    });
+
+    it("should return zeros when RAL does not exist", () => {
+      const result = registry.mergePendingDelegations("nonexistent", conversationId, 999, []);
+      expect(result.insertedCount).toBe(0);
+      expect(result.mergedCount).toBe(0);
+    });
+
+    it("should handle mixed inserts and merges in single call", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Add initial delegation
+      const initialDelegation: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Task 1",
+        ralNumber,
+      };
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [initialDelegation]);
+
+      // Now merge: one existing (should merge) and one new (should insert)
+      const mixedBatch: PendingDelegation[] = [
+        {
+          type: "followup",
+          delegationConversationId: "del-1", // Existing - will merge
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Updated prompt",
+          followupEventId: "followup-1",
+          ralNumber,
+        },
+        {
+          type: "delegate",
+          delegationConversationId: "del-2", // New - will insert
+          recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
+          prompt: "Task 2",
+          ralNumber,
+        },
+      ];
+
+      const result = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, mixedBatch);
+
+      expect(result.insertedCount).toBe(1);
+      expect(result.mergedCount).toBe(1);
+
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      expect(pending).toHaveLength(2);
+    });
+
+    it("should update lastActivityAt", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+      const initialState = registry.getState(agentPubkey, conversationId);
+      const initialTime = initialState?.lastActivityAt;
+
+      // Small delay
+      const start = Date.now();
+      while (Date.now() - start < 2) {}
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, []);
+
+      const updatedState = registry.getState(agentPubkey, conversationId);
+      expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
+    });
+
+    it("should update delegationToRal mapping on merge with new RAL number", () => {
+      // Create RAL 1
+      const ralNumber1 = registry.create(agentPubkey, conversationId);
+
+      // Add delegation to RAL 1
+      const delegation1: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Original",
+        ralNumber: ralNumber1,
+      };
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber1, [delegation1]);
+
+      // Create RAL 2
+      const ralNumber2 = registry.create(agentPubkey, conversationId);
+
+      // Merge same delegation ID to RAL 2 (simulating followup from new RAL)
+      const delegation2: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "del-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up from new RAL",
+        followupEventId: "followup-abc",
+        ralNumber: ralNumber2,
+      };
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber2, [delegation2]);
+
+      // The delegation should now be associated with RAL 2
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber2);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].ralNumber).toBe(ralNumber2);
+    });
+  });
+
+  describe("followup completion routing", () => {
+    it("should record completion when e-tag contains followupEventId instead of delegationConversationId", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Add a followup delegation with a followupEventId
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "original-del-123",
+        followupEventId: "followup-event-456",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up question",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Record completion using the followupEventId (simulating a client reply with only the followup e-tag)
+      const location = registry.recordCompletion({
+        delegationConversationId: "followup-event-456", // Using followupEventId!
+        recipientPubkey: "recipient-1",
+        response: "Here's my follow-up response",
+        completedAt: Date.now(),
+      });
+
+      // Completion should succeed and route correctly
+      expect(location).toBeDefined();
+      expect(location?.agentPubkey).toBe(agentPubkey);
+      expect(location?.conversationId).toBe(conversationId);
+      expect(location?.ralNumber).toBe(ralNumber);
+
+      // Delegation should be moved from pending to completed
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+
+      expect(pending).toHaveLength(0);
+      expect(completed).toHaveLength(1);
+      // Completed entry should use the canonical ID
+      expect(completed[0].delegationConversationId).toBe("original-del-123");
+    });
+
+    it("should find pending delegation via followupEventId", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "original-del-789",
+        followupEventId: "followup-event-abc",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Another follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Find delegation using the followupEventId
+      const result = registry.findDelegation("followup-event-abc");
+
+      expect(result).toBeDefined();
+      expect(result?.pending).toBeDefined();
+      expect(result?.pending?.delegationConversationId).toBe("original-del-789");
+      expect(result?.agentPubkey).toBe(agentPubkey);
+      expect(result?.conversationId).toBe(conversationId);
+    });
+
+    it("should find RAL waiting for delegation via followupEventId", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "original-del-xyz",
+        followupEventId: "followup-event-def",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Yet another follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Find RAL waiting for delegation using the followupEventId
+      const ral = registry.findStateWaitingForDelegation("followup-event-def");
+
+      expect(ral).toBeDefined();
+      expect(ral?.ralNumber).toBe(ralNumber);
+      expect(ral?.agentPubkey).toBe(agentPubkey);
+    });
+
+    it("should handle completion flow: initial delegate -> followup -> completion via followupEventId", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Step 1: Add initial delegation
+      const initialDelegation: PendingDelegation = {
+        type: "delegate",
+        delegationConversationId: "conv-001",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Initial task",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [initialDelegation]);
+
+      // Verify initial state
+      expect(registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber)).toHaveLength(1);
+
+      // Step 2: Merge followup (simulating delegate_followup being called)
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "conv-001", // Same conversation
+        followupEventId: "followup-msg-001",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up question about initial task",
+        ralNumber,
+      };
+
+      const mergeResult = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+      expect(mergeResult.mergedCount).toBe(1);
+      expect(mergeResult.insertedCount).toBe(0);
+
+      // Step 3: Record completion using followupEventId (client replies to followup)
+      const location = registry.recordCompletion({
+        delegationConversationId: "followup-msg-001", // Reply e-tags the followup
+        recipientPubkey: "recipient-1",
+        response: "Here's the answer to your follow-up",
+        completedAt: Date.now(),
+      });
+
+      expect(location).toBeDefined();
+      expect(location?.ralNumber).toBe(ralNumber);
+
+      // Verify final state
+      const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+      const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+
+      expect(pending).toHaveLength(0);
+      expect(completed).toHaveLength(1);
+      expect(completed[0].delegationConversationId).toBe("conv-001"); // Canonical ID
+    });
+
+    it("should clean up followupToCanonical mapping when clearing conversation", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "conv-cleanup",
+        followupEventId: "followup-cleanup",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Test cleanup",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Verify mapping exists
+      expect(registry.getRalKeyForDelegation("followup-cleanup")).toBeDefined();
+
+      // Clear conversation
+      registry.clear(agentPubkey, conversationId);
+
+      // Verify mapping is cleaned up
+      expect(registry.getRalKeyForDelegation("followup-cleanup")).toBeUndefined();
+      expect(registry.findDelegation("followup-cleanup")).toBeUndefined();
+    });
+
+    it("should clean up followupToCanonical mapping when using setPendingDelegations", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId);
+
+      // Add followup delegation
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "conv-set-cleanup",
+        followupEventId: "followup-set-cleanup",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Test setPendingDelegations cleanup",
+        ralNumber,
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Verify mapping exists
+      expect(registry.getRalKeyForDelegation("followup-set-cleanup")).toBeDefined();
+
+      // Replace with empty delegations (should clean up)
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
+
+      // Verify mapping is cleaned up
+      expect(registry.getRalKeyForDelegation("followup-set-cleanup")).toBeUndefined();
+    });
+  });
+
   describe("edge cases", () => {
     it("should handle empty pending delegations array", () => {
       const ralNumber = registry.create(agentPubkey, conversationId);

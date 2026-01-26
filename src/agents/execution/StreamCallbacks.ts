@@ -268,29 +268,12 @@ export function createOnStopCheck(
                     "delegation.count": pendingDelegations.length,
                 });
 
-                // Merge pending delegations
-                const existingDelegations = ralRegistry.getConversationPendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                const mergedDelegations = [...existingDelegations];
-                for (const newDelegation of pendingDelegations) {
-                    if (
-                        !mergedDelegations.some(
-                            (d) => d.delegationConversationId === newDelegation.delegationConversationId
-                        )
-                    ) {
-                        mergedDelegations.push(newDelegation);
-                    }
-                }
-
-                ralRegistry.setPendingDelegations(
+                // Use atomic merge to safely handle concurrent delegation calls
+                ralRegistry.mergePendingDelegations(
                     context.agent.pubkey,
                     context.conversationId,
                     ralNumber,
-                    mergedDelegations
+                    pendingDelegations
                 );
 
                 conversationStore.save();
