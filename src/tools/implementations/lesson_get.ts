@@ -2,6 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { createExpectedError } from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { normalizeLessonEventId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
@@ -38,11 +39,15 @@ function formatLessonOutput(lesson: NDKAgentLesson, eventId: string): LessonGetO
     };
 }
 
+// Type for expected error results
+type LessonGetResult = LessonGetOutput | { type: "error-text"; text: string };
+
 // Core implementation - fetches lesson by event ID
+// Returns error-text for expected "not found" conditions
 async function executeLessonGet(
     input: LessonGetInput,
     context: ToolExecutionContext
-): Promise<LessonGetOutput> {
+): Promise<LessonGetResult> {
     const { eventId: inputEventId } = input;
 
     const projectContext = getProjectContext();
@@ -54,7 +59,8 @@ async function executeLessonGet(
     // Supports: hex IDs, hex prefixes, note1..., nevent1..., nostr: prefixed versions
     const normalizeResult = normalizeLessonEventId(inputEventId, allLessons);
     if (!normalizeResult.success) {
-        throw new Error(normalizeResult.error);
+        // Invalid event ID format is an expected user error - return error-text
+        return createExpectedError(normalizeResult.error);
     }
 
     const eventId = normalizeResult.eventId;
@@ -79,7 +85,8 @@ async function executeLessonGet(
     }
 
     if (!lesson) {
-        throw new Error(`No lesson found with event ID: "${eventId}"`);
+        // "Lesson not found" is an expected condition - return error-text
+        return createExpectedError(`No lesson found with event ID: "${eventId}"`);
     }
 
     logger.info("✅ Successfully retrieved lesson", {

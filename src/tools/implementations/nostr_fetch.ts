@@ -9,6 +9,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
+import { createExpectedError, isExpectedNotFoundError } from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { parseNostrEvent } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
@@ -55,8 +56,9 @@ function formatTimestamp(unixTimestamp: number): string {
 
 /**
  * Execute the nostr_fetch tool
+ * Returns null if event is not found (expected condition)
  */
-async function executeNostrFetch(input: NostrFetchInput): Promise<string> {
+async function executeNostrFetch(input: NostrFetchInput): Promise<string | null> {
     const { eventId, format } = input;
 
     const ndk = getNDK();
@@ -65,7 +67,8 @@ async function executeNostrFetch(input: NostrFetchInput): Promise<string> {
     const event = await parseNostrEvent(eventId, ndk);
 
     if (!event) {
-        throw new Error(`Event not found: ${eventId}`);
+        // "Event not found" is an expected condition - return null to signal expected error
+        return null;
     }
 
     // Return raw event JSON if requested
@@ -111,8 +114,20 @@ export function createNostrFetchTool(_context: ToolExecutionContext): AISdkTool 
 
         execute: async (input: NostrFetchInput) => {
             try {
-                return await executeNostrFetch(input);
+                const result = await executeNostrFetch(input);
+
+                // "Event not found" is an expected condition - return error-text
+                if (result === null) {
+                    return createExpectedError(`Event not found: ${input.eventId}`);
+                }
+
+                return result;
             } catch (error) {
+                // Check if this is an expected "not found" error from a different code path
+                if (isExpectedNotFoundError(error)) {
+                    return createExpectedError(`Event not found: ${input.eventId}`);
+                }
+
                 logger.error("Failed to fetch nostr event", { eventId: input.eventId, error });
                 throw new Error(
                     `Failed to fetch nostr event: ${error instanceof Error ? error.message : String(error)}`

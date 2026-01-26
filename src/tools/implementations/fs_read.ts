@@ -5,6 +5,12 @@ import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
 import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
+import {
+    createExpectedError,
+    type ExpectedErrorResult,
+    getFsErrorDescription,
+    isExpectedFsError,
+} from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -290,6 +296,16 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
                 return content;
             } catch (error: unknown) {
                 const target = toolEventId ? `tool result ${toolEventId}` : path;
+
+                // Expected errors (file not found, permission denied, etc.) return error-text
+                // This ensures the error is properly communicated to the LLM without stream failures
+                if (isExpectedFsError(error)) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    const description = getFsErrorDescription(code);
+                    return createExpectedError(`${description}: ${target}`);
+                }
+
+                // Unexpected errors still throw (they'll be caught by the SDK)
                 throw new Error(`Failed to read ${target}: ${formatAnyError(error)}`);
             }
         },

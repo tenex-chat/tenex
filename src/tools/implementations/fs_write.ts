@@ -4,6 +4,11 @@ import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
 import { getLocalReportStore } from "@/services/reports";
+import {
+    createExpectedError,
+    getFsErrorDescription,
+    isExpectedFsError,
+} from "@/tools/utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -76,6 +81,15 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
             try {
                 return await executeWriteFile(path, content, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
+                // Expected errors (permission denied, etc.) return error-text
+                // This ensures the error is properly communicated to the LLM without stream failures
+                if (isExpectedFsError(error)) {
+                    const code = (error as NodeJS.ErrnoException).code;
+                    const description = getFsErrorDescription(code);
+                    return createExpectedError(`${description}: ${path}`);
+                }
+
+                // Unexpected errors still throw (they'll be caught by the SDK)
                 throw new Error(`Failed to write ${path}: ${formatAnyError(error)}`);
             }
         },
