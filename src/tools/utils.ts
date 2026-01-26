@@ -204,15 +204,11 @@ export function isExpectedFsError(error: unknown): boolean {
 }
 
 /**
- * Expected HTTP status codes that should return error-text instead of throwing
- */
-const EXPECTED_HTTP_STATUS_CODES = new Set([400, 401, 403, 404, 405, 408, 410, 429, 451]);
-
-/**
- * Check if an HTTP status code is an expected error (client errors, not found, etc.)
+ * Check if an HTTP status code is an expected error (all 4xx client errors)
+ * This includes 400-499 range: bad request, unauthorized, forbidden, not found, etc.
  */
 export function isExpectedHttpError(status: number): boolean {
-    return EXPECTED_HTTP_STATUS_CODES.has(status);
+    return status >= 400 && status < 500;
 }
 
 /**

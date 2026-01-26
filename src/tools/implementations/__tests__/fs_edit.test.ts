@@ -134,17 +134,20 @@ modified line 3`,
             expect(content).toBe("qux bar qux baz qux");
         });
 
-        it("should fail when string is not unique and replace_all is false", async () => {
+        it("should return error-text when string is not unique and replace_all is false", async () => {
             const filePath = path.join(testDir, "duplicate.txt");
             writeFileSync(filePath, "test test test", "utf-8");
 
-            await expect(
-                editTool.execute({
-                    path: filePath,
-                    old_string: "test",
-                    new_string: "replaced",
-                })
-            ).rejects.toThrow("old_string appears multiple times");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "test",
+                new_string: "replaced",
+            });
+
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("appears multiple times"),
+            });
         });
 
         it("should handle special regex characters in replace_all", async () => {
@@ -166,30 +169,36 @@ modified line 3`,
     });
 
     describe("error handling", () => {
-        it("should fail when old_string is not found", async () => {
+        it("should return error-text when old_string is not found", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
 
-            await expect(
-                editTool.execute({
-                    path: filePath,
-                    old_string: "NotFound",
-                    new_string: "Replaced",
-                })
-            ).rejects.toThrow("old_string not found");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "NotFound",
+                new_string: "Replaced",
+            });
+
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("old_string not found"),
+            });
         });
 
-        it("should fail when old_string and new_string are identical", async () => {
+        it("should return error-text when old_string and new_string are identical", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "Hello, World!", "utf-8");
 
-            await expect(
-                editTool.execute({
-                    path: filePath,
-                    old_string: "World",
-                    new_string: "World",
-                })
-            ).rejects.toThrow("old_string and new_string must be different");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "World",
+                new_string: "World",
+            });
+
+            expect(result).toEqual({
+                type: "error-text",
+                text: "old_string and new_string must be different",
+            });
         });
 
         it("should reject relative paths", async () => {
@@ -212,6 +221,48 @@ modified line 3`,
             expect(result).toEqual({
                 type: "error-text",
                 text: expect.stringContaining("File or directory not found"),
+            });
+        });
+
+        it("should return error-text when old_string equals new_string", async () => {
+            const filePath = path.join(testDir, "test.txt");
+            writeFileSync(filePath, "some content", "utf-8");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "same",
+                new_string: "same",
+            });
+            expect(result).toEqual({
+                type: "error-text",
+                text: "old_string and new_string must be different",
+            });
+        });
+
+        it("should return error-text when old_string not found in file", async () => {
+            const filePath = path.join(testDir, "test.txt");
+            writeFileSync(filePath, "some content", "utf-8");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "not in file",
+                new_string: "replacement",
+            });
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("old_string not found"),
+            });
+        });
+
+        it("should return error-text when old_string appears multiple times", async () => {
+            const filePath = path.join(testDir, "test.txt");
+            writeFileSync(filePath, "hello world hello world", "utf-8");
+            const result = await editTool.execute({
+                path: filePath,
+                old_string: "hello",
+                new_string: "goodbye",
+            });
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("appears multiple times"),
             });
         });
     });
