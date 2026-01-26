@@ -11,13 +11,6 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
 
-const pairConfigSchema = z.object({
-  interval: z
-    .number()
-    .min(10)
-    .describe("Number of tool executions between checkpoints (e.g., 10 means checkpoint every 10 tools)"),
-});
-
 const delegationItemSchema = z.object({
   recipient: z
     .string()
@@ -29,9 +22,6 @@ const delegationItemSchema = z.object({
     .string()
     .optional()
     .describe("Git branch name for worktree isolation"),
-  pair: pairConfigSchema
-    .optional()
-    .describe("Enable real-time pairing supervision. IMPORTANT: Only use pairing when (1) your role explicitly involves monitoring other agents, or (2) the user explicitly requested progress monitoring/reporting. Do NOT use pairing for routine delegations - it adds unnecessary overhead and interrupts the delegated agent's workflow."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -105,45 +95,6 @@ async function executeDelegate(
       prompt: delegation.prompt,
       ralNumber: context.ralNumber,
     });
-
-    // Start pairing supervision if requested
-    if (delegation.pair) {
-      const projectContext = getProjectContext();
-      const pairingManager = projectContext.pairingManager;
-
-      if (!pairingManager) {
-        logger.warn("[delegate] Pairing requested but PairingManager not available", {
-          recipient: delegation.recipient,
-        });
-      } else {
-        // Get current RAL number for this agent/conversation
-        const currentRal = ralRegistry.getState(context.agent.pubkey, context.conversationId);
-
-        if (!currentRal) {
-          logger.warn("[delegate] Pairing requested but no active RAL found", {
-            recipient: delegation.recipient,
-          });
-        } else {
-          pairingManager.startPairing(
-            eventId,
-            {
-              delegationId: eventId,
-              recipientPubkey: pubkey,
-              interval: delegation.pair.interval,
-            },
-            context.agent.pubkey,
-            context.conversationId,
-            currentRal.ralNumber
-          );
-
-          logger.info("[delegate] Started pairing supervision", {
-            delegationId: eventId.substring(0, 8),
-            recipient: delegation.recipient,
-            interval: delegation.pair.interval,
-          });
-        }
-      }
-    }
   }
 
   if (failedRecipients.length > 0) {
@@ -212,14 +163,11 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
       if (delegations.length === 1) {
         const d = delegations[0];
-        const pairStr = d.pair ? " with pairing" : "";
-        return `Delegating to ${d.recipient}${pairStr}`;
+        return `Delegating to ${d.recipient}`;
       }
 
-      const hasPairing = delegations.some((d) => d.pair);
       const recipients = delegations.map((d) => d.recipient).join(", ");
-      const pairStr = hasPairing ? " with pairing" : "";
-      return `Delegating ${delegations.length} tasks to: ${recipients}${pairStr}`;
+      return `Delegating ${delegations.length} tasks to: ${recipients}`;
     },
     enumerable: false,
     configurable: true,

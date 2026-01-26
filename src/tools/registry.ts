@@ -63,9 +63,6 @@ import { createBugListTool } from "./implementations/bug_list";
 import { createBugReportAddTool } from "./implementations/bug_report_add";
 import { createBugReportCreateTool } from "./implementations/bug_report_create";
 
-// Pairing tools
-import { createStopPairingTool } from "./implementations/stop_pairing";
-
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
 
@@ -203,9 +200,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     bug_report_create: createBugReportCreateTool,
     bug_report_add: createBugReportAddTool,
 
-    // Pairing tools
-    stop_pairing: createStopPairingTool,
-
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
     todo_write: createTodoWriteTool as ToolFactory,
 
@@ -273,9 +267,6 @@ export function getAllToolNames(): ToolName[] {
 /** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
 const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];
 
-/** Pairing tools - auto-injected when hasActivePairings is true */
-const PAIRING_TOOLS: ToolName[] = ["stop_pairing"];
-
 /** File editing tools - auto-injected when fs_write is available */
 const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 
@@ -322,15 +313,6 @@ export function getToolsObject(
         for (const alphaToolName of ALPHA_TOOLS) {
             if (!regularTools.includes(alphaToolName)) {
                 regularTools.push(alphaToolName);
-            }
-        }
-    }
-
-    // Auto-inject pairing tools when there are active pairings (only for full registry context)
-    if ('hasActivePairings' in context && context.hasActivePairings) {
-        for (const pairingToolName of PAIRING_TOOLS) {
-            if (!regularTools.includes(pairingToolName)) {
-                regularTools.push(pairingToolName);
             }
         }
     }
