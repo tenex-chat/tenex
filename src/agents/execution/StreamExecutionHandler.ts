@@ -148,10 +148,32 @@ export class StreamExecutionHandler {
                 executionSpan: this.executionSpan,
             });
 
+            // DIAGNOSTIC: Track when we're about to call stream()
+            const streamCallStartTime = Date.now();
+            this.executionSpan?.addEvent("executor.stream_call_starting", {
+                "stream.call_start_time": streamCallStartTime,
+                "stream.messages_count": messages.length,
+                "stream.tools_count": Object.keys(toolsObject).length,
+                "stream.abort_signal_aborted": abortSignal.aborted,
+                "ral.number": ralNumber,
+            });
+
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,
                 onStopCheck,
+            });
+
+            // DIAGNOSTIC: Track when stream() returns
+            const streamCallEndTime = Date.now();
+            const streamCallDuration = streamCallEndTime - streamCallStartTime;
+            this.executionSpan?.addEvent("executor.stream_call_completed", {
+                "stream.call_end_time": streamCallEndTime,
+                "stream.call_duration_ms": streamCallDuration,
+                "stream.result_set_after_stream": this.result !== undefined,
+                "stream.result_kind_after_stream": this.result?.kind ?? "undefined",
+                "stream.abort_signal_aborted_after": abortSignal.aborted,
+                "ral.number": ralNumber,
             });
 
             // Diagnostic: Track when stream method returns
@@ -258,10 +280,19 @@ export class StreamExecutionHandler {
             }
         });
 
+        // Track when we register the complete listener
+        const completeListenerRegisteredAt = Date.now();
+        this.executionSpan?.addEvent("executor.complete_listener_registered", {
+            "listener.registered_at": completeListenerRegisteredAt,
+            "ral.number": ralNumber,
+        });
+
         llmService.on("complete", (event: CompleteEvent) => {
             const completeReceivedTime = Date.now();
+            const timeSinceRegistration = completeReceivedTime - completeListenerRegisteredAt;
             this.executionSpan?.addEvent("executor.complete_received", {
                 "complete.received_at": completeReceivedTime,
+                "complete.ms_since_listener_registered": timeSinceRegistration,
                 "complete.message_length": event.message?.length ?? 0,
                 "complete.steps_count": event.steps?.length ?? 0,
                 "complete.finish_reason": event.finishReason ?? "unknown",
@@ -289,6 +320,18 @@ export class StreamExecutionHandler {
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
+            const errorReceivedTime = Date.now();
+            const timeSinceRegistration = errorReceivedTime - completeListenerRegisteredAt;
+            this.executionSpan?.addEvent("executor.stream_error_received", {
+                "error.received_at": errorReceivedTime,
+                "error.ms_since_listener_registered": timeSinceRegistration,
+                "error.message": event.error instanceof Error ? event.error.message : String(event.error),
+                "error.type": event.error instanceof Error ? event.error.constructor.name : typeof event.error,
+                "error.result_already_set": this.result !== undefined,
+                "error.result_kind": this.result?.kind ?? "none",
+                "ral.number": ralNumber,
+            });
+
             logger.error("[StreamExecutionHandler] Stream error from LLMService", event);
             this.result = { kind: "error-handled" };
 
@@ -323,7 +366,17 @@ export class StreamExecutionHandler {
     private createEventContext(): EventContext {
         const { context, llmService } = this.config;
         const { createEventContext } = require("@/utils/event-context");
-        return createEventContext(context, llmService.model);
+        const eventContext = createEventContext(context, llmService.model);
+
+        // DIAGNOSTIC: Track event context creation to debug llm-ral=0 issues
+        this.executionSpan?.addEvent("executor.event_context_created", {
+            "context.ral_number": eventContext.ralNumber,
+            "context.conversation_id": eventContext.conversationId?.substring(0, 8) ?? "none",
+            "context.model": eventContext.model ?? "none",
+            "config.ral_number": this.config.ralNumber,
+        });
+
+        return eventContext;
     }
 
     /**

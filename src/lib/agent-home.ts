@@ -1,5 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { mkdirSync, realpathSync, existsSync } from "node:fs";
+import { isAbsolute, join, normalize, relative, resolve, dirname } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
 
@@ -33,20 +33,65 @@ export function normalizePath(inputPath: string): string {
 }
 
 /**
+ * Resolve the real path of a file or directory, following symlinks.
+ * If the path doesn't exist, resolves the parent directory and appends the filename.
+ * This ensures symlinks are resolved even for files that will be created.
+ * @param inputPath - The path to resolve
+ * @returns The resolved real path with symlinks followed
+ */
+function resolveRealPath(inputPath: string): string {
+    const normalized = normalizePath(inputPath);
+
+    // If the path exists, resolve it directly
+    if (existsSync(normalized)) {
+        return realpathSync(normalized);
+    }
+
+    // Path doesn't exist - resolve the parent directory instead
+    // This catches symlinks in the parent chain
+    const parentDir = dirname(normalized);
+    const filename = normalized.slice(parentDir.length + 1); // Get the filename portion
+
+    if (existsSync(parentDir)) {
+        const realParent = realpathSync(parentDir);
+        return join(realParent, filename);
+    }
+
+    // Neither path nor parent exists - walk up until we find an existing ancestor
+    let currentPath = parentDir;
+    const pathParts: string[] = [filename];
+
+    while (currentPath && currentPath !== dirname(currentPath)) {
+        const parent = dirname(currentPath);
+        pathParts.unshift(currentPath.slice(parent.length + 1));
+        currentPath = parent;
+
+        if (existsSync(currentPath)) {
+            const realAncestor = realpathSync(currentPath);
+            return join(realAncestor, ...pathParts);
+        }
+    }
+
+    // No ancestor exists, return normalized path as-is
+    return normalized;
+}
+
+/**
  * Check if a path is within a given directory.
- * Both paths are normalized to prevent path traversal attacks.
+ * Both paths are normalized and symlinks are resolved to prevent escape attacks.
  * Uses path.relative for cross-platform separator handling.
- * @param inputPath - The path to check (will be normalized)
- * @param directory - The directory to check against (will be normalized)
+ * @param inputPath - The path to check (will be normalized, symlinks resolved)
+ * @param directory - The directory to check against (will be normalized, symlinks resolved)
  * @returns true if path is within or equal to directory
  */
 export function isPathWithinDirectory(inputPath: string, directory: string): boolean {
-    const normalizedPath = normalizePath(inputPath);
-    const normalizedDir = normalizePath(directory);
+    // Resolve symlinks to prevent symlink escape attacks
+    const realPath = resolveRealPath(inputPath);
+    const realDir = resolveRealPath(directory);
 
     // Use path.relative for cross-platform handling
     // If the relative path starts with ".." or is absolute, the path is outside
-    const relativePath = relative(normalizedDir, normalizedPath);
+    const relativePath = relative(realDir, realPath);
 
     // Path is within directory if:
     // 1. It doesn't start with ".." (would mean escaping the directory)

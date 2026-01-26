@@ -2,4 +2,4 @@ export type { ReportData, ReportInfo, ReportSummary, WriteReportResult } from ".
 export { ReportService } from "./ReportService";
 export { articleToReportInfo } from "./articleUtils";
 export type { LocalReportMetadata } from "./LocalReportStore";
-export { LocalReportStore, getLocalReportStore, InvalidSlugError } from "./LocalReportStore";
+export { LocalReportStore, getLocalReportStore, createLocalReportStore, InvalidSlugError } from "./LocalReportStore";

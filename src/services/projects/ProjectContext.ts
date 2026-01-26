@@ -4,6 +4,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { PairingManager } from "@/services/pairing";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
+import type { LocalReportStore } from "@/services/reports/LocalReportStore";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import { articleToReportInfo } from "@/services/reports/articleUtils";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
@@ -72,6 +73,12 @@ export class ProjectContext {
      * MCP manager for this project's MCP tool access
      */
     public mcpManager?: MCPManager;
+
+    /**
+     * Local report store for this project's report storage.
+     * Each project has its own store to ensure isolation.
+     */
+    public localReportStore?: LocalReportStore;
 
     /**
      * Prompt compilers for agents in this project

@@ -302,6 +302,28 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             },
         };
 
+        // DIAGNOSTIC: Track state before streamText call
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("llm.streamText_preparing", {
+            "stream.messages_count": processedMessages.length,
+            "stream.tools_count": this.capabilities.builtInTools ? 0 : Object.keys(tools).length,
+            "stream.abort_signal_present": !!options?.abortSignal,
+            "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
+            "stream.provider": this.provider,
+            "stream.model": this.model,
+        });
+
+        // Track chunk statistics for post-mortem analysis
+        let chunkCount = 0;
+        let lastChunkType: string | undefined;
+        let lastChunkTime = startTime;
+        let toolInputStartCount = 0;
+        let toolCallCount = 0;
+        let toolResultCount = 0;
+        let textDeltaCount = 0;
+        let finishPartSeen = false;
+        let stepFinishCount = 0;
+
         const { fullStream } = streamText({
             model,
             messages: processedMessages,
@@ -328,6 +350,12 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             onFinish: createFinishHandler(this, finishConfig, finishState),
             onError: ({ error }) => {
                 // Emit stream-error event for the executor to handle and publish to user
+                activeSpan?.addEvent("llm.onError_called", {
+                    "error.message": error instanceof Error ? error.message : String(error),
+                    "error.type": error instanceof Error ? error.constructor.name : typeof error,
+                    "stream.chunk_count_at_error": chunkCount,
+                    "stream.last_chunk_type": lastChunkType ?? "none",
+                });
                 this.emit("stream-error", { error });
             },
         });
@@ -335,21 +363,98 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Consume the stream (this is what triggers everything!)
         try {
             for await (const part of fullStream) {
+                chunkCount++;
+                lastChunkType = part.type;
+                lastChunkTime = Date.now();
+
+                // Track specific part types for diagnostics
+                switch (part.type) {
+                    case "tool-input-start":
+                        toolInputStartCount++;
+                        break;
+                    case "tool-call":
+                        toolCallCount++;
+                        break;
+                    case "tool-result":
+                        toolResultCount++;
+                        break;
+                    case "text-delta":
+                        textDeltaCount++;
+                        break;
+                    case "finish":
+                        finishPartSeen = true;
+                        activeSpan?.addEvent("llm.finish_part_received", {
+                            "finish.reason": (part as { finishReason?: string }).finishReason ?? "unknown",
+                            "stream.chunk_count": chunkCount,
+                            "stream.ms_since_start": lastChunkTime - startTime,
+                        });
+                        break;
+                    case "finish-step":
+                        stepFinishCount++;
+                        activeSpan?.addEvent("llm.step_finish_received", {
+                            "step.number": stepFinishCount,
+                            "step.finish_reason": (part as { finishReason?: string }).finishReason ?? "unknown",
+                            "stream.chunk_count": chunkCount,
+                        });
+                        break;
+                }
+
                 // Handle tool-error events that don't come through onChunk
                 if (part.type === "tool-error") {
                     this.chunkHandler.handleChunk({ chunk: part as TextStreamPart<Record<string, AISdkTool>> });
                 }
             }
 
-            // DIAGNOSTIC: Track when for-await loop completes
+            // DIAGNOSTIC: Track when for-await loop completes with detailed stats
             const loopCompleteTime = Date.now();
             const loopDuration = loopCompleteTime - startTime;
-            trace.getActiveSpan()?.addEvent("llm.stream_loop_complete", {
+            const timeSinceLastChunk = loopCompleteTime - lastChunkTime;
+            activeSpan?.addEvent("llm.stream_loop_complete", {
                 "stream.loop_complete_time": loopCompleteTime,
                 "stream.loop_duration_ms": loopDuration,
                 "stream.cached_content_length": this.cachedContentForComplete.length,
+                "stream.total_chunk_count": chunkCount,
+                "stream.last_chunk_type": lastChunkType ?? "none",
+                "stream.ms_since_last_chunk": timeSinceLastChunk,
+                "stream.finish_part_seen": finishPartSeen,
+                "stream.step_finish_count": stepFinishCount,
+                "stream.tool_input_start_count": toolInputStartCount,
+                "stream.tool_call_count": toolCallCount,
+                "stream.tool_result_count": toolResultCount,
+                "stream.text_delta_count": textDeltaCount,
+                "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
             });
+
+            // CRITICAL DIAGNOSTIC: If loop completed but no finish part was seen, something is very wrong
+            if (!finishPartSeen && chunkCount > 0) {
+                activeSpan?.addEvent("llm.stream_incomplete_warning", {
+                    "warning.message": "Stream loop completed without seeing finish part",
+                    "stream.chunk_count": chunkCount,
+                    "stream.last_chunk_type": lastChunkType ?? "none",
+                    "stream.tool_input_start_count": toolInputStartCount,
+                    "stream.tool_call_count": toolCallCount,
+                    "stream.tool_result_count": toolResultCount,
+                });
+                logger.warn("[LLMService] Stream loop completed without finish part", {
+                    chunkCount,
+                    lastChunkType,
+                    toolInputStartCount,
+                    toolCallCount,
+                    toolResultCount,
+                    provider: this.provider,
+                    model: this.model,
+                });
+            }
         } catch (error) {
+            // DIAGNOSTIC: Track error with stream state
+            activeSpan?.addEvent("llm.stream_loop_error", {
+                "error.message": error instanceof Error ? error.message : String(error),
+                "error.type": error instanceof Error ? error.constructor.name : typeof error,
+                "stream.chunk_count_at_error": chunkCount,
+                "stream.last_chunk_type": lastChunkType ?? "none",
+                "stream.finish_part_seen": finishPartSeen,
+                "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
+            });
             await this.handleStreamError(error, startTime);
             throw error;
         }

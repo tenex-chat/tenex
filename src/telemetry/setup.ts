@@ -12,14 +12,15 @@ import { ToolCallSpanProcessor } from "./ToolCallSpanProcessor.js";
 import { NostrSpanProcessor } from "./NostrSpanProcessor.js";
 
 const DEFAULT_SERVICE_NAME = "tenex-daemon";
-
-const exporterUrl = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces";
-const traceExporter = new OTLPTraceExporter({
-    url: exporterUrl,
-});
+const DEFAULT_ENDPOINT = "http://localhost:4318/v1/traces";
 
 class ErrorHandlingExporterWrapper implements SpanExporter {
     private disabled = false;
+
+    constructor(
+        private traceExporter: OTLPTraceExporter,
+        private exporterUrl: string
+    ) {}
 
     export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
         // Once disabled, drop all spans silently
@@ -28,12 +29,12 @@ class ErrorHandlingExporterWrapper implements SpanExporter {
             return;
         }
 
-        traceExporter.export(spans, (result) => {
+        this.traceExporter.export(spans, (result) => {
             if (result.error && !this.disabled) {
                 const errorMessage = result.error?.message || String(result.error);
                 const isConnectionError = errorMessage.includes("ECONNREFUSED") || errorMessage.includes("connect");
                 if (isConnectionError) {
-                    console.warn(`[Telemetry] ⚠️  Collector not available at ${exporterUrl}`);
+                    console.warn(`[Telemetry] ⚠️  Collector not available at ${this.exporterUrl}`);
                 } else {
                     console.error("[Telemetry] Export error:", errorMessage);
                 }
@@ -45,11 +46,9 @@ class ErrorHandlingExporterWrapper implements SpanExporter {
     }
 
     shutdown(): Promise<void> {
-        return traceExporter.shutdown();
+        return this.traceExporter.shutdown();
     }
 }
-
-const wrappedExporter = new ErrorHandlingExporterWrapper();
 
 // Create a wrapper processor that enriches span names and fixes Nostr IDs before exporting
 class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
@@ -68,7 +67,7 @@ class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
 
 let sdk: NodeSDK | null = null;
 
-function createSDK(serviceName: string): NodeSDK {
+function createSDK(serviceName: string, wrappedExporter: SpanExporter): NodeSDK {
     const resource = resourceFromAttributes({
         [SEMRESATTRS_SERVICE_NAME]: serviceName,
         [SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || "0.8.0",
@@ -89,18 +88,31 @@ function createSDK(serviceName: string): NodeSDK {
     });
 }
 
-export function initializeTelemetry(enabled = true, serviceName = DEFAULT_SERVICE_NAME): void {
+export function initializeTelemetry(
+    enabled = true,
+    serviceName = DEFAULT_SERVICE_NAME,
+    endpoint = DEFAULT_ENDPOINT
+): void {
     if (!enabled) {
         console.log("[Telemetry] OpenTelemetry disabled via config");
         return;
     }
 
-    sdk = createSDK(serviceName);
+    // Use environment variable if set, otherwise use config endpoint
+    const exporterUrl = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || endpoint;
+
+    // Create exporter with the configured URL
+    const traceExporter = new OTLPTraceExporter({
+        url: exporterUrl,
+    });
+
+    // Wrap the exporter with error handling
+    const wrappedExporter = new ErrorHandlingExporterWrapper(traceExporter, exporterUrl);
+
+    sdk = createSDK(serviceName, wrappedExporter);
     sdk.start();
     console.log(`[Telemetry] OpenTelemetry enabled - service: ${serviceName}`);
-    console.log(
-        `[Telemetry] Exporting to ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://localhost:4318/v1/traces"}`
-    );
+    console.log(`[Telemetry] Exporting to ${exporterUrl}`);
 }
 
 export function shutdownTelemetry(): Promise<void> {

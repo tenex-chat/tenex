@@ -38,6 +38,7 @@ export interface TenexConfig {
     telemetry?: {
         enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
         serviceName?: string; // OTL trace service name (default: 'tenex-daemon')
+        endpoint?: string; // OTLP HTTP endpoint URL (default: http://localhost:4318/v1/traces)
     };
 
     // Global system prompt configuration
@@ -80,6 +81,7 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             serviceName: z.string().optional(),
+            endpoint: z.string().optional(),
         })
         .optional(),
     globalSystemPrompt: z
