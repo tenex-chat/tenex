@@ -12,20 +12,23 @@ import type { LLMOperation, LLMOperationsRegistry, RALState } from "@/services/L
 import { config } from "@/services/ConfigService";
 
 /**
- * OperationsStatusPublisher handles publishing of LLM operation status events to Nostr.
+ * OperationsStatusService handles publishing of LLM operation status events to Nostr.
  *
- * Publishes one event per event being processed, with:
- * - One e-tag for the event being processed
+ * Publishes one event per conversation (thread root), with:
+ * - One e-tag for the conversation ID (thread root event)
  * - Uppercase P-tags for whitelisted human users from config.json
- * - Lowercase p-tags for all agents working on that event
+ * - Lowercase p-tags for all agents working on that conversation
  * - One a-tag for the project reference
+ *
+ * Note: The e-tag points to the conversation/thread root ID (not individual message IDs),
+ * allowing clients to look up working agents by conversation ID.
  */
 export class OperationsStatusService {
     private debounceTimer?: NodeJS.Timeout;
     private unsubscribe?: () => void;
-    private publishedEvents = new Set<string>(); // Track which events we've published status for
-    private lastPublishedState = new Map<string, Set<string>>(); // Track which agents were published per event
-    private lastPublishedRALStates = new Map<string, Map<string, RALState>>(); // Track RAL states per event (eventId -> agentPubkey -> state)
+    private publishedConversations = new Set<string>(); // Track which conversations we've published status for
+    private lastPublishedConversationAgents = new Map<string, Set<string>>(); // Track which agents were published per conversation
+    private lastPublishedRALStates = new Map<string, Map<string, RALState>>(); // Track RAL states per conversation (conversationId -> agentPubkey -> state)
 
     constructor(
         private registry: LLMOperationsRegistry,
@@ -35,7 +38,7 @@ export class OperationsStatusService {
     start(): void {
         // Guard against multiple start() calls
         if (this.unsubscribe) {
-            logger.warn("[OperationsStatusPublisher] Already started, ignoring duplicate start()");
+            logger.warn("[OperationsStatusService] Already started, ignoring duplicate start()");
             return;
         }
 
@@ -46,7 +49,7 @@ export class OperationsStatusService {
 
         // Publish initial state if any operations exist
         this.publishNow().catch((err) => {
-            logger.error("[OperationsStatusPublisher] Failed to publish initial state", {
+            logger.error("[OperationsStatusService] Failed to publish initial state", {
                 error: formatAnyError(err),
             });
         });
@@ -72,7 +75,7 @@ export class OperationsStatusService {
         // Schedule new publish
         this.debounceTimer = setTimeout(() => {
             this.publishNow().catch((err) => {
-                logger.error("[OperationsStatusPublisher] Failed to publish status", {
+                logger.error("[OperationsStatusService] Failed to publish status", {
                     error: formatAnyError(err),
                 });
             });
@@ -82,97 +85,97 @@ export class OperationsStatusService {
     private async publishNow(): Promise<void> {
         if (!isProjectContextInitialized()) {
             logger.debug(
-                "[OperationsStatusPublisher] Project context not initialized, skipping publish"
+                "[OperationsStatusService] Project context not initialized, skipping publish"
             );
             return;
         }
 
         const projectCtx = getProjectContext();
-        const operationsByEvent = this.registry.getOperationsByEvent();
+        const operationsByConversation = this.registry.getOperationsByConversation();
 
-        // Keep track of currently active events
-        const currentEventIds = new Set(operationsByEvent.keys());
+        // Keep track of currently active conversations (thread roots)
+        const currentConversationIds = new Set(operationsByConversation.keys());
 
-        // Track events we need to clean up
-        const eventsToCleanup = new Set<string>();
+        // Track conversations we need to clean up
+        const conversationsToCleanup = new Set<string>();
 
-        // Check which previously published events are no longer active
-        for (const eventId of this.publishedEvents) {
-            if (!currentEventIds.has(eventId)) {
-                eventsToCleanup.add(eventId);
+        // Check which previously published conversations are no longer active
+        for (const conversationId of this.publishedConversations) {
+            if (!currentConversationIds.has(conversationId)) {
+                conversationsToCleanup.add(conversationId);
             }
         }
 
         // Log current state for debugging
-        if (operationsByEvent.size > 0 || eventsToCleanup.size > 0) {
-            logger.debug("[OperationsStatusPublisher] Current state", {
-                activeEvents: (Array.from(currentEventIds) as string[]).map((id) => id.substring(0, 8)),
-                previouslyPublished: (Array.from(this.publishedEvents) as string[]).map((id) =>
+        if (operationsByConversation.size > 0 || conversationsToCleanup.size > 0) {
+            logger.debug("[OperationsStatusService] Current state", {
+                activeConversations: (Array.from(currentConversationIds) as string[]).map((id) => id.substring(0, 8)),
+                previouslyPublished: (Array.from(this.publishedConversations) as string[]).map((id) =>
                     id.substring(0, 8)
                 ),
-                toCleanup: (Array.from(eventsToCleanup) as string[]).map((id) => id.substring(0, 8)),
+                toCleanup: (Array.from(conversationsToCleanup) as string[]).map((id) => id.substring(0, 8)),
             });
         }
 
-        // Publish one TenexOperationsStatus event per event being processed
-        for (const [eventId, operations] of operationsByEvent) {
+        // Publish one TenexOperationsStatus event per conversation (thread root)
+        for (const [conversationId, operations] of operationsByConversation) {
             try {
                 // Only publish if state changed or not previously published
                 if (
-                    !this.publishedEvents.has(eventId) ||
-                    this.hasOperationsChanged(eventId, operations)
+                    !this.publishedConversations.has(conversationId) ||
+                    this.hasOperationsChanged(conversationId, operations)
                 ) {
-                    await this.publishEventStatus(eventId, operations, projectCtx);
-                    this.publishedEvents.add(eventId);
-                    this.lastPublishedState.set(
-                        eventId,
+                    await this.publishConversationStatus(conversationId, operations, projectCtx);
+                    this.publishedConversations.add(conversationId);
+                    this.lastPublishedConversationAgents.set(
+                        conversationId,
                         new Set(operations.map((op: LLMOperation) => op.agentPubkey))
                     );
                     // Track RAL states for change detection
                     const ralStates = new Map<string, RALState>();
                     for (const op of operations) {
-                        ralStates.set(op.agentPubkey, op.ralState ?? 'IDLE');
+                        ralStates.set(op.agentPubkey, op.ralState ?? "IDLE");
                     }
-                    this.lastPublishedRALStates.set(eventId, ralStates);
+                    this.lastPublishedRALStates.set(conversationId, ralStates);
                 }
             } catch (err) {
-                logger.error("[OperationsStatusPublisher] Failed to publish event status", {
-                    eventId: eventId.substring(0, 8),
+                logger.error("[OperationsStatusService] Failed to publish conversation status", {
+                    conversationId: conversationId.substring(0, 8),
                     error: formatAnyError(err),
                 });
             }
         }
 
-        // Publish cleanup events (empty p-tags) for completed events
-        for (const eventId of eventsToCleanup) {
+        // Publish cleanup events (empty p-tags) for completed conversations
+        for (const conversationId of conversationsToCleanup) {
             try {
-                logger.debug("[OperationsStatusPublisher] Publishing cleanup event", {
-                    eventId: eventId.substring(0, 8),
+                logger.debug("[OperationsStatusService] Publishing cleanup event", {
+                    conversationId: conversationId.substring(0, 8),
                 });
-                await this.publishEventStatus(eventId, [], projectCtx);
-                this.publishedEvents.delete(eventId);
-                this.lastPublishedState.delete(eventId);
-                this.lastPublishedRALStates.delete(eventId);
+                await this.publishConversationStatus(conversationId, [], projectCtx);
+                this.publishedConversations.delete(conversationId);
+                this.lastPublishedConversationAgents.delete(conversationId);
+                this.lastPublishedRALStates.delete(conversationId);
             } catch (err) {
-                logger.error("[OperationsStatusPublisher] Failed to publish cleanup status", {
-                    eventId: eventId.substring(0, 8),
+                logger.error("[OperationsStatusService] Failed to publish cleanup status", {
+                    conversationId: conversationId.substring(0, 8),
                     error: formatAnyError(err),
                 });
             }
         }
 
-        logger.debug("[OperationsStatusPublisher] Published status", {
-            activeEvents: operationsByEvent.size,
-            cleanedEvents: eventsToCleanup.size,
-            totalOperations: (Array.from(operationsByEvent.values()) as LLMOperation[][]).reduce(
+        logger.debug("[OperationsStatusService] Published status", {
+            activeConversations: operationsByConversation.size,
+            cleanedConversations: conversationsToCleanup.size,
+            totalOperations: (Array.from(operationsByConversation.values()) as LLMOperation[][]).reduce(
                 (sum, ops) => sum + ops.length,
                 0
             ),
         });
     }
 
-    private hasOperationsChanged(eventId: string, operations: LLMOperation[]): boolean {
-        const lastAgents = this.lastPublishedState.get(eventId);
+    private hasOperationsChanged(conversationId: string, operations: LLMOperation[]): boolean {
+        const lastAgents = this.lastPublishedConversationAgents.get(conversationId);
         if (!lastAgents) return true;
 
         const currentAgents = new Set(operations.map((op) => op.agentPubkey));
@@ -183,20 +186,20 @@ export class OperationsStatusService {
         }
 
         // Check if RAL states have changed
-        const lastRALStates = this.lastPublishedRALStates.get(eventId);
+        const lastRALStates = this.lastPublishedRALStates.get(conversationId);
         if (!lastRALStates) return true;
 
         for (const op of operations) {
             const lastState = lastRALStates.get(op.agentPubkey);
-            const currentState = op.ralState ?? 'IDLE';
+            const currentState = op.ralState ?? "IDLE";
             if (lastState !== currentState) return true;
         }
 
         return false;
     }
 
-    private async publishEventStatus(
-        eventId: string,
+    private async publishConversationStatus(
+        conversationId: string,
         operations: LLMOperation[],
         projectCtx: ProjectContext
     ): Promise<void> {
@@ -206,8 +209,8 @@ export class OperationsStatusService {
         // Content is empty - runtime is now tracked in agent publisher events
         event.content = "";
 
-        // Single e-tag for the event being processed
-        event.tag(["e", eventId]);
+        // Single e-tag for the conversation (thread root)
+        event.tag(["e", conversationId]);
 
         // Uppercase P-tags for whitelisted human users from config
         const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
@@ -215,7 +218,7 @@ export class OperationsStatusService {
             event.tag(["P", pubkey]);
         }
 
-        // Lowercase p-tags for all agents working on this event
+        // Lowercase p-tags for all agents working on this conversation
         const agentPubkeys = new Set(operations.map((op) => op.agentPubkey));
         for (const pubkey of agentPubkeys) {
             event.tag(["p", pubkey]);
@@ -230,8 +233,8 @@ export class OperationsStatusService {
         await event.publish();
 
         const isCleanup = operations.length === 0;
-        logger.debug("[OperationsStatusPublisher] Published event status", {
-            eventId: eventId.substring(0, 8),
+        logger.debug("[OperationsStatusService] Published conversation status", {
+            conversationId: conversationId.substring(0, 8),
             whitelistedUsers: whitelistedPubkeys.map((p) => p.substring(0, 8)),
             agentCount: agentPubkeys.size,
             operationCount: operations.length,
