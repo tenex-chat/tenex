@@ -8,13 +8,14 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
+import { PROVIDER_IDS } from "../provider-ids";
 
 /**
  * OpenAI provider implementation
  */
 export class OpenAIProvider extends StandardProvider {
     static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
-        "openai",
+        PROVIDER_IDS.OPENAI,
         "OpenAI",
         "Direct access to GPT models",
         "standard",

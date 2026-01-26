@@ -8,13 +8,14 @@
 import { createOllama } from "ollama-ai-provider-v2";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
+import { PROVIDER_IDS } from "../provider-ids";
 
 /**
  * Ollama provider implementation
  */
 export class OllamaProvider extends StandardProvider {
     static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
-        "ollama",
+        PROVIDER_IDS.OLLAMA,
         "Ollama",
         "Run open-source LLMs locally",
         "standard",

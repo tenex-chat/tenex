@@ -8,13 +8,14 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
+import { PROVIDER_IDS } from "../provider-ids";
 
 /**
  * Anthropic provider implementation
  */
 export class AnthropicProvider extends StandardProvider {
     static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
-        "anthropic",
+        PROVIDER_IDS.ANTHROPIC,
         "Anthropic",
         "Direct access to Claude models",
         "standard",

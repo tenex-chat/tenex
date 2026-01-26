@@ -1,7 +1,7 @@
 /**
  * Agent Provider - Base class for agent-based LLM providers
  *
- * Agent providers (like claude-code and codex-cli) have their own
+ * Agent providers (like claude-code, codex-app-server, gemini-cli) have their own
  * execution model with built-in tools and session management.
  */
 

@@ -43,7 +43,7 @@ export class ClaudeCodeProvider extends AgentProvider {
     private enableTenexTools = true;
 
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
-        "claude-code",
+        PROVIDER_IDS.CLAUDE_CODE,
         "Claude Code",
         "Claude with built-in coding tools and MCP support",
         "agent",

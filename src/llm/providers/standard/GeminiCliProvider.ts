@@ -8,13 +8,14 @@
 import { createGeminiProvider } from "ai-sdk-provider-gemini-cli";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
+import { PROVIDER_IDS } from "../provider-ids";
 
 /**
  * Gemini CLI provider implementation
  */
 export class GeminiCliProvider extends StandardProvider {
     static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
-        "gemini-cli",
+        PROVIDER_IDS.GEMINI_CLI,
         "Gemini CLI",
         "Access Gemini models via CLI with OAuth",
         "standard",
