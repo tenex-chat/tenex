@@ -1,18 +1,23 @@
 /**
  * Prompt Compiler Service (TIN-10)
  *
- * Compiles agent lessons with user comments into optimized system prompts.
+ * Compiles agent lessons with user comments into Effective Agent Instructions.
  * Uses LLM to intelligently merge:
- * - Agent base instructions
- * - Lessons (retrieved from ProjectContext)
+ * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
+ * - Lessons (retrieved from ProjectContext, tagging the Agent Definition Event)
+ * - Comments on Lesson Events
  * - Optional additionalSystemPrompt
+ *
+ * Terminology:
+ * - Base Agent Instructions: Raw instructions stored in the agent definition Nostr event (Kind 4199)
+ * - Effective Agent Instructions: Final compiled instructions = Base + Lessons + Comments
  *
  * Key behaviors:
  * - Retrieves lessons internally from ProjectContext (not passed as parameter)
  * - Uses generateText (not generateObject) for natural prompt integration
- * - Returns only the compiled prompt string (not a structured object)
+ * - Returns only the Effective Agent Instructions string (not a structured object)
  * - On LLM failure: throws error (consumer handles fallback)
- * - Cache hash uses agentDefinitionEventId when provided, or basePromptHash for local agents
+ * - Cache hash uses agentDefinitionEventId when provided, or baseInstructionsHash for local agents
  */
 
 import * as fs from "node:fs/promises";
@@ -48,17 +53,17 @@ export interface LessonComment {
 }
 
 /**
- * Cache entry for compiled prompts
+ * Cache entry for Effective Agent Instructions
  */
-export interface CompiledPromptCacheEntry {
-    /** The compiled system prompt */
-    compiledPrompt: string;
+export interface EffectiveInstructionsCacheEntry {
+    /** The Effective Agent Instructions (compiled result) */
+    effectiveAgentInstructions: string;
     /** When the cache was written (Unix timestamp) */
     timestamp: number;
     /** max(created_at) of lessons AND comments used */
     maxCreatedAt: number;
-    /** SHA-256 hash of the base prompt used */
-    basePromptHash: string;
+    /** SHA-256 hash of the Base Agent Instructions used */
+    baseInstructionsHash: string;
 }
 
 
@@ -305,40 +310,40 @@ export class PromptCompilerService {
     // =====================================================================================
 
     /**
-     * Compile lessons and their comments into a system prompt.
-     * Uses LLM to intelligently merge agent base instructions with lessons.
+     * Compile lessons and their comments into Effective Agent Instructions.
+     * Uses LLM to intelligently merge Base Agent Instructions with lessons.
      *
-     * @param basePrompt The base system prompt to enhance
+     * @param baseAgentInstructions The Base Agent Instructions to enhance (from agent.instructions)
      * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
      * @param additionalSystemPrompt Optional additional instructions to integrate
-     * @returns The compiled prompt string
+     * @returns The Effective Agent Instructions string
      * @throws Error if LLM compilation fails (consumer should handle fallback)
      */
     async compile(
-        basePrompt: string,
+        baseAgentInstructions: string,
         agentDefinitionEventId?: string,
         additionalSystemPrompt?: string
     ): Promise<string> {
         // Retrieve lessons from ProjectContext
         const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
 
-        // If no lessons and no additional prompt, return base prompt directly
+        // If no lessons and no additional prompt, return Base Agent Instructions directly
         if (lessons.length === 0 && !additionalSystemPrompt) {
-            logger.debug("PromptCompilerService: no lessons or additional prompt, returning base prompt", {
+            logger.debug("PromptCompilerService: no lessons or additional prompt, returning Base Agent Instructions", {
                 agentPubkey: this.agentPubkey.substring(0, 8),
             });
-            return basePrompt;
+            return baseAgentInstructions;
         }
 
         // Calculate freshness inputs
         const maxCreatedAt = this.calculateMaxCreatedAt(lessons);
         // Create deterministic cache key from all relevant inputs:
         // - agentDefinitionEventId (when provided for non-local agents)
-        // - basePrompt (always included - captures local agent definition changes)
+        // - baseAgentInstructions (always included - captures local agent definition changes)
         // - additionalSystemPrompt (captures dynamic context changes)
         const cacheHash = this.hashString(JSON.stringify({
             agentDefinitionEventId: agentDefinitionEventId || null,
-            basePrompt,
+            baseAgentInstructions,
             additionalSystemPrompt: additionalSystemPrompt || null,
         }));
 
@@ -347,36 +352,36 @@ export class PromptCompilerService {
         if (cached) {
             const cacheValid =
                 cached.maxCreatedAt >= maxCreatedAt &&
-                cached.basePromptHash === cacheHash;
+                cached.baseInstructionsHash === cacheHash;
 
             if (cacheValid) {
-                logger.debug("PromptCompilerService: returning cached prompt", {
+                logger.debug("PromptCompilerService: returning cached Effective Agent Instructions", {
                     agentPubkey: this.agentPubkey.substring(0, 8),
                     cacheAge: Date.now() - cached.timestamp * 1000,
                 });
-                return cached.compiledPrompt;
+                return cached.effectiveAgentInstructions;
             }
 
             logger.debug("PromptCompilerService: cache stale, recompiling", {
                 agentPubkey: this.agentPubkey.substring(0, 8),
                 cachedMaxCreatedAt: cached.maxCreatedAt,
                 currentMaxCreatedAt: maxCreatedAt,
-                cacheHashMatch: cached.basePromptHash === cacheHash,
+                cacheHashMatch: cached.baseInstructionsHash === cacheHash,
             });
         }
 
         // Compile with LLM
-        const compiledPrompt = await this.compileWithLLM(lessons, basePrompt, additionalSystemPrompt);
+        const effectiveAgentInstructions = await this.compileWithLLM(lessons, baseAgentInstructions, additionalSystemPrompt);
 
         // Cache the result
         await this.writeCache({
-            compiledPrompt,
+            effectiveAgentInstructions,
             timestamp: Math.floor(Date.now() / 1000),
             maxCreatedAt,
-            basePromptHash: cacheHash,
+            baseInstructionsHash: cacheHash,
         });
 
-        return compiledPrompt;
+        return effectiveAgentInstructions;
     }
 
     /**
@@ -404,18 +409,18 @@ export class PromptCompilerService {
     }
 
     /**
-     * Compile lessons + comments into a prompt using the LLM.
-     * Uses generateText to naturally integrate lessons into the base prompt.
+     * Compile lessons + comments into Effective Agent Instructions using the LLM.
+     * Uses generateText to naturally integrate lessons into the Base Agent Instructions.
      *
      * @param lessons The agent's lessons
-     * @param basePrompt The base system prompt to enhance
+     * @param baseAgentInstructions The Base Agent Instructions to enhance
      * @param additionalSystemPrompt Optional additional instructions to integrate
-     * @returns The compiled prompt string
+     * @returns The Effective Agent Instructions string
      * @throws Error if LLM compilation fails
      */
     private async compileWithLLM(
         lessons: NDKAgentLesson[],
-        basePrompt: string,
+        baseAgentInstructions: string,
         additionalSystemPrompt?: string
     ): Promise<string> {
         // Get LLM configuration - use promptCompilation config if set, then summarization, then default
@@ -446,14 +451,14 @@ export class PromptCompilerService {
         });
 
         // Build compilation prompt with emphasis on natural integration
-        const systemPrompt = `You are a prompt compiler that rewrites and integrates lessons learned by an AI agent into their base system prompt.
+        const systemPrompt = `You are a prompt compiler that rewrites and integrates lessons learned by an AI agent into their Base Agent Instructions.
 
 Your task:
-1. Rewrite the base prompt to naturally incorporate the provided lessons
+1. Rewrite the Base Agent Instructions to naturally incorporate the provided lessons
 2. Integrate lessons as natural parts of the instructions, not as separate sections
 3. Resolve any contradictions (newer lessons/comments take precedence)
 4. Remove redundancy while preserving important nuances
-5. You may restructure and reformat the prompt for better clarity
+5. You may restructure and reformat the instructions for better clarity
 
 Guidelines:
 - Lessons should feel like they were always part of the original instructions
@@ -462,12 +467,12 @@ Guidelines:
 - Do NOT add meta-commentary about the compilation process
 - Do NOT mention that lessons were integrated
 
-Output ONLY the compiled prompt, nothing else.`;
+Output ONLY the Effective Agent Instructions, nothing else.`;
 
         // Build user prompt with all inputs
-        let userPrompt = `## Base Prompt
+        let userPrompt = `## Base Agent Instructions
 
-${basePrompt}
+${baseAgentInstructions}
 
 ## Lessons to Integrate
 
@@ -484,23 +489,23 @@ ${additionalSystemPrompt}`;
 
         userPrompt += `
 
-Please rewrite and compile this into a unified, cohesive prompt.`;
+Please rewrite and compile this into unified, cohesive Effective Agent Instructions.`;
 
-        const { text: compiledPrompt } = await llmService.generateText([
+        const { text: effectiveAgentInstructions } = await llmService.generateText([
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
         ]);
 
-        logger.info("PromptCompilerService: compiled prompt successfully", {
+        logger.info("PromptCompilerService: compiled Effective Agent Instructions successfully", {
             agentPubkey: this.agentPubkey.substring(0, 8),
             lessonsCount: lessons.length,
             commentsCount: this.getTotalCommentsCount(),
-            basePromptLength: basePrompt.length,
-            compiledLength: compiledPrompt.length,
+            baseInstructionsLength: baseAgentInstructions.length,
+            effectiveInstructionsLength: effectiveAgentInstructions.length,
             hasAdditionalPrompt: !!additionalSystemPrompt,
         });
 
-        return compiledPrompt;
+        return effectiveAgentInstructions;
     }
 
     // =====================================================================================
@@ -517,11 +522,11 @@ Please rewrite and compile this into a unified, cohesive prompt.`;
     /**
      * Read cache entry from disk
      */
-    private async readCache(): Promise<CompiledPromptCacheEntry | null> {
+    private async readCache(): Promise<EffectiveInstructionsCacheEntry | null> {
         try {
             const cachePath = this.getCachePath();
             const data = await fs.readFile(cachePath, "utf-8");
-            return JSON.parse(data) as CompiledPromptCacheEntry;
+            return JSON.parse(data) as EffectiveInstructionsCacheEntry;
         } catch {
             // File doesn't exist or is invalid - that's fine
             return null;
@@ -531,7 +536,7 @@ Please rewrite and compile this into a unified, cohesive prompt.`;
     /**
      * Write cache entry to disk
      */
-    private async writeCache(entry: CompiledPromptCacheEntry): Promise<void> {
+    private async writeCache(entry: EffectiveInstructionsCacheEntry): Promise<void> {
         try {
             await fs.mkdir(this.cacheDir, { recursive: true });
             const cachePath = this.getCachePath();

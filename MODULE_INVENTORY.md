@@ -81,7 +81,7 @@ Use this section to understand each service’s scope and dependencies:
 | `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
 | `MCP` services | `src/services/mcp/` | Install/manage MCP servers, expose them to dynamic tools and CLI setup flows. |
-| `PromptCompilerService` | `src/services/prompt-compiler/` | Compiles agent lessons with user comments into optimized system prompts (TIN-10). Uses LLM to synthesize lessons + NIP-22 comments into base prompts, with disk caching at `~/.tenex/agents/prompts/`. One instance per agent, registered during `ProjectRuntime.start()`. Handles subscription to kind 1111 comment events filtered by `#K: [4129]`. |
+| `PromptCompilerService` | `src/services/prompt-compiler/` | Compiles agent lessons with user comments into Effective Agent Instructions (TIN-10). Takes Base Agent Instructions (from `agent.instructions` in Kind 4199 event) and synthesizes them with Lessons + NIP-22 comments to produce the final instructions the agent uses. Disk caching at `~/.tenex/agents/prompts/`. One instance per agent, registered during `ProjectRuntime.start()`. Handles subscription to kind 1111 comment events filtered by `#K: [4129]`. |
 
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.
 
