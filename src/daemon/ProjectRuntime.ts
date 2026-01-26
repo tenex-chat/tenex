@@ -162,7 +162,7 @@ export class ProjectRuntime {
             await this.initializePromptCompilers();
 
             // Warm user profile cache for whitelisted pubkeys and project owner
-            // This ensures getNameSync() returns real names instead of "User"
+            // This ensures getNameSync() returns real names instead of shortened pubkeys
             // for message attribution in delegations
             await this.warmUserProfileCache();
 
@@ -623,7 +623,7 @@ export class ProjectRuntime {
 
     /**
      * Warm the user profile cache for whitelisted pubkeys and project owner.
-     * This ensures that getNameSync() returns real user names instead of "User"
+     * This ensures that getNameSync() returns real user names instead of shortened pubkeys
      * when attributing messages in delegations.
      */
     private async warmUserProfileCache(): Promise<void> {

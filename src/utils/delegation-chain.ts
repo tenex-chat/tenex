@@ -34,12 +34,13 @@ import { ConversationStore, type DelegationChainEntry } from "@/conversations/Co
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
+import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 
 /**
- * Truncate a conversation ID to 12 hex characters for display.
+ * Truncate a conversation ID to PREFIX_LENGTH hex characters for display.
  */
 export function truncateConversationId(conversationId: string): string {
-    return conversationId.substring(0, 12);
+    return conversationId.substring(0, PREFIX_LENGTH);
 }
 
 /**
@@ -88,7 +89,7 @@ export function buildDelegationChain(
     /**
      * Helper to resolve a pubkey to a display name.
      * Returns the agent slug if known, or the user's name from their Nostr profile if it's the project owner.
-     * Uses PubkeyService.getNameSync() which returns cached profile name or "User" as fallback.
+     * Uses PubkeyService.getNameSync() which returns cached profile name or shortened pubkey as fallback.
      */
     const resolveDisplayName = (pubkey: string): { displayName: string; isUser: boolean } => {
         if (pubkey === projectOwnerPubkey) {
@@ -105,7 +106,7 @@ export function buildDelegationChain(
         }
 
         // Unknown pubkey - use truncated version
-        return { displayName: pubkey.substring(0, 8), isUser: false };
+        return { displayName: pubkey.substring(0, PREFIX_LENGTH), isUser: false };
     };
 
     // Build the chain by walking up through parent conversations
@@ -337,7 +338,7 @@ export function formatDelegationChain(
         const recipientName = `${recipient.displayName}${recipientSuffix}`;
 
         // Get the conversation ID for this link from RECIPIENT.conversationId
-        // Truncate to 12 chars for display (full IDs are stored in chain entries)
+        // Truncate to PREFIX_LENGTH chars for display (full IDs are stored in chain entries)
         const convId = recipient.conversationId
             ? truncateConversationId(recipient.conversationId)
             : "unknown";

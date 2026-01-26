@@ -228,6 +228,12 @@ function serializeConversation(
             // Text messages: straightforward format
             formattedLines.push(formatLine(relativeSeconds, from, targets, entry.content));
         } else if (entry.messageType === "tool-call") {
+            // Only include tool calls if includeToolResults is true
+            if (!options.includeToolResults) {
+                // Skip tool call entries when not including tool results
+                continue;
+            }
+
             // Tool call: look for matching tool-results by toolCallId or adjacency
             const toolData = (entry.toolData ?? []) as ToolCallPart[];
 
@@ -240,7 +246,7 @@ function serializeConversation(
             let adjacentResults: ToolResultPart[] = [];
             let shouldSkipNext = false;
 
-            if (options.includeToolResults && i + 1 < messages.length) {
+            if (i + 1 < messages.length) {
                 const nextMsg = messages[i + 1];
                 if (nextMsg.messageType === "tool-result" && nextMsg.pubkey === entry.pubkey) {
                     const resultData = (nextMsg.toolData ?? []) as ToolResultPart[];
@@ -265,26 +271,24 @@ function serializeConversation(
                 const input = tc.input !== undefined ? formatToolInput(tc.input) : "";
                 let toolCallStr = `[tool-use ${toolName} ${input}]`;
 
-                if (options.includeToolResults) {
-                    let matchingResult: ToolResultPart | undefined;
+                let matchingResult: ToolResultPart | undefined;
 
-                    // Try to find matching result by toolCallId first
-                    if (tc.toolCallId && toolResultsMap.has(tc.toolCallId)) {
-                        matchingResult = toolResultsMap.get(tc.toolCallId);
-                        matchedResultIds.add(tc.toolCallId);
-                    } else if (!hasToolCallIds && adjacentResultIndex < adjacentResults.length) {
-                        // Fallback: when no toolCallIds, match by position (adjacency)
-                        matchingResult = adjacentResults[adjacentResultIndex++];
-                    }
+                // Try to find matching result by toolCallId first
+                if (tc.toolCallId && toolResultsMap.has(tc.toolCallId)) {
+                    matchingResult = toolResultsMap.get(tc.toolCallId);
+                    matchedResultIds.add(tc.toolCallId);
+                } else if (!hasToolCallIds && adjacentResultIndex < adjacentResults.length) {
+                    // Fallback: when no toolCallIds, match by position (adjacency)
+                    matchingResult = adjacentResults[adjacentResultIndex++];
+                }
 
-                    if (matchingResult) {
-                        const resultContent =
-                            matchingResult.output !== undefined
-                                ? safeStringify(matchingResult.output)
-                                : "";
-                        toolCallStr += ` [tool-result ${resultContent}]`;
-                        shouldSkipNext = true;
-                    }
+                if (matchingResult) {
+                    const resultContent =
+                        matchingResult.output !== undefined
+                            ? safeStringify(matchingResult.output)
+                            : "";
+                    toolCallStr += ` [tool-result ${resultContent}]`;
+                    shouldSkipNext = true;
                 }
                 toolCallParts.push(toolCallStr);
             }

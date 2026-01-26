@@ -1,6 +1,7 @@
 import { getNDK } from "@/nostr";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
+import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 
 interface UserProfile {
@@ -26,7 +27,6 @@ export class PubkeyService {
 
     private userProfileCache: Map<Hexpubkey, CacheEntry> = new Map();
     private readonly CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-    private readonly DEFAULT_USER_NAME = "User";
 
     private constructor() {}
 
@@ -52,7 +52,7 @@ export class PubkeyService {
 
         // It's a user - fetch their profile
         const profile = await this.getUserProfile(pubkey);
-        return this.extractDisplayName(profile);
+        return this.extractDisplayName(profile, pubkey);
     }
 
     /**
@@ -68,15 +68,16 @@ export class PubkeyService {
         // Check cache for user profile
         const cached = this.userProfileCache.get(pubkey);
         if (cached && Date.now() < cached.ttl) {
-            return this.extractDisplayName(cached.profile);
+            return this.extractDisplayName(cached.profile, pubkey);
         }
 
-        // Return default if nothing found
-        return this.DEFAULT_USER_NAME;
+        // Return shortened pubkey as fallback using shared PREFIX_LENGTH constant
+        return pubkey.substring(0, PREFIX_LENGTH);
     }
 
     /**
-     * Get agent slug for a pubkey if it belongs to an agent
+     * Get agent slug for a pubkey if it belongs to an agent.
+     * Uses AgentRegistry's getAgentByPubkey for efficient O(1) lookup.
      */
     private getAgentSlug(pubkey: Hexpubkey): string | undefined {
         if (!isProjectContextInitialized()) {
@@ -85,11 +86,10 @@ export class PubkeyService {
 
         const projectCtx = getProjectContext();
 
-        // Check all agents
-        for (const [slug, agent] of projectCtx.agents) {
-            if (agent.pubkey === pubkey) {
-                return slug;
-            }
+        // Use direct pubkey lookup from AgentRegistry (O(1) instead of O(n))
+        const agent = projectCtx.getAgentByPubkey(pubkey);
+        if (agent) {
+            return agent.slug;
         }
 
         return undefined;
@@ -175,9 +175,11 @@ export class PubkeyService {
 
     /**
      * Extract the best display name from a profile
+     * @param profile The user profile to extract a name from
+     * @param pubkeyFallback Optional pubkey to use as fallback if no name is found
      */
-    private extractDisplayName(profile: UserProfile): string {
-        // Priority: name > display_name > username > default
+    private extractDisplayName(profile: UserProfile, pubkeyFallback?: string): string {
+        // Priority: name > display_name > username > shortened pubkey
         if (profile.name?.trim()) {
             return profile.name.trim();
         }
@@ -187,7 +189,12 @@ export class PubkeyService {
         if (profile.username?.trim()) {
             return profile.username.trim();
         }
-        return this.DEFAULT_USER_NAME;
+        // Fallback to shortened pubkey if available
+        if (pubkeyFallback) {
+            return pubkeyFallback.substring(0, PREFIX_LENGTH);
+        }
+        // This shouldn't happen as callers should provide pubkeyFallback
+        return "Unknown";
     }
 
     /**
@@ -204,7 +211,7 @@ export class PubkeyService {
     /**
      * Warm the cache for multiple user pubkeys.
      * This pre-fetches kind:0 profiles so that getNameSync() returns real names
-     * instead of the default "User" value.
+     * instead of shortened pubkeys.
      *
      * @param pubkeys Array of pubkeys to warm the cache for
      * @returns Map of pubkey to resolved display name
@@ -235,10 +242,10 @@ export class PubkeyService {
                         results.set(pubkey, name);
                     } catch (error) {
                         logger.warn("[PUBKEY_SERVICE] Failed to warm profile", {
-                            pubkey: pubkey.substring(0, 8),
+                            pubkey: pubkey.substring(0, PREFIX_LENGTH),
                             error: error instanceof Error ? error.message : String(error),
                         });
-                        results.set(pubkey, this.DEFAULT_USER_NAME);
+                        results.set(pubkey, pubkey.substring(0, PREFIX_LENGTH));
                     }
                 })
             );
