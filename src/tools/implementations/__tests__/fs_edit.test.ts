@@ -202,15 +202,17 @@ modified line 3`,
             ).rejects.toThrow("Path must be absolute");
         });
 
-        it("should fail when file does not exist", async () => {
+        it("should return error-text when file does not exist", async () => {
             const nonExistent = path.join(testDir, "nonexistent.txt");
-            await expect(
-                editTool.execute({
-                    path: nonExistent,
-                    old_string: "old",
-                    new_string: "new",
-                })
-            ).rejects.toThrow();
+            const result = await editTool.execute({
+                path: nonExistent,
+                old_string: "old",
+                new_string: "new",
+            });
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("File or directory not found"),
+            });
         });
     });
 
