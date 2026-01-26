@@ -31,7 +31,7 @@ mock.module("@/llm", () => ({
                     throw new Error("LLM service unavailable");
                 }
                 return {
-                    text: "Compiled prompt content",
+                    text: "Effective Agent Instructions from LLM",
                 };
             },
         }),
@@ -261,7 +261,7 @@ describe("PromptCompilerService", () => {
 
             const result = await service.compile(baseAgentInstructions);
 
-            expect(result).toBe("Compiled prompt content");
+            expect(result).toBe("Effective Agent Instructions from LLM");
             expect(llmCallCount).toBe(1);
         });
 
@@ -287,7 +287,7 @@ describe("PromptCompilerService", () => {
 
             // Should not throw when event ID is provided
             const result = await service.compile(baseAgentInstructions, "event123");
-            expect(result).toBe("Compiled prompt content");
+            expect(result).toBe("Effective Agent Instructions from LLM");
         });
 
         test("accepts optional additionalSystemPrompt", async () => {
@@ -313,7 +313,7 @@ describe("PromptCompilerService", () => {
 
             // Should not throw when additional prompt is provided
             const result = await service.compile(baseAgentInstructions, undefined, additionalPrompt);
-            expect(result).toBe("Compiled prompt content");
+            expect(result).toBe("Effective Agent Instructions from LLM");
         });
     });
 
@@ -603,18 +603,18 @@ describe("PromptCompilerService", () => {
 
             // First compilation
             const result1 = await service.compile("Original Base Agent Instructions");
-            expect(result1).toBe("Compiled prompt content");
+            expect(result1).toBe("Effective Agent Instructions from LLM");
             expect(llmCallCount).toBe(1);
 
             // Second compilation with same baseAgentInstructions should use cache (hit)
             const result2 = await service.compile("Original Base Agent Instructions");
-            expect(result2).toBe("Compiled prompt content");
+            expect(result2).toBe("Effective Agent Instructions from LLM");
             // Cache hit - LLM should NOT be called again
             expect(llmCallCount).toBe(1);
 
             // Third compilation with DIFFERENT baseAgentInstructions - should recompile (cache miss)
             const result3 = await service.compile("Changed Base Agent Instructions");
-            expect(result3).toBe("Compiled prompt content");
+            expect(result3).toBe("Effective Agent Instructions from LLM");
             // New baseAgentInstructions means cache miss, LLM called
             expect(llmCallCount).toBe(2);
         });
@@ -643,17 +643,17 @@ describe("PromptCompilerService", () => {
 
             // First compilation without additionalSystemPrompt
             const result1 = await service.compile(baseAgentInstructions);
-            expect(result1).toBe("Compiled prompt content");
+            expect(result1).toBe("Effective Agent Instructions from LLM");
             expect(llmCallCount).toBe(1);
 
             // Second compilation WITH additionalSystemPrompt - should recompile
             const result2 = await service.compile(baseAgentInstructions, undefined, "Extra instructions");
-            expect(result2).toBe("Compiled prompt content");
+            expect(result2).toBe("Effective Agent Instructions from LLM");
             expect(llmCallCount).toBe(2);
 
             // Third compilation with DIFFERENT additionalSystemPrompt - should recompile
             const result3 = await service.compile(baseAgentInstructions, undefined, "Different instructions");
-            expect(result3).toBe("Compiled prompt content");
+            expect(result3).toBe("Effective Agent Instructions from LLM");
             expect(llmCallCount).toBe(3);
         });
 
