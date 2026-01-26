@@ -17,7 +17,7 @@
  * - Uses generateText (not generateObject) for natural prompt integration
  * - Returns only the Effective Agent Instructions string (not a structured object)
  * - On LLM failure: throws error (consumer handles fallback)
- * - Cache hash uses agentDefinitionEventId when provided, or baseInstructionsHash for local agents
+ * - Cache hash (cacheInputsHash) uses agentDefinitionEventId when provided, else baseAgentInstructions hash
  */
 
 import * as fs from "node:fs/promises";
@@ -62,8 +62,8 @@ export interface EffectiveInstructionsCacheEntry {
     timestamp: number;
     /** max(created_at) of lessons AND comments used */
     maxCreatedAt: number;
-    /** SHA-256 hash of the Base Agent Instructions used */
-    baseInstructionsHash: string;
+    /** SHA-256 hash of cache-relevant inputs: agentDefinitionEventId (if provided) OR baseAgentInstructions hash, plus additionalSystemPrompt */
+    cacheInputsHash: string;
 }
 
 
@@ -352,7 +352,7 @@ export class PromptCompilerService {
         if (cached) {
             const cacheValid =
                 cached.maxCreatedAt >= maxCreatedAt &&
-                cached.baseInstructionsHash === cacheHash;
+                cached.cacheInputsHash === cacheHash;
 
             if (cacheValid) {
                 logger.debug("PromptCompilerService: returning cached Effective Agent Instructions", {
@@ -366,7 +366,7 @@ export class PromptCompilerService {
                 agentPubkey: this.agentPubkey.substring(0, 8),
                 cachedMaxCreatedAt: cached.maxCreatedAt,
                 currentMaxCreatedAt: maxCreatedAt,
-                cacheHashMatch: cached.baseInstructionsHash === cacheHash,
+                cacheHashMatch: cached.cacheInputsHash === cacheHash,
             });
         }
 
@@ -378,7 +378,7 @@ export class PromptCompilerService {
             effectiveAgentInstructions,
             timestamp: Math.floor(Date.now() / 1000),
             maxCreatedAt,
-            baseInstructionsHash: cacheHash,
+            cacheInputsHash: cacheHash,
         });
 
         return effectiveAgentInstructions;
