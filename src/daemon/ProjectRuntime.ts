@@ -520,6 +520,14 @@ export class ProjectRuntime {
     /**
      * Initialize PromptCompilerService for each agent in the project (TIN-10).
      * This enables lesson comments to be routed to their respective compilers.
+     *
+     * EAGER COMPILATION: After creating each compiler, we:
+     * 1. Initialize it with the agent's base instructions
+     * 2. Start the comment subscription
+     * 3. Trigger compilation in the background (fire and forget)
+     *
+     * Agent execution will use whatever compiled instructions are available,
+     * falling back to base instructions if compilation isn't done yet.
      */
     private async initializePromptCompilers(): Promise<void> {
         if (!this.context) {
@@ -527,46 +535,90 @@ export class ProjectRuntime {
             return;
         }
 
-        const ndk = getNDK();
-        const { config: loadedConfig } = await config.loadConfig();
-        const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
+        const tracer = trace.getTracer("tenex.project-runtime");
 
-        let initializedCount = 0;
-        for (const agent of this.context.agents.values()) {
-            try {
-                const compiler = new PromptCompilerService(
-                    agent.pubkey,
-                    whitelistArray,
-                    ndk,
-                    this.context
-                );
+        return tracer.startActiveSpan("tenex.prompt_compilers.initialize", async (span) => {
+            span.setAttribute("project.id", this.projectId);
+            span.setAttribute("project.dtag", this.dTag);
 
-                // Register the compiler with the context
-                this.context.setPromptCompiler(agent.pubkey, compiler);
+            const ndk = getNDK();
+            const { config: loadedConfig } = await config.loadConfig();
+            const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
 
-                // Start the subscription for lesson comments
-                compiler.subscribe();
+            const agentCount = this.context!.agents.size;
+            span.setAttribute("agents.total", agentCount);
 
-                initializedCount++;
-                logger.debug("[ProjectRuntime] Initialized prompt compiler for agent", {
-                    agentSlug: agent.slug,
-                    agentPubkey: agent.pubkey.substring(0, 8),
-                });
-            } catch (error) {
-                logger.error("[ProjectRuntime] Failed to initialize prompt compiler for agent", {
-                    agentSlug: agent.slug,
-                    agentPubkey: agent.pubkey.substring(0, 8),
-                    error: error instanceof Error ? error.message : String(error),
-                });
-                // Continue with other agents - don't block startup
+            let initializedCount = 0;
+            let eagerCompilationTriggeredCount = 0;
+            const agentSlugs: string[] = [];
+
+            for (const agent of this.context!.agents.values()) {
+                try {
+                    const compiler = new PromptCompilerService(
+                        agent.pubkey,
+                        whitelistArray,
+                        ndk,
+                        this.context!
+                    );
+
+                    // Register the compiler with the context
+                    this.context!.setPromptCompiler(agent.pubkey, compiler);
+
+                    // Start the subscription for lesson comments
+                    compiler.subscribe();
+
+                    // EAGER COMPILATION: Initialize with base instructions and trigger background compilation
+                    // This is async but we don't await - compilation happens in background
+                    await compiler.initialize(
+                        agent.instructions || "",
+                        agent.eventId
+                    );
+
+                    // Trigger compilation in the background (fire and forget)
+                    // This will check if lessons exist and compile if needed
+                    compiler.triggerCompilation();
+
+                    initializedCount++;
+                    eagerCompilationTriggeredCount++;
+                    agentSlugs.push(agent.slug);
+
+                    span.addEvent("tenex.prompt_compiler.agent_initialized", {
+                        "agent.slug": agent.slug,
+                        "agent.pubkey": agent.pubkey.substring(0, 8),
+                        "compilation.triggered": true,
+                    });
+
+                    logger.debug("[ProjectRuntime] Initialized prompt compiler for agent (eager compilation triggered)", {
+                        agentSlug: agent.slug,
+                        agentPubkey: agent.pubkey.substring(0, 8),
+                    });
+                } catch (error) {
+                    span.addEvent("tenex.prompt_compiler.agent_init_failed", {
+                        "agent.slug": agent.slug,
+                        "error.message": error instanceof Error ? error.message : String(error),
+                    });
+
+                    logger.error("[ProjectRuntime] Failed to initialize prompt compiler for agent", {
+                        agentSlug: agent.slug,
+                        agentPubkey: agent.pubkey.substring(0, 8),
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                    // Continue with other agents - don't block startup
+                }
             }
-        }
 
-        if (initializedCount > 0) {
-            logger.info(`[ProjectRuntime] Initialized ${initializedCount} prompt compiler(s)`, {
-                projectId: this.projectId,
-            });
-        }
+            span.setAttribute("compilers.initialized", initializedCount);
+            span.setAttribute("compilations.triggered", eagerCompilationTriggeredCount);
+            span.setAttribute("agents.slugs", agentSlugs.join(","));
+
+            if (initializedCount > 0) {
+                logger.info(`[ProjectRuntime] Initialized ${initializedCount} prompt compiler(s) with eager compilation`, {
+                    projectId: this.projectId,
+                });
+            }
+
+            span.end();
+        });
     }
 
     /**

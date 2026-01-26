@@ -31,6 +31,7 @@ import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
 import { logger } from "@/utils/logger";
 import type { ProjectContext } from "@/services/projects/ProjectContext";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 // =====================================================================================
 // TYPES
@@ -66,6 +67,25 @@ export interface EffectiveInstructionsCacheEntry {
     cacheInputsHash: string;
 }
 
+/**
+ * Compilation status tracking for eager compilation
+ */
+export type CompilationStatus = "idle" | "compiling" | "completed" | "error";
+
+/**
+ * Result from getEffectiveInstructionsSync() indicating source of instructions
+ */
+export interface EffectiveInstructionsResult {
+    /** The instructions to use */
+    instructions: string;
+    /** Whether these are compiled (true) or base instructions (false) */
+    isCompiled: boolean;
+    /** Timestamp of when these instructions were compiled (undefined if using base) */
+    compiledAt?: number;
+    /** Source of the instructions: "compiled_cache", "base_instructions", or "compilation_in_progress" */
+    source: "compiled_cache" | "base_instructions" | "compilation_in_progress";
+}
+
 
 // =====================================================================================
 // PROMPT COMPILER SERVICE
@@ -94,6 +114,41 @@ export class PromptCompilerService {
 
     /** Cache directory */
     private cacheDir: string;
+
+    // =====================================================================================
+    // EAGER COMPILATION STATE (TIN-10 Enhancement)
+    // =====================================================================================
+
+    /** Current compilation status */
+    private compilationStatus: CompilationStatus = "idle";
+
+    /** In-memory cache of compiled effective instructions (loaded from disk or after compilation) */
+    private cachedEffectiveInstructions: EffectiveInstructionsCacheEntry | null = null;
+
+    /** Base agent instructions (stored for sync retrieval and recompilation) */
+    private baseAgentInstructions: string = "";
+
+    /** Agent definition event ID (stored for cache hash calculation) */
+    private agentDefinitionEventId?: string;
+
+    /** Promise for the currently running compilation (if any).
+     * Useful for testing or other scenarios that need to await compilation. */
+    private currentCompilationPromise: Promise<void> | null = null;
+
+    /** Timestamp of last compilation trigger (for debouncing) */
+    private lastCompilationTrigger: number = 0;
+
+    /** Minimum interval between compilation triggers (ms) - debounce rapid lesson arrivals */
+    private static readonly COMPILATION_DEBOUNCE_MS = 5000;
+
+    /** Flag indicating a recompilation is pending (set when trigger arrives during active compilation or debounce) */
+    private pendingRecompile: boolean = false;
+
+    /** Timer for debounced compilation (to ensure triggers aren't dropped when idle) */
+    private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Flag indicating if initialize() has been called */
+    private initialized: boolean = false;
 
     constructor(
         agentPubkey: Hexpubkey,
@@ -203,6 +258,15 @@ export class PromptCompilerService {
             this.subscription = null;
         }
 
+        // Clear debounce timer to prevent post-shutdown compilation triggers
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+
+        // Reset compilation state to ensure full quiescence
+        this.pendingRecompile = false;
+
         // Reset EOSE state so waitForEOSE is reliable after restart
         this.eoseReceived = false;
         this.eosePromise = null;
@@ -234,6 +298,27 @@ export class PromptCompilerService {
             lessonEventId: comment.lessonEventId.substring(0, 8),
             totalCommentsForLesson: existing.length,
         });
+
+        // Trigger recompilation when a new comment arrives (debounced)
+        this.onCommentArrived();
+    }
+
+    /**
+     * Called when a new comment arrives for a lesson.
+     * Triggers recompilation in the background.
+     */
+    onCommentArrived(): void {
+        const tracer = trace.getTracer("tenex.prompt-compiler");
+        tracer.startActiveSpan("tenex.prompt_compilation.comment_trigger", (span) => {
+            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
+            span.setAttribute("trigger.source", "new_comment");
+            span.end();
+        });
+
+        logger.debug("PromptCompilerService: new comment arrived, triggering recompilation", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+        });
+        this.triggerCompilation();
     }
 
     /**
@@ -506,6 +591,410 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
         });
 
         return effectiveAgentInstructions;
+    }
+
+    // =====================================================================================
+    // EAGER COMPILATION API (TIN-10 Enhancement)
+    // =====================================================================================
+
+    /**
+     * Initialize the compiler with base agent instructions.
+     * This MUST be called before triggerCompilation() or getEffectiveInstructionsSync().
+     * Typically called from ProjectRuntime after creating the compiler.
+     *
+     * @param baseAgentInstructions The Base Agent Instructions from agent.instructions
+     * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
+     */
+    async initialize(
+        baseAgentInstructions: string,
+        agentDefinitionEventId?: string
+    ): Promise<void> {
+        const tracer = trace.getTracer("tenex.prompt-compiler");
+
+        return tracer.startActiveSpan("tenex.prompt_compilation.initialize", async (span) => {
+            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
+
+            this.baseAgentInstructions = baseAgentInstructions;
+            this.agentDefinitionEventId = agentDefinitionEventId;
+            this.initialized = true;
+
+            // Try to load existing cache from disk into memory
+            const cached = await this.readCache();
+            if (cached) {
+                // Validate the cache is for the same inputs
+                const cacheHash = this.hashString(JSON.stringify({
+                    agentDefinitionEventId: agentDefinitionEventId || null,
+                    baseAgentInstructions,
+                    additionalSystemPrompt: null,
+                }));
+
+                if (cached.cacheInputsHash === cacheHash) {
+                    this.cachedEffectiveInstructions = cached;
+                    this.compilationStatus = "completed";
+                    span.addEvent("tenex.prompt_compilation.cache_loaded_from_disk", {
+                        "cache.timestamp": cached.timestamp,
+                        "cache.max_created_at": cached.maxCreatedAt,
+                    });
+                    span.setAttribute("cache.loaded_from_disk", true);
+                    logger.debug("PromptCompilerService: loaded valid cache into memory", {
+                        agentPubkey: this.agentPubkey.substring(0, 8),
+                        cacheTimestamp: cached.timestamp,
+                    });
+                } else {
+                    span.addEvent("tenex.prompt_compilation.cache_inputs_changed");
+                    span.setAttribute("cache.loaded_from_disk", false);
+                    span.setAttribute("cache.inputs_changed", true);
+                    logger.debug("PromptCompilerService: cache inputs changed, will need recompilation", {
+                        agentPubkey: this.agentPubkey.substring(0, 8),
+                    });
+                }
+            } else {
+                span.setAttribute("cache.loaded_from_disk", false);
+                span.setAttribute("cache.exists", false);
+            }
+
+            span.end();
+        });
+    }
+
+    /**
+     * Trigger compilation in the background (fire and forget).
+     * This is the key method for EAGER compilation - called at project startup.
+     * Does NOT block - compilation happens asynchronously.
+     *
+     * Safe to call multiple times - uses debouncing and pendingRecompile to ensure
+     * no triggers are dropped. If a trigger arrives during active compilation or
+     * within the debounce window, a follow-up compilation will be scheduled.
+     */
+    triggerCompilation(): void {
+        // Guard: ensure initialize() was called
+        if (!this.initialized) {
+            logger.warn("PromptCompilerService: triggerCompilation called before initialize()", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+            });
+            return;
+        }
+
+        const tracer = trace.getTracer("tenex");
+
+        // Debounce rapid triggers (e.g., multiple lessons arriving quickly)
+        const now = Date.now();
+        const timeSinceLastTrigger = now - this.lastCompilationTrigger;
+        if (timeSinceLastTrigger < PromptCompilerService.COMPILATION_DEBOUNCE_MS) {
+            // Within debounce window
+            logger.debug("PromptCompilerService: debouncing compilation trigger", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+                timeSinceLastTrigger,
+            });
+
+            // If a compilation is in progress, just mark pending (will be handled in finally block)
+            if (this.compilationStatus === "compiling") {
+                this.pendingRecompile = true;
+                logger.debug("PromptCompilerService: compilation in progress, marked pending recompile", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                });
+                return;
+            }
+
+            // If idle (no active compilation), schedule a timer to compile after debounce window expires
+            // This ensures triggers aren't dropped when the system is idle
+            if (!this.debounceTimer) {
+                const remainingDebounce = PromptCompilerService.COMPILATION_DEBOUNCE_MS - timeSinceLastTrigger;
+                this.debounceTimer = setTimeout(() => {
+                    this.debounceTimer = null;
+                    logger.debug("PromptCompilerService: debounce timer fired, triggering compilation", {
+                        agentPubkey: this.agentPubkey.substring(0, 8),
+                    });
+                    this.triggerCompilation();
+                }, remainingDebounce);
+                logger.debug("PromptCompilerService: scheduled debounce timer", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                    remainingDebounceMs: remainingDebounce,
+                });
+            }
+            return;
+        }
+        this.lastCompilationTrigger = now;
+
+        // Clear any pending debounce timer since we're about to compile now
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+
+        // If already compiling, mark pending and let the running compilation handle it
+        if (this.compilationStatus === "compiling") {
+            this.pendingRecompile = true;
+            logger.debug("PromptCompilerService: compilation in progress, marked pending recompile", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+            });
+            return;
+        }
+
+        // Clear pending flag since we're about to compile
+        this.pendingRecompile = false;
+
+        // Fire and forget - don't await
+        this.currentCompilationPromise = tracer.startActiveSpan("tenex.prompt_compilation", async (span) => {
+            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
+
+            try {
+                span.addEvent("tenex.prompt_compilation.started");
+                this.compilationStatus = "compiling";
+
+                const startTime = Date.now();
+
+                // Wait for EOSE with a timeout to ensure we have comments
+                try {
+                    await Promise.race([
+                        this.waitForEOSE(),
+                        new Promise<void>((_, reject) =>
+                            setTimeout(() => reject(new Error("EOSE timeout")), 5000)
+                        ),
+                    ]);
+                } catch {
+                    // Continue without all comments
+                    logger.debug("PromptCompilerService: EOSE timeout during eager compilation", {
+                        agentPubkey: this.agentPubkey.substring(0, 8),
+                    });
+                }
+
+                // Run the actual compilation
+                const effectiveInstructions = await this.compile(
+                    this.baseAgentInstructions,
+                    this.agentDefinitionEventId
+                );
+
+                // Update in-memory cache
+                const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
+                const maxCreatedAt = this.calculateMaxCreatedAt(lessons);
+                const cacheHash = this.hashString(JSON.stringify({
+                    agentDefinitionEventId: this.agentDefinitionEventId || null,
+                    baseAgentInstructions: this.baseAgentInstructions,
+                    additionalSystemPrompt: null,
+                }));
+
+                this.cachedEffectiveInstructions = {
+                    effectiveAgentInstructions: effectiveInstructions,
+                    timestamp: Math.floor(Date.now() / 1000),
+                    maxCreatedAt,
+                    cacheInputsHash: cacheHash,
+                };
+
+                this.compilationStatus = "completed";
+
+                const duration = Date.now() - startTime;
+                span.addEvent("tenex.prompt_compilation.completed", {
+                    "compilation.duration_ms": duration,
+                    "compilation.lessons_count": lessons.length,
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+
+                logger.info("PromptCompilerService: eager compilation completed", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                    durationMs: duration,
+                    lessonsCount: lessons.length,
+                });
+            } catch (error) {
+                this.compilationStatus = "error";
+                span.addEvent("tenex.prompt_compilation.error", {
+                    "error.message": error instanceof Error ? error.message : String(error),
+                });
+                span.setStatus({
+                    code: SpanStatusCode.ERROR,
+                    message: error instanceof Error ? error.message : String(error),
+                });
+
+                logger.error("PromptCompilerService: eager compilation failed", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            } finally {
+                span.end();
+                this.currentCompilationPromise = null;
+
+                // Check if a recompile was requested while we were compiling
+                if (this.pendingRecompile) {
+                    logger.debug("PromptCompilerService: pending recompile detected, scheduling follow-up", {
+                        agentPubkey: this.agentPubkey.substring(0, 8),
+                    });
+                    // Reset timestamp to allow immediate trigger
+                    this.lastCompilationTrigger = 0;
+                    // Use setImmediate to avoid deep recursion
+                    setImmediate(() => this.triggerCompilation());
+                }
+            }
+        });
+    }
+
+    /**
+     * Get the effective instructions SYNCHRONOUSLY.
+     * This is the key method for agent execution - NEVER blocks on compilation.
+     *
+     * Priority order:
+     * 1. Fresh compiled instructions (cache is valid)
+     * 2. Stale compiled instructions (cache exists but is stale - triggers background recompile)
+     * 3. Base instructions (no cache available - compilation pending, in progress, or failed)
+     *
+     * Staleness is determined by:
+     * - maxCreatedAt: new lessons have arrived since last compilation
+     * - cacheInputsHash: base instructions or agentDefinitionEventId changed
+     *
+     * Per requirements: agent should NEVER wait. We serve stale compiled instructions
+     * (which are better than base) while a recompile runs in the background.
+     *
+     * Includes telemetry to track which source was used.
+     */
+    getEffectiveInstructionsSync(): EffectiveInstructionsResult {
+        const tracer = trace.getTracer("tenex");
+
+        // If we have cached compiled instructions, check freshness
+        if (this.cachedEffectiveInstructions) {
+            // Check if cache is still fresh by comparing maxCreatedAt AND input hash
+            const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
+            const currentMaxCreatedAt = this.calculateMaxCreatedAt(lessons);
+
+            // Also check if inputs (base instructions, agentDefinitionEventId) have changed
+            const currentInputsHash = this.hashString(JSON.stringify({
+                agentDefinitionEventId: this.agentDefinitionEventId || null,
+                baseAgentInstructions: this.baseAgentInstructions,
+                additionalSystemPrompt: null,
+            }));
+            const inputsMatch = this.cachedEffectiveInstructions.cacheInputsHash === currentInputsHash;
+
+            const cacheIsFresh = inputsMatch &&
+                this.cachedEffectiveInstructions.maxCreatedAt >= currentMaxCreatedAt;
+
+            if (cacheIsFresh) {
+                // Cache is fresh - emit telemetry and return
+                tracer.startActiveSpan("tenex.prompt_compilation.cache_hit", (span) => {
+                    span.setAttribute("compilation.timestamp", this.cachedEffectiveInstructions!.timestamp);
+                    span.setAttribute("compilation.is_compiled", true);
+                    span.setAttribute("compilation.max_created_at", this.cachedEffectiveInstructions!.maxCreatedAt);
+                    span.end();
+                });
+
+                logger.debug("PromptCompilerService: returning fresh cached effective instructions", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                    cacheTimestamp: this.cachedEffectiveInstructions.timestamp,
+                });
+
+                return {
+                    instructions: this.cachedEffectiveInstructions.effectiveAgentInstructions,
+                    isCompiled: true,
+                    compiledAt: this.cachedEffectiveInstructions.timestamp,
+                    source: "compiled_cache",
+                };
+            }
+
+            // Cache is stale - but we can still serve it while recompile is in-flight
+            // This follows the requirement: "agent should never wait"
+            // Cache can be stale due to: new lessons (maxCreatedAt) OR changed inputs (base instructions)
+            const staleReason = !inputsMatch ? "inputs_changed" : "new_lessons";
+            logger.debug("PromptCompilerService: cache is stale, serving stale while triggering recompile", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+                staleReason,
+                inputsMatch,
+                cachedMaxCreatedAt: this.cachedEffectiveInstructions.maxCreatedAt,
+                currentMaxCreatedAt,
+                compilationStatus: this.compilationStatus,
+            });
+
+            // Trigger background recompile if not already compiling
+            if (this.compilationStatus !== "compiling") {
+                this.triggerCompilation();
+            }
+
+            // Return stale cache (better than base instructions)
+            tracer.startActiveSpan("tenex.prompt_compilation.cache_stale", (span) => {
+                span.setAttribute("compilation.timestamp", this.cachedEffectiveInstructions!.timestamp);
+                span.setAttribute("compilation.is_compiled", true);
+                span.setAttribute("compilation.is_stale", true);
+                span.setAttribute("compilation.stale_reason", staleReason);
+                span.setAttribute("compilation.inputs_match", inputsMatch);
+                span.setAttribute("compilation.cached_max_created_at", this.cachedEffectiveInstructions!.maxCreatedAt);
+                span.setAttribute("compilation.current_max_created_at", currentMaxCreatedAt);
+                span.end();
+            });
+
+            return {
+                instructions: this.cachedEffectiveInstructions.effectiveAgentInstructions,
+                isCompiled: true,
+                compiledAt: this.cachedEffectiveInstructions.timestamp,
+                source: "compiled_cache",
+            };
+        }
+
+        // No compiled instructions available - return base instructions
+        // This happens when:
+        // 1. Compilation hasn't started yet
+        // 2. Compilation is in progress
+        // 3. Compilation failed
+
+        const source = this.compilationStatus === "compiling"
+            ? "compilation_in_progress"
+            : "base_instructions";
+
+        tracer.startActiveSpan("tenex.prompt_compilation.fallback_to_base", (span) => {
+            span.setAttribute("compilation.status", this.compilationStatus);
+            span.setAttribute("compilation.is_compiled", false);
+            span.setAttribute("compilation.source", source);
+            span.end();
+        });
+
+        logger.debug("PromptCompilerService: returning base instructions (no compiled cache)", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+            compilationStatus: this.compilationStatus,
+            source,
+        });
+
+        return {
+            instructions: this.baseAgentInstructions,
+            isCompiled: false,
+            source,
+        };
+    }
+
+    /**
+     * Get the current compilation status
+     */
+    getCompilationStatus(): CompilationStatus {
+        return this.compilationStatus;
+    }
+
+    /**
+     * Check if compiled instructions are available
+     */
+    hasCompiledInstructions(): boolean {
+        return this.cachedEffectiveInstructions !== null;
+    }
+
+    /**
+     * Called when a new lesson arrives for this agent.
+     * Triggers recompilation in the background.
+     */
+    onLessonArrived(): void {
+        const tracer = trace.getTracer("tenex.prompt-compiler");
+        tracer.startActiveSpan("tenex.prompt_compilation.lesson_trigger", (span) => {
+            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
+            span.setAttribute("trigger.source", "new_lesson");
+            span.end();
+        });
+
+        logger.debug("PromptCompilerService: new lesson arrived, triggering recompilation", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+        });
+        this.triggerCompilation();
+    }
+
+    /**
+     * Wait for the current compilation to complete (for testing purposes).
+     * Returns immediately if no compilation is in progress.
+     */
+    async waitForCompilation(): Promise<void> {
+        if (this.currentCompilationPromise) {
+            await this.currentCompilationPromise;
+        }
     }
 
     // =====================================================================================

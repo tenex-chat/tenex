@@ -210,7 +210,8 @@ export class ProjectContext {
     // =====================================================================================
 
     /**
-     * Add a lesson for an agent, maintaining the 50-lesson limit per agent
+     * Add a lesson for an agent, maintaining the 50-lesson limit per agent.
+     * EAGER COMPILATION: Also triggers background recompilation of the agent's prompt.
      */
     addLesson(agentPubkey: string, lesson: NDKAgentLesson): void {
         const existingLessons = this.agentLessons.get(agentPubkey) || [];
@@ -222,6 +223,17 @@ export class ProjectContext {
         const limitedLessons = updatedLessons.slice(0, 50);
 
         this.agentLessons.set(agentPubkey, limitedLessons);
+
+        // EAGER COMPILATION: Trigger recompilation when new lesson arrives
+        // This is fire-and-forget - compilation happens in background
+        const compiler = this.promptCompilers.get(agentPubkey);
+        if (compiler) {
+            logger.debug("ProjectContext: triggering recompilation after new lesson", {
+                agentPubkey: agentPubkey.substring(0, 8),
+                lessonTitle: lesson.title,
+            });
+            compiler.onLessonArrived();
+        }
     }
 
     /**

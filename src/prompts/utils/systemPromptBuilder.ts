@@ -11,6 +11,7 @@ import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
+import { trace } from "@opentelemetry/api";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -223,70 +224,80 @@ async function addCoreAgentFragments(
 }
 
 /**
- * Default timeout for waitForEOSE to prevent indefinite blocking.
- * If EOSE doesn't arrive within this time, we proceed without comments.
- */
-const EOSE_TIMEOUT_MS = 5000; // 5 seconds
-
-/**
- * Compile lessons into Effective Agent Instructions using PromptCompilerService (TIN-10).
+ * Get Effective Agent Instructions SYNCHRONOUSLY using PromptCompilerService (TIN-10).
  *
- * This function:
- * 1. Waits for EOSE to ensure all lesson comments are received (with timeout)
- * 2. Calls compile() to synthesize lessons + comments into Effective Agent Instructions
- * 3. Falls back to simple concatenation if compilation fails
+ * EAGER COMPILATION: This function NEVER blocks on compilation.
+ * - If compiled instructions are available (from cache or completed compilation), use them
+ * - If compilation isn't ready yet (in progress or not started), use base instructions
  *
- * Note: The service retrieves lessons internally from ProjectContext.
+ * Compilation is triggered at project startup and runs in the background.
+ * Agent execution always gets the "current best" instructions without waiting.
  *
  * @param compiler The PromptCompilerService for this agent
- * @param lessons The agent's lessons (used for fallback formatting if compilation fails)
+ * @param lessons The agent's lessons (used for fallback formatting if needed)
  * @param baseAgentInstructions The Base Agent Instructions (from agent.instructions)
- * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
- * @returns The Effective Agent Instructions with lessons integrated
+ * @param agentSlug The agent's slug for telemetry (optional)
+ * @returns The Effective Agent Instructions (compiled if available, base otherwise)
  */
-async function compileLessonsIntoEffectiveInstructions(
+function getEffectiveInstructionsSync(
     compiler: PromptCompilerService,
     lessons: NDKAgentLesson[],
     baseAgentInstructions: string,
-    agentDefinitionEventId?: string
-): Promise<string> {
-    try {
-        // Wait for EOSE with timeout to prevent indefinite blocking
-        await Promise.race([
-            compiler.waitForEOSE(),
-            new Promise<void>((_, reject) =>
-                setTimeout(
-                    () => reject(new Error("EOSE timeout - proceeding without all comments")),
-                    EOSE_TIMEOUT_MS
-                )
-            ),
-        ]);
-    } catch (eoseError) {
-        // Log warning but continue - we can still compile with whatever comments we have
-        logger.warn("waitForEOSE issue, proceeding with compilation", {
-            error: eoseError instanceof Error ? eoseError.message : String(eoseError),
-        });
+    agentSlug?: string
+): string {
+    const tracer = trace.getTracer("tenex.system-prompt-builder");
+
+    // Use the synchronous method - NEVER blocks on compilation
+    const result = compiler.getEffectiveInstructionsSync();
+
+    // Record what source we're using for agent execution
+    tracer.startActiveSpan("tenex.agent_execution.instructions_source", (span) => {
+        span.setAttribute("instructions.source", result.source);
+        span.setAttribute("instructions.is_compiled", result.isCompiled);
+        span.setAttribute("instructions.length", result.instructions.length);
+        if (agentSlug) {
+            span.setAttribute("agent.slug", agentSlug);
+        }
+        if (result.compiledAt) {
+            span.setAttribute("instructions.compiled_at", result.compiledAt);
+        }
+        span.end();
+    });
+
+    logger.debug("📋 Retrieved effective instructions synchronously", {
+        source: result.source,
+        isCompiled: result.isCompiled,
+        compiledAt: result.compiledAt,
+        instructionsLength: result.instructions.length,
+    });
+
+    // If we got compiled instructions, use them
+    if (result.isCompiled) {
+        return result.instructions;
     }
 
-    try {
-        // Compile lessons + comments into Effective Agent Instructions
-        // The service retrieves lessons internally from ProjectContext
-        const effectiveAgentInstructions = await compiler.compile(baseAgentInstructions, agentDefinitionEventId);
-
-        logger.debug("✅ Compiled lessons into Effective Agent Instructions using PromptCompilerService", {
-            baseInstructionsLength: baseAgentInstructions.length,
-            effectiveInstructionsLength: effectiveAgentInstructions.length,
+    // Not compiled yet - check if we have lessons to format as fallback
+    // This provides a better experience than raw base instructions when lessons exist
+    if (lessons.length > 0) {
+        // Record fallback usage
+        tracer.startActiveSpan("tenex.agent_execution.fallback_lessons", (span) => {
+            span.setAttribute("fallback.reason", result.source);
+            span.setAttribute("fallback.lessons_count", lessons.length);
+            if (agentSlug) {
+                span.setAttribute("agent.slug", agentSlug);
+            }
+            span.end();
         });
 
-        return effectiveAgentInstructions;
-    } catch (error) {
-        logger.error("Failed to compile lessons with PromptCompilerService, using fallback", {
-            error: error instanceof Error ? error.message : String(error),
+        logger.debug("📋 Using fallback lesson formatting (compilation not ready)", {
+            lessonsCount: lessons.length,
+            compilationStatus: result.source,
         });
-
-        // Fallback to simple concatenation if compilation fails
         return formatFallbackLessons(lessons, baseAgentInstructions);
     }
+
+    // No lessons and no compiled instructions - just use base
+    return baseAgentInstructions;
 }
 
 /**
@@ -382,22 +393,23 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     const usePromptCompiler = !!promptCompiler;
 
-    // If PromptCompilerService is available, compile lessons into Effective Agent Instructions
-    // The result replaces agent.instructions for fragment building
+    // If PromptCompilerService is available, get effective instructions SYNCHRONOUSLY
+    // EAGER COMPILATION: This NEVER blocks - uses cached compiled instructions or falls back to base
+    // Compilation happens in the background at project startup
     let effectiveAgentInstructions: string | undefined;
     if (promptCompiler) {
         const lessons = agentLessons?.get(agent.pubkey) || [];
-        // CRITICAL: Pass ONLY agent.instructions (Base Agent Instructions), NOT the full system prompt
-        // This ensures the cache contains only Base + Lessons, not runtime fragments
         const baseAgentInstructions = agent.instructions || "";
-        effectiveAgentInstructions = await compileLessonsIntoEffectiveInstructions(
+
+        // SYNCHRONOUS retrieval - NEVER waits for compilation
+        effectiveAgentInstructions = getEffectiveInstructionsSync(
             promptCompiler,
             lessons,
             baseAgentInstructions,
-            agent.eventId
+            agent.slug
         );
 
-        logger.debug("✅ Compiled lessons into Effective Agent Instructions", {
+        logger.debug("✅ Retrieved Effective Agent Instructions (sync)", {
             agentName: agent.name,
             baseInstructionsLength: baseAgentInstructions.length,
             effectiveInstructionsLength: effectiveAgentInstructions.length,
