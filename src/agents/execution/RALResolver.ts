@@ -3,7 +3,7 @@
  *
  * Handles the logic of finding or creating a RAL for an execution:
  * - Check for resumable RAL (completed delegations ready to continue)
- * - Check for RAL with queued injections (pairing checkpoint)
+ * - Check for RAL with queued injections
  * - Create new RAL if none found
  * - Handle delegation runtime accumulation
  */
@@ -27,7 +27,7 @@ export interface RALResolutionResult {
  *
  * Priority:
  * 1. Resumable RAL - has completed delegations ready to continue
- * 2. Injection RAL - has queued injections (e.g., pairing checkpoint)
+ * 2. Injection RAL - has queued injections
  * 3. New RAL - create fresh for this execution
  */
 export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResolutionResult> {
@@ -37,7 +37,7 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
     // Check for a resumable RAL (one with completed delegations ready to continue)
     const resumableRal = ralRegistry.findResumableRAL(agentPubkey, conversationId);
 
-    // Also check for RAL with queued injections (e.g., pairing checkpoint)
+    // Also check for RAL with queued injections
     const injectionRal = !resumableRal
         ? ralRegistry.findRALWithInjections(agentPubkey, conversationId)
         : undefined;
@@ -99,7 +99,7 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             "delegation.max_runtime_ms": maxDelegationRuntime,
         });
     } else if (injectionRal) {
-        // Resume RAL with queued injections (pairing checkpoint)
+        // Resume RAL with queued injections
         ralNumber = injectionRal.ralNumber;
         isResumption = true;
 
