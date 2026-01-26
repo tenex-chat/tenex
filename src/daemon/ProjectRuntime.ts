@@ -2,8 +2,6 @@ import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
-import { AgentExecutor } from "@/agents/execution/AgentExecutor";
-import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
@@ -12,7 +10,6 @@ import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { PairingManager } from "@/services/pairing";
 import { PromptCompilerService } from "@/services/prompt-compiler";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
@@ -152,12 +149,6 @@ export class ProjectRuntime {
             // Reconcile any orphaned RALs from a previous daemon run
             await this.reconcileOrphanedRals();
 
-            // Initialize pairing manager for real-time delegation supervision
-            const pairingManager = new PairingManager(async (agentPubkey, conversationId) => {
-                await this.triggerAgentForCheckpoint(agentPubkey, conversationId);
-            });
-            this.context.pairingManager = pairingManager;
-
             // Initialize prompt compilers for each agent (TIN-10)
             await this.initializePromptCompilers();
 
@@ -291,13 +282,6 @@ export class ProjectRuntime {
         await ConversationStore.cleanup();
         console.log(chalk.gray(" done"));
 
-        // Stop all active pairings to clean up subscriptions
-        if (this.context?.pairingManager) {
-            process.stdout.write(chalk.gray("   Stopping pairings..."));
-            this.context.pairingManager.stopAll();
-            console.log(chalk.gray(" done"));
-        }
-
         // Stop all prompt compilers
         if (this.context) {
             process.stdout.write(chalk.gray("   Stopping prompt compilers..."));
@@ -360,69 +344,6 @@ export class ProjectRuntime {
      */
     isActive(): boolean {
         return this.isRunning;
-    }
-
-    /**
-     * Trigger agent execution for a pairing checkpoint.
-     * Used by PairingManager when it queues a checkpoint and needs to resume the supervisor.
-     */
-    async triggerAgentForCheckpoint(agentPubkey: string, conversationId: string): Promise<void> {
-        if (!this.isRunning || !this.context) {
-            logger.warn("[ProjectRuntime] Cannot trigger checkpoint - runtime not ready", {
-                projectId: this.projectId,
-                isRunning: this.isRunning,
-            });
-            return;
-        }
-
-        const context = this.context;
-
-        await projectContextStore.run(context, async () => {
-            const agent = context.getAgentByPubkey(agentPubkey);
-            if (!agent) {
-                logger.error("[ProjectRuntime] Agent not found for checkpoint trigger", {
-                    agentPubkey: agentPubkey.substring(0, 8),
-                    projectId: this.projectId,
-                });
-                return;
-            }
-
-            const conversation = ConversationStore.get(conversationId);
-            if (!conversation) {
-                logger.error("[ProjectRuntime] Conversation not found for checkpoint trigger", {
-                    conversationId: conversationId.substring(0, 8),
-                    projectId: this.projectId,
-                });
-                return;
-            }
-
-            // Get root event from cache (populated when events are added to conversation)
-            const rootEventId = conversation.getRootEventId();
-            const rootEvent = rootEventId ? ConversationStore.getCachedEvent(rootEventId) : undefined;
-            if (!rootEvent) {
-                logger.error("[ProjectRuntime] No root event in conversation", {
-                    conversationId: conversationId.substring(0, 8),
-                });
-                return;
-            }
-
-            logger.info("[ProjectRuntime] Triggering agent for pairing checkpoint", {
-                agentSlug: agent.slug,
-                conversationId: conversationId.substring(0, 8),
-            });
-
-            // Create execution context and execute
-            const executionContext = await createExecutionContext({
-                agent,
-                conversationId,
-                projectBasePath: this.projectBasePath,
-                triggeringEvent: rootEvent,
-                mcpManager: this.mcpManager,
-            });
-
-            const agentExecutor = new AgentExecutor();
-            await agentExecutor.execute(executionContext);
-        });
     }
 
     /**

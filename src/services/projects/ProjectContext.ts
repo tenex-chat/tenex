@@ -2,7 +2,6 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { PairingManager } from "@/services/pairing";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import { articleToReportInfo } from "@/services/reports/articleUtils";
@@ -57,11 +56,6 @@ export class ProjectContext {
      * Maximum number of reports to cache per project (memory efficiency)
      */
     private static readonly MAX_REPORTS_CACHE_SIZE = 200;
-
-    /**
-     * PairingManager for real-time delegation supervision (optional, initialized when needed)
-     */
-    public pairingManager?: PairingManager;
 
     /**
      * Status publisher for immediately publishing project status updates

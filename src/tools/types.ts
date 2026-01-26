@@ -55,7 +55,6 @@ export type ToolName =
     | "bug_list"
     | "bug_report_create"
     | "bug_report_add"
-    | "stop_pairing"
     | "todo_write"
     | "web_fetch"
     | "web_search"
@@ -139,7 +138,6 @@ export interface ConversationToolContext extends ToolExecutionContext {
  */
 export interface ToolRegistryContext extends ConversationToolContext {
     alphaMode?: boolean;
-    hasActivePairings?: boolean;
     mcpManager?: MCPManager;
 }
 
