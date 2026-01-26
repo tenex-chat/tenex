@@ -515,6 +515,31 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Search model set to "${name}"`));
     }
 
+    static async setPromptCompilationModel(llmsConfig: TenexLLMs): Promise<void> {
+        const configNames = Object.keys(llmsConfig.configurations);
+
+        if (configNames.length === 0) {
+            console.log(chalk.yellow("⚠️  No configurations available"));
+            return;
+        }
+
+        const { name } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "name",
+                message: "Select prompt compilation model:",
+                choices: configNames.map((n) => ({
+                    name: n === llmsConfig.promptCompilation ? `${n} (current)` : n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        llmsConfig.promptCompilation = name;
+        console.log(chalk.green(`✅ Prompt compilation model set to "${name}"`));
+        console.log(chalk.gray("   This model is used to compile lessons into agent system prompts."));
+    }
+
     /**
      * Select a Codex model and reasoning effort interactively
      */
@@ -580,13 +605,13 @@ export class ConfigurationManager {
 
     private static getDefaultModelForProvider(provider: AISdkProvider): string {
         const defaults: Record<AISdkProvider, string> = {
-            openrouter: "openai/gpt-4",
-            anthropic: "claude-3-5-sonnet-latest",
-            openai: "gpt-4",
-            ollama: "llama3.1:8b",
-            "claude-code": "claude-3-5-sonnet-20241022",
-            "gemini-cli": "gemini-2.0-flash-exp",
-            "codex-app-server": "gpt-5.1-codex-max",
+            [PROVIDER_IDS.OPENROUTER]: "openai/gpt-4",
+            [PROVIDER_IDS.ANTHROPIC]: "claude-3-5-sonnet-latest",
+            [PROVIDER_IDS.OPENAI]: "gpt-4",
+            [PROVIDER_IDS.OLLAMA]: "llama3.1:8b",
+            [PROVIDER_IDS.CLAUDE_CODE]: "claude-3-5-sonnet-20241022",
+            [PROVIDER_IDS.GEMINI_CLI]: "gemini-2.0-flash-exp",
+            [PROVIDER_IDS.CODEX_APP_SERVER]: "gpt-5.1-codex-max",
         };
         return defaults[provider] || "";
     }

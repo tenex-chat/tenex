@@ -10,6 +10,7 @@ import type { LanguageModelUsage } from "ai";
 import type { LanguageModelUsageWithCostUsd } from "../../types";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
+import { PROVIDER_IDS } from "../provider-ids";
 
 /**
  * OpenRouter-specific metadata structure
@@ -31,7 +32,7 @@ interface OpenRouterProviderMetadata {
  */
 export class OpenRouterProvider extends StandardProvider {
     static readonly METADATA: ProviderMetadata = StandardProvider.createMetadata(
-        "openrouter",
+        PROVIDER_IDS.OPENROUTER,
         "OpenRouter",
         "Access multiple AI models through a single API",
         "standard",

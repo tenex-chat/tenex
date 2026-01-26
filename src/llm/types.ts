@@ -75,20 +75,21 @@ export interface LLMService {
 // Export execution context type
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { LanguageModelUsage } from "ai";
+import { PROVIDER_IDS } from "./providers/provider-ids";
 export type { ExecutionContext };
 
 /**
  * AI SDK supported providers
- * Note: Provider IDs use kebab-case consistently
+ * Derived from PROVIDER_IDS to prevent magic string duplication
  */
 export const AI_SDK_PROVIDERS = [
-    "openrouter",
-    "anthropic",
-    "openai",
-    "ollama",
-    "claude-code",
-    "gemini-cli",
-    "codex-app-server",
+    PROVIDER_IDS.OPENROUTER,
+    PROVIDER_IDS.ANTHROPIC,
+    PROVIDER_IDS.OPENAI,
+    PROVIDER_IDS.OLLAMA,
+    PROVIDER_IDS.CLAUDE_CODE,
+    PROVIDER_IDS.GEMINI_CLI,
+    PROVIDER_IDS.CODEX_APP_SERVER,
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 

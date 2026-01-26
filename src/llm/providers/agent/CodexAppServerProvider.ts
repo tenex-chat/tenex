@@ -48,7 +48,7 @@ interface ExtendedUsage extends LanguageModelUsage {
  */
 export class CodexAppServerProvider extends AgentProvider {
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
-        "codex-app-server",
+        PROVIDER_IDS.CODEX_APP_SERVER,
         "Codex App Server",
         "OpenAI Codex with app-server mode and mid-execution injection",
         "agent",

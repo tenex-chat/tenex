@@ -47,6 +47,10 @@ export class LLMConfigEditor {
                         name: `Search model: ${llmsConfig.search || "none"}`,
                         value: "search",
                     },
+                    {
+                        name: `Prompt compilation model: ${llmsConfig.promptCompilation || "none"}`,
+                        value: "promptCompilation",
+                    },
                     { name: "Test configuration", value: "test" },
                     { name: "Exit", value: "exit" },
                 ],
@@ -69,6 +73,7 @@ export class LLMConfigEditor {
             if (action === "summarization") await ConfigurationManager.setSummarizationModel(llmsConfig);
             if (action === "supervision") await ConfigurationManager.setSupervisionModel(llmsConfig);
             if (action === "search") await ConfigurationManager.setSearchModel(llmsConfig);
+            if (action === "promptCompilation") await ConfigurationManager.setPromptCompilationModel(llmsConfig);
             await this.saveConfig(llmsConfig);
         }
 
