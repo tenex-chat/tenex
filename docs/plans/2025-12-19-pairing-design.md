@@ -1,6 +1,8 @@
 # Pairing: Real-Time Delegation Supervision
 
-> Status: Core pairing is implemented via `src/services/pairing/PairingManager.ts` and the `delegate` tool. The current API uses `delegate({ delegations: [...] })` with optional `pair` config per delegation, and pairing listens to kind `1` tool/output events tagged with `tool`/`tool-args` and `e=<delegation_id>`. See `docs/DELEGATION-AND-RAL-PROCESSING.md` for current behavior.
+> ⚠️ **DEPRECATED (2026-01-27)**: Pairing infrastructure has been removed. See the agent-directed monitoring prompt fragment (`src/prompts/fragments/28-agent-directed-monitoring.ts`) for the replacement approach where agents use `conversation_get` and `sleep` to monitor delegated work at their own discretion.
+
+> Status: ~~Core pairing is implemented via `src/services/pairing/PairingManager.ts` and the `delegate` tool. The current API uses `delegate({ delegations: [...] })` with optional `pair` config per delegation, and pairing listens to kind `1` tool/output events tagged with `tool`/`tool-args` and `e=<delegation_id>`. See `docs/DELEGATION-AND-RAL-PROCESSING.md` for current behavior.~~ **REMOVED**
 
 ## Overview
 

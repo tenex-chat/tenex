@@ -15,7 +15,6 @@ This document describes how delegation and RAL (Reason-Act Loop) state is tracke
 | `src/event-handler/reply.ts` | Delegates incoming chat events to the dispatch service |
 | `src/nostr/AgentPublisher.ts` | Publishes delegation, completion, ask, and tool-use events |
 | `src/nostr/AgentEventEncoder.ts` | Defines event tags and shared encoding logic |
-| `src/services/pairing/PairingManager.ts` | Supervises delegated agents and injects checkpoints |
 
 ## Event Types and Tags
 
@@ -112,11 +111,6 @@ The delegated agent’s conversation root is the delegation event, so all of its
 1. `reply.ts` queues injections on active RALs (streaming or waiting).
 2. `AgentExecutor` consumes injections in `prepareStep` with `getAndConsumeInjections`.
 3. Injections are persisted into `ConversationStore` so they become part of the conversation history.
-
-## Pairing Checkpoints
-
-When a delegation includes `pair`, `PairingManager` subscribes to kind `1` events with `e=<delegation_id>`.
-Every `interval` events, it queues a system checkpoint message into the supervisor’s RAL and triggers resumption.
 
 ## Worktree Context
 

@@ -62,7 +62,6 @@ services/
 ├── ral/           ← Delegation/RAL state
 │   ├── RALRegistry.ts
 │   └── types.ts
-├── pairing/       ← Delegation supervision
 ├── rag/
 ├── mcp/
 ├── ConfigService.ts  ← Small services at root

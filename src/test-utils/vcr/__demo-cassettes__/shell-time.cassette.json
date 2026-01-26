@@ -240,21 +240,6 @@
                       "branch": {
                         "description": "Git branch name for worktree isolation",
                         "type": "string"
-                      },
-                      "pair": {
-                        "description": "Enable real-time pairing supervision. You will receive periodic checkpoint updates about the delegated agent's progress.",
-                        "type": "object",
-                        "properties": {
-                          "interval": {
-                            "description": "Number of tool executions between checkpoints (e.g., 5 means checkpoint every 5 tools)",
-                            "type": "number",
-                            "minimum": 1
-                          }
-                        },
-                        "required": [
-                          "interval"
-                        ],
-                        "additionalProperties": false
                       }
                     },
                     "required": [

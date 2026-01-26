@@ -154,10 +154,6 @@ services/
 │   ├── RALRegistry.ts
 │   ├── types.ts
 │   └── index.ts
-├── pairing/              # Delegation supervision
-│   ├── PairingManager.ts
-│   ├── types.ts
-│   └── index.ts
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
 │   ├── RAGDatabaseService.ts
