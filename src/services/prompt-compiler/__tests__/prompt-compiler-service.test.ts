@@ -193,7 +193,7 @@ describe("PromptCompilerService", () => {
     });
 
     describe("compile", () => {
-        test("returns base prompt when no lessons exist", async () => {
+        test("returns Base Agent Instructions when no lessons exist", async () => {
             // mockLessons is empty by default
             const service = new PromptCompilerService(
                 agentPubkey,
@@ -201,11 +201,11 @@ describe("PromptCompilerService", () => {
                 mockNdk,
                 mockProjectContext
             );
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
 
-            const result = await service.compile(basePrompt);
+            const result = await service.compile(baseAgentInstructions);
 
-            expect(result).toBe(basePrompt);
+            expect(result).toBe(baseAgentInstructions);
             expect(llmCallCount).toBe(0); // No LLM call when no lessons
         });
 
@@ -230,13 +230,13 @@ describe("PromptCompilerService", () => {
                 mockNdk,
                 mockProjectContext
             );
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
 
             // Should throw since LLM fails
-            await expect(service.compile(basePrompt)).rejects.toThrow("LLM service unavailable");
+            await expect(service.compile(baseAgentInstructions)).rejects.toThrow("LLM service unavailable");
         });
 
-        test("returns compiled prompt when LLM compilation succeeds", async () => {
+        test("returns Effective Agent Instructions when LLM compilation succeeds", async () => {
             llmShouldFail = false;
 
             // Add a lesson so compilation is attempted
@@ -257,9 +257,9 @@ describe("PromptCompilerService", () => {
                 mockNdk,
                 mockProjectContext
             );
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
 
-            const result = await service.compile(basePrompt);
+            const result = await service.compile(baseAgentInstructions);
 
             expect(result).toBe("Compiled prompt content");
             expect(llmCallCount).toBe(1);
@@ -283,10 +283,10 @@ describe("PromptCompilerService", () => {
                 mockNdk,
                 mockProjectContext
             );
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
 
             // Should not throw when event ID is provided
-            const result = await service.compile(basePrompt, "event123");
+            const result = await service.compile(baseAgentInstructions, "event123");
             expect(result).toBe("Compiled prompt content");
         });
 
@@ -308,11 +308,11 @@ describe("PromptCompilerService", () => {
                 mockNdk,
                 mockProjectContext
             );
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
             const additionalPrompt = "Always respond in JSON format.";
 
             // Should not throw when additional prompt is provided
-            const result = await service.compile(basePrompt, undefined, additionalPrompt);
+            const result = await service.compile(baseAgentInstructions, undefined, additionalPrompt);
             expect(result).toBe("Compiled prompt content");
         });
     });
@@ -581,7 +581,7 @@ describe("PromptCompilerService", () => {
             expect(maxTimestamp).toBe(now);
         });
 
-        test("cache invalidation when basePrompt changes", async () => {
+        test("cache invalidation when baseAgentInstructions changes", async () => {
             // Set up a lesson so compilation is attempted
             mockLessons = [
                 {
@@ -602,20 +602,20 @@ describe("PromptCompilerService", () => {
             );
 
             // First compilation
-            const result1 = await service.compile("Original base prompt");
+            const result1 = await service.compile("Original Base Agent Instructions");
             expect(result1).toBe("Compiled prompt content");
             expect(llmCallCount).toBe(1);
 
-            // Second compilation with same basePrompt should use cache (hit)
-            const result2 = await service.compile("Original base prompt");
+            // Second compilation with same baseAgentInstructions should use cache (hit)
+            const result2 = await service.compile("Original Base Agent Instructions");
             expect(result2).toBe("Compiled prompt content");
             // Cache hit - LLM should NOT be called again
             expect(llmCallCount).toBe(1);
 
-            // Third compilation with DIFFERENT basePrompt - should recompile (cache miss)
-            const result3 = await service.compile("Changed base prompt");
+            // Third compilation with DIFFERENT baseAgentInstructions - should recompile (cache miss)
+            const result3 = await service.compile("Changed Base Agent Instructions");
             expect(result3).toBe("Compiled prompt content");
-            // New basePrompt means cache miss, LLM called
+            // New baseAgentInstructions means cache miss, LLM called
             expect(llmCallCount).toBe(2);
         });
 
@@ -639,20 +639,20 @@ describe("PromptCompilerService", () => {
                 mockProjectContext
             );
 
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
 
             // First compilation without additionalSystemPrompt
-            const result1 = await service.compile(basePrompt);
+            const result1 = await service.compile(baseAgentInstructions);
             expect(result1).toBe("Compiled prompt content");
             expect(llmCallCount).toBe(1);
 
             // Second compilation WITH additionalSystemPrompt - should recompile
-            const result2 = await service.compile(basePrompt, undefined, "Extra instructions");
+            const result2 = await service.compile(baseAgentInstructions, undefined, "Extra instructions");
             expect(result2).toBe("Compiled prompt content");
             expect(llmCallCount).toBe(2);
 
             // Third compilation with DIFFERENT additionalSystemPrompt - should recompile
-            const result3 = await service.compile(basePrompt, undefined, "Different instructions");
+            const result3 = await service.compile(baseAgentInstructions, undefined, "Different instructions");
             expect(result3).toBe("Compiled prompt content");
             expect(llmCallCount).toBe(3);
         });
@@ -660,7 +660,7 @@ describe("PromptCompilerService", () => {
         test("cache key includes all inputs for deterministic caching", async () => {
             // This test verifies that the cache key is deterministic based on:
             // - agentDefinitionEventId
-            // - basePrompt
+            // - baseAgentInstructions
             // - additionalSystemPrompt
 
             mockLessons = [
@@ -681,28 +681,28 @@ describe("PromptCompilerService", () => {
                 mockProjectContext
             );
 
-            const basePrompt = "You are a helpful assistant.";
+            const baseAgentInstructions = "You are a helpful assistant.";
             const eventId = "event123";
             const additionalPrompt = "Be concise.";
 
             // Compile with all three inputs - first call
-            await service.compile(basePrompt, eventId, additionalPrompt);
+            await service.compile(baseAgentInstructions, eventId, additionalPrompt);
             expect(llmCallCount).toBe(1);
 
             // Same inputs - cache hit, LLM should NOT be called
-            await service.compile(basePrompt, eventId, additionalPrompt);
+            await service.compile(baseAgentInstructions, eventId, additionalPrompt);
             expect(llmCallCount).toBe(1); // Still 1 - cache hit
 
             // Change only eventId - should invalidate cache
-            await service.compile(basePrompt, "different-event", additionalPrompt);
+            await service.compile(baseAgentInstructions, "different-event", additionalPrompt);
             expect(llmCallCount).toBe(2);
 
-            // Change only basePrompt - should invalidate cache
-            await service.compile("Different prompt", eventId, additionalPrompt);
+            // Change only baseAgentInstructions - should invalidate cache
+            await service.compile("Different instructions", eventId, additionalPrompt);
             expect(llmCallCount).toBe(3);
 
             // Change only additionalPrompt - should invalidate cache
-            await service.compile(basePrompt, eventId, "Different additional");
+            await service.compile(baseAgentInstructions, eventId, "Different additional");
             expect(llmCallCount).toBe(4);
         });
     });

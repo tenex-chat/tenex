@@ -229,25 +229,25 @@ async function addCoreAgentFragments(
 const EOSE_TIMEOUT_MS = 5000; // 5 seconds
 
 /**
- * Compile lessons into a prompt using PromptCompilerService (TIN-10).
+ * Compile lessons into Effective Agent Instructions using PromptCompilerService (TIN-10).
  *
  * This function:
  * 1. Waits for EOSE to ensure all lesson comments are received (with timeout)
- * 2. Calls compile() to synthesize lessons + comments into the base prompt
+ * 2. Calls compile() to synthesize lessons + comments into Effective Agent Instructions
  * 3. Falls back to simple concatenation if compilation fails
  *
  * Note: The service retrieves lessons internally from ProjectContext.
  *
  * @param compiler The PromptCompilerService for this agent
  * @param lessons The agent's lessons (used for fallback formatting if compilation fails)
- * @param basePrompt The system prompt without lessons
+ * @param baseAgentInstructions The Base Agent Instructions (from agent.instructions)
  * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
- * @returns The compiled prompt with lessons integrated
+ * @returns The Effective Agent Instructions with lessons integrated
  */
-async function compileLessonsIntoPrompt(
+async function compileLessonsIntoEffectiveInstructions(
     compiler: PromptCompilerService,
     lessons: NDKAgentLesson[],
-    basePrompt: string,
+    baseAgentInstructions: string,
     agentDefinitionEventId?: string
 ): Promise<string> {
     try {
@@ -269,37 +269,37 @@ async function compileLessonsIntoPrompt(
     }
 
     try {
-        // Compile lessons + comments into the base prompt
+        // Compile lessons + comments into Effective Agent Instructions
         // The service retrieves lessons internally from ProjectContext
-        const compiledPrompt = await compiler.compile(basePrompt, agentDefinitionEventId);
+        const effectiveAgentInstructions = await compiler.compile(baseAgentInstructions, agentDefinitionEventId);
 
-        logger.debug("✅ Compiled lessons into prompt using PromptCompilerService", {
-            basePromptLength: basePrompt.length,
-            compiledPromptLength: compiledPrompt.length,
+        logger.debug("✅ Compiled lessons into Effective Agent Instructions using PromptCompilerService", {
+            baseInstructionsLength: baseAgentInstructions.length,
+            effectiveInstructionsLength: effectiveAgentInstructions.length,
         });
 
-        return compiledPrompt;
+        return effectiveAgentInstructions;
     } catch (error) {
         logger.error("Failed to compile lessons with PromptCompilerService, using fallback", {
             error: error instanceof Error ? error.message : String(error),
         });
 
         // Fallback to simple concatenation if compilation fails
-        return formatFallbackLessons(lessons, basePrompt);
+        return formatFallbackLessons(lessons, baseAgentInstructions);
     }
 }
 
 /**
- * Fallback lesson formatting: appends formatted lessons to base prompt.
+ * Fallback lesson formatting: appends formatted lessons to Base Agent Instructions.
  * Used when PromptCompilerService cannot compile (no LLM config, LLM error, etc.)
  */
-function formatFallbackLessons(lessons: NDKAgentLesson[], basePrompt: string): string {
+function formatFallbackLessons(lessons: NDKAgentLesson[], baseAgentInstructions: string): string {
     if (lessons.length === 0) {
-        return basePrompt;
+        return baseAgentInstructions;
     }
 
     const formattedSection = formatLessonsWithReminder(lessons);
-    return `${basePrompt}\n\n${formattedSection}`;
+    return `${baseAgentInstructions}\n\n${formattedSection}`;
 }
 
 /**
@@ -345,11 +345,11 @@ export async function buildSystemPromptMessages(
  * Builds the main system prompt content.
  *
  * Uses PromptCompilerService (TIN-10) when available to synthesize lessons + comments
- * into the agent's BASE INSTRUCTIONS ONLY. The compiled result (base instructions + lessons)
+ * into Effective Agent Instructions. The result (Base Agent Instructions + Lessons)
  * is then used when building fragments.
  *
- * IMPORTANT: The compiled prompt should contain ONLY:
- * - Agent base instructions (from agent.instructions)
+ * IMPORTANT: The Effective Agent Instructions should contain ONLY:
+ * - Base Agent Instructions (from agent.instructions in Kind 4199 event)
  * - Lessons learned (merged by LLM)
  *
  * Fragments (project context, worktrees, available agents, etc.) are added AFTER compilation.
@@ -382,38 +382,38 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     const usePromptCompiler = !!promptCompiler;
 
-    // If PromptCompilerService is available, compile lessons into ONLY the base instructions
-    // The compiled result replaces agent.instructions for fragment building
-    let compiledInstructions: string | undefined;
+    // If PromptCompilerService is available, compile lessons into Effective Agent Instructions
+    // The result replaces agent.instructions for fragment building
+    let effectiveAgentInstructions: string | undefined;
     if (promptCompiler) {
         const lessons = agentLessons?.get(agent.pubkey) || [];
-        // CRITICAL: Pass ONLY agent.instructions (base instructions), NOT the full system prompt
-        // This ensures the cache contains only base instructions + lessons, not runtime fragments
-        const baseInstructions = agent.instructions || "";
-        compiledInstructions = await compileLessonsIntoPrompt(
+        // CRITICAL: Pass ONLY agent.instructions (Base Agent Instructions), NOT the full system prompt
+        // This ensures the cache contains only Base + Lessons, not runtime fragments
+        const baseAgentInstructions = agent.instructions || "";
+        effectiveAgentInstructions = await compileLessonsIntoEffectiveInstructions(
             promptCompiler,
             lessons,
-            baseInstructions,
+            baseAgentInstructions,
             agent.eventId
         );
 
-        logger.debug("✅ Compiled lessons into base instructions", {
+        logger.debug("✅ Compiled lessons into Effective Agent Instructions", {
             agentName: agent.name,
-            baseInstructionsLength: baseInstructions.length,
-            compiledLength: compiledInstructions.length,
+            baseInstructionsLength: baseAgentInstructions.length,
+            effectiveInstructionsLength: effectiveAgentInstructions.length,
         });
     }
 
-    // Create an agent copy with compiled instructions (if available)
-    // This ensures fragments use the compiled version instead of raw instructions
-    const agentForFragments: AgentInstance = compiledInstructions
-        ? { ...agent, instructions: compiledInstructions }
+    // Create an agent copy with Effective Agent Instructions (if available)
+    // This ensures fragments use the compiled version instead of raw Base Agent Instructions
+    const agentForFragments: AgentInstance = effectiveAgentInstructions
+        ? { ...agent, instructions: effectiveAgentInstructions }
         : agent;
 
     const systemPromptBuilder = new PromptBuilder();
 
     // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
-    // NOTE: Uses agentForFragments which has compiled instructions (lessons merged in)
+    // NOTE: Uses agentForFragments which has Effective Agent Instructions (lessons merged in)
     systemPromptBuilder.add("agent-identity", {
         agent: agentForFragments,
         projectTitle: project.tagValue("title") || "Unknown Project",
@@ -468,7 +468,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager);
 
     // Handle lessons: ONLY add via fragment if NOT using PromptCompilerService
-    // When using compiler, lessons are already merged into compiledInstructions
+    // When using compiler, lessons are already merged into Effective Agent Instructions
     if (!usePromptCompiler) {
         // No compiler available - add lessons via fragment
         addLessonsViaFragment(systemPromptBuilder, agentForFragments, agentLessons);
