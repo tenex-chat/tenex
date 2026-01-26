@@ -7,6 +7,7 @@
 import { fragmentRegistry } from "../core/FragmentRegistry";
 
 // Import all fragment definitions
+import { globalSystemPromptFragment } from "./00-global-system-prompt";
 import { agentIdentityFragment } from "./01-agent-identity";
 import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { delegationChainFragment } from "./05-delegation-chain";
@@ -34,6 +35,9 @@ import { delegationCompletionFragment } from "./delegation-completion";
  * This provides a clear view of all available fragments
  */
 export function registerAllFragments(): void {
+    // Global user-configured prompt (appears before everything)
+    fragmentRegistry.register(globalSystemPromptFragment);
+
     // Core identity and context
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentHomeDirectoryFragment);

@@ -424,6 +424,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     const systemPromptBuilder = new PromptBuilder();
 
+    // Add global system prompt if configured (appears first, before agent identity)
+    systemPromptBuilder.add("global-system-prompt", {});
+
     // Add agent identity - use workingDirectory for "Absolute Path" (where the agent operates)
     // NOTE: Uses agentForFragments which has Effective Agent Instructions (lessons merged in)
     systemPromptBuilder.add("agent-identity", {
@@ -521,6 +524,9 @@ async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions):
     const { agent, availableAgents = [], conversation, agentLessons, alphaMode } = options;
 
     const systemPromptBuilder = new PromptBuilder();
+
+    // Add global system prompt if configured (appears first, before agent identity)
+    systemPromptBuilder.add("global-system-prompt", {});
 
     // For standalone agents, use a simplified identity without project references
     systemPromptBuilder.add("agent-identity", {
