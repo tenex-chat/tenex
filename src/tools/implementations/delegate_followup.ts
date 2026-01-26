@@ -90,7 +90,9 @@ async function executeDelegateFollowup(
   }, eventContext);
 
   // Register the followup as a pending delegation for response routing
-  // but DON'T return StopExecutionSignal - agent can continue and acknowledge to user
+  // Use atomic merge to safely handle concurrent delegation calls
+  // Note: followup delegations use the same delegationConversationId as the original,
+  // but include the followupEventId for routing responses to the new event
   const newDelegation = {
     type: "followup" as const,
     delegationConversationId: delegation_conversation_id,
@@ -101,23 +103,13 @@ async function executeDelegateFollowup(
     ralNumber: effectiveRalNumber,
   };
 
-  // Merge with existing pending delegations
-  const existingDelegations = ralRegistry.getConversationPendingDelegations(
-    context.agent.pubkey,
-    context.conversationId,
-    effectiveRalNumber
-  );
-
-  const mergedDelegations = [...existingDelegations];
-  if (!mergedDelegations.some(d => d.delegationConversationId === delegation_conversation_id)) {
-    mergedDelegations.push(newDelegation);
-  }
-
-  ralRegistry.setPendingDelegations(
+  // Use atomic merge - this handles concurrent updates safely and merges
+  // the followupEventId into existing entries instead of dropping them
+  ralRegistry.mergePendingDelegations(
     context.agent.pubkey,
     context.conversationId,
     effectiveRalNumber,
-    mergedDelegations
+    [newDelegation]
   );
 
   // Return normal result - agent continues without blocking
