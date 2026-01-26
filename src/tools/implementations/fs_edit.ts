@@ -4,6 +4,7 @@ import { isPathWithinDirectory, isWithinAgentHome } from "@/lib/agent-home";
 import { formatAnyError } from "@/lib/error-formatter";
 import {
     createExpectedError,
+    type ExpectedErrorResult,
     getFsErrorDescription,
     isExpectedFsError,
 } from "@/tools/utils";
@@ -38,7 +39,7 @@ async function executeEdit(
     workingDirectory: string,
     agentPubkey: string,
     allowOutsideWorkingDirectory?: boolean,
-): Promise<string> {
+): Promise<string | ExpectedErrorResult> {
     if (!path.startsWith("/")) {
         throw new Error(`Path must be absolute, got: ${path}`);
     }
@@ -56,9 +57,9 @@ async function executeEdit(
     // Read the file
     const content = await readFile(path, "utf-8");
 
-    // Check if old_string exists
+    // Check if old_string exists - return as expected error since this is user input validation
     if (!content.includes(oldString)) {
-        throw new Error(
+        return createExpectedError(
             `old_string not found in ${path}. Make sure you're using the exact string from the file.`
         );
     }
@@ -76,8 +77,9 @@ async function executeEdit(
         const firstIndex = content.indexOf(oldString);
         const lastIndex = content.lastIndexOf(oldString);
 
+        // Multiple matches - return as expected error since this is user input validation
         if (firstIndex !== lastIndex) {
-            throw new Error(
+            return createExpectedError(
                 `old_string appears multiple times in ${path}. Either provide a larger string with more surrounding context to make it unique or use replace_all to change every instance.`
             );
         }
@@ -117,11 +119,14 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
             allowOutsideWorkingDirectory?: boolean;
         }) => {
             try {
+                // Validate input - same strings is an expected user error
                 if (old_string === new_string) {
-                    throw new Error("old_string and new_string must be different");
+                    return createExpectedError("old_string and new_string must be different");
                 }
 
-                return await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
+                const result = await executeEdit(path, old_string, new_string, replace_all, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
+                // executeEdit may return an ExpectedErrorResult for validation errors
+                return result;
             } catch (error: unknown) {
                 // Expected errors (file not found, permission denied, etc.) return error-text
                 // This ensures the error is properly communicated to the LLM without stream failures

@@ -238,6 +238,32 @@ describe("fs_write tool", () => {
         });
     });
 
+    describe("error handling", () => {
+        it("should return error-text for permission denied errors", async () => {
+            // Create a read-only directory
+            const readOnlyDir = path.join(testDir, "readonly");
+            mkdirSync(readOnlyDir, { mode: 0o555 }); // r-xr-xr-x
+
+            try {
+                const filePath = path.join(readOnlyDir, "test.txt");
+                const result = await writeTool.execute({
+                    path: filePath,
+                    content: "test content",
+                });
+
+                // Should return error-text object, not throw
+                expect(result).toEqual({
+                    type: "error-text",
+                    text: expect.stringMatching(/Permission denied|Access denied/),
+                });
+            } finally {
+                // Restore permissions for cleanup
+                const fs = await import("node:fs");
+                fs.chmodSync(readOnlyDir, 0o755);
+            }
+        });
+    });
+
     describe("reports directory protection", () => {
         it("should block writes to the reports directory", async () => {
             // Mock the TENEX_BASE_DIR to control the reports directory location

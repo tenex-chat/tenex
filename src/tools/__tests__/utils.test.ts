@@ -122,6 +122,24 @@ describe("isExpectedHttpError", () => {
         expect(isExpectedHttpError(429)).toBe(true);
     });
 
+    it("should return true for 409 Conflict", () => {
+        expect(isExpectedHttpError(409)).toBe(true);
+    });
+
+    it("should return true for 422 Unprocessable Entity", () => {
+        expect(isExpectedHttpError(422)).toBe(true);
+    });
+
+    it("should return true for all 4xx codes (400-499 range)", () => {
+        expect(isExpectedHttpError(400)).toBe(true);
+        expect(isExpectedHttpError(450)).toBe(true);
+        expect(isExpectedHttpError(499)).toBe(true);
+    });
+
+    it("should return false for 399 (below 4xx range)", () => {
+        expect(isExpectedHttpError(399)).toBe(false);
+    });
+
     it("should return false for 500 Internal Server Error", () => {
         expect(isExpectedHttpError(500)).toBe(false);
     });

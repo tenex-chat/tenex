@@ -7,9 +7,9 @@ import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
 import {
     createExpectedError,
-    type ExpectedErrorResult,
     getFsErrorDescription,
     isExpectedFsError,
+    isExpectedNotFoundError,
 } from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -297,12 +297,17 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
             } catch (error: unknown) {
                 const target = toolEventId ? `tool result ${toolEventId}` : path;
 
-                // Expected errors (file not found, permission denied, etc.) return error-text
+                // Expected FS errors (file not found, permission denied, etc.) return error-text
                 // This ensures the error is properly communicated to the LLM without stream failures
                 if (isExpectedFsError(error)) {
                     const code = (error as NodeJS.ErrnoException).code;
                     const description = getFsErrorDescription(code);
                     return createExpectedError(`${description}: ${target}`);
+                }
+
+                // Expected "not found" errors (e.g., tool result not found) also return error-text
+                if (isExpectedNotFoundError(error)) {
+                    return createExpectedError(error instanceof Error ? error.message : `Not found: ${target}`);
                 }
 
                 // Unexpected errors still throw (they'll be caught by the SDK)

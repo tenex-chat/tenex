@@ -111,6 +111,14 @@ async function executeWebFetch(input: WebFetchInput): Promise<string | { type: "
             return createExpectedError(`HTTP ${status} error fetching "${url}": ${formatAnyError(error)}`);
         }
 
+        // Invalid URL errors are expected errors (user provided bad input)
+        if (error instanceof Error && (
+            error.message.includes("Invalid URL") ||
+            error.message.includes("Unsupported protocol")
+        )) {
+            return createExpectedError(error.message);
+        }
+
         // Unexpected errors still throw (they'll be caught by the SDK)
         throw new Error(`Failed to fetch URL "${url}": ${formatAnyError(error)}`);
     }
