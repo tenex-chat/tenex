@@ -40,6 +40,13 @@ export interface TenexConfig {
         serviceName?: string; // OTL trace service name (default: 'tenex-daemon')
     };
 
+    // Global system prompt configuration
+    // When set, this content is added to ALL projects' system prompts
+    globalSystemPrompt?: {
+        enabled?: boolean; // Enable the global system prompt (default: true when content exists)
+        content?: string; // The actual system prompt content
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -73,6 +80,12 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             serviceName: z.string().optional(),
+        })
+        .optional(),
+    globalSystemPrompt: z
+        .object({
+            enabled: z.boolean().optional(),
+            content: z.string().optional(),
         })
         .optional(),
     description: z.string().optional(),
