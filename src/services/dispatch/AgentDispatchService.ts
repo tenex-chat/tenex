@@ -8,6 +8,7 @@ import { metadataDebounceManager } from "@/conversations/services/MetadataDeboun
 import { formatAnyError } from "@/lib/error-formatter";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config } from "@/services/ConfigService";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext, type ProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
@@ -341,24 +342,18 @@ export class AgentDispatchService {
                 delegationTarget.conversationId
             );
 
-            if (activeRal?.isStreaming) {
-                const aborted = llmOpsRegistry.stopByAgentAndConversation(
-                    delegationTarget.agent.pubkey,
-                    delegationTarget.conversationId,
-                    INJECTION_ABORT_REASON
-                );
-
-                span.addEvent("dispatch.delegation_stream_abort", {
+            // NOTE: We intentionally do NOT abort streaming executions when delegation completes.
+            // The delegator might be mid-stream (waiting for LLM response after a tool call).
+            // Aborting would kill the stream before it can finish naturally.
+            // Instead, we let the debounce run, then either:
+            // - Resume the finished RAL with delegation results
+            // - Queue results for an active stream to pick up via prepareStep
+            // See trace-detective report on executor.result_undefined_error for details.
+            if (activeRal) {
+                span.addEvent("dispatch.delegation_completion_received", {
                     "ral.number": activeRal.ralNumber,
-                    "aborted": aborted,
+                    "ral.is_streaming": activeRal.isStreaming,
                 });
-
-                if (aborted) {
-                    logger.info("[dispatch] Aborted streaming execution for delegation completion", {
-                        agent: delegationTarget.agent.slug,
-                        ralNumber: activeRal.ralNumber,
-                    });
-                }
             }
             const debounceKey = `${delegationTarget.agent.pubkey}:${delegationTarget.conversationId}`;
             const debounceSequence = await this.waitForDelegationDebounce(debounceKey, span);
@@ -370,6 +365,47 @@ export class AgentDispatchService {
                 return;
             }
             this.delegationDebounceSequence.delete(debounceKey);
+
+            // Check if there's still an active streaming RAL after debounce.
+            // If so, just queue the delegation results - the prepareStep callback will pick them up.
+            // This prevents starting a second execution while the first is still streaming.
+            const currentRal = ralRegistry.getState(
+                delegationTarget.agent.pubkey,
+                delegationTarget.conversationId
+            );
+            if (currentRal?.isStreaming) {
+                // Queue delegation results for the active stream to pick up
+                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                    delegationTarget.agent.pubkey,
+                    delegationTarget.conversationId,
+                    currentRal.ralNumber
+                );
+                const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                    delegationTarget.agent.pubkey,
+                    delegationTarget.conversationId,
+                    currentRal.ralNumber
+                );
+                const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
+                    completedDelegations,
+                    pendingDelegations
+                );
+                if (resultsMessage) {
+                    ralRegistry.queueUserMessage(
+                        delegationTarget.agent.pubkey,
+                        delegationTarget.conversationId,
+                        currentRal.ralNumber,
+                        resultsMessage
+                    );
+                }
+                span.addEvent("dispatch.delegation_queued_for_active_stream", {
+                    "ral.number": currentRal.ralNumber,
+                    "delegation.completed_count": completedDelegations.length,
+                    "delegation.pending_count": pendingDelegations.length,
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return;
+            }
+
             const resumableRal = ralRegistry.findResumableRAL(
                 delegationTarget.agent.pubkey,
                 delegationTarget.conversationId
@@ -402,6 +438,14 @@ export class AgentDispatchService {
                 resumableRal?.ralNumber
             );
             const hasPendingDelegations = pendingDelegations.length > 0;
+
+            // DIAGNOSTIC: Trace the moment hasPendingDelegations is captured for context
+            span.addEvent("dispatch.hasPendingDelegations_captured", {
+                "hasPendingDelegations": hasPendingDelegations,
+                "pendingDelegations.count": pendingDelegations.length,
+                "pendingDelegations.ids": pendingDelegations.map(d => d.delegationConversationId).join(","),
+                "ral.number": resumableRal?.ralNumber ?? -1,
+            });
 
             span.setAttributes({
                 "delegation.pending_count": pendingDelegations.length,
@@ -638,7 +682,7 @@ export class AgentDispatchService {
         if (activeRal.isStreaming) {
             // Check if this is a Claude Code agent
             const llmConfig = config.getLLMConfig(agent.llmConfig);
-            const isClaudeCodeProvider = llmConfig.provider === "claude-code";
+            const isClaudeCodeProvider = llmConfig.provider === PROVIDER_IDS.CLAUDE_CODE;
 
             if (isClaudeCodeProvider) {
                 // Try to use message injection if available (requires fork of ai-sdk-provider-claude-code)
