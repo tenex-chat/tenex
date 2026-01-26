@@ -10,7 +10,7 @@ import { EventEmitter } from "tseep";
 export const INJECTION_ABORT_REASON = "INJECTION_ABORT";
 
 /** RAL state representing the current phase of agent execution */
-export type RALState = 'IDLE' | 'REASONING' | 'ACTING' | 'STREAMING' | 'ERROR';
+export type RALState = "IDLE" | "REASONING" | "ACTING" | "STREAMING" | "ERROR";
 
 // Store essential operation metadata
 export interface LLMOperation {
@@ -280,36 +280,37 @@ export class LLMOperationsRegistry {
     }
 
     /**
-     * Get operations grouped by event ID for publishing.
-     * Each operation appears under both its triggering event ID and conversation root ID.
+     * Get operations grouped by conversation ID (thread root) for publishing.
+     * Operations are grouped by conversationId only, not by individual message eventId.
+     * This ensures kind:24133 status events use the thread root in the e-tag,
+     * allowing clients to look up working agents by conversation ID.
      */
-    getOperationsByEvent(): Map<string, LLMOperation[]> {
-        const byEvent = new Map<string, LLMOperation[]>();
+    getOperationsByConversation(): Map<string, LLMOperation[]> {
+        const byConversation = new Map<string, LLMOperation[]>();
 
         for (const operation of this.operations.values()) {
-            this.addOperationToEventMap(byEvent, operation.eventId, operation);
-
-            if (operation.conversationId !== operation.eventId) {
-                this.addOperationToEventMap(byEvent, operation.conversationId, operation);
-            }
+            this.addOperationToConversationMap(byConversation, operation.conversationId, operation);
         }
 
-        return byEvent;
+        return byConversation;
     }
 
+    // NOTE: getOperationsByEvent() was removed - use getOperationsByConversation() instead.
+    // If you need per-event grouping, iterate operations and group manually.
+
     /**
-     * Helper to add an operation to the event map.
+     * Helper to add an operation to the conversation map.
      * Creates the array if it doesn't exist, then appends the operation.
      */
-    private addOperationToEventMap(
+    private addOperationToConversationMap(
         map: Map<string, LLMOperation[]>,
-        eventId: string,
+        conversationId: string,
         operation: LLMOperation
     ): void {
-        let operations = map.get(eventId);
+        let operations = map.get(conversationId);
         if (!operations) {
             operations = [];
-            map.set(eventId, operations);
+            map.set(conversationId, operations);
         }
         operations.push(operation);
     }
