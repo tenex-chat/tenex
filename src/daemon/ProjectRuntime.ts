@@ -14,6 +14,7 @@ import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { PairingManager } from "@/services/pairing";
 import { PromptCompilerService } from "@/services/prompt-compiler";
+import { createLocalReportStore, LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
@@ -49,6 +50,7 @@ export class ProjectRuntime {
     private statusPublisher: ProjectStatusService | null = null;
     private operationsStatusPublisher: OperationsStatusService | null = null;
     private mcpManager: MCPManager = new MCPManager();
+    private localReportStore: LocalReportStore = createLocalReportStore();
 
     private isRunning = false;
     private startTime: Date | null = null;
@@ -144,6 +146,10 @@ export class ProjectRuntime {
 
             // Set mcpManager on context for use by tools and services
             this.context.mcpManager = this.mcpManager;
+
+            // Initialize and set local report store on context for project-scoped storage
+            this.localReportStore.initialize(this.metadataPath);
+            this.context.localReportStore = this.localReportStore;
 
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);
@@ -304,6 +310,11 @@ export class ProjectRuntime {
             this.context.stopAllPromptCompilers();
             console.log(chalk.gray(" done"));
         }
+
+        // Reset local report store
+        process.stdout.write(chalk.gray("   Resetting report store..."));
+        this.localReportStore.reset();
+        console.log(chalk.gray(" done"));
 
         // Release our reference to the prefix KV store (but don't close it -
         // it's a daemon-global resource that outlives individual project runtimes)

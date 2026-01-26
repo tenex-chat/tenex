@@ -23,6 +23,13 @@ import {
     readLightweightMetadata,
     readMessagesFromDisk,
 } from "./ConversationDiskReader";
+import {
+    getIndexManager,
+    parseQuery,
+    search as searchIndex,
+    type AdvancedSearchResult,
+    type RawSearchInput,
+} from "./search";
 
 // Forward declaration - ConversationStore will be imported dynamically
 // to avoid circular dependencies
@@ -323,7 +330,8 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Search conversations by title.
+     * Search conversations by title (legacy in-memory search).
+     * @deprecated Use searchAdvanced for full-text search across all conversations.
      */
     search(query: string): InstanceType<typeof ConversationStoreClass>[] {
         const results: InstanceType<typeof ConversationStoreClass>[] = [];
@@ -335,6 +343,95 @@ class ConversationRegistryImpl {
             }
         }
         return results;
+    }
+
+    /**
+     * Advanced search across ALL conversations (not just in-memory).
+     * Supports full-text search on message content, agent filters, and date filters.
+     *
+     * @param input - Search input with query text and optional filters
+     * @param limit - Maximum number of results (default: 20)
+     * @returns AdvancedSearchResult with explicit success/error information
+     */
+    searchAdvanced(input: RawSearchInput, limit: number = 20): AdvancedSearchResult {
+        if (!this._projectId) {
+            logger.warn("[ConversationRegistry] searchAdvanced called before initialization");
+            return {
+                success: false,
+                results: [],
+                error: "ConversationRegistry not initialized",
+            };
+        }
+
+        try {
+            // Parse and validate the query
+            const query = parseQuery(input);
+
+            // Get or create the index manager for this project
+            const indexManager = getIndexManager(this._basePath, this._projectId);
+
+            // Get the index (loads from disk or rebuilds if needed)
+            const index = indexManager.getIndex();
+
+            // Perform the search
+            const results = searchIndex(query, index, limit);
+
+            logger.debug("[ConversationRegistry] Advanced search completed", {
+                query: input.query,
+                resultCount: results.length,
+                projectId: this._projectId,
+            });
+
+            return {
+                success: true,
+                results,
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.error("[ConversationRegistry] Advanced search failed", {
+                error: errorMessage,
+                query: input.query,
+            });
+
+            return {
+                success: false,
+                results: [],
+                error: errorMessage,
+            };
+        }
+    }
+
+    /**
+     * Trigger an index update for a conversation.
+     * Updates are debounced (30 seconds) to avoid excessive I/O.
+     */
+    triggerIndexUpdate(conversationId: string): void {
+        if (!this._projectId) return;
+
+        try {
+            const indexManager = getIndexManager(this._basePath, this._projectId);
+            indexManager.triggerUpdate(conversationId);
+        } catch (error) {
+            logger.warn("[ConversationRegistry] Failed to trigger index update", {
+                conversationId: conversationId.substring(0, 8),
+                error,
+            });
+        }
+    }
+
+    /**
+     * Rebuild the search index from scratch.
+     * Use sparingly as this scans all conversation files.
+     */
+    rebuildSearchIndex(): void {
+        if (!this._projectId) return;
+
+        try {
+            const indexManager = getIndexManager(this._basePath, this._projectId);
+            indexManager.rebuildIndex();
+        } catch (error) {
+            logger.error("[ConversationRegistry] Failed to rebuild search index", { error });
+        }
     }
 
     /**

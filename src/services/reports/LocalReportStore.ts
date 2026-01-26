@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve, relative } from "node:path";
-import { getTenexBasePath } from "@/constants";
+import { join, resolve, relative, basename, dirname } from "node:path";
+import { isPathWithinDirectory } from "@/lib/agent-home";
 import { logger } from "@/utils/logger";
 
 /**
@@ -30,28 +30,66 @@ export interface LocalReportMetadata {
 /**
  * LocalReportStore manages local file storage for reports.
  *
- * Reports are stored at: $TENEX_BASE_DIR/reports/<slug>.md
- * Metadata is stored at: $TENEX_BASE_DIR/reports/.metadata/<slug>.json
+ * Reports are stored at: $TENEX_BASE_DIR/projects/<projectDTag>/reports/<slug>.md
+ * Metadata is stored at: $TENEX_BASE_DIR/projects/<projectDTag>/reports/.metadata/<slug>.json
  *
  * This provides:
  * - Fast local reads without Nostr lookups
  * - Single source of truth for multi-agent collaboration
  * - Backwards compatibility via subscription hydration
+ * - Project isolation to prevent d-tag conflicts across projects
  */
 export class LocalReportStore {
+    private _basePath: string | null = null;
+    private _projectId: string | null = null;
+
+    /**
+     * Initialize the store for a project.
+     * Must be called once at startup before using any methods.
+     * @param metadataPath The project metadata path (e.g., ~/.tenex/projects/<dTag>)
+     */
+    initialize(metadataPath: string): void {
+        this._basePath = dirname(metadataPath);  // ~/.tenex/projects
+        this._projectId = basename(metadataPath); // <dTag>
+        logger.info(`[LocalReportStore] Initialized for project ${this._projectId}`, {
+            basePath: this._basePath,
+            projectId: this._projectId,
+        });
+    }
+
+    /**
+     * Check if the store has been initialized
+     */
+    isInitialized(): boolean {
+        return this._projectId !== null && this._basePath !== null;
+    }
+
+    /**
+     * Get the project ID (d-tag)
+     */
+    get projectId(): string | null {
+        return this._projectId;
+    }
+
     /**
      * Get the path to the reports directory
-     * Always computed fresh to respect environment variable changes
+     * Requires initialization with a project context
      */
     getReportsDir(): string {
-        return join(getTenexBasePath(), "reports");
+        if (!this._basePath || !this._projectId) {
+            throw new Error("LocalReportStore.initialize() must be called before getReportsDir()");
+        }
+        return join(this._basePath, this._projectId, "reports");
     }
 
     /**
      * Get the path to the metadata directory
      */
     private getMetadataDir(): string {
-        return join(getTenexBasePath(), "reports", ".metadata");
+        if (!this._basePath || !this._projectId) {
+            throw new Error("LocalReportStore.initialize() must be called before getMetadataDir()");
+        }
+        return join(this._basePath, this._projectId, "reports", ".metadata");
     }
 
     /**
@@ -289,27 +327,55 @@ export class LocalReportStore {
     /**
      * Check if a path is within the reports directory
      * Used to block direct writes via fs_write
+     * Uses secure path normalization to prevent path traversal attacks.
      * @param path The path to check
+     * @throws Error if the store has not been initialized
      */
     isPathInReportsDir(path: string): boolean {
-        // Normalize paths for comparison
-        const normalizedPath = path.replace(/\\/g, "/");
-        const normalizedReportsDir = this.getReportsDir().replace(/\\/g, "/");
+        // CRITICAL: Throw if not initialized to prevent silent bypass of protection
+        if (!this.isInitialized()) {
+            throw new Error(
+                "LocalReportStore.isPathInReportsDir() called before initialization. " +
+                "This indicates a bug - the store must be initialized during project startup."
+            );
+        }
 
-        return normalizedPath.startsWith(normalizedReportsDir + "/") ||
-               normalizedPath === normalizedReportsDir;
+        // Use secure path containment check that handles .., symlinks, case differences
+        return isPathWithinDirectory(path, this.getReportsDir());
+    }
+
+    /**
+     * Reset the store (for testing purposes)
+     */
+    reset(): void {
+        this._basePath = null;
+        this._projectId = null;
     }
 }
 
-// Singleton instance
-let localReportStoreInstance: LocalReportStore | null = null;
+/**
+ * Create a new LocalReportStore instance.
+ * Each project should have its own instance managed by ProjectContext.
+ */
+export function createLocalReportStore(): LocalReportStore {
+    return new LocalReportStore();
+}
 
 /**
- * Get the singleton LocalReportStore instance
+ * Get the LocalReportStore for the current project context.
+ * This is a convenience function that gets the store from ProjectContext.
+ *
+ * @throws Error if called outside of a project context
  */
 export function getLocalReportStore(): LocalReportStore {
-    if (!localReportStoreInstance) {
-        localReportStoreInstance = new LocalReportStore();
+    // Lazy import to avoid circular dependency
+    const { getProjectContext } = require("@/services/projects/ProjectContext");
+    const context = getProjectContext();
+    if (!context.localReportStore) {
+        throw new Error(
+            "LocalReportStore not available in project context. " +
+            "This indicates a bug - the store should be initialized during project startup."
+        );
     }
-    return localReportStoreInstance;
+    return context.localReportStore;
 }

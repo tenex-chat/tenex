@@ -19,11 +19,16 @@ function getBasePath(): string {
 interface TelemetryConfig {
     enabled: boolean;
     serviceName: string;
+    endpoint: string;
 }
 
 function getTelemetryConfig(): TelemetryConfig {
     const configPath = join(getBasePath(), "config.json");
-    const defaults: TelemetryConfig = { enabled: true, serviceName: "tenex-daemon" };
+    const defaults: TelemetryConfig = {
+        enabled: true,
+        serviceName: "tenex-daemon",
+        endpoint: "http://localhost:4318/v1/traces"
+    };
 
     if (!existsSync(configPath)) return defaults;
     try {
@@ -31,6 +36,7 @@ function getTelemetryConfig(): TelemetryConfig {
         return {
             enabled: config.telemetry?.enabled !== false,
             serviceName: config.telemetry?.serviceName || defaults.serviceName,
+            endpoint: config.telemetry?.endpoint || defaults.endpoint,
         };
     } catch {
         return defaults; // default on parse error
@@ -38,7 +44,7 @@ function getTelemetryConfig(): TelemetryConfig {
 }
 
 const telemetryConfig = getTelemetryConfig();
-initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName);
+initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName, telemetryConfig.endpoint);
 
 import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
