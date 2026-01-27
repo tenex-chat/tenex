@@ -1,7 +1,9 @@
 import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SchedulerService } from "@/services/scheduling";
+import { eventLoopMonitor } from "@/telemetry/EventLoopMonitor";
 import { logger } from "@/utils/logger";
 import { runInteractiveSetup } from "./setup/interactive";
 import chalk from "chalk";
@@ -83,6 +85,14 @@ export const daemonCommand = new Command("daemon")
         const schedulerService = SchedulerService.getInstance();
         await schedulerService.initialize(getNDK(), ".tenex");
 
+        // DIAGNOSTIC: Start event loop monitoring for concurrent streaming bottleneck analysis
+        eventLoopMonitor.start(
+            () => llmOpsRegistry.getActiveOperationsCount(),
+            100, // Sample every 100ms
+            50   // Consider >50ms lag as blocked
+        );
+        console.log(chalk.gray("📊 Event loop monitoring enabled for diagnostics"));
+
         // Get the daemon instance
         const daemon = getDaemon();
 
@@ -96,6 +106,18 @@ export const daemonCommand = new Command("daemon")
         // Register scheduler shutdown with daemon's shutdown handlers
         daemon.addShutdownHandler(async () => {
             schedulerService.shutdown();
+            // Stop event loop monitor and log final stats
+            const stats = eventLoopMonitor.getStats();
+            logger.info("[EventLoopMonitor] Final stats on shutdown", {
+                peakLagMs: stats.peakLagMs,
+                avgLagMs: Math.round(stats.avgLagMs * 100) / 100,
+                sampleCount: stats.sampleCount,
+                blockedCount: stats.blockedCount,
+                blockedPercentage: stats.sampleCount > 0
+                    ? Math.round((stats.blockedCount / stats.sampleCount) * 10000) / 100
+                    : 0,
+            });
+            eventLoopMonitor.stop();
         });
 
         try {
