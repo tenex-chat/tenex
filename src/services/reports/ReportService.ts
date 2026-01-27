@@ -23,6 +23,7 @@ export interface ReportInfo {
     title?: string;
     summary?: string;
     content?: string;
+    /** Author's hex pubkey (64-character lowercase hex string) */
     author: string;
     publishedAt?: number;
     hashtags?: string[];
@@ -110,8 +111,9 @@ export class ReportService {
         const projectTagId = projectCtx.project.tagId();
         article.tags.push(["a", projectTagId]);
 
-        // Add author tag for the agent
-        article.tags.push(["p", agent.pubkey, "", "author"]);
+        // Note: We don't add a p-tag for the author because the event.pubkey
+        // already identifies who authored/signed the event. P-tags are for
+        // tagging OTHER users (mentions, collaborators, etc.), not yourself.
 
         // Sign and publish the article
         await agent.sign(article);
@@ -217,6 +219,7 @@ export class ReportService {
     /**
      * List reports from project agents
      * Uses cached reports for fast lookup
+     * @param agentPubkeys Optional array of hex pubkeys to filter by (must be 64-char hex, not npub)
      */
     async listReports(agentPubkeys?: string[]): Promise<ReportSummary[]> {
         const projectCtx = getProjectContext();
@@ -228,13 +231,10 @@ export class ReportService {
         let cachedReports = projectCtx.getAllReports();
 
         // Filter by agent pubkeys if provided
+        // report.author is already a hex pubkey (see articleUtils.ts)
         if (agentPubkeys && agentPubkeys.length > 0) {
             const pubkeySet = new Set(agentPubkeys);
-            cachedReports = cachedReports.filter((report) => {
-                // Extract pubkey from author (could be npub or hex)
-                const authorPubkey = this.extractPubkeyFromAuthor(report.author);
-                return authorPubkey && pubkeySet.has(authorPubkey);
-            });
+            cachedReports = cachedReports.filter((report) => pubkeySet.has(report.author));
         }
 
         // Filter out deleted reports and convert to ReportSummary
@@ -259,28 +259,6 @@ export class ReportService {
         });
 
         return reports;
-    }
-
-    /**
-     * Extract hex pubkey from author string (handles npub and hex formats)
-     */
-    private extractPubkeyFromAuthor(author: string): string | undefined {
-        if (!author) return undefined;
-
-        // If it's an npub, decode it
-        if (author.startsWith("npub1")) {
-            try {
-                const decoded = nip19.decode(author);
-                if (decoded.type === "npub") {
-                    return decoded.data as string;
-                }
-            } catch {
-                return undefined;
-            }
-        }
-
-        // Assume it's already a hex pubkey
-        return author;
     }
 
     /**
@@ -330,8 +308,8 @@ export class ReportService {
         const projectTagId = projectCtx.project.tagId();
         deletedArticle.tags.push(["a", projectTagId]);
 
-        // Add author tag
-        deletedArticle.tags.push(["p", agent.pubkey, "", "author"]);
+        // Note: We don't add a p-tag for the author because the event.pubkey
+        // already identifies who authored/signed the event.
 
         // Sign and publish the updated article
         await agent.sign(deletedArticle);

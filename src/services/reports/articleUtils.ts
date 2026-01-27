@@ -31,8 +31,9 @@ export function articleToReportInfo(article: NDKArticle): ReportInfo {
         (tag: string[]) => tag[0] === "t" && tag[1] === "memorize_team"
     );
 
-    // Get author npub
-    const authorNpub = article.author.npub;
+    // Get author hex pubkey directly from the event
+    // Internal data should always use hex format, not npub
+    const authorPubkey = article.pubkey;
 
     return {
         id: `nostr:${article.encode()}`,
@@ -40,7 +41,7 @@ export function articleToReportInfo(article: NDKArticle): ReportInfo {
         title: article.title,
         summary: article.summary,
         content: article.content,
-        author: authorNpub,
+        author: authorPubkey,
         publishedAt: article.published_at,
         hashtags: hashtags.length > 0 ? hashtags : undefined,
         projectReference,
