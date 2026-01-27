@@ -38,7 +38,6 @@ export interface ExecutionContext {
     hasPendingDelegations?: boolean;
     debug?: boolean;
     alphaMode?: boolean;
-    hasActivePairings?: boolean;
     mcpManager?: MCPManager;
 }
 

@@ -121,8 +121,8 @@ All delegation-related tools follow the same pattern: publish event(s), return s
 
 #### delegate
 
-Note: "mode" parameter removed. The old "pair" mode (periodic check-ins) is superseded by
-the injection mechanism - delegating agents can receive messages anytime during execution.
+Note: All delegations use the injection mechanism - delegating agents can receive messages
+anytime during execution via message injection.
 
 ```typescript
 async function delegate(params, context): Promise<DelegateResult> {
@@ -326,8 +326,7 @@ Event p-tags executing agent → Queue in RAL registry
 - `DelegationRegistryService` - replaced by RALRegistry
 - Blocking wait logic in all delegation tools
 - Complex response aggregation
-- "pair" mode with check-ins - replaced by injection mechanism (user can message agent anytime)
-- `PairModeController` and `PairModeRegistry` - no longer needed
+- Previous periodic check-in infrastructure - replaced by injection mechanism (user can message agent anytime)
 
 ## Injection Mechanism
 
