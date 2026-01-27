@@ -1403,8 +1403,7 @@ git commit -m "feat(executor): integrate RAL lifecycle management"
 **Files:**
 - Delete: `src/services/delegation/DelegationService.ts`
 - Delete: `src/services/delegation/DelegationRegistryService.ts`
-- Delete: `src/services/delegation/PairModeController.ts`
-- Delete: `src/services/delegation/PairModeRegistry.ts`
+- Delete deprecated delegation controller files (already removed)
 - Modify: `src/services/delegation/index.ts`
 
 **Step 1: Update index.ts to remove exports**
@@ -1418,8 +1417,7 @@ export type { DelegationMode, DelegationResponses } from "./types";
 ```bash
 rm src/services/delegation/DelegationService.ts
 rm src/services/delegation/DelegationRegistryService.ts
-rm src/services/delegation/PairModeController.ts
-rm src/services/delegation/PairModeRegistry.ts
+# Other deprecated delegation files already removed
 ```
 
 **Step 3: Fix any import errors in other files**
@@ -1430,7 +1428,7 @@ Search for imports of deleted modules and update/remove them.
 
 ```bash
 git add -A
-git commit -m "refactor: remove deprecated DelegationService and PairMode"
+git commit -m "refactor: remove deprecated DelegationService"
 ```
 
 ---
@@ -1516,5 +1514,4 @@ git commit -m "test(ral): add RALRegistry and integration tests"
 **Files Deleted:**
 - `src/services/delegation/DelegationService.ts`
 - `src/services/delegation/DelegationRegistryService.ts`
-- `src/services/delegation/PairModeController.ts`
-- `src/services/delegation/PairModeRegistry.ts`
+- Deprecated delegation controller files (already removed)
