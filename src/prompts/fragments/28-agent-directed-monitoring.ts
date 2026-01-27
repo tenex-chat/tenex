@@ -2,7 +2,7 @@
  * Agent-Directed Monitoring Fragment
  *
  * Provides guidance on how agents can monitor delegated work using existing tools.
- * This replaces the automatic pairing infrastructure with agent-controlled monitoring.
+ * Agents control when and how often to check on delegated tasks.
  */
 
 import type { PromptFragment } from "../core/types";
