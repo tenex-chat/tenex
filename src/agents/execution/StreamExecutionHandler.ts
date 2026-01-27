@@ -94,6 +94,20 @@ export class StreamExecutionHandler {
             const lastUserMessage = extractLastUserMessage(messages);
             ralRegistry.startLLMStream(context.agent.pubkey, context.conversationId, ralNumber, lastUserMessage);
 
+            // DIAGNOSTIC: Capture process state at stream start for bottleneck analysis
+            const memUsage = process.memoryUsage();
+            const cpuUsage = process.cpuUsage();
+            this.executionSpan?.addEvent("executor.stream_start_process_state", {
+                "process.memory_heap_used_mb": Math.round(memUsage.heapUsed / 1024 / 1024),
+                "process.memory_heap_total_mb": Math.round(memUsage.heapTotal / 1024 / 1024),
+                "process.memory_rss_mb": Math.round(memUsage.rss / 1024 / 1024),
+                "process.memory_external_mb": Math.round(memUsage.external / 1024 / 1024),
+                "process.cpu_user_ms": Math.round(cpuUsage.user / 1000),
+                "process.cpu_system_ms": Math.round(cpuUsage.system / 1000),
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+            });
+
             // Add TENEX-specific attributes to the active span
             const activeSpan = trace.getActiveSpan();
             if (activeSpan) {
@@ -164,9 +178,11 @@ export class StreamExecutionHandler {
                 onStopCheck,
             });
 
-            // DIAGNOSTIC: Track when stream() returns
+            // DIAGNOSTIC: Track when stream() returns with process state comparison
             const streamCallEndTime = Date.now();
             const streamCallDuration = streamCallEndTime - streamCallStartTime;
+            const endMemUsage = process.memoryUsage();
+            const endCpuUsage = process.cpuUsage(cpuUsage); // Delta since start
             this.executionSpan?.addEvent("executor.stream_call_completed", {
                 "stream.call_end_time": streamCallEndTime,
                 "stream.call_duration_ms": streamCallDuration,
@@ -174,6 +190,11 @@ export class StreamExecutionHandler {
                 "stream.result_kind_after_stream": this.result?.kind ?? "undefined",
                 "stream.abort_signal_aborted_after": abortSignal.aborted,
                 "ral.number": ralNumber,
+                // Process state delta for bottleneck analysis
+                "process.memory_heap_delta_mb": Math.round((endMemUsage.heapUsed - memUsage.heapUsed) / 1024 / 1024),
+                "process.memory_rss_delta_mb": Math.round((endMemUsage.rss - memUsage.rss) / 1024 / 1024),
+                "process.cpu_user_delta_ms": Math.round(endCpuUsage.user / 1000),
+                "process.cpu_system_delta_ms": Math.round(endCpuUsage.system / 1000),
             });
 
             // Diagnostic: Track when stream method returns

@@ -324,6 +324,12 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         let finishPartSeen = false;
         let stepFinishCount = 0;
 
+        // DIAGNOSTIC: Track inter-chunk timing for concurrent streaming bottleneck analysis
+        let maxInterChunkDelayMs = 0;
+        let totalInterChunkDelayMs = 0;
+        let interChunkDelays: number[] = []; // For percentile analysis
+        const SLOW_CHUNK_THRESHOLD_MS = 500; // Log chunks taking >500ms
+
         const { fullStream } = streamText({
             model,
             messages: processedMessages,
@@ -363,9 +369,35 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         // Consume the stream (this is what triggers everything!)
         try {
             for await (const part of fullStream) {
+                const chunkReceivedTime = Date.now();
+                const interChunkDelay = chunkReceivedTime - lastChunkTime;
+
                 chunkCount++;
                 lastChunkType = part.type;
-                lastChunkTime = Date.now();
+
+                // DIAGNOSTIC: Track inter-chunk timing
+                if (chunkCount > 1) { // Skip first chunk (no previous to compare)
+                    totalInterChunkDelayMs += interChunkDelay;
+                    interChunkDelays.push(interChunkDelay);
+                    if (interChunkDelay > maxInterChunkDelayMs) {
+                        maxInterChunkDelayMs = interChunkDelay;
+                    }
+
+                    // Log slow chunks that might indicate blocking
+                    if (interChunkDelay > SLOW_CHUNK_THRESHOLD_MS) {
+                        activeSpan?.addEvent("llm.slow_chunk_detected", {
+                            "chunk.number": chunkCount,
+                            "chunk.type": part.type,
+                            "chunk.inter_delay_ms": interChunkDelay,
+                            "chunk.threshold_ms": SLOW_CHUNK_THRESHOLD_MS,
+                            "process.memory_heap_used_mb": Math.round(
+                                process.memoryUsage().heapUsed / 1024 / 1024
+                            ),
+                        });
+                    }
+                }
+
+                lastChunkTime = chunkReceivedTime;
 
                 // Track specific part types for diagnostics
                 switch (part.type) {
@@ -409,6 +441,22 @@ export class LLMService extends EventEmitter<Record<string, any>> {
             const loopCompleteTime = Date.now();
             const loopDuration = loopCompleteTime - startTime;
             const timeSinceLastChunk = loopCompleteTime - lastChunkTime;
+
+            // Calculate inter-chunk timing percentiles for bottleneck analysis
+            const sortedDelays = [...interChunkDelays].sort((a, b) => a - b);
+            const p50Delay = sortedDelays.length > 0
+                ? sortedDelays[Math.floor(sortedDelays.length * 0.5)]
+                : 0;
+            const p95Delay = sortedDelays.length > 0
+                ? sortedDelays[Math.floor(sortedDelays.length * 0.95)]
+                : 0;
+            const p99Delay = sortedDelays.length > 0
+                ? sortedDelays[Math.floor(sortedDelays.length * 0.99)]
+                : 0;
+            const avgInterChunkDelay = interChunkDelays.length > 0
+                ? totalInterChunkDelayMs / interChunkDelays.length
+                : 0;
+
             activeSpan?.addEvent("llm.stream_loop_complete", {
                 "stream.loop_complete_time": loopCompleteTime,
                 "stream.loop_duration_ms": loopDuration,
@@ -423,6 +471,13 @@ export class LLMService extends EventEmitter<Record<string, any>> {
                 "stream.tool_result_count": toolResultCount,
                 "stream.text_delta_count": textDeltaCount,
                 "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
+                // DIAGNOSTIC: Inter-chunk timing metrics for bottleneck analysis
+                "stream.inter_chunk_max_delay_ms": maxInterChunkDelayMs,
+                "stream.inter_chunk_avg_delay_ms": Math.round(avgInterChunkDelay * 100) / 100,
+                "stream.inter_chunk_p50_delay_ms": p50Delay,
+                "stream.inter_chunk_p95_delay_ms": p95Delay,
+                "stream.inter_chunk_p99_delay_ms": p99Delay,
+                "stream.slow_chunks_count": interChunkDelays.filter(d => d > SLOW_CHUNK_THRESHOLD_MS).length,
             });
 
             // CRITICAL DIAGNOSTIC: If loop completed but no finish part was seen, something is very wrong
