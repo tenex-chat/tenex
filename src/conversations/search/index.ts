@@ -1,5 +1,7 @@
 /**
- * Conversation search module exports.
+ * Conversation Search Module
+ *
+ * Provides full-text, keyword, and semantic search capabilities for conversations.
  */
 
 // Types
@@ -42,3 +44,6 @@ export {
     ConversationIndexManager,
     getIndexManager,
 } from "./ConversationIndexManager";
+
+// Embeddings and Semantic Search
+export * from "./embeddings";
