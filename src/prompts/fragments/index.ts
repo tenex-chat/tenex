@@ -25,6 +25,7 @@ import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
 import { mcpResourcesFragment } from "./26-mcp-resources";
 import { memorizedReportsFragment } from "./27-memorized-reports";
+import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { alphaModeFragment } from "./alpha-mode";
 import { debugModeFragment } from "./debug-mode";
@@ -64,6 +65,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(ragInstructionsFragment);
     fragmentRegistry.register(mcpResourcesFragment);
     fragmentRegistry.register(memorizedReportsFragment);
+    fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(worktreeContextFragment);
 }
 

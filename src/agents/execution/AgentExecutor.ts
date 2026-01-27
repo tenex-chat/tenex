@@ -229,10 +229,6 @@ export class AgentExecutor {
         const conversationStore = ConversationStore.getOrLoad(context.conversationId);
         const projectContext = getProjectContext();
 
-        const hasActivePairings = projectContext.pairingManager
-            ? projectContext.pairingManager.getActivePairingsForSupervisor(context.agent.pubkey).length > 0
-            : false;
-
         const fullContext: FullRuntimeContext = {
             agent: context.agent,
             conversationId: context.conversationId,
@@ -245,7 +241,6 @@ export class AgentExecutor {
             conversationStore,
             getConversation: () => conversationStore,
             alphaMode: context.alphaMode,
-            hasActivePairings,
             mcpManager: projectContext.mcpManager,
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,

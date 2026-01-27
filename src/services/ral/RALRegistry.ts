@@ -1221,8 +1221,6 @@ export class RALRegistry {
 
   /**
    * Find a RAL that has queued injections ready to process.
-   * Used for pairing checkpoint resumption - the supervisor has pending delegations
-   * but received a checkpoint message that needs processing.
    */
   findRALWithInjections(agentPubkey: string, conversationId: string): RALRegistryEntry | undefined {
     const rals = this.getActiveRALs(agentPubkey, conversationId);

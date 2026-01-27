@@ -53,7 +53,6 @@ The `services/` layer contains stateful business logic and domain services:
 - RAG operations
 - Scheduling
 - Delegation/RAL state tracking
-- Pairing supervision
 - MCP integration
 
 **Rule:** Services can import from `utils/`, `lib/`, `nostr/`, `llm/`, but not from `commands/`, `daemon/`, or `event-handler/`.
@@ -154,10 +153,6 @@ services/
 │   ├── RALRegistry.ts
 │   ├── types.ts
 │   └── index.ts
-├── pairing/              # Delegation supervision
-│   ├── PairingManager.ts
-│   ├── types.ts
-│   └── index.ts
 ├── rag/                  # RAG domain
 │   ├── RAGService.ts
 │   ├── RAGDatabaseService.ts
@@ -203,7 +198,7 @@ ProjectStatusService
 
 **Goal:** Consistent "Service" suffix for all business logic classes.
 
-**Exceptions:** Registries and infrastructure managers (e.g., `RALRegistry`, `PairingManager`) keep their names when they are not business-logic services.
+**Exceptions:** Registries (e.g., `RALRegistry`) keep their names when they are not business-logic services.
 
 ---
 
