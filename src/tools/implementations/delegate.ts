@@ -57,7 +57,10 @@ interface CircularDelegationWarning {
 interface DelegateOutput {
   success: boolean;
   message: string;
+  /** Truncated delegation conversation IDs (prefixes for compact display) */
   delegationConversationIds: string[];
+  /** Full delegation conversation IDs for direct follow-up without prefix resolution */
+  delegationConversationIdsFull?: string[];
   circularDelegationWarning?: CircularDelegationWarning;
   circularDelegationWarnings?: CircularDelegationWarning[];
 }
@@ -152,6 +155,7 @@ async function executeDelegate(
   }
 
   const delegationConversationIds = pendingDelegations.map(d => truncateConversationId(d.delegationConversationId));
+  const delegationConversationIdsFull = pendingDelegations.map(d => d.delegationConversationId);
   const unforcedWarnings = circularWarnings.filter(w => !w.forced);
 
   // All delegations were circular (not forced) - return soft warning
@@ -189,6 +193,7 @@ async function executeDelegate(
     success: true,
     message,
     delegationConversationIds,
+    delegationConversationIdsFull,
     ...(circularWarnings.length > 0 && {
       circularDelegationWarning: circularWarnings[0],
       circularDelegationWarnings: circularWarnings,

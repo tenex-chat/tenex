@@ -171,6 +171,7 @@ describe("Delegation tools - Self-delegation validation", () => {
 
 describe("Delegation tools - RAL isolation", () => {
     const conversationId = "test-conversation-id";
+    const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
     const createMockContext = (ralNumber: number): ToolExecutionContext => ({
@@ -288,6 +289,7 @@ describe("Delegation tools - RAL isolation", () => {
 
 describe("Delegation tools - RALRegistry state verification", () => {
     const conversationId = "test-conversation-id";
+    const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
     const createMockContext = (ralNumber: number): ToolExecutionContext => ({
@@ -466,6 +468,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
 
 describe("Delegation tools - Circular delegation soft warning", () => {
     const conversationId = "test-conversation-id";
+    const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
     let conversationStoreSpy: Mock<typeof ConversationStore.get>;
 
@@ -535,7 +538,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
 
     it("should return soft warning when circular delegation is detected without force flag", async () => {
         const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
         // Create a delegation chain that includes other-agent
         const delegationChain = [
@@ -576,7 +579,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
 
     it("should proceed with circular delegation when force flag is true", async () => {
         const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
         // Create a delegation chain that includes other-agent
         const delegationChain = [
@@ -615,7 +618,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
 
     it("should allow normal delegation when no circular dependency exists", async () => {
         const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
         // Create a delegation chain that does NOT include other-agent
         const delegationChain = [
@@ -644,11 +647,15 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         expect(result.success).toBe(true);
         expect(result.delegationConversationIds).toHaveLength(1);
         expect(result.circularDelegationWarning).toBeUndefined();
+
+        // Should return full IDs alongside truncated ones
+        expect(result.delegationConversationIdsFull).toHaveLength(1);
+        expect(result.delegationConversationIdsFull![0]).toMatch(/^mock-delegation-id-/);
     });
 
     it("should process mixed delegations: non-circular succeeds, circular returns warning", async () => {
         const agentPubkey = "agent-pubkey-123";
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
         // Create a delegation chain that includes other-agent but NOT third-agent
         const delegationChain = [
