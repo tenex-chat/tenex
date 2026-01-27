@@ -260,7 +260,7 @@ export class LLMService extends EventEmitter<Record<string, any>> {
         const stopWhen = async ({
             steps,
         }: { steps: StepResult<Record<string, AISdkTool>>[] }): Promise<boolean> => {
-            // First check custom stop condition (e.g., pair mode check-in)
+            // First check custom stop condition
             if (options?.onStopCheck) {
                 const shouldStop = await options.onStopCheck(steps);
                 if (shouldStop) {
