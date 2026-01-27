@@ -22,6 +22,10 @@ const delegationItemSchema = z.object({
     .string()
     .optional()
     .describe("Git branch name for worktree isolation"),
+  force: z
+    .boolean()
+    .optional()
+    .describe("Set to true to proceed with delegation even if circular delegation is detected"),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -34,6 +38,11 @@ interface DelegateOutput {
   success: boolean;
   message: string;
   delegationConversationIds: string[];
+  circularDelegationWarning?: {
+    recipient: string;
+    chain: string;
+    message: string;
+  };
 }
 
 async function executeDelegate(
@@ -72,16 +81,32 @@ async function executeDelegate(
       const targetName = targetAgent?.slug || pubkey.substring(0, 8);
       const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
 
-      logger.warn("[delegate] Circular delegation detected", {
+      // If force flag is not set, return a soft warning instead of proceeding
+      if (!delegation.force) {
+        logger.info("[delegate] Circular delegation detected, returning soft warning", {
+          recipient: delegation.recipient,
+          targetPubkey: pubkey.substring(0, 8),
+          chain: chainDisplay,
+        });
+
+        return {
+          success: false,
+          message: `Note: "${targetName}" is already in your delegation chain (${chainDisplay}). If you proceed, this creates a circular delegation which may cause the task to bounce back and forth. To continue anyway, add \`force: true\` to this delegation.`,
+          delegationConversationIds: [],
+          circularDelegationWarning: {
+            recipient: targetName,
+            chain: chainDisplay,
+            message: `"${targetName}" is already in your delegation chain. Proceeding would create a circular delegation.`,
+          },
+        };
+      }
+
+      // Force flag is set - log and proceed
+      logger.warn("[delegate] Circular delegation proceeding with force flag", {
         recipient: delegation.recipient,
         targetPubkey: pubkey.substring(0, 8),
         chain: chainDisplay,
       });
-
-      throw new Error(
-        `Circular delegation detected: "${targetName}" is already in the delegation chain (${chainDisplay}). ` +
-        "Delegating to them would create a cycle. Consider completing your own task or delegating to a different agent."
-      );
     }
 
     // Publish delegation event

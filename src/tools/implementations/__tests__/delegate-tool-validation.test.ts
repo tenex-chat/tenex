@@ -459,6 +459,184 @@ describe("Delegation tools - RALRegistry state verification", () => {
     });
 });
 
+describe("Delegation tools - Circular delegation soft warning", () => {
+    const conversationId = "test-conversation-id";
+    let registry: RALRegistry;
+
+    // Import projectContextStore for mocking
+    const { projectContextStore } = require("@/services/projects");
+
+    const createMockContextWithChain = (ralNumber: number, delegationChain: any[] = []): ToolExecutionContext => {
+        // Mock the ConversationStore.get to return our chain
+        const mockConversation = {
+            getRootEventId: () => conversationId,
+            getTodos: () => [],
+            metadata: {
+                delegationChain,
+            },
+        };
+
+        return {
+            agent: {
+                slug: "self-agent",
+                name: "Self Agent",
+                pubkey: "agent-pubkey-123",
+            } as AgentInstance,
+            conversationId,
+            triggeringEvent: {
+                tags: [],
+            } as any,
+            agentPublisher: {
+                delegate: async () => "mock-delegation-id",
+            } as any,
+            ralNumber,
+            projectBasePath: "/tmp/test",
+            workingDirectory: "/tmp/test",
+            currentBranch: "main",
+            getConversation: () => mockConversation as any,
+        };
+    };
+
+    // Create a minimal mock ProjectContext
+    const createMockProjectContext = () => ({
+        getAgentByPubkey: (pubkey: string) => {
+            if (pubkey === "other-pubkey-456") {
+                return { slug: "other-agent", name: "Other Agent", pubkey };
+            }
+            if (pubkey === "agent-pubkey-123") {
+                return { slug: "self-agent", name: "Self Agent", pubkey };
+            }
+            return undefined;
+        },
+    });
+
+    beforeEach(() => {
+        // Reset singleton for testing
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+        registry = RALRegistry.getInstance();
+
+        // Mock ConversationStore.get
+        const ConversationStore = require("@/conversations/ConversationStore").ConversationStore;
+        spyOn(ConversationStore, "get").mockImplementation((convId: string) => {
+            return undefined; // Default no chain
+        });
+    });
+
+    it("should return soft warning when circular delegation is detected without force flag", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId);
+
+        // Create a delegation chain that includes other-agent
+        const delegationChain = [
+            { pubkey: "user-pubkey", displayName: "User" },
+            { pubkey: "other-pubkey-456", displayName: "other-agent" },
+            { pubkey: agentPubkey, displayName: "self-agent" },
+        ];
+
+        const context = createMockContextWithChain(ralNumber, delegationChain);
+
+        // Mock ConversationStore.get for this specific test
+        const ConversationStore = require("@/conversations/ConversationStore").ConversationStore;
+        spyOn(ConversationStore, "get").mockReturnValue({
+            metadata: { delegationChain },
+        });
+
+        const delegateTool = createDelegateTool(context);
+
+        const input = {
+            delegations: [
+                { recipient: "other-agent", prompt: "This would create a cycle" }
+            ],
+        };
+
+        // Run within projectContextStore to provide ProjectContext
+        const result = await projectContextStore.run(createMockProjectContext(), async () => {
+            return await delegateTool.execute(input);
+        });
+
+        // Should return a soft warning, not throw
+        expect(result.success).toBe(false);
+        expect(result.message).toContain("is already in your delegation chain");
+        expect(result.message).toContain("force: true");
+        expect(result.circularDelegationWarning).toBeDefined();
+        expect(result.circularDelegationWarning?.recipient).toBe("other-agent");
+        expect(result.delegationConversationIds).toHaveLength(0);
+    });
+
+    it("should proceed with circular delegation when force flag is true", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId);
+
+        // Create a delegation chain that includes other-agent
+        const delegationChain = [
+            { pubkey: "user-pubkey", displayName: "User" },
+            { pubkey: "other-pubkey-456", displayName: "other-agent" },
+            { pubkey: agentPubkey, displayName: "self-agent" },
+        ];
+
+        const context = createMockContextWithChain(ralNumber, delegationChain);
+
+        // Mock ConversationStore.get for this specific test
+        const ConversationStore = require("@/conversations/ConversationStore").ConversationStore;
+        spyOn(ConversationStore, "get").mockReturnValue({
+            metadata: { delegationChain },
+        });
+
+        const delegateTool = createDelegateTool(context);
+
+        const input = {
+            delegations: [
+                { recipient: "other-agent", prompt: "Force through the cycle", force: true }
+            ],
+        };
+
+        // Run within projectContextStore to provide ProjectContext
+        const result = await projectContextStore.run(createMockProjectContext(), async () => {
+            return await delegateTool.execute(input);
+        });
+
+        // Should succeed with force flag
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationIds).toHaveLength(1);
+        expect(result.circularDelegationWarning).toBeUndefined();
+    });
+
+    it("should allow normal delegation when no circular dependency exists", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId);
+
+        // Create a delegation chain that does NOT include other-agent
+        const delegationChain = [
+            { pubkey: "user-pubkey", displayName: "User" },
+            { pubkey: agentPubkey, displayName: "self-agent" },
+        ];
+
+        const context = createMockContextWithChain(ralNumber, delegationChain);
+
+        // Mock ConversationStore.get for this specific test
+        const ConversationStore = require("@/conversations/ConversationStore").ConversationStore;
+        spyOn(ConversationStore, "get").mockReturnValue({
+            metadata: { delegationChain },
+        });
+
+        const delegateTool = createDelegateTool(context);
+
+        const input = {
+            delegations: [
+                { recipient: "other-agent", prompt: "Normal delegation" }
+            ],
+        };
+
+        const result = await delegateTool.execute(input);
+
+        // Should succeed normally
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationIds).toHaveLength(1);
+        expect(result.circularDelegationWarning).toBeUndefined();
+    });
+});
+
 // Restore mocks
 afterAll(() => {
     mockResolve.mockRestore();
