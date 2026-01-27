@@ -1,6 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { MessageInjector } from "@/llm/types";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 import { EventEmitter } from "tseep";
 
 /**
@@ -33,6 +34,11 @@ export class LLMOperationsRegistry {
     private byEvent = new Map<string, Set<string>>();
     private operationsByContext = new Map<string, string>(); // contextKey -> operationId
     private changeListeners = new Set<() => void>();
+
+    // DIAGNOSTIC: Concurrent streaming metrics
+    private peakConcurrentOperations = 0;
+    private totalOperationsRegistered = 0;
+    private concurrencyHistogram = new Map<number, number>(); // concurrency level -> count
 
     static getInstance(): LLMOperationsRegistry {
         if (!LLMOperationsRegistry.instance) {
@@ -82,6 +88,30 @@ export class LLMOperationsRegistry {
             agentPubkey: context.agent.pubkey.substring(0, 8),
         });
 
+        // DIAGNOSTIC: Track concurrent streaming metrics
+        this.totalOperationsRegistered++;
+        const currentConcurrency = this.operations.size;
+        if (currentConcurrency > this.peakConcurrentOperations) {
+            this.peakConcurrentOperations = currentConcurrency;
+        }
+        this.concurrencyHistogram.set(
+            currentConcurrency,
+            (this.concurrencyHistogram.get(currentConcurrency) || 0) + 1
+        );
+
+        // Emit OTL event for concurrent operation tracking
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("llm_ops.operation_registered", {
+            "concurrent.current_count": currentConcurrency,
+            "concurrent.peak_count": this.peakConcurrentOperations,
+            "concurrent.total_registered": this.totalOperationsRegistered,
+            "operation.id": operationId.substring(0, 8),
+            "operation.agent_name": context.agent.name,
+            "operation.agent_pubkey": context.agent.pubkey.substring(0, 8),
+            "process.memory_heap_used_mb": Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+            "process.memory_rss_mb": Math.round(process.memoryUsage().rss / 1024 / 1024),
+        });
+
         // Notify listeners of new operation
         this.notifyChange();
 
@@ -120,11 +150,24 @@ export class LLMOperationsRegistry {
             this.unindexOperation(operationId, operation.eventId);
         }
 
+        const operationDuration = Date.now() - operation.registeredAt;
         logger.debug("[LLMOpsRegistry] Completed operation", {
             operationId: operationId.substring(0, 8),
             eventId: operation.eventId.substring(0, 8),
             conversationId: operation.conversationId.substring(0, 8),
-            duration: Date.now() - operation.registeredAt,
+            duration: operationDuration,
+        });
+
+        // DIAGNOSTIC: Track operation completion with concurrency context
+        const remainingConcurrency = this.operations.size;
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("llm_ops.operation_completed", {
+            "concurrent.remaining_count": remainingConcurrency,
+            "concurrent.peak_count": this.peakConcurrentOperations,
+            "operation.id": operationId.substring(0, 8),
+            "operation.duration_ms": operationDuration,
+            "operation.agent_pubkey": operation.agentPubkey.substring(0, 8),
+            "process.memory_heap_used_mb": Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         });
 
         // Notify listeners of change
@@ -277,6 +320,36 @@ export class LLMOperationsRegistry {
 
     getActiveOperationsCount(): number {
         return this.operations.size;
+    }
+
+    /**
+     * DIAGNOSTIC: Get concurrency statistics for bottleneck analysis
+     */
+    getConcurrencyStats(): {
+        current: number;
+        peak: number;
+        total: number;
+        histogram: Record<number, number>;
+        activeAgents: string[];
+    } {
+        return {
+            current: this.operations.size,
+            peak: this.peakConcurrentOperations,
+            total: this.totalOperationsRegistered,
+            histogram: Object.fromEntries(this.concurrencyHistogram),
+            activeAgents: Array.from(this.operations.values()).map(
+                (op) => `${op.agentPubkey.substring(0, 8)}:${op.ralState || "unknown"}`
+            ),
+        };
+    }
+
+    /**
+     * DIAGNOSTIC: Reset concurrency metrics (for testing)
+     */
+    resetConcurrencyMetrics(): void {
+        this.peakConcurrentOperations = 0;
+        this.totalOperationsRegistered = 0;
+        this.concurrencyHistogram.clear();
     }
 
     /**

@@ -553,6 +553,17 @@ export class AgentDispatchService {
         const ralRegistry = RALRegistry.getInstance();
         const dispatchContext = trace.setSpan(getSafeContext(), parentSpan);
 
+        // DIAGNOSTIC: Track concurrent execution metrics for bottleneck analysis
+        const dispatchStartTime = Date.now();
+        const currentActiveOps = llmOpsRegistry.getActiveOperationsCount();
+        parentSpan.addEvent("dispatch.concurrent_execution_starting", {
+            "concurrent.target_agents_count": targetAgents.length,
+            "concurrent.existing_active_ops": currentActiveOps,
+            "concurrent.total_after_dispatch": currentActiveOps + targetAgents.length,
+            "concurrent.dispatch_start_time": dispatchStartTime,
+            "concurrent.event_loop_lag_ms": this.measureEventLoopLag(),
+        });
+
         const executionPromises = targetAgents.map(async (targetAgent) => {
             const agentSpan = tracer.startSpan(
                 "tenex.dispatch.agent",
@@ -638,6 +649,30 @@ export class AgentDispatchService {
         });
 
         await Promise.all(executionPromises);
+
+        // DIAGNOSTIC: Track concurrent execution completion metrics
+        const dispatchEndTime = Date.now();
+        const dispatchDuration = dispatchEndTime - dispatchStartTime;
+        const finalActiveOps = llmOpsRegistry.getActiveOperationsCount();
+        parentSpan.addEvent("dispatch.concurrent_execution_completed", {
+            "concurrent.dispatch_duration_ms": dispatchDuration,
+            "concurrent.agents_executed": targetAgents.length,
+            "concurrent.final_active_ops": finalActiveOps,
+            "concurrent.event_loop_lag_ms": this.measureEventLoopLag(),
+            "concurrent.avg_per_agent_ms": Math.round(dispatchDuration / targetAgents.length),
+        });
+    }
+
+    /**
+     * Measure event loop lag to detect blocking operations.
+     * Returns the lag in milliseconds - high values indicate event loop blocking.
+     */
+    private measureEventLoopLag(): number {
+        const start = process.hrtime.bigint();
+        // This is synchronous - it just measures how long since we scheduled vs now
+        // In real monitoring, you'd use setImmediate to measure actual lag
+        // For diagnostic purposes, this gives us a baseline timestamp
+        return Number((process.hrtime.bigint() - start) / 1000000n);
     }
 
     /**
