@@ -93,6 +93,29 @@ export class RAGService {
     }
 
     /**
+     * Query a collection with semantic search and optional SQL filter (prefilter)
+     * The filter is applied BEFORE vector search for proper project isolation
+     * @param filter SQL-style filter string, e.g., "metadata LIKE '%\"projectId\":\"abc\"%'"
+     */
+    public async queryWithFilter(
+        collectionName: string,
+        queryText: string,
+        topK = 5,
+        filter?: string
+    ): Promise<RAGQueryResult[]> {
+        await this.ensureInitialized();
+        return this.operations.performSemanticSearchWithFilter(collectionName, queryText, topK, filter);
+    }
+
+    /**
+     * Delete a document by its ID
+     */
+    public async deleteDocumentById(collectionName: string, documentId: string): Promise<void> {
+        await this.ensureInitialized();
+        return this.operations.deleteDocumentById(collectionName, documentId);
+    }
+
+    /**
      * Delete a collection
      */
     public async deleteCollection(name: string): Promise<void> {

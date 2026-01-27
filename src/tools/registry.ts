@@ -52,6 +52,7 @@ import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
 import { createConversationSearchTool } from "./implementations/conversation_search";
+import { createConversationIndexTool } from "./implementations/conversation_index";
 import { createShellTool } from "./implementations/shell";
 import { createKillShellTool } from "./implementations/kill_shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
@@ -173,8 +174,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     schedule_task: createScheduleTaskTool,
     schedule_tasks_list: createListScheduledTasksTool,
 
-    // Conversation search
+    // Conversation search and indexing
     conversation_search: createConversationSearchTool,
+    conversation_index: createConversationIndexTool,
 
     shell: createShellTool,
     kill_shell: createKillShellTool,

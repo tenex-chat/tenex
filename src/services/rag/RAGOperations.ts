@@ -210,6 +210,20 @@ export class RAGOperations {
         queryText: string,
         topK = 5
     ): Promise<RAGQueryResult[]> {
+        return this.performSemanticSearchWithFilter(collectionName, queryText, topK, undefined);
+    }
+
+    /**
+     * Perform semantic search with optional SQL prefilter
+     * The filter is applied BEFORE vector search for proper isolation
+     * @param filter SQL-style filter string, applied as prefilter during vector search
+     */
+    async performSemanticSearchWithFilter(
+        collectionName: string,
+        queryText: string,
+        topK = 5,
+        filter?: string
+    ): Promise<RAGQueryResult[]> {
         // Validate inputs early
         this.validateSearchInputs(collectionName, queryText, topK);
 
@@ -219,11 +233,12 @@ export class RAGOperations {
             // Generate query embedding
             const queryVector = await this.embeddingProvider.embed(queryText);
 
-            // Perform vector search
-            const results = await this.executeVectorSearch(table, queryVector, topK);
+            // Perform vector search with optional filter
+            const results = await this.executeVectorSearch(table, queryVector, topK, filter);
 
             logger.info(
-                `Semantic search completed on '${collectionName}': found ${results.length} results`
+                `Semantic search completed on '${collectionName}': found ${results.length} results`,
+                { filter: filter || "none" }
             );
 
             return results;
@@ -236,28 +251,56 @@ export class RAGOperations {
     }
 
     /**
-     * Execute vector search and transform results
+     * Delete a document by its ID
+     */
+    async deleteDocumentById(collectionName: string, documentId: string): Promise<void> {
+        const table = await this.dbManager.getTable(collectionName);
+
+        try {
+            // Escape single quotes in the ID for SQL safety
+            const escapedId = documentId.replace(/'/g, "''");
+            await table.delete(`id = '${escapedId}'`);
+            logger.debug(`Deleted document '${documentId}' from collection '${collectionName}'`);
+        } catch (error) {
+            // Log but don't throw - document might not exist
+            logger.debug(`Could not delete document '${documentId}': ${error}`);
+        }
+    }
+
+    /**
+     * Execute vector search with optional prefilter and transform results
      */
     private async executeVectorSearch(
         table: Table,
         queryVector: Float32Array,
-        topK: number
+        topK: number,
+        filter?: string
     ): Promise<RAGQueryResult[]> {
-        const searchQuery = this.createVectorSearchQuery(table, queryVector, topK);
+        const searchQuery = this.createVectorSearchQuery(table, queryVector, topK, filter);
         const results = await this.executeLanceDBQuery(searchQuery);
         return this.transformSearchResults(results);
     }
 
     /**
-     * Create a vector search query
+     * Create a vector search query with optional SQL prefilter
+     * The filter is applied BEFORE vector search (prefilter by default in LanceDB)
      */
     private createVectorSearchQuery(
         table: Table,
         queryVector: Float32Array,
-        topK: number
+        topK: number,
+        filter?: string
     ): VectorQuery {
-        logger.debug(`Creating vector search with topK=${topK}, vector_dims=${queryVector.length}`);
-        return table.search(Array.from(queryVector)).limit(topK) as VectorQuery;
+        logger.debug(`Creating vector search with topK=${topK}, vector_dims=${queryVector.length}, filter=${filter || "none"}`);
+
+        let query = table.search(Array.from(queryVector)).limit(topK) as VectorQuery;
+
+        // Apply prefilter if provided - this filters BEFORE vector search
+        if (filter) {
+            query = query.where(filter) as VectorQuery;
+        }
+
+        return query;
     }
 
     /**
