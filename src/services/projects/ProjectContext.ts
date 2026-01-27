@@ -9,7 +9,6 @@ import { articleToReportInfo } from "@/services/reports/articleUtils";
 import type { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
-import { nip19 } from "nostr-tools";
 
 /**
  * ProjectContext provides system-wide access to loaded project and agents
@@ -318,7 +317,7 @@ export class ProjectContext {
      * @param report The report info to add/update
      */
     addReport(report: ReportInfo): void {
-        // Extract author pubkey from npub or use as-is
+        // Get author hex pubkey from report
         const authorPubkey = this.extractPubkeyFromReport(report);
         if (!authorPubkey) {
             logger.warn("Cannot add report without author pubkey", { slug: report.slug });
@@ -467,24 +466,9 @@ export class ProjectContext {
     }
 
     /**
-     * Extract pubkey from report (handles both npub and hex formats)
+     * Extract pubkey from report. Author is stored as hex pubkey.
      */
     private extractPubkeyFromReport(report: ReportInfo): string | undefined {
-        if (!report.author) return undefined;
-
-        // If it's an npub, try to decode it
-        if (report.author.startsWith("npub1")) {
-            try {
-                const decoded = nip19.decode(report.author);
-                if (decoded.type === "npub") {
-                    return decoded.data as string;
-                }
-            } catch {
-                // Fall through to return as-is
-            }
-        }
-
-        // Assume it's already a hex pubkey
         return report.author;
     }
 
