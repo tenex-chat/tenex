@@ -277,7 +277,7 @@ async function executeConversationSearch(
     }
 
     let conversations: ConversationSearchResult[];
-    let searchType: "full-text" | "title-only" | "semantic" | "hybrid" = "keyword";
+    let searchType: "full-text" | "title-only" | "semantic" | "hybrid" = "full-text";
     let warning: string | undefined;
 
     switch (effectiveMode) {
@@ -306,7 +306,7 @@ async function executeConversationSearch(
         case "keyword":
         default:
             conversations = keywordSearch(query, limit);
-            searchType = "keyword";
+            searchType = "full-text";
             break;
     }
 

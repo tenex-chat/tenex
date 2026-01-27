@@ -10,7 +10,10 @@ import type { CompletedDelegation, PendingDelegation } from "@/services/ral/type
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
+
+const tracer = trace.getTracer("tenex.message-compiler");
 
 type CompilationMode = "full" | "delta";
 
@@ -73,96 +76,143 @@ export class MessageCompiler {
     }
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
-        const cursor = this.currentCursor;
-        const messages: ModelMessage[] = [];
-        let systemPromptCount = 0;
-        let dynamicContextCount = 0;
+        return tracer.startActiveSpan("tenex.message.compile", async (span) => {
+            try {
+                span.setAttribute("agent.slug", context.agent.slug);
+                span.setAttribute("conversation.id", context.conversation.id.substring(0, 12));
+                span.setAttribute("ral.number", context.ralNumber);
+                span.setAttribute("compilation.mode", this.plan.mode);
 
-        if (this.plan.mode === "full") {
-            const systemPromptMessages = await buildSystemPromptMessages(context);
-            const conversationMessages = await this.conversationStore.buildMessagesForRal(
-                context.agent.pubkey,
-                context.ralNumber
-            );
-            const dynamicContextMessages = await this.buildDynamicContextMessages(context);
+                const cursor = this.currentCursor;
+                const messages: ModelMessage[] = [];
+                let systemPromptCount = 0;
+                let dynamicContextCount = 0;
 
-            messages.push(...systemPromptMessages.map((sm) => sm.message));
-
-            // Inject meta model system prompts if present
-            // These describe available model variants and variant-specific instructions
-            if (context.metaModelSystemPrompt) {
-                messages.push({
-                    role: "system",
-                    content: context.metaModelSystemPrompt,
-                });
-                systemPromptCount++;
-            }
-            if (context.variantSystemPrompt) {
-                messages.push({
-                    role: "system",
-                    content: context.variantSystemPrompt,
-                });
-                systemPromptCount++;
-            }
-
-            messages.push(...conversationMessages);
-
-            messages.push(...dynamicContextMessages);
-
-            // Add ephemeral messages (e.g., supervision corrections) LAST in the message array.
-            // This satisfies Gemini's constraint that multi-turn requests should end with a user role.
-            // If ephemeral messages are placed before system messages, Gemini/OpenRouter strips them.
-            if (context.ephemeralMessages?.length) {
-                for (const ephemeral of context.ephemeralMessages) {
-                    messages.push({
-                        role: ephemeral.role,
-                        content: ephemeral.content,
+                if (this.plan.mode === "full") {
+                    const systemPromptMessages = await tracer.startActiveSpan("tenex.message.build_system_prompt", async (sysSpan) => {
+                        try {
+                            const result = await buildSystemPromptMessages(context);
+                            sysSpan.setAttribute("message.count", result.length);
+                            return result;
+                        } finally {
+                            sysSpan.end();
+                        }
                     });
-                }
-            }
 
-            systemPromptCount += systemPromptMessages.length;
-            dynamicContextCount = dynamicContextMessages.length + (context.ephemeralMessages?.length ?? 0);
-        } else {
-            // In delta mode, only send new conversation messages.
-            // The session already has full context from initial compilation.
-            // Sending wrapped system context as user messages confuses Claude Code
-            // into responding to the context instead of the user's question.
-            const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
-                context.agent.pubkey,
-                context.ralNumber,
-                cursor
-            );
-            messages.push(...conversationMessages);
-
-            // Add ephemeral messages LAST in delta mode too (for supervision corrections).
-            // Must be last to satisfy Gemini's message ordering constraints.
-            if (context.ephemeralMessages?.length) {
-                for (const ephemeral of context.ephemeralMessages) {
-                    messages.push({
-                        role: ephemeral.role,
-                        content: ephemeral.content,
+                    const conversationMessages = await tracer.startActiveSpan("tenex.message.build_conversation_history", async (convSpan) => {
+                        try {
+                            const result = await this.conversationStore.buildMessagesForRal(
+                                context.agent.pubkey,
+                                context.ralNumber
+                            );
+                            convSpan.setAttribute("message.count", result.length);
+                            return result;
+                        } finally {
+                            convSpan.end();
+                        }
                     });
+
+                    const dynamicContextMessages = await tracer.startActiveSpan("tenex.message.build_dynamic_context", async (dynSpan) => {
+                        try {
+                            const result = await this.buildDynamicContextMessages(context);
+                            dynSpan.setAttribute("message.count", result.length);
+                            return result;
+                        } finally {
+                            dynSpan.end();
+                        }
+                    });
+
+                    messages.push(...systemPromptMessages.map((sm) => sm.message));
+
+                    // Inject meta model system prompts if present
+                    // These describe available model variants and variant-specific instructions
+                    if (context.metaModelSystemPrompt) {
+                        messages.push({
+                            role: "system",
+                            content: context.metaModelSystemPrompt,
+                        });
+                        systemPromptCount++;
+                    }
+                    if (context.variantSystemPrompt) {
+                        messages.push({
+                            role: "system",
+                            content: context.variantSystemPrompt,
+                        });
+                        systemPromptCount++;
+                    }
+
+                    messages.push(...conversationMessages);
+
+                    messages.push(...dynamicContextMessages);
+
+                    // Add ephemeral messages (e.g., supervision corrections) LAST in the message array.
+                    // This satisfies Gemini's constraint that multi-turn requests should end with a user role.
+                    // If ephemeral messages are placed before system messages, Gemini/OpenRouter strips them.
+                    if (context.ephemeralMessages?.length) {
+                        for (const ephemeral of context.ephemeralMessages) {
+                            messages.push({
+                                role: ephemeral.role,
+                                content: ephemeral.content,
+                            });
+                        }
+                    }
+
+                    systemPromptCount += systemPromptMessages.length;
+                    dynamicContextCount = dynamicContextMessages.length + (context.ephemeralMessages?.length ?? 0);
+                } else {
+                    // In delta mode, only send new conversation messages.
+                    // The session already has full context from initial compilation.
+                    // Sending wrapped system context as user messages confuses Claude Code
+                    // into responding to the context instead of the user's question.
+                    const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
+                        context.agent.pubkey,
+                        context.ralNumber,
+                        cursor
+                    );
+                    messages.push(...conversationMessages);
+
+                    // Add ephemeral messages LAST in delta mode too (for supervision corrections).
+                    // Must be last to satisfy Gemini's message ordering constraints.
+                    if (context.ephemeralMessages?.length) {
+                        for (const ephemeral of context.ephemeralMessages) {
+                            messages.push({
+                                role: ephemeral.role,
+                                content: ephemeral.content,
+                            });
+                        }
+                    }
                 }
+
+                const conversationCount = this.plan.mode === "full"
+                    ? messages.length - systemPromptCount - dynamicContextCount
+                    : messages.length;
+
+                const counts = {
+                    systemPrompt: systemPromptCount,
+                    conversation: conversationCount,
+                    dynamicContext: dynamicContextCount,
+                    total: messages.length,
+                };
+
+                span.setAttribute("message.count", messages.length);
+                span.setAttribute("counts.system_prompt", counts.systemPrompt);
+                span.setAttribute("counts.conversation", counts.conversation);
+                span.setAttribute("counts.dynamic_context", counts.dynamicContext);
+                span.setAttribute("counts.total", counts.total);
+
+                // Update cursor for subsequent prepareStep calls within same execution.
+                // This prevents resending the same messages during streaming.
+                this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
+
+                return { messages, mode: this.plan.mode, counts };
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({ code: SpanStatusCode.ERROR });
+                throw error;
+            } finally {
+                span.end();
             }
-        }
-
-        const conversationCount = this.plan.mode === "full"
-            ? messages.length - systemPromptCount - dynamicContextCount
-            : messages.length;
-
-        const counts = {
-            systemPrompt: systemPromptCount,
-            conversation: conversationCount,
-            dynamicContext: dynamicContextCount,
-            total: messages.length,
-        };
-
-        // Update cursor for subsequent prepareStep calls within same execution.
-        // This prevents resending the same messages during streaming.
-        this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
-
-        return { messages, mode: this.plan.mode, counts };
+        });
     }
 
     advanceCursor(): void {

@@ -12,7 +12,9 @@ import { config as configService } from "@/services/ConfigService";
 import { RALRegistry, extractPendingDelegations } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { trace } from "@opentelemetry/api";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("tenex.stream-callbacks");
 import type { LanguageModel, ModelMessage, StepResult } from "ai";
 import { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
@@ -91,146 +93,185 @@ export function createPrepareStep(
     const conversation = context.getConversation();
 
     return async (step: StepData) => {
-        // Pass steps to LLM service for usage tracking
-        llmService.updateUsageFromSteps(step.steps);
+        return tracer.startActiveSpan("tenex.agent.prepare_step", async (span) => {
+            try {
+                span.setAttribute("ral.number", ralNumber);
+                span.setAttribute("agent.pubkey", context.agent.pubkey.substring(0, 8));
+                span.setAttribute("conversation.id", context.conversationId.substring(0, 12));
+                span.setAttribute("step.number", step.stepNumber);
 
-        // Update execution context with latest messages
-        execContext.accumulatedMessages = step.messages;
+                // Pass steps to LLM service for usage tracking
+                llmService.updateUsageFromSteps(step.steps);
 
-        // Sync any tool calls/results from AI SDK to ConversationStore
-        const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
-        syncer.syncFromSDK(step.messages);
+                // Update execution context with latest messages
+                execContext.accumulatedMessages = step.messages;
 
-        // Process any new injections
-        const newInjections = ralRegistry.getAndConsumeInjections(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
+                // Sync any tool calls/results from AI SDK to ConversationStore
+                await tracer.startActiveSpan("tenex.agent.sync_messages", async (syncSpan) => {
+                    try {
+                        const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
+                        syncer.syncFromSDK(step.messages);
+                    } finally {
+                        syncSpan.end();
+                    }
+                });
 
-        const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
+                // Process any new injections
+                const newInjections = await tracer.startActiveSpan("tenex.agent.consume_injections", async (injectSpan) => {
+                    try {
+                        return ralRegistry.getAndConsumeInjections(
+                            context.agent.pubkey,
+                            context.conversationId,
+                            ralNumber
+                        );
+                    } finally {
+                        injectSpan.end();
+                    }
+                });
 
-        if (newInjections.length > 0) {
-            for (const injection of newInjections) {
-                if (injection.ephemeral) {
-                    midStepEphemeralMessages.push({
-                        role: injection.role,
-                        content: injection.content,
-                    });
-                } else {
-                    conversationStore.addMessage({
-                        pubkey: context.triggeringEvent.pubkey,
-                        ral: ralNumber,
-                        content: injection.content,
-                        messageType: "text",
-                        targetedPubkeys: [context.agent.pubkey],
-                        senderPubkey: injection.senderPubkey,
-                        eventId: injection.eventId,
+                const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
+
+                if (newInjections.length > 0) {
+                    for (const injection of newInjections) {
+                        if (injection.ephemeral) {
+                            midStepEphemeralMessages.push({
+                                role: injection.role,
+                                content: injection.content,
+                            });
+                        } else {
+                            conversationStore.addMessage({
+                                pubkey: context.triggeringEvent.pubkey,
+                                ral: ralNumber,
+                                content: injection.content,
+                                messageType: "text",
+                                targetedPubkeys: [context.agent.pubkey],
+                                senderPubkey: injection.senderPubkey,
+                                eventId: injection.eventId,
+                            });
+                        }
+                    }
+
+                    executionSpan?.addEvent("ral_injection.process", {
+                        "injection.message_count": newInjections.length,
+                        "injection.ephemeral_count": midStepEphemeralMessages.length,
+                        "ral.number": ralNumber,
                     });
                 }
-            }
 
-            executionSpan?.addEvent("ral_injection.process", {
-                "injection.message_count": newInjections.length,
-                "injection.ephemeral_count": midStepEphemeralMessages.length,
-                "ral.number": ralNumber,
-            });
-        }
-
-        const pendingDelegations = ralRegistry.getConversationPendingDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-        const completedDelegations = ralRegistry.getConversationCompletedDelegations(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
-            agent: context.agent,
-            project: projectContext.project,
-            conversation: conversation!,
-            projectBasePath: context.projectBasePath,
-            workingDirectory: context.workingDirectory,
-            currentBranch: context.currentBranch,
-            availableAgents: Array.from(projectContext.agents.values()),
-            mcpManager: projectContext.mcpManager,
-            agentLessons: projectContext.agentLessons,
-            nudgeContent,
-            respondingToPubkey: context.triggeringEvent.pubkey,
-            pendingDelegations,
-            completedDelegations,
-            ralNumber,
-            ephemeralMessages:
-                [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
-                    ? [...ephemeralMessages, ...midStepEphemeralMessages]
-                    : undefined,
-        });
-
-        // For delta mode with no new messages, keep original
-        if (mode === "delta" && rebuiltMessages.length === 0) {
-            logger.debug("[StreamCallbacks] prepareStep: delta mode with no new messages, keeping original");
-            return undefined;
-        }
-
-        // Dynamic model switching
-        if (isMetaModel) {
-            const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
-
-            if (currentVariant !== modelState.lastUsedVariant) {
-                const resolution = configService.resolveMetaModel(
-                    context.agent.llmConfig,
-                    undefined,
-                    currentVariant
+                const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
                 );
 
-                if (resolution.isMetaModel) {
-                    const newLlmConfig = configService.getLLMConfig(resolution.configName);
-
+                const { messages: rebuiltMessages, mode } = await tracer.startActiveSpan("tenex.agent.compile_messages", async (compileSpan) => {
                     try {
-                        const registry = llmServiceFactory.getRegistry();
-                        const newModel = LLMService.createLanguageModelFromRegistry(
-                            newLlmConfig.provider,
-                            newLlmConfig.model,
-                            registry
+                        const result = await messageCompiler.compile({
+                            agent: context.agent,
+                            project: projectContext.project,
+                            conversation: conversation!,
+                            projectBasePath: context.projectBasePath,
+                            workingDirectory: context.workingDirectory,
+                            currentBranch: context.currentBranch,
+                            availableAgents: Array.from(projectContext.agents.values()),
+                            mcpManager: projectContext.mcpManager,
+                            agentLessons: projectContext.agentLessons,
+                            nudgeContent,
+                            respondingToPubkey: context.triggeringEvent.pubkey,
+                            pendingDelegations,
+                            completedDelegations,
+                            ralNumber,
+                            ephemeralMessages:
+                                [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
+                                    ? [...ephemeralMessages, ...midStepEphemeralMessages]
+                                    : undefined,
+                        });
+                        compileSpan.setAttribute("compilation.mode", result.mode);
+                        compileSpan.setAttribute("compiled.message_count", result.messages.length);
+                        return result;
+                    } finally {
+                        compileSpan.end();
+                    }
+                });
+
+                span.setAttribute("compilation.mode", mode);
+                span.setAttribute("compiled.message_count", rebuiltMessages.length);
+
+                // For delta mode with no new messages, keep original
+                if (mode === "delta" && rebuiltMessages.length === 0) {
+                    logger.debug("[StreamCallbacks] prepareStep: delta mode with no new messages, keeping original");
+                    return undefined;
+                }
+
+                // Dynamic model switching
+                if (isMetaModel) {
+                    const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+
+                    if (currentVariant !== modelState.lastUsedVariant) {
+                        const resolution = configService.resolveMetaModel(
+                            context.agent.llmConfig,
+                            undefined,
+                            currentVariant
                         );
 
-                        const previousVariant = modelState.lastUsedVariant;
+                        if (resolution.isMetaModel) {
+                            const newLlmConfig = configService.getLLMConfig(resolution.configName);
 
-                        executionSpan?.addEvent("executor.model_switched", {
-                            "ral.number": ralNumber,
-                            "meta_model.previous_variant": previousVariant || "default",
-                            "meta_model.new_variant": currentVariant || "default",
-                            "meta_model.new_config": resolution.configName,
-                            "meta_model.new_provider": newLlmConfig.provider,
-                            "meta_model.new_model": newLlmConfig.model,
-                        });
+                            try {
+                                const registry = llmServiceFactory.getRegistry();
+                                const newModel = LLMService.createLanguageModelFromRegistry(
+                                    newLlmConfig.provider,
+                                    newLlmConfig.model,
+                                    registry
+                                );
 
-                        logger.info("[StreamCallbacks] Dynamic model switch via change_model tool", {
-                            agent: context.agent.slug,
-                            previousVariant: previousVariant || "default",
-                            newVariant: currentVariant || "default",
-                            newConfig: resolution.configName,
-                        });
+                                const previousVariant = modelState.lastUsedVariant;
 
-                        modelState.setVariant(currentVariant);
-                        modelState.setModel(newModel);
-                    } catch (modelError) {
-                        logger.error("[StreamCallbacks] Failed to create new model for variant switch", {
-                            error: formatAnyError(modelError),
-                            variant: currentVariant,
-                            config: resolution.configName,
-                        });
+                                executionSpan?.addEvent("executor.model_switched", {
+                                    "ral.number": ralNumber,
+                                    "meta_model.previous_variant": previousVariant || "default",
+                                    "meta_model.new_variant": currentVariant || "default",
+                                    "meta_model.new_config": resolution.configName,
+                                    "meta_model.new_provider": newLlmConfig.provider,
+                                    "meta_model.new_model": newLlmConfig.model,
+                                });
+
+                                logger.info("[StreamCallbacks] Dynamic model switch via change_model tool", {
+                                    agent: context.agent.slug,
+                                    previousVariant: previousVariant || "default",
+                                    newVariant: currentVariant || "default",
+                                    newConfig: resolution.configName,
+                                });
+
+                                modelState.setVariant(currentVariant);
+                                modelState.setModel(newModel);
+                            } catch (modelError) {
+                                logger.error("[StreamCallbacks] Failed to create new model for variant switch", {
+                                    error: formatAnyError(modelError),
+                                    variant: currentVariant,
+                                    config: resolution.configName,
+                                });
+                            }
+                        }
                     }
                 }
-            }
-        }
 
-        return modelState.currentModel
-            ? { model: modelState.currentModel, messages: rebuiltMessages }
-            : { messages: rebuiltMessages };
+                return modelState.currentModel
+                    ? { model: modelState.currentModel, messages: rebuiltMessages }
+                    : { messages: rebuiltMessages };
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({ code: SpanStatusCode.ERROR });
+                throw error;
+            } finally {
+                span.end();
+            }
+        });
     };
 }
 

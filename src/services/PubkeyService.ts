@@ -3,6 +3,9 @@ import { getProjectContext, isProjectContextInitialized } from "@/services/proje
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("tenex.pubkey-service");
 
 interface UserProfile {
     name?: string;
@@ -44,15 +47,28 @@ export class PubkeyService {
      * Get a display name for any pubkey (agent or user)
      */
     async getName(pubkey: Hexpubkey): Promise<string> {
-        // First, check if it's an agent
-        const agentSlug = this.getAgentSlug(pubkey);
-        if (agentSlug) {
-            return agentSlug;
-        }
+        return tracer.startActiveSpan("tenex.pubkey.get_name", async (span) => {
+            try {
+                span.setAttribute("pubkey", pubkey.substring(0, 8));
 
-        // It's a user - fetch their profile
-        const profile = await this.getUserProfile(pubkey);
-        return this.extractDisplayName(profile, pubkey);
+                // First, check if it's an agent
+                const agentSlug = this.getAgentSlug(pubkey);
+                if (agentSlug) {
+                    span.setAttribute("resolved_from", "agent_registry");
+                    span.setAttribute("display_name", agentSlug);
+                    return agentSlug;
+                }
+
+                // It's a user - fetch their profile
+                const profile = await this.getUserProfile(pubkey);
+                const displayName = this.extractDisplayName(profile, pubkey);
+                span.setAttribute("resolved_from", "user_profile");
+                span.setAttribute("display_name", displayName);
+                return displayName;
+            } finally {
+                span.end();
+            }
+        });
     }
 
     /**
@@ -99,55 +115,73 @@ export class PubkeyService {
      * Fetch user profile from kind:0 event
      */
     private async getUserProfile(pubkey: Hexpubkey): Promise<UserProfile> {
-        // Check cache first
-        const cached = this.userProfileCache.get(pubkey);
-        if (cached && Date.now() < cached.ttl) {
-            return cached.profile;
-        }
+        return tracer.startActiveSpan("tenex.pubkey.fetch_profile", async (span) => {
+            try {
+                span.setAttribute("pubkey", pubkey.substring(0, 8));
 
-        try {
-            const ndk = getNDK();
+                // Check cache first
+                const cached = this.userProfileCache.get(pubkey);
+                if (cached && Date.now() < cached.ttl) {
+                    span.setAttribute("cache.status", "hit");
+                    span.setAttribute("profile.name", cached.profile.name ?? "");
+                    span.setAttribute("profile.display_name", cached.profile.display_name ?? "");
+                    return cached.profile;
+                }
 
-            // Fetch kind:0 (metadata) event for this pubkey
-            const profileEvent = await ndk.fetchEvent({
-                kinds: [0],
-                authors: [pubkey],
-            });
+                span.setAttribute("cache.status", "miss");
 
-            if (profileEvent) {
-                const profile = this.parseProfileEvent(profileEvent);
+                try {
+                    const ndk = getNDK();
 
-                // Cache the result
+                    // Fetch kind:0 (metadata) event for this pubkey
+                    const profileEvent = await ndk.fetchEvent({
+                        kinds: [0],
+                        authors: [pubkey],
+                    });
+
+                    if (profileEvent) {
+                        const profile = this.parseProfileEvent(profileEvent);
+
+                        // Cache the result
+                        this.userProfileCache.set(pubkey, {
+                            profile,
+                            ttl: Date.now() + this.CACHE_TTL_MS,
+                        });
+
+                        logger.debug("[PUBKEY_NAME_REPO] Fetched user profile", {
+                            pubkey,
+                            name: profile.name,
+                            display_name: profile.display_name,
+                        });
+
+                        span.setAttribute("profile.name", profile.name ?? "");
+                        span.setAttribute("profile.display_name", profile.display_name ?? "");
+                        span.setAttribute("profile.empty", false);
+                        return profile;
+                    }
+                } catch (error) {
+                    logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
+                        pubkey,
+                        error,
+                    });
+                    span.setAttribute("profile.fetch_error", error instanceof Error ? error.message : String(error));
+                }
+
+                // Return empty profile if fetch failed
+                const emptyProfile: UserProfile = { fetchedAt: Date.now() };
+
+                // Cache even empty results to avoid repeated failed fetches
                 this.userProfileCache.set(pubkey, {
-                    profile,
+                    profile: emptyProfile,
                     ttl: Date.now() + this.CACHE_TTL_MS,
                 });
 
-                logger.debug("[PUBKEY_NAME_REPO] Fetched user profile", {
-                    pubkey,
-                    name: profile.name,
-                    display_name: profile.display_name,
-                });
-
-                return profile;
+                span.setAttribute("profile.empty", true);
+                return emptyProfile;
+            } finally {
+                span.end();
             }
-        } catch (error) {
-            logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
-                pubkey,
-                error,
-            });
-        }
-
-        // Return empty profile if fetch failed
-        const emptyProfile: UserProfile = { fetchedAt: Date.now() };
-
-        // Cache even empty results to avoid repeated failed fetches
-        this.userProfileCache.set(pubkey, {
-            profile: emptyProfile,
-            ttl: Date.now() + this.CACHE_TTL_MS,
         });
-
-        return emptyProfile;
     }
 
     /**
@@ -217,45 +251,69 @@ export class PubkeyService {
      * @returns Map of pubkey to resolved display name
      */
     async warmUserProfiles(pubkeys: Hexpubkey[]): Promise<Map<Hexpubkey, string>> {
-        const results = new Map<Hexpubkey, string>();
+        return tracer.startActiveSpan("tenex.pubkey.warm_profiles", async (span) => {
+            try {
+                const results = new Map<Hexpubkey, string>();
 
-        // Deduplicate pubkeys and filter out agent pubkeys (they don't need profile warming)
-        const uniquePubkeys = [...new Set(pubkeys)];
-        const userPubkeys = uniquePubkeys.filter((pk) => !this.getAgentSlug(pk));
+                // Deduplicate pubkeys and filter out agent pubkeys (they don't need profile warming)
+                const uniquePubkeys = [...new Set(pubkeys)];
+                const userPubkeys = uniquePubkeys.filter((pk) => !this.getAgentSlug(pk));
 
-        if (userPubkeys.length === 0) {
-            return results;
-        }
+                span.setAttribute("pubkey.count", pubkeys.length);
+                span.setAttribute("user_pubkey.count", userPubkeys.length);
+                span.setAttribute("batch.size", this.MAX_CONCURRENT_FETCHES);
 
-        logger.debug("[PUBKEY_SERVICE] Warming user profile cache", {
-            count: userPubkeys.length,
-            dedupedFrom: pubkeys.length,
+                if (userPubkeys.length === 0) {
+                    span.setAttribute("profiles.warmed_count", 0);
+                    return results;
+                }
+
+                logger.debug("[PUBKEY_SERVICE] Warming user profile cache", {
+                    count: userPubkeys.length,
+                    dedupedFrom: pubkeys.length,
+                });
+
+                // Fetch in batches to avoid thundering-herd fetches
+                let batchNumber = 0;
+                for (let i = 0; i < userPubkeys.length; i += this.MAX_CONCURRENT_FETCHES) {
+                    batchNumber++;
+                    const batch = userPubkeys.slice(i, i + this.MAX_CONCURRENT_FETCHES);
+
+                    await tracer.startActiveSpan("tenex.pubkey.warm_batch", async (batchSpan) => {
+                        try {
+                            batchSpan.setAttribute("batch.number", batchNumber);
+                            batchSpan.setAttribute("batch.size", batch.length);
+
+                            await Promise.all(
+                                batch.map(async (pubkey) => {
+                                    try {
+                                        const name = await this.getName(pubkey);
+                                        results.set(pubkey, name);
+                                    } catch (error) {
+                                        logger.warn("[PUBKEY_SERVICE] Failed to warm profile", {
+                                            pubkey: pubkey.substring(0, PREFIX_LENGTH),
+                                            error: error instanceof Error ? error.message : String(error),
+                                        });
+                                        results.set(pubkey, pubkey.substring(0, PREFIX_LENGTH));
+                                    }
+                                })
+                            );
+                        } finally {
+                            batchSpan.end();
+                        }
+                    });
+                }
+
+                logger.debug("[PUBKEY_SERVICE] Profile cache warmed", {
+                    count: results.size,
+                });
+
+                span.setAttribute("profiles.warmed_count", results.size);
+                return results;
+            } finally {
+                span.end();
+            }
         });
-
-        // Fetch in batches to avoid thundering-herd fetches
-        for (let i = 0; i < userPubkeys.length; i += this.MAX_CONCURRENT_FETCHES) {
-            const batch = userPubkeys.slice(i, i + this.MAX_CONCURRENT_FETCHES);
-            await Promise.all(
-                batch.map(async (pubkey) => {
-                    try {
-                        const name = await this.getName(pubkey);
-                        results.set(pubkey, name);
-                    } catch (error) {
-                        logger.warn("[PUBKEY_SERVICE] Failed to warm profile", {
-                            pubkey: pubkey.substring(0, PREFIX_LENGTH),
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                        results.set(pubkey, pubkey.substring(0, PREFIX_LENGTH));
-                    }
-                })
-            );
-        }
-
-        logger.debug("[PUBKEY_SERVICE] Profile cache warmed", {
-            count: results.size,
-        });
-
-        return results;
     }
 
     /**
