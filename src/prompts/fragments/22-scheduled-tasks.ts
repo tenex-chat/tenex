@@ -15,11 +15,23 @@ function cronToHumanReadable(cronExpression: string): string {
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
 
     // Common patterns
-    if (minute === "*" && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    if (
+        minute === "*" &&
+        hour === "*" &&
+        dayOfMonth === "*" &&
+        month === "*" &&
+        dayOfWeek === "*"
+    ) {
         return "Every minute";
     }
 
-    if (minute.startsWith("*/") && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+    if (
+        minute.startsWith("*/") &&
+        hour === "*" &&
+        dayOfMonth === "*" &&
+        month === "*" &&
+        dayOfWeek === "*"
+    ) {
         const interval = minute.replace("*/", "");
         return `Every ${interval} minutes`;
     }
@@ -52,6 +64,25 @@ function cronToHumanReadable(cronExpression: string): string {
 }
 
 /**
+ * Format an ISO timestamp as a human-readable datetime
+ */
+function formatExecutionTime(isoTimestamp: string): string {
+    try {
+        const date = new Date(isoTimestamp);
+        return `${date.toLocaleString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "UTC",
+        })} UTC`;
+    } catch {
+        return isoTimestamp;
+    }
+}
+
+/**
  * Formats scheduled tasks for display in the agent's system prompt
  */
 function formatScheduledTasks(tasks: ScheduledTask[], agentPubkey: string): string {
@@ -62,22 +93,58 @@ function formatScheduledTasks(tasks: ScheduledTask[], agentPubkey: string): stri
         return "";
     }
 
-    const taskLines = myTasks.map((task, index) => {
-        const title = task.title || `Task ${index + 1}`;
-        const humanCron = cronToHumanReadable(task.schedule);
-        const lastRunInfo = task.lastRun ? ` (last run: ${new Date(task.lastRun).toISOString()})` : "";
+    // Separate recurring and one-off tasks
+    const recurringTasks = myTasks.filter((task) => task.type !== "oneoff");
+    const oneoffTasks = myTasks.filter((task) => task.type === "oneoff");
 
-        return `- **${title}**: ${humanCron} (cron: \`${task.schedule}\`)${lastRunInfo}
+    const sections: string[] = [];
+
+    // Format recurring tasks
+    if (recurringTasks.length > 0) {
+        const recurringLines = recurringTasks.map((task, index) => {
+            const title = task.title || `Recurring Task ${index + 1}`;
+            const humanCron = cronToHumanReadable(task.schedule);
+            const lastRunInfo = task.lastRun
+                ? ` (last run: ${new Date(task.lastRun).toISOString()})`
+                : "";
+
+            return `- **${title}** [recurring]: ${humanCron} (cron: \`${task.schedule}\`)${lastRunInfo}
+  ID: \`${task.id}\`
   Prompt: "${task.prompt.length > 100 ? `${task.prompt.substring(0, 100)}...` : task.prompt}"`;
-    });
+        });
+
+        sections.push(`### Recurring Tasks\n${recurringLines.join("\n\n")}`);
+    }
+
+    // Format one-off tasks
+    if (oneoffTasks.length > 0) {
+        const oneoffLines = oneoffTasks.map((task, index) => {
+            const title = task.title || `One-off Task ${index + 1}`;
+            const executeAtFormatted = task.executeAt
+                ? formatExecutionTime(task.executeAt)
+                : "Unknown";
+
+            return `- **${title}** [one-off]: Executes at ${executeAtFormatted}
+  ID: \`${task.id}\`
+  Prompt: "${task.prompt.length > 100 ? `${task.prompt.substring(0, 100)}...` : task.prompt}"`;
+        });
+
+        sections.push(`### One-off Tasks\n${oneoffLines.join("\n\n")}`);
+    }
+
+    const totalCount = myTasks.length;
+    const summary =
+        totalCount === 1
+            ? "1 scheduled task"
+            : `${totalCount} scheduled tasks (${recurringTasks.length} recurring, ${oneoffTasks.length} one-off)`;
 
     return `## Your Scheduled Tasks
 
-You have ${myTasks.length} scheduled task${myTasks.length === 1 ? "" : "s"} that will trigger automatically:
+You have ${summary} that will trigger automatically:
 
-${taskLines.join("\n\n")}
+${sections.join("\n\n")}
 
-These tasks run automatically based on their cron schedules. You can use \`schedule_tasks_list\` to see all tasks or \`schedule_task_cancel\` to remove any of them.`;
+Use \`schedule_tasks_list\` to see all tasks or \`schedule_task_cancel\` to remove any by ID.`;
 }
 
 // Scheduled tasks fragment - shows agent's scheduled tasks in system prompt
