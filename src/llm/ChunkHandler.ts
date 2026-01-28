@@ -4,34 +4,7 @@ import { trace } from "@opentelemetry/api";
 import type { TextStreamPart } from "ai";
 import type { EventEmitter } from "tseep";
 import { shouldIgnoreChunk } from "./chunk-validators";
-import type { LanguageModelUsageWithCostUsd } from "./types";
-
-/**
- * Events emitted by the LLM service for chunk handling
- */
-export interface ChunkHandlerEvents {
-    "raw-chunk": { chunk: TextStreamPart<Record<string, AISdkTool>> };
-    "chunk-type-change": { from: string; to: string };
-    "content": { delta: string };
-    "reasoning": { delta: string };
-    "stream-error": { error: unknown };
-    "tool-will-execute": {
-        toolName: string;
-        toolCallId: string;
-        args: unknown;
-        usage?: {
-            inputTokens: number;
-            outputTokens: number;
-            contextWindow?: number;
-        };
-    };
-    "tool-did-execute": {
-        toolName: string;
-        toolCallId: string;
-        result: unknown;
-        error?: boolean;
-    };
-}
+import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
 
 export interface ChunkHandlerState {
     previousChunkType?: string;
@@ -46,12 +19,10 @@ export interface ChunkHandlerState {
  */
 export class ChunkHandler {
     private state: ChunkHandlerState;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private emitter: EventEmitter<Record<string, any>>;
+    private emitter: EventEmitter<LLMServiceEventMap>;
 
     constructor(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        emitter: EventEmitter<Record<string, any>>,
+        emitter: EventEmitter<LLMServiceEventMap>,
         state: ChunkHandlerState
     ) {
         this.emitter = emitter;

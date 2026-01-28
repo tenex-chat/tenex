@@ -224,3 +224,15 @@ export interface ReasoningEvent {
 export interface RawChunkEvent {
     chunk: TextStreamPart<Record<string, AISdkTool>>;
 }
+
+export interface LLMServiceEventMap {
+    "raw-chunk": (event: RawChunkEvent) => void;
+    "chunk-type-change": (event: ChunkTypeChangeEvent) => void;
+    "content": (event: ContentEvent) => void;
+    "reasoning": (event: ReasoningEvent) => void;
+    "stream-error": (event: StreamErrorEvent) => void;
+    "tool-will-execute": (event: ToolWillExecuteEvent) => void;
+    "tool-did-execute": (event: ToolDidExecuteEvent) => void;
+    "complete": (event: CompleteEvent) => void;
+    "session-captured": (event: SessionCapturedEvent) => void;
+}

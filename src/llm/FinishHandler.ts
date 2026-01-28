@@ -9,6 +9,7 @@ import type { EventEmitter } from "tseep";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 import { getInvalidToolCalls } from "./utils/tool-errors";
 import { extractUsageMetadata, extractOpenRouterGenerationId } from "./providers/usage-metadata";
+import type { LLMServiceEventMap } from "./types";
 
 export interface FinishHandlerConfig {
     provider: string;
@@ -28,8 +29,7 @@ export interface FinishHandlerState {
  * Extracted from LLMService to reduce file size.
  */
 export function createFinishHandler(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    emitter: EventEmitter<Record<string, any>>,
+    emitter: EventEmitter<LLMServiceEventMap>,
     config: FinishHandlerConfig,
     state: FinishHandlerState
 ): StreamTextOnFinishCallback<Record<string, AISdkTool>> {

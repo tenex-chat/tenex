@@ -26,7 +26,7 @@ import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
-import type { LanguageModelUsageWithCostUsd } from "./types";
+import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
 
@@ -35,6 +35,7 @@ export type {
     ChunkTypeChangeEvent,
     CompleteEvent,
     ContentEvent,
+    LLMServiceEventMap,
     RawChunkEvent,
     ReasoningEvent,
     SessionCapturedEvent,
@@ -47,8 +48,7 @@ export type {
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class LLMService extends EventEmitter<Record<string, any>> {
+export class LLMService extends EventEmitter<LLMServiceEventMap> {
     public readonly provider: string;
     public readonly model: string;
     private readonly capabilities: ProviderCapabilities;

@@ -13,12 +13,12 @@ describe("global-system-prompt fragment", () => {
 
     test("has correct id and priority", () => {
         expect(globalSystemPromptFragment.id).toBe("global-system-prompt");
-        expect(globalSystemPromptFragment.priority).toBe(0.5);
+        expect(globalSystemPromptFragment.priority).toBe(3);
     });
 
-    test("priority is lower than agent-identity (1)", () => {
-        // Global system prompt should appear before agent identity
-        expect(globalSystemPromptFragment.priority).toBeLessThan(1);
+    test("priority is higher than agent-identity (1)", () => {
+        // Global system prompt should not appear before agent identity
+        expect(globalSystemPromptFragment.priority).toBeGreaterThan(1);
     });
 
     test("returns empty string when config throws (not loaded)", () => {
