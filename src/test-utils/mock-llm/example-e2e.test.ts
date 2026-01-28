@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { LLMService } from "@/llm/types";
 import { createMockLLMService } from "./index";
+import type { MockLLMServiceContract } from "./types";
 
 // Example of how to use the mock LLM service in E2E tests
 describe("Example E2E Test with Mock LLM", () => {
-    let mockLLM: LLMService;
+    let mockLLM: MockLLMServiceContract;
 
     beforeEach(() => {
         // Create mock with orchestrator workflow scenario
