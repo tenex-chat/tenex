@@ -30,6 +30,7 @@ import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
 import { createLessonLearnTool } from "./implementations/learn";
+import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createProjectListTool } from "./implementations/project_list";
@@ -154,6 +155,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     discover_capabilities: createMcpDiscoverTool,
 
     // Lesson tools
+    lesson_delete: createLessonDeleteTool,
     lesson_get: createLessonGetTool,
     lesson_learn: createLessonLearnTool,
 

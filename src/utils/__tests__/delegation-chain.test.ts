@@ -222,7 +222,7 @@ describe("delegation-chain utilities", () => {
                 tags: [],
             } as unknown as NDKEvent;
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "any-conv-id");
             expect(result).toBeUndefined();
         });
 
@@ -247,18 +247,19 @@ describe("delegation-chain utilities", () => {
             };
             mockConversationStoreGet.mockReturnValue(mockParentStore);
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId to indicate the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             // Full chain validation: User -> pm-wip -> claude-code
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
             // User: origin, no conversationId
             // pm-wip: from stored chain, conversationId = userconv1234567890
-            // claude-code: delegated to in parent-conv-id-1234567890 (full ID)
+            // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
             expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
             expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" });
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
         });
 
         it("should not have duplicate entries when merging stored chain with walked ancestors", () => {
@@ -301,7 +302,7 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
 
@@ -324,18 +325,19 @@ describe("delegation-chain utilities", () => {
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             // When parent is missing, use sender as first in chain
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
             // pm-wip: origin (chain is empty), no conversationId
-            // claude-code: delegated to in missing-parent-id-1234567890 (full ID)
+            // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(2);
             expect(result![0].displayName).toBe("pm-wip");
             expect(result![0].conversationId).toBeUndefined(); // Origin has no conversationId
             expect(result![1].displayName).toBe("claude-code");
-            expect(result![1].conversationId).toBe("missing-parent-id-1234567890"); // Where claude was delegated to (full ID)
+            expect(result![1].conversationId).toBe("claude-conv-id-1234567890"); // The conversation created for claude
         });
 
         it("should identify User when sender is project owner", () => {
@@ -346,15 +348,16 @@ describe("delegation-chain utilities", () => {
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
             // User: origin, no conversationId
-            // claude-code: delegated to in parent-conv-id-1234567890 (full ID)
+            // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(2);
             expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" }); // Full ID stored
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
         });
 
         it("should use PubkeyService to resolve user display name from Nostr profile", () => {
@@ -367,13 +370,14 @@ describe("delegation-chain utilities", () => {
             // Mock PubkeyService returning a real user name instead of fallback "User"
             mockGetNameSync.mockReturnValue("Pablo");
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "project-owner-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
             // Should use "Pablo" from PubkeyService instead of hardcoded "User"
             expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "parent-conv-id-1234567890" });
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
             // Verify PubkeyService was called with the project owner pubkey
             expect(mockGetNameSync).toHaveBeenCalledWith("project-owner-pubkey");
         });
@@ -422,7 +426,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             // Full chain should be: User -> pm-wip -> exec -> claude-code
@@ -430,12 +435,12 @@ describe("delegation-chain utilities", () => {
             // User: origin, no conversationId
             // pm-wip: from stored chain, conversationId = userconv1234567890
             // exec: delegated to in pm-conv-id-1234567890
-            // claude-code: delegated to in exec-conv-id-1234567890
+            // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(4);
             expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
             expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
             expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "exec-conv-id-1234567890" }); // Full ID
+            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -472,18 +477,19 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             // Chain should include: User (from walking up) -> exec (immediate delegator) -> claude-code (current)
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
             // User: origin (started the conversation), no conversationId
             // exec: delegated to in legacy-parent-conv-id-1234567890
-            // claude-code: delegated to in legacy-parent-conv-id-1234567890
+            // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
             expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
             expect(result![1]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -523,7 +529,7 @@ describe("delegation-chain utilities", () => {
             });
 
             // Should not hang, should return a chain without duplicates
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
             expect(result).toBeDefined();
 
             // Verify no duplicates from circular reference
@@ -575,8 +581,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            // Build the chain
-            const chain = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Build the chain with currentConversationId for the conversation being created for claude-code
+            const chain = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
             expect(chain).toBeDefined();
             expect(chain).toHaveLength(4);
 
@@ -584,7 +590,7 @@ describe("delegation-chain utilities", () => {
             expect(chain![0].conversationId).toBeUndefined(); // User is origin
             expect(chain![1].conversationId).toBe("userconv1234567890"); // Full ID from stored chain
             expect(chain![2].conversationId).toBe("pm-conv-id-1234567890"); // Full ID
-            expect(chain![3].conversationId).toBe("exec-conv-id-1234567890"); // Full ID
+            expect(chain![3].conversationId).toBe("claude-conv-id-1234567890"); // Current conv ID
 
             // Format the chain (no currentConversationId needed - it uses stored IDs)
             const formatted = formatDelegationChain(chain!, "agent-pubkey-claude");
@@ -601,7 +607,7 @@ describe("delegation-chain utilities", () => {
             expect(lines[1]).toBe("  -> [pm-wip -> execution-coordinator] [conversation pm-conv-id-1]");
 
             // Line 3: [execution-coordinator -> claude-code (you)] uses claude.conversationId (truncated)
-            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation exec-conv-id]");
+            expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation claude-conv-]");
         });
 
         it("should use truncated pubkey for unknown agents", () => {
@@ -612,13 +618,15 @@ describe("delegation-chain utilities", () => {
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
             // Full order validation: unknown first (12-char prefix), current agent last
             expect(result![0].displayName).toBe("unknown12345"); // PREFIX_LENGTH=12
             expect(result![1].displayName).toBe("claude-code");
+            expect(result![1].conversationId).toBe("claude-conv-id-1234567890"); // Current conv ID
         });
 
         it("should trust stored chains as authoritative (even with legacy format)", () => {
@@ -668,7 +676,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -687,9 +696,9 @@ describe("delegation-chain utilities", () => {
             expect(result![2].displayName).toBe("execution-coordinator");
             expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
 
-            // claude was delegated TO in exec-conv-id-1234567890
+            // claude was delegated TO in claude-conv-id-1234567890 (the conversation created for them)
             expect(result![3].displayName).toBe("claude-code");
-            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
+            expect(result![3].conversationId).toBe("claude-conv-id-1234567890");
         });
 
         it("should trust new-semantic chains where origin has no conversationId", () => {
@@ -738,7 +747,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -756,9 +766,9 @@ describe("delegation-chain utilities", () => {
             expect(result![2].displayName).toBe("execution-coordinator");
             expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
 
-            // claude was delegated TO in exec-conv-id-1234567890
+            // claude was delegated TO in claude-conv-id-1234567890 (the conversation created for them)
             expect(result![3].displayName).toBe("claude-code");
-            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
+            expect(result![3].conversationId).toBe("claude-conv-id-1234567890");
         });
 
         it("should capture conversation IDs when walking the chain", () => {
@@ -805,7 +815,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey");
+            // Pass currentConversationId for the conversation being created for claude-code
+            const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "claude-conv-id-1234567890");
 
             expect(result).toBeDefined();
             expect(result).toHaveLength(4);
@@ -818,8 +829,8 @@ describe("delegation-chain utilities", () => {
             expect(result![1].conversationId).toBe("user-conv-id-1234567890");
             // exec: delegated to in pm-conv-id-1234567890 (full ID)
             expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
-            // claude: delegated to in exec-conv-id-1234567890 (full ID)
-            expect(result![3].conversationId).toBe("exec-conv-id-1234567890");
+            // claude: delegated to in claude-conv-id-1234567890 (the conversation created for them)
+            expect(result![3].conversationId).toBe("claude-conv-id-1234567890");
         });
     });
 });

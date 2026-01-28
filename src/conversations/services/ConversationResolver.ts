@@ -167,7 +167,8 @@ export class ConversationResolver {
                 const delegationChain = buildDelegationChain(
                     event,
                     targetAgentPubkey,
-                    projectCtx.project.pubkey // Project owner is the human user
+                    projectCtx.project.pubkey, // Project owner is the human user
+                    conversation.id // The conversation being created for the current agent
                 );
 
                 if (delegationChain && delegationChain.length > 0) {

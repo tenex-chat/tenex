@@ -19,6 +19,7 @@ export type ToolName =
     | "conversation_list"
     | "lesson_learn"
     | "lesson_get"
+    | "lesson_delete"
     | "shell"
     | "kill_shell"
     | "agents_discover"
