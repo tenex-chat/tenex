@@ -11,6 +11,102 @@ import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
 
 /**
+ * Resolve the Project Manager for a project.
+ *
+ * Priority order:
+ * 1. Local PM override for this specific project (highest priority)
+ * 2. Explicit PM designation in 31933 project tags (role="pm")
+ * 3. First agent from project tags
+ * 4. First agent in registry (fallback for projects with no agent tags)
+ *
+ * @param project - The NDKProject event
+ * @param agents - Map of agent slug to AgentInstance
+ * @param projectDTag - The project's dTag for checking project-scoped PM overrides
+ * @returns The resolved PM agent or undefined if no agents exist
+ * @throws Error if PM is designated but not loaded in registry
+ */
+export function resolveProjectManager(
+    project: NDKProject,
+    agents: Map<string, AgentInstance>,
+    projectDTag: string | undefined
+): AgentInstance | undefined {
+    // Step 1: Check for local PM override for this specific project (highest priority)
+    if (projectDTag) {
+        for (const agent of agents.values()) {
+            if (agent.pmOverrides?.[projectDTag] === true) {
+                logger.info("Found local PM override for project", {
+                    agentName: agent.name,
+                    agentSlug: agent.slug,
+                    projectDTag,
+                });
+                return agent;
+            }
+        }
+    }
+
+    // Step 2: Check for explicit "pm" role in project tags
+    const pmAgentTag = project.tags.find(
+        (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
+    );
+
+    if (pmAgentTag?.[1]) {
+        const pmEventId = pmAgentTag[1];
+        logger.debug("Found explicit PM designation in project tags", { pmEventId });
+
+        for (const agent of agents.values()) {
+            if (agent.eventId === pmEventId) {
+                return agent;
+            }
+        }
+
+        throw new Error(
+            `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
+        );
+    }
+
+    // Step 3: Fallback to first agent from project tags
+    const firstAgentTag = project.tags.find(
+        (tag: string[]) => tag[0] === "agent" && tag[1]
+    );
+
+    if (firstAgentTag?.[1]) {
+        const pmEventId = firstAgentTag[1];
+        logger.debug("No explicit PM found, using first agent from project tags");
+
+        for (const agent of agents.values()) {
+            if (agent.eventId === pmEventId) {
+                return agent;
+            }
+        }
+
+        throw new Error(
+            `Project Manager agent not found. First agent (eventId: ${pmEventId}) not loaded in registry.`
+        );
+    }
+
+    // Step 4: No agent tags in project, use first from registry if any exist
+    if (agents.size > 0) {
+        const firstAgent = agents.values().next().value;
+        if (firstAgent) {
+            logger.info(
+                "No agent tags in project event, using first agent from registry as PM",
+                {
+                    agentName: firstAgent.name,
+                    agentSlug: firstAgent.slug,
+                }
+            );
+            return firstAgent;
+        }
+    }
+
+    // No agents at all
+    logger.warn(
+        "No agents found in project or registry. Project will run without a project manager."
+    );
+    return undefined;
+}
+
+/**
  * ProjectContext provides system-wide access to loaded project and agents
  * Initialized during "tenex project run" by ProjectManager
  */
@@ -85,11 +181,13 @@ export class ProjectContext {
         this.agentRegistry = agentRegistry;
 
         const agents = agentRegistry.getAllAgentsMap();
+        const projectDTag = project.dTag || project.tagValue("d");
 
         // Debug logging
         logger.debug("Initializing ProjectContext", {
             projectId: project.id,
             projectTitle: project.tagValue("title"),
+            projectDTag,
             agentsCount: agents.size,
             agentSlugs: Array.from(agents.keys()),
             agentDetails: Array.from(agents.entries()).map(([slug, agent]) => ({
@@ -99,75 +197,8 @@ export class ProjectContext {
             })),
         });
 
-        // Find the project manager agent - look for "pm" role suffix first
-        const pmAgentTag = project.tags.find(
-            (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
-        );
-
-        let projectManagerAgent: AgentInstance | undefined;
-
-        if (pmAgentTag?.[1]) {
-            const pmEventId = pmAgentTag[1];
-            logger.info("Found explicit PM designation in project tags");
-
-            // Find the agent with matching eventId
-            for (const agent of agents.values()) {
-                if (agent.eventId === pmEventId) {
-                    projectManagerAgent = agent;
-                    break;
-                }
-            }
-
-            if (!projectManagerAgent) {
-                throw new Error(
-                    `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
-                );
-            }
-        } else {
-            // Fallback: use first agent from tags or from registry
-            const firstAgentTag = project.tags.find(
-                (tag: string[]) => tag[0] === "agent" && tag[1]
-            );
-
-            if (firstAgentTag) {
-                const pmEventId = firstAgentTag[1];
-                logger.info("No explicit PM found, using first agent from project tags as PM");
-
-                // Find the agent with matching eventId
-                for (const agent of agents.values()) {
-                    if (agent.eventId === pmEventId) {
-                        projectManagerAgent = agent;
-                        break;
-                    }
-                }
-
-                if (!projectManagerAgent) {
-                    throw new Error(
-                        `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
-                    );
-                }
-            } else if (agents.size > 0) {
-                // No agent tags in project, but agents exist in registry (e.g., global agents)
-                projectManagerAgent = agents.values().next().value;
-
-                if (!projectManagerAgent) {
-                    throw new Error("Failed to get first agent from registry");
-                }
-
-                logger.info(
-                    "No agent tags in project event, using first agent from registry as PM",
-                    {
-                        agentName: projectManagerAgent.name,
-                        agentSlug: projectManagerAgent.slug,
-                    }
-                );
-            } else {
-                // No agents at all - this is allowed, project might work without agents
-                logger.warn(
-                    "No agents found in project or registry. Project will run without a project manager."
-                );
-            }
-        }
+        // Use consolidated PM resolution logic
+        const projectManagerAgent = resolveProjectManager(project, agents, projectDTag);
 
         if (projectManagerAgent) {
             logger.info(`Using "${projectManagerAgent.name}" as Project Manager`);
@@ -521,33 +552,17 @@ export class ProjectContext {
         await this.agentRegistry.loadFromProject(newProject);
 
         const agents = this.agentRegistry.getAllAgentsMap();
+        const projectDTag = newProject.dTag || newProject.tagValue("d");
 
-        // Update project manager reference - look for "pm" role first
-        const pmAgentTag = newProject.tags.find(
-            (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
-        );
-
-        let pmEventId: string;
-        if (pmAgentTag?.[1]) {
-            pmEventId = pmAgentTag[1];
-        } else {
-            // Fallback to first agent
-            const firstAgentTag = newProject.tags.find(
-                (tag: string[]) => tag[0] === "agent" && tag[1]
-            );
-            if (firstAgentTag) {
-                pmEventId = firstAgentTag[1];
-            } else {
-                logger.error("No agents found in updated project");
-                return;
+        // Use consolidated PM resolution logic (same as constructor)
+        try {
+            const newPM = resolveProjectManager(newProject, agents, projectDTag);
+            if (newPM) {
+                this.projectManager = newPM;
             }
-        }
-
-        for (const agent of agents.values()) {
-            if (agent.eventId === pmEventId) {
-                this.projectManager = agent;
-                break;
-            }
+        } catch (error) {
+            logger.error("Failed to resolve project manager in updateProjectData", { error });
+            // Keep existing PM if resolution fails
         }
 
         logger.info("ProjectContext updated with new data", {
@@ -555,6 +570,7 @@ export class ProjectContext {
             projectTitle: newProject.tagValue("title"),
             totalAgents: agents.size,
             agentSlugs: Array.from(agents.keys()),
+            projectManager: this.projectManager?.slug,
         });
     }
 }

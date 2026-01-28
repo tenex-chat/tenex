@@ -15,6 +15,7 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
+import { createAgentConfigureTool } from "./implementations/agent_configure";
 import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
@@ -126,6 +127,7 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
     // Agent tools
+    agent_configure: createAgentConfigureTool,
     agents_publish: createAgentsPublishTool,
     agents_discover: createAgentsDiscoverTool,
     agents_hire: createAgentsHireTool,
