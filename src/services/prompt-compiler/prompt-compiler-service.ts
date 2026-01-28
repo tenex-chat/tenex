@@ -850,6 +850,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
 
         // If we have cached compiled instructions, check freshness
         if (this.cachedEffectiveInstructions) {
+            const cached = this.cachedEffectiveInstructions;
             // Check if cache is still fresh by comparing maxCreatedAt AND input hash
             const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
             const currentMaxCreatedAt = this.calculateMaxCreatedAt(lessons);
@@ -860,29 +861,29 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 baseAgentInstructions: this.baseAgentInstructions,
                 additionalSystemPrompt: null,
             }));
-            const inputsMatch = this.cachedEffectiveInstructions.cacheInputsHash === currentInputsHash;
+            const inputsMatch = cached.cacheInputsHash === currentInputsHash;
 
             const cacheIsFresh = inputsMatch &&
-                this.cachedEffectiveInstructions.maxCreatedAt >= currentMaxCreatedAt;
+                cached.maxCreatedAt >= currentMaxCreatedAt;
 
             if (cacheIsFresh) {
                 // Cache is fresh - emit telemetry and return
                 tracer.startActiveSpan("tenex.prompt_compilation.cache_hit", (span) => {
-                    span.setAttribute("compilation.timestamp", this.cachedEffectiveInstructions!.timestamp);
+                    span.setAttribute("compilation.timestamp", cached.timestamp);
                     span.setAttribute("compilation.is_compiled", true);
-                    span.setAttribute("compilation.max_created_at", this.cachedEffectiveInstructions!.maxCreatedAt);
+                    span.setAttribute("compilation.max_created_at", cached.maxCreatedAt);
                     span.end();
                 });
 
                 logger.debug("PromptCompilerService: returning fresh cached effective instructions", {
                     agentPubkey: this.agentPubkey.substring(0, 8),
-                    cacheTimestamp: this.cachedEffectiveInstructions.timestamp,
+                    cacheTimestamp: cached.timestamp,
                 });
 
                 return {
-                    instructions: this.cachedEffectiveInstructions.effectiveAgentInstructions,
+                    instructions: cached.effectiveAgentInstructions,
                     isCompiled: true,
-                    compiledAt: this.cachedEffectiveInstructions.timestamp,
+                    compiledAt: cached.timestamp,
                     source: "compiled_cache",
                 };
             }
@@ -895,7 +896,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 agentPubkey: this.agentPubkey.substring(0, 8),
                 staleReason,
                 inputsMatch,
-                cachedMaxCreatedAt: this.cachedEffectiveInstructions.maxCreatedAt,
+                cachedMaxCreatedAt: cached.maxCreatedAt,
                 currentMaxCreatedAt,
                 compilationStatus: this.compilationStatus,
             });
@@ -907,20 +908,20 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
 
             // Return stale cache (better than base instructions)
             tracer.startActiveSpan("tenex.prompt_compilation.cache_stale", (span) => {
-                span.setAttribute("compilation.timestamp", this.cachedEffectiveInstructions!.timestamp);
+                span.setAttribute("compilation.timestamp", cached.timestamp);
                 span.setAttribute("compilation.is_compiled", true);
                 span.setAttribute("compilation.is_stale", true);
                 span.setAttribute("compilation.stale_reason", staleReason);
                 span.setAttribute("compilation.inputs_match", inputsMatch);
-                span.setAttribute("compilation.cached_max_created_at", this.cachedEffectiveInstructions!.maxCreatedAt);
+                span.setAttribute("compilation.cached_max_created_at", cached.maxCreatedAt);
                 span.setAttribute("compilation.current_max_created_at", currentMaxCreatedAt);
                 span.end();
             });
 
             return {
-                instructions: this.cachedEffectiveInstructions.effectiveAgentInstructions,
+                instructions: cached.effectiveAgentInstructions,
                 isCompiled: true,
-                compiledAt: this.cachedEffectiveInstructions.timestamp,
+                compiledAt: cached.timestamp,
                 source: "compiled_cache",
             };
         }
