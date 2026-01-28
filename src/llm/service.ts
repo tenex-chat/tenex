@@ -89,22 +89,22 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         }
 
         // Initialize chunk handler with state accessors that sync to LLMService
-        const self = this;
+        const getService = () => this;
         const chunkHandlerState: ChunkHandlerState = {
             get previousChunkType() {
-                return self.previousChunkType;
+                return getService().previousChunkType;
             },
             set previousChunkType(value: string | undefined) {
-                self.previousChunkType = value;
+                getService().previousChunkType = value;
             },
             get cachedContentForComplete() {
-                return self.cachedContentForComplete;
+                return getService().cachedContentForComplete;
             },
             set cachedContentForComplete(value: string) {
-                self.cachedContentForComplete = value;
+                getService().cachedContentForComplete = value;
             },
-            getCurrentStepUsage: () => self.currentStepUsage,
-            getModelContextWindow: () => self.getModelContextWindow(),
+            getCurrentStepUsage: () => getService().currentStepUsage,
+            getModelContextWindow: () => getService().getModelContextWindow(),
         };
         this.chunkHandler = new ChunkHandler(this, chunkHandlerState);
 
@@ -141,7 +141,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     /**
      * Get full telemetry configuration for the current service instance.
      */
-    private getTelemetryConfig() {
+    private getTelemetryConfig(): ReturnType<typeof getFullTelemetryConfig> {
         return getFullTelemetryConfig({
             agentSlug: this.agentSlug,
             provider: this.provider,
@@ -312,7 +312,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         // DIAGNOSTIC: Track inter-chunk timing for concurrent streaming bottleneck analysis
         let maxInterChunkDelayMs = 0;
         let totalInterChunkDelayMs = 0;
-        let interChunkDelays: number[] = []; // For percentile analysis
+        const interChunkDelays: number[] = []; // For percentile analysis
         const SLOW_CHUNK_THRESHOLD_MS = 500; // Log chunks taking >500ms
 
         const { fullStream } = streamText({
