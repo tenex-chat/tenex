@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
+import { checkSupervisionHealth, registerDefaultHeuristics } from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
@@ -22,7 +23,7 @@ import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { trace } from "@opentelemetry/api";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
 import chalk from "chalk";
 
 /**
@@ -120,6 +121,9 @@ export class ProjectRuntime {
             // Initialize components
             const agentRegistry = new AgentRegistry(this.projectBasePath, this.metadataPath);
             await agentRegistry.loadFromProject(this.project);
+
+            // Verify supervision system health (fail-fast if misconfigured)
+            await this.verifySupervisionHealth();
 
             // Create project context directly (don't use global singleton)
             this.context = new ProjectContext(this.project, agentRegistry);
@@ -662,5 +666,60 @@ export class ProjectRuntime {
         if (totalReconciled > 0) {
             logger.info(`[ProjectRuntime] Reconciled ${totalReconciled} orphaned RAL(s)`);
         }
+    }
+
+    /**
+     * Verify supervision system health at startup.
+     * Ensures heuristics are registered and the supervision system is properly configured.
+     * This is a fail-fast check that prevents the daemon from running without supervision.
+     *
+     * Uses centralized health check for consistent fail-closed semantics across all entry points.
+     */
+    private async verifySupervisionHealth(): Promise<void> {
+        const tracer = trace.getTracer("tenex.project-runtime");
+
+        return tracer.startActiveSpan("tenex.supervision.health_check", async (span) => {
+            span.setAttribute("project.id", this.projectId);
+
+            // Ensure heuristics are registered before checking health
+            registerDefaultHeuristics();
+
+            // Use centralized health check for consistent validation
+            const healthResult = checkSupervisionHealth();
+
+            span.setAttributes({
+                "supervision.registry_size": healthResult.registrySize,
+                "supervision.heuristic_ids": healthResult.heuristicIds.join(","),
+                "supervision.post_completion_count": healthResult.postCompletionCount,
+                "supervision.healthy": healthResult.healthy,
+            });
+
+            if (!healthResult.healthy) {
+                const errorMessage = `[ProjectRuntime] ${healthResult.errorMessage}`;
+
+                logger.error(errorMessage);
+                span.recordException(new Error(errorMessage));
+                span.setStatus({ code: SpanStatusCode.ERROR, message: healthResult.errorMessage });
+                span.end();
+
+                throw new Error(errorMessage);
+            }
+
+            span.addEvent("supervision.health_check_passed", {
+                "heuristics.count": healthResult.registrySize,
+                "heuristics.post_completion_count": healthResult.postCompletionCount,
+            });
+
+            span.setStatus({ code: SpanStatusCode.OK });
+
+            logger.info("[ProjectRuntime] Supervision system health check passed", {
+                projectId: this.projectId,
+                heuristicCount: healthResult.registrySize,
+                heuristicIds: healthResult.heuristicIds,
+                postCompletionCount: healthResult.postCompletionCount,
+            });
+
+            span.end();
+        });
     }
 }
