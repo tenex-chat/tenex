@@ -200,13 +200,40 @@ export class ConversationSummarizer {
                 event.tags.push(["a", this.context.project.tagId()]); // Project reference
                 event.tags.push(["model", summarizationConfig.model]);
 
+                // LOCAL-FIRST: Persist to local storage BEFORE publishing to Nostr
+                // This ensures operational cache is always populated regardless of Nostr publish outcome
+                // Nostr events are for replication/audit, local files are the primary read source
+                conversation.updateMetadata({
+                    ...(result.title ? { title: result.title } : {}),
+                    ...(result.summary ? { summary: result.summary } : {}),
+                    ...(result.status_label ? { statusLabel: result.status_label } : {}),
+                    ...(result.status_current_activity ? { statusCurrentActivity: result.status_current_activity } : {}),
+                });
+                await conversation.save();
+                console.log(
+                    `Persisted local metadata for conversation ${conversation.id}: ${result.title}`
+                );
+
                 // Sign and publish with backend signer
                 const backendSigner = await config.getBackendSigner();
                 await event.sign(backendSigner);
-                event.publish();
-                console.log(
-                    `Published metadata for conversation ${conversation.id}: ${result.title}`
-                );
+
+                // Await publish and handle errors gracefully - local persistence already succeeded
+                try {
+                    await event.publish();
+                    console.log(
+                        `Published metadata to Nostr for conversation ${conversation.id}: ${result.title}`
+                    );
+                } catch (publishError) {
+                    // Log but don't fail - local metadata is already persisted
+                    console.warn(
+                        `Failed to publish metadata to Nostr for conversation ${conversation.id}:`,
+                        publishError
+                    );
+                    span.addEvent("nostr_publish_failed", {
+                        error: publishError instanceof Error ? publishError.message : String(publishError),
+                    });
+                }
 
                 // Also persist summary to local metadata for prompt fragments
                 // This ensures "Recent Conversations" section can display summaries
