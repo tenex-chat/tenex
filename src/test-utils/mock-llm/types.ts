@@ -1,4 +1,60 @@
-import type { LegacyToolCall } from "@/llm/types";
+export interface MockToolCall {
+    name?: string;
+    function?: string;
+    params?: Record<string, unknown>;
+    args?: string | Record<string, unknown>;
+}
+
+export interface MockMessage {
+    role: string;
+    content: string;
+}
+
+export interface MockCompletionRequest {
+    messages: MockMessage[];
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    options?: {
+        configName?: string;
+        [key: string]: unknown;
+    };
+}
+
+export interface MockCompletionResponse {
+    content?: string;
+    toolCalls?: MockToolCall[];
+    model?: string;
+    usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+    };
+    experimental_providerMetadata?: Record<string, unknown>;
+}
+
+export interface MockStreamEvent {
+    type: string;
+    content?: string;
+    delta?: string;
+    error?: string;
+    tool?: string;
+    args?: unknown;
+    response?: {
+        type: string;
+        content?: string;
+        toolCalls?: MockToolCall[];
+        usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+        };
+    };
+}
+
+export interface MockLLMServiceContract {
+    complete(request: MockCompletionRequest): Promise<MockCompletionResponse>;
+    stream?(request: MockCompletionRequest): AsyncIterableIterator<MockStreamEvent>;
+}
 
 export interface MockLLMResponse {
     /** The messages that should trigger this response */
@@ -29,7 +85,7 @@ export interface MockLLMResponse {
         /** Text content of the response */
         content?: string;
         /** Tool calls to make */
-        toolCalls?: LegacyToolCall[];
+        toolCalls?: MockToolCall[];
         /** Simulate streaming delay in ms */
         streamDelay?: number;
         /** Simulate an error */

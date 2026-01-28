@@ -1,19 +1,20 @@
-import type {
-    CompletionRequest,
-    CompletionResponse,
-    LLMService,
-    Message,
-    StreamEvent,
-} from "@/llm/types";
 import { conversationalLogger } from "../conversational-logger";
-import type { MockLLMConfig, MockLLMResponse } from "./types";
+import type {
+    MockCompletionRequest,
+    MockCompletionResponse,
+    MockLLMConfig,
+    MockLLMResponse,
+    MockLLMServiceContract,
+    MockMessage,
+    MockStreamEvent,
+} from "./types";
 
-export class MockLLMService implements LLMService {
+export class MockLLMService implements MockLLMServiceContract {
     public provider = "mock";
     private config: MockLLMConfig;
     private responses: MockLLMResponse[] = [];
     private requestHistory: Array<{
-        messages: Message[];
+        messages: MockMessage[];
         model?: string;
         response: MockLLMResponse["response"];
         timestamp: Date;
@@ -64,7 +65,7 @@ export class MockLLMService implements LLMService {
         this.responses.sort((a, b) => (b.priority || 0) - (a.priority || 0));
     }
 
-    async complete(request: CompletionRequest): Promise<CompletionResponse> {
+    async complete(request: MockCompletionRequest): Promise<MockCompletionResponse> {
         const messages = request.messages;
         const model = request.options?.configName || "mock-model";
 
@@ -123,10 +124,10 @@ export class MockLLMService implements LLMService {
                 completion_tokens: 50,
                 total_tokens: 150,
             },
-        } as CompletionResponse;
+        } as MockCompletionResponse;
     }
 
-    async *stream(request: CompletionRequest): AsyncIterableIterator<StreamEvent> {
+    async *stream(request: MockCompletionRequest): AsyncIterableIterator<MockStreamEvent> {
         const messages = request.messages;
         const model = request.options?.configName || "mock-model";
 
@@ -182,12 +183,12 @@ export class MockLLMService implements LLMService {
         };
     }
 
-    private findMatchingResponse(messages: Message[]): MockLLMResponse["response"] {
+    private findMatchingResponse(messages: MockMessage[]): MockLLMResponse["response"] {
         const systemMessage = messages.find((m) => m.role === "system");
         const lastUserMessage = messages.filter((m) => m.role === "user").pop();
 
         // Extract tool calls from messages that have them
-        interface MessageWithToolCalls extends Message {
+        interface MessageWithToolCalls extends MockMessage {
             tool_calls?: Array<{
                 function: string | { name: string };
             }>;
@@ -384,7 +385,7 @@ export class MockLLMService implements LLMService {
     }
 
     private recordRequest(
-        messages: Message[],
+        messages: MockMessage[],
         model: string,
         response: MockLLMResponse["response"]
     ): void {
@@ -404,7 +405,7 @@ export class MockLLMService implements LLMService {
     }
 
     getRequestHistory(): Array<{
-        messages: Message[];
+        messages: MockMessage[];
         model?: string;
         response: MockLLMResponse["response"];
     }> {
