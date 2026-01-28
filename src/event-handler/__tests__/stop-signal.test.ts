@@ -23,6 +23,7 @@ describe("Stop Signal (kind 24134)", () => {
     const conversationId2 = "conv789id0000000000000000000000000000000000000000000000000000";
     const userPubkey = "user456pubkey000000000000000000000000000000000000000000000000";
     const whitelistedPubkey = "whitelist000000000000000000000000000000000000000000000000000";
+    const projectId = "31933:pubkey:test-project";
 
     const mockAgent: AgentInstance = {
         pubkey: agentPubkey,
@@ -240,7 +241,7 @@ describe("Stop Signal (kind 24134)", () => {
 
             // Create a RAL with an abort controller
             const abortController = new AbortController();
-            const ralNumber = ralRegistry.create(agentPubkey, conversationId, "trigger-event-id");
+            const ralNumber = ralRegistry.create(agentPubkey, conversationId, projectId, "trigger-event-id");
             ralRegistry.registerAbortController(agentPubkey, conversationId, ralNumber, abortController);
 
             const mockConversation = createMockConversationStore(conversationId, blockedAgents);

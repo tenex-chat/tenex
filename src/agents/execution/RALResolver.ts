@@ -12,6 +12,8 @@ import { RALRegistry } from "@/services/ral";
 export interface RALResolutionContext {
     agentPubkey: string;
     conversationId: string;
+    /** Project ID for multi-project isolation in daemon mode */
+    projectId: string;
     triggeringEventId: string;
     span: Span;
 }
@@ -30,7 +32,7 @@ export interface RALResolutionResult {
  * 3. New RAL - create fresh for this execution
  */
 export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResolutionResult> {
-    const { agentPubkey, conversationId, triggeringEventId, span } = ctx;
+    const { agentPubkey, conversationId, projectId, triggeringEventId, span } = ctx;
     const ralRegistry = RALRegistry.getInstance();
 
     // Check for a resumable RAL (one with completed delegations ready to continue)
@@ -95,11 +97,12 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
         });
     } else {
         // Create a new RAL for this execution
-        // Pass trace context so stop events can be correlated
+        // Pass projectId for multi-project isolation and trace context for stop event correlation
         const spanContext = span.spanContext();
         ralNumber = ralRegistry.create(
             agentPubkey,
             conversationId,
+            projectId,
             triggeringEventId,
             { traceId: spanContext.traceId, spanId: spanContext.spanId }
         );

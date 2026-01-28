@@ -1,4 +1,5 @@
 import { trace } from "@opentelemetry/api";
+import { EventEmitter, type DefaultEventMap } from "tseep";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { logger } from "@/utils/logger";
@@ -13,6 +14,12 @@ import type {
   DelegationMessage,
 } from "./types";
 
+/** Events emitted by RALRegistry */
+export type RALRegistryEvents = DefaultEventMap & {
+  /** Emitted when any RAL state changes (streaming, tools, creation, cleanup) */
+  updated: (...args: [projectId: string, conversationId: string]) => void;
+};
+
 /**
  * RAL = Reason-Act Loop
  *
@@ -23,7 +30,7 @@ import type {
  * Simplified execution model: ONE active execution per agent at a time.
  * New messages get injected into the active execution.
  */
-export class RALRegistry {
+export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   private static instance: RALRegistry;
 
   /**
@@ -63,6 +70,7 @@ export class RALRegistry {
   private static readonly MAX_QUEUE_SIZE = 100;
 
   private constructor() {
+    super();
     this.startCleanupInterval();
   }
 
@@ -72,6 +80,16 @@ export class RALRegistry {
 
   private makeAbortKey(key: string, ralNumber: number): string {
     return `${key}:${ralNumber}`;
+  }
+
+  /**
+   * Emit an 'updated' event for a conversation.
+   * Called when streaming state, tool state, or RAL lifecycle changes.
+   * @param projectId - The project this RAL belongs to (for multi-project isolation)
+   * @param conversationId - The conversation ID
+   */
+  private emitUpdated(projectId: string, conversationId: string): void {
+    this.emit("updated", projectId, conversationId);
   }
 
   private getOrCreateConversationDelegations(key: string): {
@@ -251,10 +269,12 @@ export class RALRegistry {
   /**
    * Create a new RAL entry for an agent+conversation pair.
    * Returns the RAL number assigned to this execution.
+   * @param projectId - The project this RAL belongs to (required for multi-project isolation)
    */
   create(
     agentPubkey: string,
     conversationId: string,
+    projectId: string,
     originalTriggeringEventId?: string,
     traceContext?: { traceId: string; spanId: string }
   ): number {
@@ -270,6 +290,7 @@ export class RALRegistry {
       id,
       ralNumber,
       agentPubkey,
+      projectId,
       conversationId,
       queuedInjections: [],
       isStreaming: false,
@@ -306,8 +327,12 @@ export class RALRegistry {
       ralNumber,
       agentPubkey: agentPubkey.substring(0, 8),
       conversationId: conversationId.substring(0, 8),
+      projectId: projectId.substring(0, 20),
       key,
     });
+
+    // Emit update for OperationsStatusService
+    this.emitUpdated(projectId, conversationId);
 
     return ralNumber;
   }
@@ -359,6 +384,23 @@ export class RALRegistry {
   }
 
   /**
+   * Get all RAL entries for a specific conversation (across all agents).
+   * Returns an array of entries that can be filtered for streaming/active agents.
+   * Used by OperationsStatusService to determine which agents are actively streaming.
+   */
+  getConversationEntries(conversationId: string): RALRegistryEntry[] {
+    const entries: RALRegistryEntry[] = [];
+    for (const rals of this.states.values()) {
+      for (const ral of rals.values()) {
+        if (ral.conversationId === conversationId) {
+          entries.push(ral);
+        }
+      }
+    }
+    return entries;
+  }
+
+  /**
    * Set whether agent is currently streaming
    */
   setStreaming(agentPubkey: string, conversationId: string, ralNumber: number, isStreaming: boolean): void {
@@ -381,6 +423,9 @@ export class RALRegistry {
       }
 
       llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
+
+      // Emit update for OperationsStatusService
+      this.emitUpdated(ral.projectId, conversationId);
     }
   }
 
@@ -972,6 +1017,9 @@ export class RALRegistry {
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
 
+    // Emit update for OperationsStatusService
+    this.emitUpdated(ral.projectId, conversationId);
+
     trace.getActiveSpan()?.addEvent(isActive ? "ral.tool_started" : "ral.tool_completed", {
       "ral.number": ralNumber,
       "tool.call_id": toolCallId,
@@ -1031,6 +1079,9 @@ export class RALRegistry {
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
 
+    // Emit update for OperationsStatusService
+    this.emitUpdated(ral.projectId, conversationId);
+
     trace.getActiveSpan()?.addEvent("ral.tool_cleared_fallback", {
       "ral.number": ralNumber,
       "tool.call_id": toolCallId,
@@ -1065,6 +1116,9 @@ export class RALRegistry {
     if (!rals) return;
 
     const ral = rals.get(ralNumber);
+    // Capture projectId before deletion for emitUpdated
+    const projectId = ral?.projectId;
+
     if (ral) {
       // Clean up reverse lookup
       this.ralIdToLocation.delete(ral.id);
@@ -1082,6 +1136,11 @@ export class RALRegistry {
     trace.getActiveSpan()?.addEvent("ral.cleared", {
       "ral.number": ralNumber,
     });
+
+    // Emit update for OperationsStatusService (only if we had a valid projectId)
+    if (projectId) {
+      this.emitUpdated(projectId, conversationId);
+    }
   }
 
   /**

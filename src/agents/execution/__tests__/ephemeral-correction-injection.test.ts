@@ -55,7 +55,7 @@ describe("Ephemeral Correction Message Injection", () => {
 
     describe("ephemeral flag on queueUserMessage", () => {
         it("should accept ephemeral option and mark injection correctly", () => {
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
 
             // Queue a normal (non-ephemeral) message
             registry.queueUserMessage(
@@ -87,7 +87,7 @@ describe("Ephemeral Correction Message Injection", () => {
         });
 
         it("should preserve ephemeral flag when consuming injections", () => {
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
 
             registry.queueUserMessage(
                 AGENT_PUBKEY,
@@ -126,7 +126,7 @@ describe("Ephemeral Correction Message Injection", () => {
                 eventId: "user-event-1",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             // Agent's incomplete first response
@@ -195,7 +195,7 @@ describe("Ephemeral Correction Message Injection", () => {
                 messageType: "text",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             store.addMessage({
@@ -265,7 +265,7 @@ describe("Ephemeral Correction Message Injection", () => {
             // 3. Supervision runs and tries to queue message
             // 4. clearRAL happens in executeOnce AFTER supervision (fix!)
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
 
             // RAL should exist
             const ralState = registry.getRAL(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
@@ -294,7 +294,7 @@ describe("Ephemeral Correction Message Injection", () => {
         });
 
         it("should retain queued messages across multiple re-engagement attempts if not consumed", () => {
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
 
             // First supervision correction
             registry.queueUserMessage(
@@ -353,7 +353,7 @@ describe("Ephemeral Correction Message Injection", () => {
                 messageType: "text",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             store.addMessage({
