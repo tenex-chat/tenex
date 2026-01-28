@@ -1,7 +1,7 @@
 import type { AISdkTool } from "@/tools/types";
 import { isStopExecutionSignal } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
-import { createSdkMcpServer, tool, type SdkMcpServer, type Tool } from "ai-sdk-provider-codex-app-server";
+import { createSdkMcpServer, tool, type SdkMcpServer, type Tool, type ToolDefinition } from "ai-sdk-provider-codex-app-server";
 import { z, type ZodRawShape } from "zod";
 
 /**
@@ -70,7 +70,7 @@ export class CodexAppServerToolsAdapter {
         allTools: Record<string, AISdkTool>
     ): Tool[] {
         return localTools.map(([name, tenexTool]) => {
-            let zodSchema = z.object({});
+            let zodSchema: unknown = z.object({});
 
             if (tenexTool.inputSchema) {
                 const schema = tenexTool.inputSchema;
@@ -82,11 +82,10 @@ export class CodexAppServerToolsAdapter {
                 }
             }
 
-            return tool({
+            return tool<unknown, unknown>({
                 name,
                 description: tenexTool.description || `Execute ${name}`,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                parameters: zodSchema as any,
+                parameters: zodSchema as ToolDefinition<unknown, unknown>["parameters"],
                 execute: async (args: unknown) => {
                     const executeTool = allTools[name];
                     if (!executeTool?.execute) {
