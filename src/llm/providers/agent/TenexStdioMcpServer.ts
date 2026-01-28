@@ -57,9 +57,9 @@ export class TenexStdioMcpServer {
 
         // Try to get project context if available (from AsyncLocalStorage)
         let projectId = "unknown";
-        let agentId = agentName;
-        let conversationId = context.sessionId ?? "no-conversation";
-        let currentBranch = "main";
+        const agentId = agentName;
+        const conversationId = context.sessionId ?? "no-conversation";
+        const currentBranch = "main";
 
         try {
             const projectCtx = getProjectContext();
