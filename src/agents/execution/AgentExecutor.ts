@@ -127,7 +127,7 @@ export class AgentExecutor {
             try {
                 // Get project ID for multi-project isolation in daemon mode
                 const projectCtx = getProjectContext();
-                const projectId = projectCtx.project.tagReference().join(":");
+                const projectId = projectCtx.project.tagId();
 
                 const { ralNumber, isResumption } = await resolveRAL({
                     agentPubkey: context.agent.pubkey,
