@@ -88,11 +88,22 @@ export function createPrepareStep(
     const isMetaModel = configService.isMetaModelConfig(context.agent.llmConfig);
 
     // Import project context lazily to avoid circular dependencies
-    const { getProjectContext } = require("@/services/projects");
-    const projectContext = getProjectContext();
-    const conversation = context.getConversation();
+    let projectContextModulePromise: Promise<typeof import("@/services/projects")> | null = null;
+    const loadProjectContextModule = async (): Promise<typeof import("@/services/projects")> => {
+        if (!projectContextModulePromise) {
+            projectContextModulePromise = import("@/services/projects");
+        }
+        return projectContextModulePromise;
+    };
 
     return async (step: StepData) => {
+        const { getProjectContext } = await loadProjectContextModule();
+        const projectContext = getProjectContext();
+        const conversation = context.getConversation();
+        if (!conversation) {
+            throw new Error("Conversation store unavailable during prepareStep");
+        }
+
         return tracer.startActiveSpan("tenex.agent.prepare_step", async (span) => {
             try {
                 span.setAttribute("ral.number", ralNumber);
@@ -174,7 +185,7 @@ export function createPrepareStep(
                         const result = await messageCompiler.compile({
                             agent: context.agent,
                             project: projectContext.project,
-                            conversation: conversation!,
+                            conversation,
                             projectBasePath: context.projectBasePath,
                             workingDirectory: context.workingDirectory,
                             currentBranch: context.currentBranch,
