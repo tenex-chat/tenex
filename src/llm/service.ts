@@ -58,8 +58,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private chunkHandler: ChunkHandler;
 
     constructor(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        private readonly registry: ProviderRegistryProvider<any, any> | null,
+        private readonly registry: ProviderRegistryProvider | null,
         provider: string,
         model: string,
         capabilities: ProviderCapabilities,
@@ -535,8 +534,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     static createLanguageModelFromRegistry(
         provider: string,
         model: string,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        registry: ProviderRegistryProvider<any, any>
+        registry: ProviderRegistryProvider
     ): LanguageModel {
         return registry.languageModel(`${provider}:${model}`);
     }
