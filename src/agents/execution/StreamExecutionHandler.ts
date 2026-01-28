@@ -15,7 +15,7 @@ import {
     type ReasoningEvent,
     type SessionCapturedEvent,
     type StreamErrorEvent,
-} from "@/llm/service";
+} from "@/llm/types";
 import { streamPublisher } from "@/llm";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { EventContext } from "@/nostr/types";

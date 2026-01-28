@@ -1,5 +1,4 @@
 import type { AgentInstance } from "@/agents/types";
-import { isAlphaMode } from "@/commands/daemon";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
@@ -107,7 +106,7 @@ export async function createExecutionContext(params: {
         isDelegationCompletion: params.isDelegationCompletion,
         hasPendingDelegations: params.hasPendingDelegations,
         debug: params.debug,
-        alphaMode: isAlphaMode(),
+        alphaMode: false,
         mcpManager: params.mcpManager,
         getConversation: () => ConversationStore.get(params.conversationId),
     };

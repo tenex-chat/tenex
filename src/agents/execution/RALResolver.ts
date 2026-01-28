@@ -5,7 +5,6 @@
  * - Check for resumable RAL (completed delegations ready to continue)
  * - Check for RAL with queued injections
  * - Create new RAL if none found
- * - Handle delegation runtime accumulation
  */
 import type { Span } from "@opentelemetry/api";
 import { RALRegistry } from "@/services/ral";
@@ -58,22 +57,6 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             agentPubkey, conversationId, resumableRal.ralNumber
         );
 
-        // Calculate MAX llmRuntime from completed delegations
-        // For parallel delegations, we take the longest one (critical path)
-        const maxDelegationRuntime = completedDelegations.reduce((max, d) => {
-            return Math.max(max, d.llmRuntime ?? 0);
-        }, 0);
-
-        // Add delegation runtime to parent's accumulated runtime
-        if (maxDelegationRuntime > 0) {
-            ralRegistry.addToAccumulatedRuntime(
-                agentPubkey,
-                conversationId,
-                ralNumber,
-                maxDelegationRuntime
-            );
-        }
-
         // Inject delegation results into the RAL as user message
         // Include pending delegations so agent knows what's still outstanding
         const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
@@ -96,7 +79,6 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             "ral.number": ralNumber,
             "delegation.completed_count": completedDelegations.length,
             "delegation.pending_count": pendingDelegations.length,
-            "delegation.max_runtime_ms": maxDelegationRuntime,
         });
     } else if (injectionRal) {
         // Resume RAL with queued injections

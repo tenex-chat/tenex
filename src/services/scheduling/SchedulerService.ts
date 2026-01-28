@@ -20,7 +20,6 @@ interface ScheduledTask {
     createdAt?: string; // When the task was created
     fromPubkey: string; // Who scheduled this task (the scheduler)
     toPubkey: string; // Target agent that should execute the task
-    agentPubkey?: string; // Alias for toPubkey for backwards compatibility
     projectId: string; // Project A-tag ID (format: "31933:authorPubkey:dTag")
 }
 

@@ -30,20 +30,6 @@ import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types"
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
 
-// Re-export event types for backwards compatibility
-export type {
-    ChunkTypeChangeEvent,
-    CompleteEvent,
-    ContentEvent,
-    LLMServiceEventMap,
-    RawChunkEvent,
-    ReasoningEvent,
-    SessionCapturedEvent,
-    StreamErrorEvent,
-    ToolDidExecuteEvent,
-    ToolWillExecuteEvent,
-} from "./types";
-
 /**
  * LLM Service for runtime execution with AI SDK providers
  * Pure runtime concerns - no configuration management

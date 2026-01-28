@@ -13,7 +13,7 @@
  * ```
  */
 
-import type { DelegationChainEntry } from "@/conversations/ConversationStore";
+import type { DelegationChainEntry } from "@/conversations/types";
 import type { PromptFragment } from "../core/types";
 import { formatDelegationChain } from "@/utils/delegation-chain";
 

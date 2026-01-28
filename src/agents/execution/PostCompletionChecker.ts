@@ -12,7 +12,7 @@ import {
 } from "@/agents/supervision";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { CompleteEvent } from "@/llm/service";
+import type { CompleteEvent } from "@/llm/types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";

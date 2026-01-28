@@ -64,25 +64,6 @@ export async function handleDelegationCompletion(
                 "etag.index": i,
             });
 
-            // Extract llm-runtime-total tag from completion event (if present)
-            // This is the total LLM runtime for the entire delegation (not incremental)
-            // We prefer llm-runtime-total over llm-runtime because runtime reporting is now incremental
-            // Fallback to llm-runtime for backward compatibility with older agents
-            let llmRuntime: number | undefined;
-            const llmRuntimeTotalTag = event.tags.find((tag) => tag[0] === "llm-runtime-total");
-            const llmRuntimeTag = llmRuntimeTotalTag ?? event.tags.find((tag) => tag[0] === "llm-runtime");
-            if (llmRuntimeTag && llmRuntimeTag[1]) {
-                const parsed = parseInt(llmRuntimeTag[1], 10);
-                if (!isNaN(parsed) && parsed >= 0) {
-                    llmRuntime = parsed;
-                    span.addEvent("extracted_llm_runtime_total", {
-                        "delegation.event_id": eTag,
-                        "llm_runtime_total_ms": llmRuntime,
-                        "tag_source": llmRuntimeTotalTag ? "llm-runtime-total" : "llm-runtime",
-                    });
-                }
-            }
-
             // Attempt to build a real transcript from the conversation history
             // This captures user interventions and multi-turn exchanges
             let fullTranscript: DelegationMessage[] | undefined;
@@ -143,14 +124,12 @@ export async function handleDelegationCompletion(
             }
 
             // Record the completion (looks up RAL internally via delegation conversation ID)
-            // Pass llmRuntime if available (for agent completions) - human responses won't have this
             const result = ralRegistry.recordCompletion({
                 delegationConversationId: eTag,
                 recipientPubkey: event.pubkey,
                 response: event.content,
                 completedAt: Date.now(),
                 fullTranscript: fullTranscript && fullTranscript.length > 0 ? fullTranscript : undefined,
-                llmRuntime,
             });
 
             if (result) {

@@ -1,4 +1,4 @@
-import type { CompleteEvent, ContentEvent, StreamErrorEvent } from "@/llm/service";
+import type { CompleteEvent, ContentEvent, StreamErrorEvent } from "@/llm/types";
 import { config as configService } from "@/services/ConfigService";
 import type { TenexLLMs } from "@/services/config/types";
 import { isMetaModelConfiguration } from "@/services/config/types";

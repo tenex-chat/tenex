@@ -14,7 +14,7 @@
 import { describe, expect, it, mock } from "bun:test";
 import { EventEmitter } from "tseep";
 import type { StreamExecutionResult } from "../types";
-import type { CompleteEvent, StreamErrorEvent } from "@/llm/service";
+import type { CompleteEvent, StreamErrorEvent } from "@/llm/types";
 
 describe("StreamExecutionResult", () => {
     describe("discriminated union type", () => {
