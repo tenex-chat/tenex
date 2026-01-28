@@ -19,6 +19,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
     StdioServerTransport,
 } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import type {
     CallToolRequest,
     CallToolResult,
@@ -29,7 +33,7 @@ import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { isStopExecutionSignal } from "@/services/ral/types";
 import { z } from "zod";
-import type { ZodRawShape } from "zod";
+import type { ZodRawShape, ZodTypeAny } from "zod";
 import type { MCPToolContext } from "@/tools/types";
 
 /**
@@ -75,8 +79,8 @@ function zodsToJsonSchema(
     for (const [key, schema] of Object.entries(rawShape)) {
         // Extract basic type information from Zod schema
         if (schema && typeof schema === "object" && "_def" in schema) {
-            const def = (schema as any)._def;
-            const typeName = def.typeName ?? "ZodUnknown";
+            const def = (schema as ZodTypeAny)._def;
+            const typeName = "typeName" in def ? String(def.typeName) : "ZodUnknown";
 
             // Map common Zod types to JSON Schema types
             if (typeName === "ZodString") {
@@ -162,8 +166,8 @@ export async function startServer(): Promise<void> {
             currentBranch: context.currentBranch,
             getConversation: () => undefined,
             // These are required by ToolExecutionContext but not available in MCP
-            agent: undefined as any, // Tools that need agent will fail at runtime
-            agentPublisher: undefined as any,
+            agent: undefined as unknown as MCPToolContext["agent"], // Tools that need agent will fail at runtime
+            agentPublisher: undefined as unknown as MCPToolContext["agentPublisher"],
             ralNumber: 0,
         };
 
@@ -187,16 +191,16 @@ export async function startServer(): Promise<void> {
         });
 
         // Register tools/list handler
-        (server as any).setRequestHandler(
-            { method: "tools/list" },
+        server.setRequestHandler(
+            ListToolsRequestSchema,
             async () => ({
                 tools: mcpTools,
             })
         );
 
         // Register tools/call handler
-        (server as any).setRequestHandler(
-            { method: "tools/call" },
+        server.setRequestHandler(
+            CallToolRequestSchema,
             async (request: CallToolRequest): Promise<CallToolResult> => {
                 const { name, arguments: args } = request.params;
 
@@ -300,4 +304,3 @@ export async function startServer(): Promise<void> {
         process.exit(1);
     }
 }
-
