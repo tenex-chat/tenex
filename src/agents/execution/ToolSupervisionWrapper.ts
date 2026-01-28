@@ -165,8 +165,9 @@ export function wrapToolsWithSupervision(
         };
 
         // Preserve non-enumerable properties like getHumanReadableContent
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const toolWithCustomProps = tool as any;
+        const toolWithCustomProps = tool as CoreTool<unknown, unknown> & {
+            getHumanReadableContent?: (args: unknown) => string;
+        };
         if (toolWithCustomProps.getHumanReadableContent) {
             Object.defineProperty(wrappedTools[toolName], "getHumanReadableContent", {
                 value: toolWithCustomProps.getHumanReadableContent,
