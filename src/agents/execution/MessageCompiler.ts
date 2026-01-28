@@ -8,6 +8,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
@@ -39,6 +40,10 @@ export interface MessageCompilerContext {
     agentLessons?: Map<string, NDKAgentLesson[]>;
     mcpManager?: MCPManager;
     nudgeContent?: string;
+    /** Individual nudge data for rendering in fragments */
+    nudges?: NudgeData[];
+    /** Tool permissions extracted from nudge events */
+    nudgeToolPermissions?: NudgeToolPermissions;
     respondingToPubkey: string;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
