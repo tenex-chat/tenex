@@ -237,6 +237,44 @@ export class ProjectContext {
     }
 
     /**
+     * Remove a lesson for an agent by event ID.
+     * Also triggers background recompilation of the agent's prompt.
+     * @returns true if the lesson was found and removed, false otherwise
+     */
+    removeLesson(agentPubkey: string, eventId: string): boolean {
+        const lessons = this.agentLessons.get(agentPubkey);
+        if (!lessons) {
+            return false;
+        }
+
+        const index = lessons.findIndex((l) => l.id === eventId);
+        if (index === -1) {
+            return false;
+        }
+
+        // Remove the lesson from the array
+        lessons.splice(index, 1);
+
+        logger.debug("ProjectContext: removed lesson from cache", {
+            agentPubkey: agentPubkey.substring(0, 8),
+            eventId: eventId.substring(0, 8),
+            remainingLessons: lessons.length,
+        });
+
+        // Trigger recompilation when a lesson is deleted
+        const compiler = this.promptCompilers.get(agentPubkey);
+        if (compiler) {
+            logger.debug("ProjectContext: triggering recompilation after lesson deletion", {
+                agentPubkey: agentPubkey.substring(0, 8),
+                eventId: eventId.substring(0, 8),
+            });
+            compiler.onLessonDeleted();
+        }
+
+        return true;
+    }
+
+    /**
      * Get lessons for a specific agent
      */
     getLessonsForAgent(agentPubkey: string): NDKAgentLesson[] {
