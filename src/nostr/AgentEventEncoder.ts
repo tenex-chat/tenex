@@ -23,23 +23,6 @@ import type {
  * ensuring consistent event creation and interpretation across the system.
  */
 
-// Re-export types for backwards compatibility
-export type {
-    AgentIntent,
-    AskIntent,
-    AskQuestion,
-    CompletionIntent,
-    ConversationIntent,
-    DelegationIntent,
-    ErrorIntent,
-    EventContext,
-    LessonIntent,
-    MultiSelectQuestion,
-    SingleSelectQuestion,
-    StatusIntent,
-    ToolUseIntent,
-} from "./types";
-
 /**
  * Encodes agent intents into properly tagged Nostr events.
  * All tagging logic is centralized here for consistency and testability.

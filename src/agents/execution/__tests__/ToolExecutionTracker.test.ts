@@ -11,7 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { EventContext } from "@/nostr/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

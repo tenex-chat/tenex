@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
-import type { AskConfig } from "@/nostr/AgentPublisher";
+import type { AskConfig } from "@/nostr/types";
 import type { AgentInstance } from "@/agents/types";
-import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { EventContext } from "@/nostr/types";
 
 /**
  * Mock interface for NDKEvent used in tests.

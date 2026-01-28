@@ -8,7 +8,8 @@ import {
     stopExecutionTime,
 } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { AgentEventEncoder, type EventContext } from "../AgentEventEncoder";
+import { AgentEventEncoder } from "../AgentEventEncoder";
+import type { EventContext } from "../types";
 
 // Mock PubkeyService
 mock.module("@/services/PubkeyService", () => ({

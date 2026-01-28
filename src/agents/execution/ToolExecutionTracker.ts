@@ -12,7 +12,7 @@
 
 import { isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
-import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { EventContext } from "@/nostr/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";

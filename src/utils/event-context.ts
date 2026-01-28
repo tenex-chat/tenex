@@ -1,4 +1,4 @@
-import type { EventContext } from "@/nostr/AgentEventEncoder";
+import type { EventContext } from "@/nostr/types";
 import type { ToolExecutionContext } from "@/tools/types";
 
 export interface CreateEventContextOptions {

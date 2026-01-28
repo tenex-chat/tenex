@@ -2,7 +2,7 @@
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 import { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
-import type { StatusIntent } from "@/nostr/AgentEventEncoder";
+import type { StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";

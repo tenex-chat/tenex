@@ -1,5 +1,5 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import type { EventContext, LessonIntent } from "@/nostr/AgentEventEncoder";
+import type { EventContext, LessonIntent } from "@/nostr/types";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
