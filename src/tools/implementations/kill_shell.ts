@@ -72,7 +72,7 @@ function executeKillShell(input: KillShellInput): KillShellOutput {
  */
 export function createKillShellTool(_context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: `Terminate a background shell process by its task ID. Use this to stop long-running processes that were started with the shell tool's run_in_background option. Returns success status and process information.`,
+        description: "Terminate a background shell process by its task ID. Use this to stop long-running processes that were started with the shell tool's run_in_background option. Returns success status and process information.",
 
         inputSchema: killShellSchema,
 
