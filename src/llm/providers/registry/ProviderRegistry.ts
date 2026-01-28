@@ -7,6 +7,7 @@
 
 import { createProviderRegistry } from "ai";
 import type { ProviderRegistryProvider } from "ai";
+import type { ProviderV3 } from "@ai-sdk/provider";
 import { logger } from "@/utils/logger";
 import type {
     ILLMProvider,
@@ -189,16 +190,14 @@ export class ProviderRegistry {
      * Build the AI SDK provider registry from initialized standard providers
      */
     private buildAiSdkRegistry(): void {
-        // biome-ignore lint/suspicious/noExplicitAny: AI SDK provider types vary
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const standardProviders: Record<string, any> = {};
+        const standardProviders: Record<string, ProviderV3> = {};
 
         for (const [providerId, provider] of this.providers) {
             // Only include standard providers in the AI SDK registry
             if (provider.metadata.category === "standard") {
                 const instance = provider.getProviderInstance();
                 if (instance) {
-                    standardProviders[providerId] = instance;
+                    standardProviders[providerId] = instance as ProviderV3;
                 }
             }
         }
