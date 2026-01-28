@@ -35,7 +35,7 @@ import {
 // to avoid circular dependencies
 let ConversationStoreClass: typeof import("./ConversationStore").ConversationStore;
 
-function getConversationStoreClass() {
+function getConversationStoreClass(): typeof import("./ConversationStore").ConversationStore {
     if (!ConversationStoreClass) {
         ConversationStoreClass = require("./ConversationStore").ConversationStore;
     }
@@ -474,7 +474,7 @@ class ConversationRegistryImpl {
     /**
      * Read lightweight metadata without loading full store.
      */
-    readLightweightMetadata(conversationId: string) {
+    readLightweightMetadata(conversationId: string): ReturnType<typeof readLightweightMetadata> {
         if (!this._projectId) return null;
         return readLightweightMetadata(this._basePath, this._projectId, conversationId);
     }
@@ -482,7 +482,7 @@ class ConversationRegistryImpl {
     /**
      * Read messages from disk without caching.
      */
-    readMessagesFromDisk(conversationId: string) {
+    readMessagesFromDisk(conversationId: string): ReturnType<typeof readMessagesFromDisk> {
         if (!this._projectId) return null;
         return readMessagesFromDisk(this._basePath, this._projectId, conversationId);
     }
@@ -490,7 +490,7 @@ class ConversationRegistryImpl {
     /**
      * Read conversation preview data.
      */
-    readConversationPreview(conversationId: string, agentPubkey: string) {
+    readConversationPreview(conversationId: string, agentPubkey: string): ReturnType<typeof readConversationPreviewForProject> {
         if (!this._projectId) return null;
         return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, this._projectId);
     }
@@ -498,7 +498,11 @@ class ConversationRegistryImpl {
     /**
      * Read conversation preview for a specific project.
      */
-    readConversationPreviewForProject(conversationId: string, agentPubkey: string, projectId: string) {
+    readConversationPreviewForProject(
+        conversationId: string,
+        agentPubkey: string,
+        projectId: string
+    ): ReturnType<typeof readConversationPreviewForProject> {
         return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, projectId);
     }
 
