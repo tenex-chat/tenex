@@ -1,3 +1,5 @@
+import type { Listener } from "tseep";
+
 // Export AI SDK types directly
 export type {
     ModelMessage,
@@ -225,7 +227,11 @@ export interface RawChunkEvent {
     chunk: TextStreamPart<Record<string, AISdkTool>>;
 }
 
-export interface LLMServiceEventMap {
+export type LLMServiceEventMap = {
+    [event in string | symbol]: Listener;
+} & {
+    __proto__?: never;
+} & {
     "raw-chunk": (event: RawChunkEvent) => void;
     "chunk-type-change": (event: ChunkTypeChangeEvent) => void;
     "content": (event: ContentEvent) => void;
@@ -235,4 +241,4 @@ export interface LLMServiceEventMap {
     "tool-did-execute": (event: ToolDidExecuteEvent) => void;
     "complete": (event: CompleteEvent) => void;
     "session-captured": (event: SessionCapturedEvent) => void;
-}
+};
