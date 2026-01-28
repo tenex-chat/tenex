@@ -68,6 +68,30 @@ const mockSpan = {
 };
 
 mock.module("@opentelemetry/api", () => ({
+    createContextKey: mock((name: string) => Symbol.for(name)),
+    DiagLogLevel: {
+        NONE: 0,
+        ERROR: 1,
+        WARN: 2,
+        INFO: 3,
+        DEBUG: 4,
+        VERBOSE: 5,
+        ALL: 6,
+    },
+    diag: {
+        setLogger: mock(() => {}),
+        debug: mock(() => {}),
+        error: mock(() => {}),
+        warn: mock(() => {}),
+        info: mock(() => {}),
+    },
+    SpanKind: {
+        INTERNAL: 0,
+        SERVER: 1,
+        CLIENT: 2,
+        PRODUCER: 3,
+        CONSUMER: 4,
+    },
     ROOT_CONTEXT: mockContext,
     context: {
         active: mock(() => mockContext),

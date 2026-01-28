@@ -3,9 +3,6 @@ import type { AgentInstance } from "@/agents/types";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { createUploadBlobTool } from "../implementations/upload_blob";
 
-// Mock the fetch global
-global.fetch = jest.fn();
-
 describe("upload_blob URL support", () => {
     let mockContext: ToolExecutionContext;
     let mockAgent: Partial<AgentInstance>;
