@@ -1,271 +1,308 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import type {
+    LanguageModelV3,
+    LanguageModelV3CallOptions,
+    LanguageModelV3Content,
+    LanguageModelV3FinishReason,
+    LanguageModelV3StreamPart,
+    LanguageModelV3Usage,
+    ProviderV3,
+} from "@ai-sdk/provider";
 import { MockLLMService } from "@/test-utils/mock-llm/MockLLMService";
-import type { MockLLMConfig } from "@/test-utils/mock-llm/types";
+import type { MockLLMConfig, MockMessage, MockToolCall } from "@/test-utils/mock-llm/types";
 import { logger } from "@/utils/logger";
 import { MockLanguageModelV3 } from "ai/test";
 
-// Using any types for the mock provider since V2/V3 types are in transition in AI SDK v6 beta
+const buildUsage = (inputTotal: number, outputTotal: number): LanguageModelV3Usage => ({
+    inputTokens: {
+        total: inputTotal,
+        noCache: inputTotal,
+        cacheRead: 0,
+        cacheWrite: 0,
+    },
+    outputTokens: {
+        total: outputTotal,
+        text: outputTotal,
+        reasoning: 0,
+    },
+});
+
+const buildFinishReason = (hasToolCalls: boolean): LanguageModelV3FinishReason => ({
+    unified: hasToolCalls ? "tool-calls" : "stop",
+    raw: hasToolCalls ? "tool-calls" : "stop",
+});
+
+const formatToolInput = (toolCall: MockToolCall): string => {
+    if (toolCall.params) {
+        return JSON.stringify(toolCall.params);
+    }
+
+    if (typeof toolCall.args === "string") {
+        return toolCall.args;
+    }
+
+    if (toolCall.args) {
+        return JSON.stringify(toolCall.args);
+    }
+
+    return "{}";
+};
+
+const formatToolName = (toolCall: MockToolCall): string => {
+    return toolCall.name ?? toolCall.function ?? "unknown";
+};
+
+const formatMessageContent = (
+    content: LanguageModelV3CallOptions["prompt"][number]["content"]
+): string => {
+    if (typeof content === "string") {
+        return content;
+    }
+
+    return content
+        .map((part) => (part.type === "text" ? part.text : "[non-text content]"))
+        .join(" ");
+};
+
+const toMockMessages = (prompt: LanguageModelV3CallOptions["prompt"]): MockMessage[] => {
+    return prompt.map((message) => ({
+        role: message.role,
+        content: formatMessageContent(message.content),
+    }));
+};
 
 /**
  * Creates a mock provider that integrates MockLLMService with AI SDK
  * This allows us to use the mock service through the standard LLMServiceFactory
  */
-export function createMockProvider(config?: MockLLMConfig): any {
+export function createMockProvider(config?: MockLLMConfig): ProviderV3 {
     const mockService = new MockLLMService(config);
 
     // Create a factory function that returns a language model
-    const createLanguageModel = (modelId: string): any => {
+    const createLanguageModel = (modelId: string): LanguageModelV3 => {
         logger.info(`[MockProvider] Creating language model for: ${modelId}`);
 
-        return new MockLanguageModelV3({
-            provider: "mock",
-            modelId: modelId || "mock-model",
+        const doGenerate: LanguageModelV3["doGenerate"] = async (options) => {
+            const messages = options.prompt;
 
-            doGenerate: (async (options: any) => {
-                // Extract messages from prompt
-                const messages = options.prompt;
+            logger.debug("[MockProvider] doGenerate called", {
+                messageCount: messages.length,
+                toolCount: options.tools?.length ?? 0,
+            });
 
-                logger.debug("[MockProvider] doGenerate called", {
-                    messageCount: messages?.length || 0,
-                    toolCount: Object.keys(options?.tools || {}).length,
-                });
-
-                if (!messages || messages.length === 0) {
-                    logger.warn("[MockProvider] doGenerate called with no messages");
-                    return {
-                        content: [{ type: "text" as const, text: "Mock response: no messages provided" }],
-                        finishReason: "stop" as any,
-                        usage: { inputTokens: 0, outputTokens: 0 },
-                        warnings: [] as any[],
-                        response: {
-                            id: `mock-${Date.now()}`,
-                            timestamp: new Date(),
-                            modelId,
-                        },
-                    };
-                }
-
-                // Convert AI SDK messages to our Message format
-                const convertedMessages = messages.map((msg: any) => {
-                    let textContent = "";
-                    if (Array.isArray(msg.content)) {
-                        textContent = msg.content
-                            .map((part: any) => {
-                                if (part.type === "text") return part.text;
-                                return "[non-text content]";
-                            })
-                            .join(" ");
-                    } else if (typeof msg.content === "string") {
-                        textContent = msg.content;
-                    }
-                    return {
-                        role: msg.role,
-                        content: textContent,
-                    };
-                });
-
-                // Call MockLLMService
-                const response = await mockService.complete({
-                    messages: convertedMessages,
-                    options: {
-                        configName: modelId,
-                    },
-                });
-
-                // Convert response to AI SDK v2 format with content array
-                const content: any[] = [];
-
-                // Add text content if present
-                if (response.content) {
-                    content.push({ type: "text" as const, text: response.content });
-                }
-
-                // Add tool calls if present
-                if (response.toolCalls) {
-                    response.toolCalls.forEach((tc: any, index: number) => {
-                        content.push({
-                            type: "tool-call" as const,
-                            toolCallId: `call_${index}`,
-                            toolName: tc.name,
-                            input: JSON.stringify(tc.params || {}),
-                        });
-                    });
-                }
-
+            if (messages.length === 0) {
+                logger.warn("[MockProvider] doGenerate called with no messages");
                 return {
-                    content,
-                    finishReason: "stop" as any,
-                    usage: {
-                        inputTokens: response.usage?.prompt_tokens || 100,
-                        outputTokens: response.usage?.completion_tokens || 50,
-                    },
-                    warnings: [] as any[],
+                    content: [
+                        { type: "text", text: "Mock response: no messages provided" },
+                    ],
+                    finishReason: buildFinishReason(false),
+                    usage: buildUsage(0, 0),
+                    warnings: [],
                     response: {
                         id: `mock-${Date.now()}`,
                         timestamp: new Date(),
                         modelId,
                     },
                 };
-            }) as unknown as any,
+            }
 
-            doStream: (async (options: any) => {
-                // Extract messages from prompt
-                const messages = options.prompt;
+            // Convert AI SDK messages to our Message format
+            const convertedMessages = toMockMessages(messages);
 
-                logger.debug("[MockProvider] doStream called", {
-                    messageCount: messages?.length || 0,
-                    toolCount: Object.keys(options?.tools || {}).length,
-                });
+            // Call MockLLMService
+            const response = await mockService.complete({
+                messages: convertedMessages,
+                options: {
+                    configName: modelId,
+                },
+            });
 
-                if (!messages || messages.length === 0) {
-                    logger.warn("[MockProvider] doStream called with no messages");
-                    const stream = new ReadableStream({
-                        start(controller) {
-                            controller.enqueue({
-                                type: "text-delta",
-                                delta: "Mock response: no messages provided",
-                            });
-                            controller.enqueue({
-                                type: "finish",
-                                finishReason: "stop",
-                                usage: { inputTokens: 0, outputTokens: 0 },
-                                logprobs: undefined,
-                            });
-                            controller.close();
-                        },
+            const content: LanguageModelV3Content[] = [];
+
+            // Add text content if present
+            if (response.content) {
+                content.push({ type: "text", text: response.content });
+            }
+
+            // Add tool calls if present
+            if (response.toolCalls) {
+                response.toolCalls.forEach((toolCall, index) => {
+                    content.push({
+                        type: "tool-call",
+                        toolCallId: `call_${index}`,
+                        toolName: formatToolName(toolCall),
+                        input: formatToolInput(toolCall),
                     });
-                    return {
-                        stream: stream as ReadableStream<any>,
-                        warnings: [] as any[],
-                        response: {
-                            id: `mock-stream-${Date.now()}`,
-                            timestamp: new Date(),
-                            modelId,
-                        },
-                    };
-                }
-
-                // Convert messages
-                const convertedMessages = messages.map((msg: any) => {
-                    let textContent = "";
-                    if (Array.isArray(msg.content)) {
-                        textContent = msg.content
-                            .map((part: any) => {
-                                if (part.type === "text") return part.text;
-                                return "[non-text content]";
-                            })
-                            .join(" ");
-                    } else if (typeof msg.content === "string") {
-                        textContent = msg.content;
-                    }
-                    return {
-                        role: msg.role,
-                        content: textContent,
-                    };
                 });
+            }
 
-                // Get the mock service's stream
-                const streamEvents = mockService.stream({
-                    messages: convertedMessages,
-                    options: {
-                        configName: modelId,
+            return {
+                content,
+                finishReason: buildFinishReason(Boolean(response.toolCalls?.length)),
+                usage: buildUsage(
+                    response.usage?.prompt_tokens ?? 100,
+                    response.usage?.completion_tokens ?? 50
+                ),
+                warnings: [],
+                response: {
+                    id: `mock-${Date.now()}`,
+                    timestamp: new Date(),
+                    modelId,
+                },
+            };
+        };
+
+        const doStream: LanguageModelV3["doStream"] = async (options) => {
+            const messages = options.prompt;
+
+            logger.debug("[MockProvider] doStream called", {
+                messageCount: messages.length,
+                toolCount: options.tools?.length ?? 0,
+            });
+
+            if (messages.length === 0) {
+                logger.warn("[MockProvider] doStream called with no messages");
+                const stream = new ReadableStream<LanguageModelV3StreamPart>({
+                    start(controller) {
+                        const textId = `text-${Date.now()}`;
+                        controller.enqueue({ type: "stream-start", warnings: [] });
+                        controller.enqueue({ type: "text-start", id: textId });
+                        controller.enqueue({
+                            type: "text-delta",
+                            id: textId,
+                            delta: "Mock response: no messages provided",
+                        });
+                        controller.enqueue({ type: "text-end", id: textId });
+                        controller.enqueue({
+                            type: "finish",
+                            finishReason: buildFinishReason(false),
+                            usage: buildUsage(0, 0),
+                        });
+                        controller.close();
                     },
                 });
+                return {
+                    stream,
+                };
+            }
 
-                // Create a ReadableStream that emits AI SDK v2 stream parts
-                const stream = new ReadableStream({
-                    async start(controller) {
-                        try {
-                            const toolCalls: Array<{
-                                toolCallId: string;
-                                toolName: string;
-                                arguments: unknown;
-                            }> = [];
+            // Convert messages
+            const convertedMessages = toMockMessages(messages);
 
-                            for await (const event of streamEvents) {
-                                switch (event.type) {
-                                    case "content":
-                                        controller.enqueue({
-                                            type: "text-delta",
-                                            delta: event.content,
-                                        });
-                                        break;
+            // Get the mock service's stream
+            const streamEvents = mockService.stream({
+                messages: convertedMessages,
+                options: {
+                    configName: modelId,
+                },
+            });
 
-                                    case "tool_start": {
-                                        if (!event.tool) break;
-                                        const toolCallId = `call_${toolCalls.length}`;
-                                        const toolCall = {
-                                            toolCallId,
-                                            toolName: event.tool,
-                                            arguments: event.args,
-                                        };
-                                        toolCalls.push(toolCall);
+            // Create a ReadableStream that emits AI SDK v3 stream parts
+            const stream = new ReadableStream<LanguageModelV3StreamPart>({
+                async start(controller) {
+                    let textId: string | null = null;
+                    let sawToolCall = false;
+                    let toolCallIndex = 0;
 
-                                        controller.enqueue({
-                                            type: "tool-call-delta",
-                                            toolCallType: "function" as const,
-                                            toolCallId,
-                                            toolName: event.tool,
-                                            argsTextDelta: JSON.stringify(event.args),
-                                        });
-                                        break;
+                    const ensureTextStart = () => {
+                        if (!textId) {
+                            textId = `text-${Date.now()}`;
+                            controller.enqueue({ type: "text-start", id: textId });
+                        }
+                    };
+
+                    controller.enqueue({ type: "stream-start", warnings: [] });
+
+                    try {
+                        for await (const event of streamEvents) {
+                            switch (event.type) {
+                                case "content":
+                                    ensureTextStart();
+                                    controller.enqueue({
+                                        type: "text-delta",
+                                        id: textId ?? "text-unknown",
+                                        delta: event.content ?? "",
+                                    });
+                                    break;
+
+                                case "tool_start": {
+                                    if (!event.tool) break;
+                                    sawToolCall = true;
+                                    const toolCallId = `call_${toolCallIndex++}`;
+                                    controller.enqueue({
+                                        type: "tool-call",
+                                        toolCallId,
+                                        toolName: event.tool,
+                                        input: JSON.stringify(event.args ?? {}),
+                                    });
+                                    break;
+                                }
+
+                                case "done": {
+                                    if (textId) {
+                                        controller.enqueue({ type: "text-end", id: textId });
                                     }
+                                    controller.enqueue({
+                                        type: "finish",
+                                        finishReason: buildFinishReason(sawToolCall),
+                                        usage: buildUsage(
+                                            event.response?.usage?.prompt_tokens ?? 100,
+                                            event.response?.usage?.completion_tokens ?? 50
+                                        ),
+                                    });
+                                    break;
+                                }
 
-                                    case "done": {
-                                        controller.enqueue({
-                                            type: "finish",
-                                            finishReason: "stop",
-                                            usage: {
-                                                inputTokens:
-                                                    event.response?.usage?.prompt_tokens || 100,
-                                                outputTokens:
-                                                    event.response?.usage?.completion_tokens || 50,
-                                            },
-                                            logprobs: undefined,
-                                        });
-                                        break;
-                                    }
-
-                                    case "error": {
-                                        controller.enqueue({
-                                            type: "error",
-                                            error: new Error(event.error),
-                                        });
-                                        break;
-                                    }
+                                case "error": {
+                                    controller.enqueue({
+                                        type: "error",
+                                        error: new Error(event.error ?? "Unknown error"),
+                                    });
+                                    break;
                                 }
                             }
-
-                            controller.close();
-                        } catch (error) {
-                            controller.error(error);
                         }
-                    },
-                });
 
-                return {
-                    stream: stream as ReadableStream<any>,
-                    warnings: [] as any[],
-                    response: {
-                        id: `mock-stream-${Date.now()}`,
-                        timestamp: new Date(),
-                        modelId,
-                    },
-                };
-            }) as any,
+                        controller.close();
+                    } catch (error) {
+                        controller.error(error);
+                    }
+                },
+            });
+
+            return {
+                stream,
+            };
+        };
+
+        return new MockLanguageModelV3({
+            provider: "mock",
+            modelId: modelId || "mock-model",
+            doGenerate,
+            doStream,
         });
     };
 
     // Create a custom provider that can handle any model ID
-    const provider: any = {
+    const provider: ProviderV3 = {
+        specificationVersion: "v3",
         languageModel: (modelId: string) => {
             return createLanguageModel(modelId);
         },
-        textEmbeddingModel: () => {
+        embeddingModel: () => {
             throw new Error("Mock provider does not support embedding models");
         },
         imageModel: () => {
             throw new Error("Mock provider does not support image models");
+        },
+        transcriptionModel: () => {
+            throw new Error("Mock provider does not support transcription models");
+        },
+        speechModel: () => {
+            throw new Error("Mock provider does not support speech models");
+        },
+        rerankingModel: () => {
+            throw new Error("Mock provider does not support reranking models");
         },
     };
 
