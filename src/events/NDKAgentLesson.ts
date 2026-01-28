@@ -26,16 +26,6 @@ export class NDKAgentLesson extends NDKEvent {
         if (value) this.tags.push(["title", value]);
     }
 
-    // Alias for title
-    get description(): string | undefined {
-        return this.tagValue("title");
-    }
-
-    set description(value: string | undefined) {
-        this.removeTag("description");
-        if (value) this.tags.push(["description", value]);
-    }
-
     /**
      * The lesson content - what the agent learned.
      * This is stored in the event content.

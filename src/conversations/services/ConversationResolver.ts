@@ -1,4 +1,5 @@
-import { ConversationStore, type ConversationMetadata } from "../ConversationStore";
+import { ConversationStore } from "../ConversationStore";
+import type { ConversationMetadata } from "../types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";

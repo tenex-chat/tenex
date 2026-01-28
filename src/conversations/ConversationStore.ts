@@ -27,9 +27,6 @@ import type {
     Injection,
 } from "./types";
 
-// Re-export types for backwards compatibility
-export type { ConversationEntry, ConversationMetadata, DelegationChainEntry, ExecutionTime, Injection, MessageType } from "./types";
-
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
 

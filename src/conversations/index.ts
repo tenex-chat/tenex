@@ -1,1 +1,2 @@
-export { ConversationStore, type ConversationMetadata, type ConversationEntry } from "./ConversationStore";
+export { ConversationStore } from "./ConversationStore";
+export type { ConversationMetadata, ConversationEntry } from "./types";

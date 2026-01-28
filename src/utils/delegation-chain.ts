@@ -30,7 +30,8 @@
  */
 
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { ConversationStore, type DelegationChainEntry } from "@/conversations/ConversationStore";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import type { DelegationChainEntry } from "@/conversations/types";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";

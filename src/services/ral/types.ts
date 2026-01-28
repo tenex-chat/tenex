@@ -84,8 +84,6 @@ export interface CompletedDelegation {
   completedAt: number;
   /** Which RAL created this delegation (for provenance tracking) */
   ralNumber: number;
-  /** Total LLM runtime for this delegation chain in milliseconds */
-  llmRuntime?: number;
 }
 
 export interface QueuedInjection {

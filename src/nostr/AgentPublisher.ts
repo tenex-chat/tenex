@@ -18,9 +18,6 @@ import type {
 } from "./types";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 
-// Re-export config types for backwards compatibility
-export type { AskConfig, DelegateConfig } from "./types";
-
 /**
  * Inject W3C trace context into an event's tags.
  * This allows the daemon to link incoming events back to their parent span.

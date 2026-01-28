@@ -42,7 +42,7 @@ export function createListScheduledTasksTool(_context: ToolExecutionContext): AI
                     schedule: task.schedule,
                     lastRun: task.lastRun,
                     nextRun: task.nextRun,
-                    agentPubkey: task.agentPubkey,
+                    toPubkey: task.toPubkey,
                 }));
 
                 logger.info(`Retrieved ${formattedTasks.length} scheduled tasks`);

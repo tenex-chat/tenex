@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain, truncateConversationId } from "../delegation-chain";
-import type { DelegationChainEntry } from "@/conversations/ConversationStore";
+import type { DelegationChainEntry } from "@/conversations/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
