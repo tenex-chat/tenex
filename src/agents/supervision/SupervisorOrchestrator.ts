@@ -1,6 +1,7 @@
 import { logger } from "@/utils/logger";
 import { HeuristicRegistry } from "./heuristics/HeuristicRegistry";
 import { supervisorLLMService } from "./SupervisorLLMService";
+import { checkSupervisionHealth } from "./supervisionHealthCheck";
 import type {
     CorrectionAction,
     HeuristicDetection,
@@ -11,6 +12,9 @@ import type {
     VerificationResult,
 } from "./types";
 import { MAX_SUPERVISION_RETRIES } from "./types";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("tenex.supervision");
 
 /**
  * Determines if a correction message should be built for the given action.
@@ -146,120 +150,222 @@ export class SupervisorOrchestrator {
      * @returns Result of the supervision check
      */
     async checkPostCompletion(context: PostCompletionContext, executionId?: string): Promise<SupervisionCheckResult> {
-        const heuristics = this.registry.getPostCompletionHeuristics();
+        const span = tracer.startSpan("supervision.check_post_completion", {
+            attributes: {
+                "agent.slug": context.agentSlug,
+                "agent.pubkey": context.agentPubkey,
+                "execution.id": executionId || "none",
+            },
+        });
 
-        if (heuristics.length === 0) {
-            logger.debug("[SupervisorOrchestrator] No post-completion heuristics registered");
-            return { hasViolation: false };
-        }
+        // Track if any error occurred during heuristic execution
+        let hadError = false;
 
-        logger.debug(
-            `[SupervisorOrchestrator] Running ${heuristics.length} post-completion heuristics for ${context.agentSlug}`
-        );
+        try {
+            // Use centralized health check for consistent fail-closed validation
+            // NOTE: We do NOT call registerDefaultHeuristics() here. Registration must happen
+            // at startup (in AgentExecutor or ProjectRuntime). If heuristics aren't registered,
+            // we fail-closed by checking the current state and throwing.
+            const healthResult = checkSupervisionHealth();
 
-        for (const heuristic of heuristics) {
-            // Skip heuristics already enforced in this execution
-            if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
-                logger.debug(`[SupervisorOrchestrator] Skipping heuristic "${heuristic.id}" - already enforced`);
-                continue;
+            span.setAttributes({
+                "heuristics.registry_size": healthResult.registrySize,
+                "heuristics.post_completion_count": healthResult.postCompletionCount,
+                "heuristics.ids": healthResult.heuristicIds.join(","),
+            });
+
+            // FAIL-CLOSED: Health check validates both registry size AND post-completion count
+            if (!healthResult.healthy) {
+                const errorMessage = `[SupervisorOrchestrator] ${healthResult.errorMessage}`;
+
+                logger.error(errorMessage);
+                span.recordException(new Error(errorMessage));
+                span.setStatus({ code: SpanStatusCode.ERROR, message: "Supervision health check failed" });
+                span.addEvent("supervision.health_check_failed", {
+                    "registry.size": healthResult.registrySize,
+                    "registry.ids": healthResult.heuristicIds.join(","),
+                    "post_completion.count": healthResult.postCompletionCount,
+                });
+
+                throw new Error(
+                    "Supervision system misconfigured: no post-completion heuristics registered. " +
+                    "Call registerDefaultHeuristics() during startup."
+                );
             }
 
-            try {
-                // Run detection
-                const detection = await heuristic.detect(context);
+            const heuristics = this.registry.getPostCompletionHeuristics();
 
-                if (!detection.triggered) {
+            // Routine execution - use DEBUG level to avoid log spam
+            logger.debug(
+                `[SupervisorOrchestrator] Running ${heuristics.length} post-completion heuristics for ${context.agentSlug}`,
+                {
+                    heuristicIds: heuristics.map(h => h.id),
+                    registrySize: healthResult.registrySize,
+                    executionId,
+                }
+            );
+
+            span.addEvent("supervision.heuristics_check_started", {
+                "heuristics.count": heuristics.length,
+            });
+
+            for (const heuristic of heuristics) {
+                // Skip heuristics already enforced in this execution
+                if (executionId && this.isHeuristicEnforced(executionId, heuristic.id)) {
+                    logger.debug(`[SupervisorOrchestrator] Skipping heuristic "${heuristic.id}" - already enforced`);
                     continue;
                 }
 
-                logger.info(
-                    `[SupervisorOrchestrator] Heuristic "${heuristic.id}" triggered for ${context.agentSlug}`,
-                    { reason: detection.reason }
-                );
+                try {
+                    // Run detection
+                    const detection = await heuristic.detect(context);
 
-                // For heuristics that skip verification, treat detection as confirmed
-                if (heuristic.skipVerification) {
-                    logger.info(
-                        `[SupervisorOrchestrator] Heuristic "${heuristic.id}" skips verification, applying correction directly`
-                    );
+                    span.addEvent("supervision.heuristic_checked", {
+                        "heuristic.id": heuristic.id,
+                        "heuristic.triggered": detection.triggered,
+                    });
 
-                    const syntheticVerification: VerificationResult = {
-                        verdict: "violation",
-                        explanation: "Heuristic configured to skip LLM verification",
-                    };
-
-                    const correctionAction = heuristic.getCorrectionAction(syntheticVerification);
-
-                    if (shouldBuildCorrectionMessage(correctionAction)) {
-                        correctionAction.message = heuristic.buildCorrectionMessage(
-                            context,
-                            syntheticVerification
-                        );
+                    if (!detection.triggered) {
+                        continue;
                     }
 
-                    return {
-                        hasViolation: true,
-                        correctionAction,
-                        heuristicId: heuristic.id,
-                        detection,
-                        verification: syntheticVerification,
-                    };
-                }
+                    // Triggered heuristics are significant - keep at INFO level
+                    logger.info(
+                        `[SupervisorOrchestrator] Heuristic "${heuristic.id}" triggered for ${context.agentSlug}`,
+                        { reason: detection.reason }
+                    );
 
-                // Build verification prompt and context
-                const verificationPrompt = heuristic.buildVerificationPrompt(context, detection);
-                const supervisionContext = this.buildSupervisionContext(
-                    context,
-                    heuristic.id,
-                    detection
-                );
+                    // For heuristics that skip verification, treat detection as confirmed
+                    if (heuristic.skipVerification) {
+                        logger.debug(
+                            `[SupervisorOrchestrator] Heuristic "${heuristic.id}" skips verification, applying correction directly`
+                        );
 
-                // Verify with LLM
-                const verification = await supervisorLLMService.verify(
-                    supervisionContext,
-                    verificationPrompt
-                );
+                        const syntheticVerification: VerificationResult = {
+                            verdict: "violation",
+                            explanation: "Heuristic configured to skip LLM verification",
+                        };
 
-                if (verification.verdict === "violation") {
-                    logger.warn(
-                        `[SupervisorOrchestrator] Violation confirmed for heuristic "${heuristic.id}"`,
+                        const correctionAction = heuristic.getCorrectionAction(syntheticVerification);
+
+                        if (shouldBuildCorrectionMessage(correctionAction)) {
+                            correctionAction.message = heuristic.buildCorrectionMessage(
+                                context,
+                                syntheticVerification
+                            );
+                        }
+
+                        span.addEvent("supervision.violation_detected", {
+                            "heuristic.id": heuristic.id,
+                            "action.type": correctionAction.type,
+                            "skipped_verification": true,
+                        });
+                        span.setStatus({ code: SpanStatusCode.OK });
+
+                        return {
+                            hasViolation: true,
+                            correctionAction,
+                            heuristicId: heuristic.id,
+                            detection,
+                            verification: syntheticVerification,
+                        };
+                    }
+
+                    // Build verification prompt and context
+                    const verificationPrompt = heuristic.buildVerificationPrompt(context, detection);
+                    const supervisionContext = this.buildSupervisionContext(
+                        context,
+                        heuristic.id,
+                        detection
+                    );
+
+                    // Verify with LLM
+                    const verification = await supervisorLLMService.verify(
+                        supervisionContext,
+                        verificationPrompt
+                    );
+
+                    if (verification.verdict === "violation") {
+                        // Violations are significant - keep at WARN level
+                        logger.warn(
+                            `[SupervisorOrchestrator] Violation confirmed for heuristic "${heuristic.id}"`,
+                            { explanation: verification.explanation }
+                        );
+
+                        // Get correction action
+                        const correctionAction = heuristic.getCorrectionAction(verification);
+
+                        // Build correction message if action type supports it
+                        if (shouldBuildCorrectionMessage(correctionAction)) {
+                            correctionAction.message = heuristic.buildCorrectionMessage(
+                                context,
+                                verification
+                            );
+                        }
+
+                        span.addEvent("supervision.violation_detected", {
+                            "heuristic.id": heuristic.id,
+                            "action.type": correctionAction.type,
+                            "skipped_verification": false,
+                        });
+                        span.setStatus({ code: SpanStatusCode.OK });
+
+                        return {
+                            hasViolation: true,
+                            correctionAction,
+                            heuristicId: heuristic.id,
+                            detection,
+                            verification,
+                        };
+                    }
+
+                    // False positives are routine - use DEBUG level
+                    logger.debug(
+                        `[SupervisorOrchestrator] Heuristic "${heuristic.id}" detection was false positive`,
                         { explanation: verification.explanation }
                     );
+                } catch (error) {
+                    // Normalize error before recording
+                    const normalizedError = error instanceof Error ? error : new Error(String(error));
+                    hadError = true;
 
-                    // Get correction action
-                    const correctionAction = heuristic.getCorrectionAction(verification);
-
-                    // Build correction message if action type supports it
-                    if (shouldBuildCorrectionMessage(correctionAction)) {
-                        correctionAction.message = heuristic.buildCorrectionMessage(
-                            context,
-                            verification
-                        );
-                    }
-
-                    return {
-                        hasViolation: true,
-                        correctionAction,
-                        heuristicId: heuristic.id,
-                        detection,
-                        verification,
-                    };
+                    logger.error(
+                        `[SupervisorOrchestrator] Error running heuristic "${heuristic.id}"`,
+                        normalizedError
+                    );
+                    span.recordException(normalizedError);
+                    // Continue to next heuristic on error
                 }
-
-                logger.debug(
-                    `[SupervisorOrchestrator] Heuristic "${heuristic.id}" detection was false positive`,
-                    { explanation: verification.explanation }
-                );
-            } catch (error) {
-                logger.error(
-                    `[SupervisorOrchestrator] Error running heuristic "${heuristic.id}"`,
-                    error
-                );
-                // Continue to next heuristic on error
             }
-        }
 
-        return { hasViolation: false };
+            span.addEvent("supervision.check_completed", {
+                "violations_found": false,
+                "had_errors": hadError,
+            });
+
+            // Set span status based on whether errors occurred during heuristic execution
+            if (hadError) {
+                span.setStatus({ code: SpanStatusCode.ERROR, message: "Errors occurred during heuristic execution" });
+            } else {
+                span.setStatus({ code: SpanStatusCode.OK });
+            }
+
+            // Routine successful completion - use DEBUG level
+            logger.debug("[SupervisorOrchestrator] All heuristics passed - no violations detected", {
+                agent: context.agentSlug,
+                heuristicsChecked: heuristics.length,
+            });
+
+            return { hasViolation: false };
+        } catch (error) {
+            // Normalize error before recording
+            const normalizedError = error instanceof Error ? error : new Error(String(error));
+            span.recordException(normalizedError);
+            span.setStatus({ code: SpanStatusCode.ERROR });
+            throw error;
+        } finally {
+            span.end();
+        }
     }
 
     /**
