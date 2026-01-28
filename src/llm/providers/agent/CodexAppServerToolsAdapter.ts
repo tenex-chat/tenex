@@ -5,20 +5,6 @@ import { createSdkMcpServer, tool, type SdkMcpServer, type Tool, type ToolDefini
 import { z, type ZodRawShape } from "zod";
 
 /**
- * Prefixes for tools that are built-in to Codex and should not be provided via MCP.
- * fs_* tools are Codex built-ins for file operations.
- */
-export const CODEX_BUILTIN_PREFIXES = ["fs_"] as const;
-
-/**
- * Check if a tool name corresponds to a Codex built-in tool.
- * Built-in tools should not be provided via MCP as Codex handles them natively.
- */
-export function isCodexBuiltinTool(name: string): boolean {
-    return CODEX_BUILTIN_PREFIXES.some(prefix => name.startsWith(prefix));
-}
-
-/**
  * Converts TENEX tools to Codex App Server SDK MCP server format.
  *
  * This adapter uses createSdkMcpServer which handles HTTP server lifecycle
@@ -33,9 +19,7 @@ export class CodexAppServerToolsAdapter {
         tools: Record<string, AISdkTool>,
         context: { agentName?: string }
     ): SdkMcpServer | undefined {
-        const localTools = Object.entries(tools).filter(([name]) =>
-            !isCodexBuiltinTool(name)
-        );
+        const localTools = Object.entries(tools);
 
         logger.debug("[CodexAppServerToolsAdapter] Input tools analysis:", {
             totalTools: Object.keys(tools).length,
