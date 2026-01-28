@@ -309,7 +309,11 @@ export class ConfigService {
             logger.warn(warning);
         }
 
-        const config = this.loadedConfig!.llms.configurations[name];
+        const loadedConfig = this.loadedConfig;
+        if (!loadedConfig) {
+            throw new Error("Config not loaded. Call loadConfig() first.");
+        }
+        const config = loadedConfig.llms.configurations[name];
 
         // If it's a meta model, resolve to the default variant
         if (isMetaModelConfiguration(config)) {
@@ -332,7 +336,11 @@ export class ConfigService {
             warnOnFallback: false,
         });
 
-        return this.loadedConfig!.llms.configurations[name];
+        const loadedConfig = this.loadedConfig;
+        if (!loadedConfig) {
+            throw new Error("Config not loaded. Call loadConfig() first.");
+        }
+        return loadedConfig.llms.configurations[name];
     }
 
     /**
@@ -597,7 +605,7 @@ export class ConfigService {
             });
             throw new Error(
                 `Failed to load config file "${filePath}": ${errorMessage}. ` +
-                    `Fix the file or delete it to use defaults.`
+                    "Fix the file or delete it to use defaults."
             );
         }
     }
