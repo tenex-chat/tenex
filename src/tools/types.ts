@@ -32,7 +32,6 @@ export type ToolName =
     | "delegate_followup"
     | "ask"
     | "project_list"
-    | "create_project"
     | "delegate_crossproject"
     | "report_write"
     | "report_read"

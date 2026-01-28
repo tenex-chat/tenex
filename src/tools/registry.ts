@@ -26,7 +26,6 @@ import { createConversationGetTool } from "./implementations/conversation_get";
 import { createFsGlobTool } from "./implementations/fs_glob";
 import { createFsGrepTool } from "./implementations/fs_grep";
 import { createConversationListTool } from "./implementations/conversation_list";
-import { createCreateProjectTool } from "./implementations/create_project";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
@@ -145,7 +144,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     conversation_list: createConversationListTool,
 
     // Project tools
-    create_project: createCreateProjectTool,
     project_list: createProjectListTool,
 
     // Delegation tools
