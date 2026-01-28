@@ -22,14 +22,14 @@ import { handleDelegationCompletion } from "@/services/dispatch/DelegationComple
 const tracer = trace.getTracer("tenex.dispatch");
 // Coalesce back-to-back delegation completions so we resume once with a stable snapshot.
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
-const getSafeContext = () => {
+const getSafeContext = (): ReturnType<typeof otelContext.active> => {
     const activeContext = otelContext.active();
     // Defensive fallback for test mocks or non-standard context managers.
     return typeof (activeContext as { getValue?: unknown }).getValue === "function"
         ? activeContext
         : ROOT_CONTEXT;
 };
-const getSafeActiveSpan = () => {
+const getSafeActiveSpan = (): ReturnType<typeof trace.getActiveSpan> => {
     try {
         return trace.getActiveSpan();
     } catch {
