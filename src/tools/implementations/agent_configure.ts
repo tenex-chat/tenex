@@ -195,11 +195,12 @@ async function executeAgentConfigure(
         }
     }
 
-    // Determine current PM status for output (always needed)
-    const isPM = agentStorage.hasPMOverride(existingAgent, projectDTag);
-
     // If no actual changes, return early without persisting (no-op optimization)
+    // Use resolved PM status from projectContext for consistency with the persistence path
     if (!hasActualChanges) {
+        const resolvedPM = projectContext.projectManager;
+        const isPMResolved = resolvedPM?.slug === slug;
+
         return {
             success: true,
             message: "No changes made (values already match)",
@@ -208,7 +209,7 @@ async function executeAgentConfigure(
                 name: existingAgent.name,
                 pubkey: agentPubkey,
                 model: existingAgent.llmConfig,
-                isPM,
+                isPM: isPMResolved,
             },
         };
     }
