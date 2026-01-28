@@ -41,8 +41,8 @@ function extractTextContent(content: ModelMessage["content"]): string {
  * Claude Code's built-in instructions plus custom content.
  */
 export type ClaudeCodeSystemPrompt = string | {
-    type: 'preset';
-    preset: 'claude_code';
+    type: "preset";
+    preset: "claude_code";
     append?: string;
 };
 
@@ -89,8 +89,8 @@ export function compileMessagesForClaudeCode(messages: ModelMessage[]): {
     // Use Claude Code's built-in preset with our system content appended
     return {
         systemPrompt: {
-            type: 'preset',
-            preset: 'claude_code',
+            type: "preset",
+            preset: "claude_code",
             append: appendContent,
         },
     };
