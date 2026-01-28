@@ -5,7 +5,7 @@
  * with built-in coding tools and MCP server support.
  */
 
-import { type ClaudeCodeSettings, createClaudeCode } from "ai-sdk-provider-claude-code";
+import { type ClaudeCodeSettings, type McpServerConfig, createClaudeCode } from "ai-sdk-provider-claude-code";
 import type { LanguageModelUsage } from "ai";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -35,6 +35,10 @@ interface ExtendedUsage extends LanguageModelUsage {
     cachedInputTokens?: number;
     reasoningTokens?: number;
 }
+
+type ClaudeCodeSettingsWithStreamStart = ClaudeCodeSettings & {
+    onStreamStart?: ProviderRuntimeContext["onStreamStart"];
+};
 
 /**
  * Claude Code provider implementation
@@ -88,7 +92,7 @@ export class ClaudeCodeProvider extends AgentProvider {
     protected createAgentSettings(
         context: ProviderRuntimeContext,
         _modelId: string
-    ): ClaudeCodeSettings {
+    ): ClaudeCodeSettingsWithStreamStart {
         // Extract tool names from the provided tools
         const toolNames = context.tools ? Object.keys(context.tools) : [];
         const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
@@ -108,10 +112,7 @@ export class ClaudeCodeProvider extends AgentProvider {
                 : undefined;
 
         // Build mcpServers configuration
-        // ClaudeCodeSettings.mcpServers accepts heterogeneous server types (stdio, SDK servers, etc.)
-        // biome-ignore lint/suspicious/noExplicitAny: ClaudeCodeSettings.mcpServers accepts varied server types
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mcpServersConfig: Record<string, any> = {};
+        const mcpServersConfig: Record<string, McpServerConfig> = {};
 
         // Add TENEX tools wrapper if enabled
         if (tenexSdkServer) {
@@ -137,7 +138,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         }
 
         // Build the settings
-        const settings: ClaudeCodeSettings = {
+        const settings: ClaudeCodeSettingsWithStreamStart = {
             permissionMode: "bypassPermissions",
             verbose: true,
             cwd: context.workingDirectory,
@@ -161,9 +162,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Pass through onStreamStart callback if provided (requires fork of ai-sdk-provider-claude-code)
         // The callback receives a MessageInjector when the stream starts, allowing mid-execution message injection
         if (context.onStreamStart) {
-            // Cast to any since the fork's ClaudeCodeSettings type includes onStreamStart
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (settings as any).onStreamStart = context.onStreamStart;
+            settings.onStreamStart = context.onStreamStart;
         }
 
         return settings;
