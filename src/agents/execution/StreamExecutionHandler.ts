@@ -23,6 +23,7 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { AISdkTool } from "@/tools/types";
+import { createEventContext } from "@/utils/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { LanguageModel, ModelMessage } from "ai";
@@ -386,7 +387,6 @@ export class StreamExecutionHandler {
      */
     private createEventContext(): EventContext {
         const { context, llmService } = this.config;
-        const { createEventContext } = require("@/utils/event-context");
         const eventContext = createEventContext(context, llmService.model);
 
         // DIAGNOSTIC: Track event context creation to debug llm-ral=0 issues
