@@ -71,7 +71,7 @@
     "@opentelemetry/sdk-trace-node": "^2.3.0",
     "@opentelemetry/semantic-conventions": "^1.38.0",
     "ai": "^6.0.57",
-    "ai-sdk-provider-claude-code": "file:../ai-sdk-provider-claude-code-fork",
+    "ai-sdk-provider-claude-code": "github:pablof7z/ai-sdk-provider-claude-code#feat/message-injection",
     "ai-sdk-provider-codex-app-server": "1.1.7",
     "ai-sdk-provider-gemini-cli": "^2.0.1",
     "chalk": "^5.6.2",
