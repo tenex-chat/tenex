@@ -76,7 +76,7 @@ async function executeDelegate(
 
       throw new Error(
         `Circular delegation detected: "${targetName}" is already in the delegation chain (${chainDisplay}). ` +
-        `Delegating to them would create a cycle. Consider completing your own task or delegating to a different agent.`
+        "Delegating to them would create a cycle. Consider completing your own task or delegating to a different agent."
       );
     }
 
