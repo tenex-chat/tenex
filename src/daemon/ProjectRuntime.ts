@@ -467,6 +467,7 @@ export class ProjectRuntime {
             return;
         }
 
+        const context = this.context;
         const tracer = trace.getTracer("tenex.project-runtime");
 
         return tracer.startActiveSpan("tenex.prompt_compilers.initialize", async (span) => {
@@ -477,24 +478,24 @@ export class ProjectRuntime {
             const { config: loadedConfig } = await config.loadConfig();
             const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
 
-            const agentCount = this.context!.agents.size;
+            const agentCount = context.agents.size;
             span.setAttribute("agents.total", agentCount);
 
             let initializedCount = 0;
             let eagerCompilationTriggeredCount = 0;
             const agentSlugs: string[] = [];
 
-            for (const agent of this.context!.agents.values()) {
+            for (const agent of context.agents.values()) {
                 try {
                     const compiler = new PromptCompilerService(
                         agent.pubkey,
                         whitelistArray,
                         ndk,
-                        this.context!
+                        context
                     );
 
                     // Register the compiler with the context
-                    this.context!.setPromptCompiler(agent.pubkey, compiler);
+                    context.setPromptCompiler(agent.pubkey, compiler);
 
                     // Start the subscription for lesson comments
                     compiler.subscribe();
