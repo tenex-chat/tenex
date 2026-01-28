@@ -158,7 +158,7 @@ afterAll(() => {
 /**
  * Create a mock provider registry for testing
  */
-function createMockRegistry(): ProviderRegistryProvider<string, string> {
+function createMockRegistry(): ProviderRegistryProvider {
     const mockModel: LanguageModel = {
         specificationVersion: "v2",
         provider: "test-provider",
@@ -182,7 +182,7 @@ function createMockRegistry(): ProviderRegistryProvider<string, string> {
         languageModel: mock(() => mockModel),
         textEmbeddingModel: mock(() => ({})),
         imageModel: mock(() => ({})),
-    } as unknown as ProviderRegistryProvider<string, string>;
+    } as unknown as ProviderRegistryProvider;
 }
 
 /**
@@ -200,7 +200,7 @@ function createMockClaudeCodeProvider() {
 }
 
 describe("LLMService", () => {
-    let mockRegistry: ProviderRegistryProvider<string, string>;
+    let mockRegistry: ProviderRegistryProvider;
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
@@ -364,7 +364,7 @@ describe("LLMService", () => {
 });
 
 describe("LLMService private methods (via behavior)", () => {
-    let mockRegistry: ProviderRegistryProvider<string, string>;
+    let mockRegistry: ProviderRegistryProvider;
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
@@ -414,7 +414,7 @@ describe("LLMService private methods (via behavior)", () => {
 });
 
 describe("LLMService chunk handling", () => {
-    let mockRegistry: ProviderRegistryProvider<string, string>;
+    let mockRegistry: ProviderRegistryProvider;
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
@@ -629,7 +629,7 @@ describe("LLMService telemetry configuration", () => {
 });
 
 describe("LLMService stream()", () => {
-    let mockRegistry: ProviderRegistryProvider<string, string>;
+    let mockRegistry: ProviderRegistryProvider;
     let capturedOnFinish: ((e: any) => Promise<void>) | undefined;
 
     beforeEach(() => {
@@ -921,7 +921,7 @@ describe("LLMService stream()", () => {
 });
 
 describe("LLMService createFinishHandler", () => {
-    let mockRegistry: ProviderRegistryProvider<string, string>;
+    let mockRegistry: ProviderRegistryProvider;
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
