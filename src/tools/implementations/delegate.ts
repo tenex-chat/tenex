@@ -3,7 +3,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/services/agents";
+import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
 import { wouldCreateCircularDelegation, truncateConversationId } from "@/utils/delegation-chain";
@@ -15,7 +15,7 @@ const delegationItemSchema = z.object({
   recipient: z
     .string()
     .describe(
-      "Agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"
+      "Agent slug (e.g., 'architect', 'claude-code', 'explore-agent'). Only agent slugs are accepted."
     ),
   prompt: z.string().describe("The request or task for this agent"),
   branch: z
@@ -48,18 +48,22 @@ async function executeDelegate(
 
   const ralRegistry = RALRegistry.getInstance();
   const pendingDelegations: PendingDelegation[] = [];
-  const failedRecipients: string[] = [];
 
   // Get the delegation chain from the current conversation for cycle detection
   const conversationStore = ConversationStore.get(context.conversationId);
   const delegationChain = conversationStore?.metadata?.delegationChain;
 
   for (const delegation of delegations) {
-    const pubkey = resolveRecipientToPubkey(delegation.recipient);
-    if (!pubkey) {
-      failedRecipients.push(delegation.recipient);
-      continue;
+    const resolution = resolveAgentSlug(delegation.recipient);
+    if (!resolution.pubkey) {
+      const availableSlugsStr = resolution.availableSlugs.length > 0
+        ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
+        : "No agents available in the current project context.";
+      throw new Error(
+        `Invalid agent slug: "${delegation.recipient}". Only agent slugs are accepted. ${availableSlugsStr}`
+      );
     }
+    const pubkey = resolution.pubkey;
 
     // Check for circular delegation using stored chain
     if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
@@ -95,16 +99,6 @@ async function executeDelegate(
       prompt: delegation.prompt,
       ralNumber: context.ralNumber,
     });
-  }
-
-  if (failedRecipients.length > 0) {
-    logger.warn("Some recipients could not be resolved", {
-      failed: failedRecipients,
-    });
-  }
-
-  if (pendingDelegations.length === 0) {
-    throw new Error("No valid recipients provided.");
   }
 
   // Register pending delegations in RALRegistry for response routing

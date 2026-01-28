@@ -13,13 +13,19 @@ import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
 
-// Mock the resolution function to return pubkeys for our test agents
+// Mock the resolution function to return pubkeys for our test agents (slug-only)
 import * as agentResolution from "@/services/agents";
-const mockResolve = spyOn(agentResolution, "resolveRecipientToPubkey");
-mockResolve.mockImplementation((recipient: string) => {
-    if (recipient === "self-agent") return "agent-pubkey-123";
-    if (recipient === "other-agent") return "other-pubkey-456";
-    return recipient.startsWith("agent-pubkey-") ? recipient : null;
+const mockResolve = spyOn(agentResolution, "resolveAgentSlug");
+mockResolve.mockImplementation((slug: string) => {
+    const availableSlugs = ["self-agent", "other-agent"];
+    if (slug === "self-agent") {
+        return { pubkey: "agent-pubkey-123", availableSlugs };
+    }
+    if (slug === "other-agent") {
+        return { pubkey: "other-pubkey-456", availableSlugs };
+    }
+    // Only slugs are accepted - pubkeys and other formats should fail
+    return { pubkey: null, availableSlugs };
 });
 
 describe("Delegation tools - Self-delegation validation", () => {
@@ -78,7 +84,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             expect(result.delegationConversationIds).toHaveLength(1);
         });
 
-        it("should allow self-delegation by pubkey", async () => {
+        it("should reject pubkeys (only slugs accepted)", async () => {
             const context = {
                 ...createMockContext(1), // Provide ralNumber
                 agentPublisher: {
@@ -93,11 +99,15 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Self-delegation is allowed - now returns normal result (no stop signal)
-            const result = await delegateTool.execute(input);
-            expect(result).toBeDefined();
-            expect(result.success).toBe(true);
-            expect(result.delegationConversationIds).toHaveLength(1);
+            // Pubkeys are no longer accepted - should throw with helpful error
+            try {
+                await delegateTool.execute(input);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error: any) {
+                expect(error.message).toContain("Invalid agent slug");
+                expect(error.message).toContain("agent-pubkey-123");
+                expect(error.message).toContain("Available agent slugs");
+            }
         });
 
         it("should allow self in multiple recipients", async () => {
