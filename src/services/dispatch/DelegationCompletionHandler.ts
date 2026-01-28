@@ -5,6 +5,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { ConversationEntry } from "@/conversations/types";
 import type { DelegationMessage } from "@/services/ral/types";
 
 const tracer = trace.getTracer("tenex.delegation");
@@ -92,17 +93,18 @@ export async function handleDelegationCompletion(
                     // Filter for meaningful communication (not internal noise):
                     // - Must be text messages
                     // - Must have p-tags (targeted to specific recipients)
+                    const hasTargetedRecipient = (
+                        msg: ConversationEntry
+                    ): msg is ConversationEntry & { targetedPubkeys: string[] } =>
+                        msg.messageType === "text" &&
+                        Array.isArray(msg.targetedPubkeys) &&
+                        msg.targetedPubkeys.length > 0;
+
                     fullTranscript = allMessages
-                        .filter(
-                            (msg) =>
-                                msg.messageType === "text" &&
-                                msg.targetedPubkeys &&
-                                msg.targetedPubkeys.length > 0
-                        )
+                        .filter(hasTargetedRecipient)
                         .map((msg) => ({
                             senderPubkey: msg.pubkey,
-                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                            recipientPubkey: msg.targetedPubkeys![0], // Primary recipient
+                            recipientPubkey: msg.targetedPubkeys[0], // Primary recipient
                             content: msg.content,
                             timestamp: msg.timestamp ?? Date.now(),
                         }));
