@@ -14,9 +14,7 @@ import type { PromptFragment } from "../core/types";
  */
 
 // Empty args - the fragment loads content from config
-interface GlobalSystemPromptArgs {
-    // Empty - content is loaded from global config
-}
+type GlobalSystemPromptArgs = Record<string, never>;
 
 export const globalSystemPromptFragment: PromptFragment<GlobalSystemPromptArgs> = {
     id: "global-system-prompt",
