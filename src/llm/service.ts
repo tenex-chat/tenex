@@ -89,7 +89,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         }
 
         // Initialize chunk handler with state accessors that sync to LLMService
-        const getService = () => this;
+        const getService = (): LLMService => this;
         const chunkHandlerState: ChunkHandlerState = {
             get previousChunkType() {
                 return getService().previousChunkType;
