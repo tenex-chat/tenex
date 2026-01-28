@@ -142,13 +142,12 @@ describe("RALRegistry", () => {
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
-      // Wait a bit to ensure timestamp difference
-      const start = Date.now();
-      while (Date.now() - start < 2) {
-        // Small delay
+      setSystemTime(new Date((initialTime ?? Date.now()) + 2));
+      try {
+        registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
+      } finally {
+        setSystemTime();
       }
-
-      registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
       const updatedState = registry.getState(agentPubkey, conversationId);
 
       expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
@@ -227,11 +226,12 @@ describe("RALRegistry", () => {
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
-      // Small delay
-      const start = Date.now();
-      while (Date.now() - start < 2) {}
-
-      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
+      setSystemTime(new Date((initialTime ?? Date.now()) + 2));
+      try {
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
+      } finally {
+        setSystemTime();
+      }
       const updatedState = registry.getState(agentPubkey, conversationId);
 
       expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
@@ -338,15 +338,18 @@ describe("RALRegistry", () => {
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
-      const start = Date.now();
-      while (Date.now() - start < 2) {}
-
-      const location = registry.recordCompletion({
-        delegationConversationId: "del-123",
-        recipientPubkey: "recipient",
-        response: "Done",
-        completedAt: Date.now(),
-      });
+      setSystemTime(new Date((initialTime ?? Date.now()) + 2));
+      let location: ReturnType<typeof registry.recordCompletion>;
+      try {
+        location = registry.recordCompletion({
+          delegationConversationId: "del-123",
+          recipientPubkey: "recipient",
+          response: "Done",
+          completedAt: Date.now(),
+        });
+      } finally {
+        setSystemTime();
+      }
 
       expect(location).toBeDefined();
       const updatedState = registry.getState(agentPubkey, conversationId);
@@ -479,15 +482,16 @@ describe("RALRegistry", () => {
       const state1 = registry.getState(agentPubkey, conversationId);
       const firstToolStartTime = state1?.toolStartedAt;
 
-      // Small delay to ensure different timestamps
-      const start = Date.now();
-      while (Date.now() - start < 2) {}
+      setSystemTime(new Date((firstToolStartTime ?? Date.now()) + 2));
+      try {
+        // Start second tool
+        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
 
-      // Start second tool
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", true, "web_fetch");
-
-      // Complete the second tool (current one)
-      registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+        // Complete the second tool (current one)
+        registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-2", false);
+      } finally {
+        setSystemTime();
+      }
 
       const state2 = registry.getState(agentPubkey, conversationId);
       // currentTool should now point to the remaining active tool
@@ -993,11 +997,12 @@ describe("RALRegistry", () => {
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
-      // Small delay
-      const start = Date.now();
-      while (Date.now() - start < 2) {}
-
-      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, []);
+      setSystemTime(new Date((initialTime ?? Date.now()) + 2));
+      try {
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, []);
+      } finally {
+        setSystemTime();
+      }
 
       const updatedState = registry.getState(agentPubkey, conversationId);
       expect(updatedState?.lastActivityAt).toBeGreaterThan(initialTime!);
