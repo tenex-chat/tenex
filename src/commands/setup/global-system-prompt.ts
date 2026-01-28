@@ -158,7 +158,7 @@ ${CONTENT_DELIMITER}
             await fs.writeFile(tempFile, templateContent, "utf-8");
 
             logger.info(
-                `Opening editor to configure global system prompt...\n` +
+                "Opening editor to configure global system prompt...\n" +
                     `(Using editor: ${getEditor()})\n`
             );
 
@@ -205,9 +205,9 @@ ${CONTENT_DELIMITER}
                 logger.info("Global system prompt cleared (no content).");
             } else {
                 logger.info(
-                    `Global system prompt saved successfully!\n` +
+                    "Global system prompt saved successfully!\n" +
                         `Content length: ${cleanedContent.length} characters\n\n` +
-                        `This prompt will be added to all agents' system prompts.`
+                        "This prompt will be added to all agents' system prompts."
                 );
             }
         } catch (error: unknown) {
