@@ -5,7 +5,7 @@ export type {
     CompletionIntent,
     DelegationIntent,
     EventContext,
-} from "./AgentEventEncoder";
+} from "./types";
 export { AgentEventEncoder } from "./AgentEventEncoder";
 export { AgentProfilePublisher } from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
