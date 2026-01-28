@@ -13,66 +13,6 @@ export type {
     FilePart,
 } from "ai";
 
-// AI SDK doesn't export a ToolCall type from the `ai` package.
-// Legacy tool call shape used by mock LLM utilities.
-export interface LegacyToolCall {
-    name?: string;
-    function?: string;
-    params?: Record<string, unknown>;
-    args?: string | Record<string, unknown>;
-}
-
-export interface Message {
-    role: string;
-    content: string;
-}
-
-export interface CompletionRequest {
-    messages: Message[];
-    model?: string;
-    temperature?: number;
-    maxTokens?: number;
-    options?: {
-        configName?: string;
-        [key: string]: unknown;
-    };
-}
-
-export interface CompletionResponse {
-    content?: string;
-    toolCalls?: LegacyToolCall[];
-    model?: string;
-    usage?: {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-    };
-    experimental_providerMetadata?: Record<string, unknown>;
-}
-
-export interface StreamEvent {
-    type: string;
-    content?: string;
-    delta?: string;
-    error?: string;
-    tool?: string;
-    args?: unknown;
-    response?: {
-        type: string;
-        content?: string;
-        toolCalls?: LegacyToolCall[];
-        usage?: {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-        };
-    };
-}
-
-export interface LLMService {
-    complete(request: CompletionRequest): Promise<CompletionResponse>;
-    stream?(request: CompletionRequest): AsyncIterableIterator<StreamEvent>;
-}
-
 // Export execution context type
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { LanguageModelUsage } from "ai";
