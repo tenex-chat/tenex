@@ -6,6 +6,8 @@
 
 import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
+import type { NudgeToolPermissions } from "@/services/nudge";
+import { isOnlyToolMode } from "@/services/nudge";
 import type { Tool as CoreTool } from "ai";
 import type {
     AISdkTool,
@@ -293,11 +295,13 @@ const META_MODEL_TOOLS: ToolName[] = ["change_model"];
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names)
  * @param context - Registry context (full or MCP partial)
+ * @param nudgePermissions - Optional tool permissions from nudge events
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
     names: string[],
-    context: ToolRegistryContext | MCPToolContext
+    context: ToolRegistryContext | MCPToolContext,
+    nudgePermissions?: NudgeToolPermissions
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
@@ -305,11 +309,96 @@ export function getToolsObject(
     const hasConversation =
         "conversationStore" in context && context.conversationStore !== undefined;
 
+    // === ONLY-TOOL MODE: STRICT EXCLUSIVITY ===
+    // When only-tool mode is active, return EXACTLY those tools - no auto-injection whatsoever.
+    // This is a security feature: the nudge author has complete control over available tools.
+    if (nudgePermissions && isOnlyToolMode(nudgePermissions)) {
+        const onlyToolNames = nudgePermissions.onlyTools!;
+        logger.debug("[ToolRegistry] Nudge only-tool mode: strict exclusive tool set", {
+            originalTools: names.length,
+            onlyTools: onlyToolNames,
+        });
+
+        // Separate regular tools and MCP tools
+        const regularTools: ToolName[] = [];
+        const mcpToolNames: string[] = [];
+
+        for (const name of onlyToolNames) {
+            if (name.startsWith("mcp__")) {
+                mcpToolNames.push(name);
+            } else if (name in toolFactories) {
+                // Filter out conversation-required tools when no conversation available
+                if (CONVERSATION_REQUIRED_TOOLS.has(name as ToolName) && !hasConversation) {
+                    logger.debug(`Filtering out tool '${name}' - requires conversation context`);
+                    continue;
+                }
+                regularTools.push(name as ToolName);
+            }
+        }
+
+        // Add ONLY the explicitly requested regular tools - NO auto-injection
+        for (const name of regularTools) {
+            const tool = getTool(name, context as ToolExecutionContext);
+            if (tool) {
+                tools[name] = tool;
+            }
+        }
+
+        // Add ONLY the explicitly requested MCP tools - NO auto-injection
+        if (mcpToolNames.length > 0 && "mcpManager" in context && context.mcpManager) {
+            try {
+                const allMcpTools = context.mcpManager.getCachedTools();
+                for (const name of mcpToolNames) {
+                    if (allMcpTools[name]) {
+                        tools[name] = asTool(allMcpTools[name]);
+                    }
+                }
+            } catch (error) {
+                console.debug("Could not load MCP tools:", error);
+            }
+        }
+
+        // Return immediately - no further processing or auto-injection
+        return tools;
+    }
+
+    // === ALLOW/DENY MODE OR NO NUDGE PERMISSIONS ===
+    let effectiveNames = names;
+
+    if (nudgePermissions) {
+        // allow-tool / deny-tool mode
+        let modifiedNames = [...names];
+
+        // Add allowed tools (that aren't already in the list)
+        if (nudgePermissions.allowTools && nudgePermissions.allowTools.length > 0) {
+            for (const allowTool of nudgePermissions.allowTools) {
+                if (!modifiedNames.includes(allowTool)) {
+                    modifiedNames.push(allowTool);
+                }
+            }
+            logger.debug("[ToolRegistry] Nudge allow-tool: added tools", {
+                allowedTools: nudgePermissions.allowTools,
+            });
+        }
+
+        // Remove denied tools
+        if (nudgePermissions.denyTools && nudgePermissions.denyTools.length > 0) {
+            modifiedNames = modifiedNames.filter(
+                (name) => !nudgePermissions.denyTools!.includes(name)
+            );
+            logger.debug("[ToolRegistry] Nudge deny-tool: removed tools", {
+                deniedTools: nudgePermissions.denyTools,
+            });
+        }
+
+        effectiveNames = modifiedNames;
+    }
+
     // Separate regular tools and MCP tools
     const regularTools: ToolName[] = [];
     const mcpToolNames: string[] = [];
 
-    for (const name of names) {
+    for (const name of effectiveNames) {
         if (name.startsWith("mcp__")) {
             mcpToolNames.push(name);
         } else if (name in toolFactories) {

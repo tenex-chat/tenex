@@ -3,6 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
 import { ReportService } from "@/services/reports";
@@ -55,7 +56,11 @@ export interface BuildSystemPromptOptions {
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
     mcpManager?: MCPManager; // MCP manager for this project
-    nudgeContent?: string; // Concatenated content from kind:4201 nudge events
+    nudgeContent?: string; // Concatenated content from kind:4201 nudge events (legacy)
+    /** Individual nudge data for rendering with titles */
+    nudges?: NudgeData[];
+    /** Tool permissions extracted from nudge events */
+    nudgeToolPermissions?: NudgeToolPermissions;
 }
 
 export interface BuildStandalonePromptOptions {
@@ -378,6 +383,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         alphaMode,
         mcpManager,
         nudgeContent,
+        nudges,
+        nudgeToolPermissions,
     } = options;
 
     // Check if PromptCompilerService is available for this agent (TIN-10)
@@ -460,8 +467,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
     // Add nudge content if present (from kind:4201 events referenced by the triggering event)
-    if (nudgeContent && nudgeContent.trim().length > 0) {
-        systemPromptBuilder.add("nudges", { nudgeContent });
+    // Now supports individual nudge data with tool permissions
+    if ((nudges && nudges.length > 0) || (nudgeContent && nudgeContent.trim().length > 0)) {
+        systemPromptBuilder.add("nudges", {
+            nudgeContent,
+            nudges,
+            nudgeToolPermissions,
+        });
     }
 
     // NOTE: agent-todos is NOT included here - it's injected as a late system message
