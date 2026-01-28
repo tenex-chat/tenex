@@ -1,4 +1,4 @@
-import type { ToolCall } from "@/llm/types";
+import type { LegacyToolCall } from "@/llm/types";
 
 export interface MockLLMResponse {
     /** The messages that should trigger this response */
@@ -29,7 +29,7 @@ export interface MockLLMResponse {
         /** Text content of the response */
         content?: string;
         /** Tool calls to make */
-        toolCalls?: ToolCall[];
+        toolCalls?: LegacyToolCall[];
         /** Simulate streaming delay in ms */
         streamDelay?: number;
         /** Simulate an error */

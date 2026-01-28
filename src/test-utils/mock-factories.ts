@@ -2,7 +2,7 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationCoordinator } from "@/conversations";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { ToolCall } from "@/llm/types";
+import type { LegacyToolCall } from "@/llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
@@ -188,7 +188,7 @@ export function createMockToolContext(
     } as ToolRegistryContext;
 }
 
-export function createMockToolCall(overrides?: Partial<ToolCall>): ToolCall {
+export function createMockToolCall(overrides?: Partial<LegacyToolCall>): LegacyToolCall {
     return {
         id: `tool-${Math.random().toString(36).substr(2, 9)}`,
         message: null,

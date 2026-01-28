@@ -2,7 +2,7 @@ export * from "./MockLLMService";
 export * from "./scenarios";
 export * from "./types";
 
-import type { ToolCall } from "@/llm/types";
+import type { LegacyToolCall } from "@/llm/types";
 import { MockLLMService } from "./MockLLMService";
 import { allScenarios } from "./scenarios";
 import type { MockLLMConfig, MockLLMScenario } from "./types";
@@ -44,7 +44,7 @@ export function createMockLLMService(
 /**
  * Create a simple mock that always returns the same response
  */
-export function createSimpleMock(content: string, toolCalls?: ToolCall[]): MockLLMService {
+export function createSimpleMock(content: string, toolCalls?: LegacyToolCall[]): MockLLMService {
     return new MockLLMService({
         defaultResponse: { content, toolCalls },
     });
