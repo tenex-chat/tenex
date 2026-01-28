@@ -129,7 +129,9 @@ export class ConversationStore {
         return conversationRegistry.agentPubkeys;
     }
 
-    static readLightweightMetadata(conversationId: string) {
+    static readLightweightMetadata(
+        conversationId: string
+    ): ReturnType<typeof conversationRegistry.readLightweightMetadata> {
         return conversationRegistry.readLightweightMetadata(conversationId);
     }
 
@@ -137,7 +139,10 @@ export class ConversationStore {
         return conversationRegistry.readMessagesFromDisk(conversationId);
     }
 
-    static readConversationPreview(conversationId: string, agentPubkey: string) {
+    static readConversationPreview(
+        conversationId: string,
+        agentPubkey: string
+    ): ReturnType<typeof conversationRegistry.readConversationPreview> {
         return conversationRegistry.readConversationPreview(conversationId, agentPubkey);
     }
 
@@ -145,7 +150,7 @@ export class ConversationStore {
         conversationId: string,
         agentPubkey: string,
         projectId: string
-    ) {
+    ): ReturnType<typeof conversationRegistry.readConversationPreviewForProject> {
         return conversationRegistry.readConversationPreviewForProject(conversationId, agentPubkey, projectId);
     }
 
