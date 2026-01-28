@@ -577,3 +577,6 @@ export class ConversationStore {
         }
     }
 }
+
+// Register store class with registry to avoid circular imports.
+conversationRegistry.setConversationStoreClass(ConversationStore);

@@ -16,6 +16,7 @@ import { getTenexBasePath } from "@/constants";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 import type { ConversationMetadata } from "./types";
+import type { ConversationStore } from "./ConversationStore";
 import {
     listConversationIdsFromDiskForProject,
     listProjectIdsFromDisk,
@@ -31,14 +32,12 @@ import {
     type RawSearchInput,
 } from "./search";
 
-// Forward declaration - ConversationStore will be imported dynamically
-// to avoid circular dependencies
-let ConversationStoreClass: typeof import("./ConversationStore").ConversationStore;
+// ConversationStore class is registered from ConversationStore module to avoid circular imports.
+let ConversationStoreClass: typeof ConversationStore | null = null;
 
-function getConversationStoreClass(): typeof import("./ConversationStore").ConversationStore {
+function getConversationStoreClass(): typeof ConversationStore {
     if (!ConversationStoreClass) {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy load to avoid circular dependency
-        ConversationStoreClass = require("./ConversationStore").ConversationStore;
+        throw new Error("ConversationStore class not registered. Ensure ConversationStore module is loaded.");
     }
     return ConversationStoreClass;
 }
@@ -47,7 +46,7 @@ function getConversationStoreClass(): typeof import("./ConversationStore").Conve
  * Singleton registry for managing conversation stores
  */
 class ConversationRegistryImpl {
-    private stores: Map<string, InstanceType<typeof ConversationStoreClass>> = new Map();
+    private stores: Map<string, ConversationStore> = new Map();
     private eventCache: Map<string, NDKEvent> = new Map();
     private _basePath: string = join(getTenexBasePath(), "projects");
     private _projectId: string | null = null;
@@ -65,6 +64,10 @@ class ConversationRegistryImpl {
         return this._agentPubkeys;
     }
 
+    setConversationStoreClass(StoreClass: typeof ConversationStore): void {
+        ConversationStoreClass = StoreClass;
+    }
+
     /**
      * Initialize the registry for a project.
      * Must be called once at startup before using any stores.
@@ -80,7 +83,7 @@ class ConversationRegistryImpl {
      * Get or load a conversation store by ID.
      * Loads from disk if not already in memory.
      */
-    getOrLoad(conversationId: string): InstanceType<typeof ConversationStoreClass> {
+    getOrLoad(conversationId: string): ConversationStore {
         let store = this.stores.get(conversationId);
         if (!store) {
             if (!this._projectId) {
@@ -98,7 +101,7 @@ class ConversationRegistryImpl {
      * Get a conversation store if it exists in memory or on disk.
      * Returns undefined if conversation doesn't exist.
      */
-    get(conversationId: string): InstanceType<typeof ConversationStoreClass> | undefined {
+    get(conversationId: string): ConversationStore | undefined {
         const cached = this.stores.get(conversationId);
         if (cached) return cached;
 
@@ -176,7 +179,7 @@ class ConversationRegistryImpl {
     /**
      * Create a new conversation from an NDKEvent.
      */
-    async create(event: NDKEvent): Promise<InstanceType<typeof ConversationStoreClass>> {
+    async create(event: NDKEvent): Promise<ConversationStore> {
         const eventId = event.id;
         if (!eventId) {
             throw new Error("Event must have an ID to create a conversation");
@@ -216,7 +219,7 @@ class ConversationRegistryImpl {
     /**
      * Find a conversation by an event ID it contains.
      */
-    findByEventId(eventId: string): InstanceType<typeof ConversationStoreClass> | undefined {
+    findByEventId(eventId: string): ConversationStore | undefined {
         for (const store of this.stores.values()) {
             if (store.hasEventId(eventId)) {
                 return store;
@@ -228,7 +231,7 @@ class ConversationRegistryImpl {
     /**
      * Get all loaded conversation stores.
      */
-    getAll(): InstanceType<typeof ConversationStoreClass>[] {
+    getAll(): ConversationStore[] {
         return Array.from(this.stores.values());
     }
 
@@ -334,8 +337,8 @@ class ConversationRegistryImpl {
      * Search conversations by title (legacy in-memory search).
      * @deprecated Use searchAdvanced for full-text search across all conversations.
      */
-    search(query: string): InstanceType<typeof ConversationStoreClass>[] {
-        const results: InstanceType<typeof ConversationStoreClass>[] = [];
+    search(query: string): ConversationStore[] {
+        const results: ConversationStore[] = [];
         const queryLower = query.toLowerCase();
         for (const store of this.stores.values()) {
             const title = store.getTitle();
