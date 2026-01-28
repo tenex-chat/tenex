@@ -201,9 +201,7 @@ export class LLMServiceFactory {
      * Get the AI SDK provider registry
      * Useful for direct access to language models
      */
-    // biome-ignore lint/suspicious/noExplicitAny: AI SDK registry types are complex
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    getRegistry(): ProviderRegistryProvider<any, any> {
+    getRegistry(): ProviderRegistryProvider {
         if (!this.initialized) {
             throw new Error("LLMServiceFactory not initialized. Call initializeProviders first.");
         }
