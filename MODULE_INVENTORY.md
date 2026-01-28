@@ -18,7 +18,6 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
 - **`mcp/`**: MCP server management commands. `serve.ts` spawns stdio-based MCP servers that expose TENEX tools to external providers (like Codex CLI). Server loads tool registry, converts Zod schemas to JSON Schema, and handles stdio transport via `@modelcontextprotocol/sdk`. Launched by `CodexCliProvider` with context via environment variables.
 - **`setup/`**: Guided onboarding flows for LLM and embed providers (ties into `ConfigService`, `llm/LLMServiceFactory`, and `services/mcp`).
-- **`vcr/`**: CLI for the VCR tooling (record, list, clean, extract) used in testing workflows.
 
 ### Agents Runtime (`src/agents`)
 - **Registry & Storage**: `AgentRegistry`, `AgentStorage`, and `constants` describe built-in agent definitions, dynamic injection, and on-disk metadata.

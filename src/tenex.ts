@@ -52,7 +52,6 @@ import { Command } from "commander";
 import { agentCommand } from "./commands/agent/index";
 import { daemonCommand } from "./commands/daemon";
 import { setupCommand } from "./commands/setup/index";
-import { createVCRCommand } from "./commands/vcr/index";
 import { createMCPCommand } from "./commands/mcp/index";
 import { initNDK } from "./nostr/ndkClient";
 
@@ -64,7 +63,6 @@ program.name("tenex").description("TENEX Command Line Interface").version("0.1.0
 program.addCommand(agentCommand);
 program.addCommand(daemonCommand);
 program.addCommand(setupCommand);
-program.addCommand(createVCRCommand());
 program.addCommand(createMCPCommand());
 
 // Initialize NDK before parsing commands
