@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve, relative, basename, dirname } from "node:path";
 import { isPathWithinDirectory } from "@/lib/agent-home";
 import { logger } from "@/utils/logger";
+import { getProjectContext } from "@/services/projects/ProjectContext";
 
 /**
  * Error thrown when a slug fails validation
@@ -368,8 +369,6 @@ export function createLocalReportStore(): LocalReportStore {
  * @throws Error if called outside of a project context
  */
 export function getLocalReportStore(): LocalReportStore {
-    // Lazy import to avoid circular dependency
-    const { getProjectContext } = require("@/services/projects/ProjectContext");
     const context = getProjectContext();
     if (!context.localReportStore) {
         throw new Error(
