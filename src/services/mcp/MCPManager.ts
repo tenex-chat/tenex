@@ -21,6 +21,11 @@ type experimental_MCPResource = Awaited<ReturnType<experimental_MCPClient["listR
 type experimental_MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
 type experimental_MCPReadResourceResult = Awaited<ReturnType<experimental_MCPClient["readResource"]>>;
 type MCPToolSet = Awaited<ReturnType<experimental_MCPClient["tools"]>>;
+type MCPResourceSubscriptionClient = {
+    subscribeResource?: (resourceUri: string) => Promise<void>;
+    unsubscribeResource?: (resourceUri: string) => Promise<void>;
+    onResourceUpdated?: (handler: (notification: { uri: string }) => void | Promise<void>) => void;
+};
 
 interface MCPClientEntry {
     client: experimental_MCPClient;
@@ -479,9 +484,12 @@ export class MCPManager {
         }
 
         try {
-            // Type assertion for experimental MCP feature not yet in AI SDK types
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (entry.client as any).subscribeResource(resourceUri);
+            // Experimental MCP feature not yet in AI SDK types
+            const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
+            if (!resourceClient.subscribeResource) {
+                throw new Error(`MCP client for '${serverName}' does not support resource subscriptions`);
+            }
+            await resourceClient.subscribeResource(resourceUri);
             trace.getActiveSpan()?.addEvent("mcp.resource_subscribed", {
                 "server.name": serverName,
                 "resource.uri": resourceUri,
@@ -512,9 +520,12 @@ export class MCPManager {
         }
 
         try {
-            // Type assertion for experimental MCP feature not yet in AI SDK types
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (entry.client as any).unsubscribeResource(resourceUri);
+            // Experimental MCP feature not yet in AI SDK types
+            const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
+            if (!resourceClient.unsubscribeResource) {
+                throw new Error(`MCP client for '${serverName}' does not support resource unsubscriptions`);
+            }
+            await resourceClient.unsubscribeResource(resourceUri);
             trace.getActiveSpan()?.addEvent("mcp.resource_unsubscribed", {
                 "server.name": serverName,
                 "resource.uri": resourceUri,
@@ -547,9 +558,12 @@ export class MCPManager {
             throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
         }
 
-        // Type assertion for experimental MCP feature not yet in AI SDK types
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (entry.client as any).onResourceUpdated(handler);
+        // Experimental MCP feature not yet in AI SDK types
+        const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
+        if (!resourceClient.onResourceUpdated) {
+            throw new Error(`MCP client for '${serverName}' does not support resource notifications`);
+        }
+        resourceClient.onResourceUpdated(handler);
         trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {
             "server.name": serverName,
         });
