@@ -146,7 +146,7 @@ export interface ToolRegistryContext extends ConversationToolContext {
  * Context for MCP tool execution - explicitly lacks conversation.
  * Tools requiring conversation are filtered out when this context is used.
  */
-export interface MCPToolContext extends Omit<ToolExecutionContext, 'getConversation' | 'conversationId' | 'triggeringEvent'> {
+export interface MCPToolContext extends Omit<ToolExecutionContext, "getConversation" | "conversationId" | "triggeringEvent"> {
     getConversation: () => undefined;
     conversationId?: undefined;
     triggeringEvent?: undefined;
