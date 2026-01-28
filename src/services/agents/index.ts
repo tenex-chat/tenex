@@ -1,4 +1,5 @@
 export type { AgentDiscoveryOptions } from "./NDKAgentDiscovery";
 export { NDKAgentDiscovery } from "./NDKAgentDiscovery";
-export { resolveRecipientToPubkey } from "./AgentResolution";
+export { resolveAgentSlug, resolveRecipientToPubkey } from "./AgentResolution";
+export type { AgentResolutionResult } from "./AgentResolution";
 export { AgentMetadataStore } from "./AgentMetadataStore";
