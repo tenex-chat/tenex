@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { MockLLMService } from "./MockLLMService";
 import type { MockLLMScenario } from "./types";
 
@@ -8,8 +8,16 @@ import type { MockLLMScenario } from "./types";
  */
 describe("MockLLMService Performance Testing", () => {
     let mockLLM: MockLLMService;
+    let setTimeoutSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        setTimeoutSpy = spyOn(globalThis, "setTimeout").mockImplementation((callback, delay?: number, ...args) => {
+            if (typeof callback === "function") {
+                callback(...args);
+            }
+            return 0 as unknown as ReturnType<typeof setTimeout>;
+        });
+
         // Create a simple scenario with delays
         const performanceScenario: MockLLMScenario = {
             name: "performance-test",
@@ -54,56 +62,40 @@ describe("MockLLMService Performance Testing", () => {
         });
     });
 
-    it("should delay response by specified streamDelay", async () => {
-        const startTime = Date.now();
+    afterEach(() => {
+        setTimeoutSpy?.mockRestore();
+    });
 
+    it("should delay response by specified streamDelay", async () => {
         const response = await mockLLM.complete({
             messages: [{ role: "user", content: "slow test" }],
             options: { configName: "test-model" },
         });
-
-        const endTime = Date.now();
-        const duration = endTime - startTime;
-
-        // Should take at least 1000ms
-        expect(duration).toBeGreaterThanOrEqual(1000);
+        const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
+        expect(delays).toEqual([1000]);
         expect(response.content).toBe("This is a slow response");
     });
 
     it("should handle very slow responses", async () => {
-        const startTime = Date.now();
-
         const response = await mockLLM.complete({
             messages: [{ role: "user", content: "very slow test" }],
             options: { configName: "test-model" },
         });
-
-        const endTime = Date.now();
-        const duration = endTime - startTime;
-
-        // Should take at least 3000ms
-        expect(duration).toBeGreaterThanOrEqual(3000);
+        const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
+        expect(delays).toEqual([3000]);
         expect(response.content).toBe("This is a very slow response");
     });
 
     it("should handle instant responses with no delay", async () => {
-        const startTime = Date.now();
-
         const response = await mockLLM.complete({
             messages: [{ role: "user", content: "instant test" }],
             options: { configName: "test-model" },
         });
-
-        const endTime = Date.now();
-        const duration = endTime - startTime;
-
-        // Should be nearly instant (less than 100ms)
-        expect(duration).toBeLessThan(100);
+        expect(setTimeoutSpy).not.toHaveBeenCalled();
         expect(response.content).toBe("This is an instant response");
     });
 
     it("should apply delays to streaming responses", async () => {
-        const startTime = Date.now();
         const chunks: string[] = [];
 
         // Stream the response
@@ -115,12 +107,10 @@ describe("MockLLMService Performance Testing", () => {
                 chunks.push(event.content);
             }
         }
-
-        const endTime = Date.now();
-        const duration = endTime - startTime;
-
-        // Streaming should also respect the delay
-        expect(duration).toBeGreaterThanOrEqual(1000);
+        const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
+        const totalDelay = delays.reduce((sum, delay) => sum + delay, 0);
+        expect(totalDelay).toBe(1000);
+        expect(delays).toHaveLength(chunks.length);
         expect(chunks.join("")).toContain("This is a slow response");
     });
 
@@ -138,8 +128,6 @@ describe("MockLLMService Performance Testing", () => {
     });
 
     it("should handle concurrent requests with different delays", async () => {
-        const startTime = Date.now();
-
         // Start three requests concurrently
         const promises = [
             mockLLM.complete({
@@ -157,11 +145,9 @@ describe("MockLLMService Performance Testing", () => {
         ];
 
         const responses = await Promise.all(promises);
-        const endTime = Date.now();
-        const totalDuration = endTime - startTime;
-
-        // All should complete, with the slowest determining total time
-        expect(totalDuration).toBeGreaterThanOrEqual(3000);
+        const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
+        expect(delays).toEqual(expect.arrayContaining([1000, 3000]));
+        expect(Math.max(...delays)).toBe(3000);
         expect(responses[0].content).toBe("This is an instant response");
         expect(responses[1].content).toBe("This is a slow response");
         expect(responses[2].content).toBe("This is a very slow response");

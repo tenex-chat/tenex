@@ -38,9 +38,8 @@ describe("UnixSocketTransport", () => {
         const client = net.createConnection(testSocketPath);
         await new Promise<void>((resolve) => client.on("connect", resolve));
 
-        const received: string[] = [];
-        client.on("data", (data) => {
-            received.push(data.toString());
+        const dataPromise = new Promise<string>((resolve) => {
+            client.once("data", (data) => resolve(data.toString()));
         });
 
         transport.write({
@@ -49,10 +48,8 @@ describe("UnixSocketTransport", () => {
             data: { type: "text-delta", textDelta: "Hello" },
         });
 
-        await new Promise((resolve) => setTimeout(resolve, 50));
-
-        expect(received.length).toBe(1);
-        const parsed = JSON.parse(received[0].trim());
+        const received = await dataPromise;
+        const parsed = JSON.parse(received.trim());
         expect(parsed.agent_pubkey).toBe("abc123");
         expect(parsed.data.textDelta).toBe("Hello");
 
