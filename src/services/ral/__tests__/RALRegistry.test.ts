@@ -8,6 +8,7 @@ describe("RALRegistry", () => {
   const agentPubkey2 = "agent-pubkey-456";
   const conversationId = "conv-123";
   const conversationId2 = "conv-456";
+  const projectId = "31933:pubkey:test-project";
 
   beforeEach(() => {
     // Reset singleton to ensure clean state between tests
@@ -26,7 +27,7 @@ describe("RALRegistry", () => {
 
   describe("create", () => {
     it("should create a new RAL entry and return ralNumber", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       expect(ralNumber).toBeDefined();
       expect(typeof ralNumber).toBe("number");
       expect(ralNumber).toBe(1); // First RAL in conversation should be 1
@@ -46,17 +47,17 @@ describe("RALRegistry", () => {
     });
 
     it("should assign unique RAL IDs", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
       const state1 = registry.getRAL(agentPubkey, conversationId, ralNumber1);
       registry.clearRAL(agentPubkey, conversationId, ralNumber1);
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
       const state2 = registry.getRAL(agentPubkey, conversationId, ralNumber2);
       expect(state1?.id).not.toBe(state2?.id);
     });
 
     it("should create multiple RALs for same agent+conversation (not overwrite)", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
       expect(ralNumber1).not.toBe(ralNumber2);
       expect(ralNumber2).toBe(ralNumber1 + 1);
 
@@ -72,8 +73,8 @@ describe("RALRegistry", () => {
     });
 
     it("should isolate state between different conversations", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId2);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId2, projectId);
 
       // Both should be RAL #1 since they're in different conversations
       expect(ralNumber1).toBe(1);
@@ -94,21 +95,21 @@ describe("RALRegistry", () => {
     });
 
     it("should return undefined for non-existent conversation", () => {
-      registry.create(agentPubkey, conversationId);
+      registry.create(agentPubkey, conversationId, projectId);
       const state = registry.getState(agentPubkey, "nonexistent");
       expect(state).toBeUndefined();
     });
 
     it("should return state for existing agent+conversation", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const state = registry.getState(agentPubkey, conversationId);
       expect(state).toBeDefined();
       expect(state?.ralNumber).toBe(ralNumber);
     });
 
     it("should get specific RAL by number", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
 
       const ral1 = registry.getRAL(agentPubkey, conversationId, ralNumber1);
       const ral2 = registry.getRAL(agentPubkey, conversationId, ralNumber2);
@@ -120,7 +121,7 @@ describe("RALRegistry", () => {
 
   describe("setStreaming", () => {
     it("should set streaming state", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialLastActivity = initialState?.lastActivityAt;
 
@@ -138,7 +139,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update lastActivityAt when streaming state changes", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
@@ -156,7 +157,7 @@ describe("RALRegistry", () => {
 
   describe("setPendingDelegations", () => {
     it("should set pending delegations", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -185,7 +186,7 @@ describe("RALRegistry", () => {
     });
 
     it("should create delegation event ID to RAL key mappings", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -222,7 +223,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update lastActivityAt when saving state", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
@@ -245,7 +246,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return RAL key for registered delegation", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const delegations: PendingDelegation[] = [
         {
           type: "delegate",
@@ -265,7 +266,7 @@ describe("RALRegistry", () => {
 
   describe("recordCompletion", () => {
     it("should record a delegation completion", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -321,7 +322,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update lastActivityAt when recording completion", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -359,7 +360,7 @@ describe("RALRegistry", () => {
 
   describe("queueSystemMessage", () => {
     it("should queue a system message", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "System message content");
 
@@ -385,7 +386,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return and consume queued injections", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "User message");
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "System message");
@@ -403,7 +404,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return copy of injections, not original array", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "Test");
 
@@ -417,7 +418,7 @@ describe("RALRegistry", () => {
 
   describe("setToolActive (concurrent tool tracking)", () => {
     it("should track multiple concurrent tools", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools concurrently
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
@@ -432,7 +433,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update currentTool to remaining tool when one completes", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
@@ -449,7 +450,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clear currentTool and toolStartedAt when all tools complete", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start and complete two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
@@ -464,7 +465,7 @@ describe("RALRegistry", () => {
     });
 
     it("should store tool info in activeTools map", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
 
@@ -475,7 +476,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update toolStartedAt to remaining tool's start time when one completes", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start first tool
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
@@ -509,7 +510,7 @@ describe("RALRegistry", () => {
 
   describe("clearToolFallback", () => {
     it("should clear a tool and update currentTool to remaining", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start two tools
       registry.setToolActive(agentPubkey, conversationId, ralNumber, "tool-call-1", true, "fs_read");
@@ -525,7 +526,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return false for non-existent tool", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const cleared = registry.clearToolFallback(agentPubkey, conversationId, ralNumber, "nonexistent");
 
@@ -535,7 +536,7 @@ describe("RALRegistry", () => {
 
   describe("abort controller management", () => {
     it("should register and abort controller", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const controller = new AbortController();
       registry.registerAbortController(agentPubkey, conversationId, ralNumber, controller);
@@ -548,7 +549,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle abort without registered controller gracefully", () => {
-      registry.create(agentPubkey, conversationId);
+      registry.create(agentPubkey, conversationId, projectId);
 
       expect(() => {
         registry.abortCurrentTool(agentPubkey, conversationId);
@@ -556,7 +557,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clear controller after abort", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const controller = new AbortController();
       registry.registerAbortController(agentPubkey, conversationId, ralNumber, controller);
@@ -571,7 +572,7 @@ describe("RALRegistry", () => {
 
   describe("clearRAL and clear", () => {
     it("should clear specific RAL state", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber, "Test");
 
@@ -582,8 +583,8 @@ describe("RALRegistry", () => {
     });
 
     it("should clear all RALs for a conversation", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
 
       registry.clear(agentPubkey, conversationId);
 
@@ -593,7 +594,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clean up delegation mappings", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -616,7 +617,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clear abort controllers", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const controller = new AbortController();
       registry.registerAbortController(agentPubkey, conversationId, ralNumber, controller);
@@ -638,8 +639,8 @@ describe("RALRegistry", () => {
 
   describe("conversation isolation", () => {
     it("should handle multiple conversations independently for same agent", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId2);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId2, projectId);
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber1, "Message for conversation 1");
       registry.queueSystemMessage(agentPubkey, conversationId2, ralNumber2, "Message for conversation 2");
@@ -655,8 +656,8 @@ describe("RALRegistry", () => {
     });
 
     it("should clear one conversation without affecting others", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId2);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId2, projectId);
 
       registry.queueSystemMessage(agentPubkey, conversationId, ralNumber1, "Message 1");
       registry.queueSystemMessage(agentPubkey, conversationId2, ralNumber2, "Message 2");
@@ -671,8 +672,8 @@ describe("RALRegistry", () => {
     });
 
     it("should track delegation completions per conversation", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
-      const ralNumber2 = registry.create(agentPubkey, conversationId2);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId2, projectId);
 
       const delegations1: PendingDelegation[] = [
         {
@@ -722,7 +723,7 @@ describe("RALRegistry", () => {
 
   describe("simplified execution model", () => {
     it("should track active RALs", () => {
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
 
       const activeRALs = registry.getActiveRALs(agentPubkey, conversationId);
       expect(activeRALs).toHaveLength(1);
@@ -737,7 +738,7 @@ describe("RALRegistry", () => {
       });
 
       it("should return false when RAL is streaming", () => {
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
         registry.setStreaming(agentPubkey, conversationId, ralNumber, true);
 
         const shouldWake = registry.shouldWakeUpExecution(agentPubkey, conversationId);
@@ -745,7 +746,7 @@ describe("RALRegistry", () => {
       });
 
       it("should return true when RAL is not streaming", () => {
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
         registry.setStreaming(agentPubkey, conversationId, ralNumber, false);
 
         const shouldWake = registry.shouldWakeUpExecution(agentPubkey, conversationId);
@@ -753,7 +754,7 @@ describe("RALRegistry", () => {
       });
 
       it("should return true when RAL has completed delegations", () => {
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
         // Add a pending delegation
         const pendingDelegations: PendingDelegation[] = [
@@ -781,7 +782,7 @@ describe("RALRegistry", () => {
       });
 
       it("should return true when RAL has pending delegations (waiting on response)", () => {
-        const ralNumber = registry.create(agentPubkey, conversationId);
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
         registry.setStreaming(agentPubkey, conversationId, ralNumber, false);
 
         // Add a pending delegation
@@ -806,7 +807,7 @@ describe("RALRegistry", () => {
 
   describe("mergePendingDelegations", () => {
     it("should insert new delegations and return correct counts", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const delegations: PendingDelegation[] = [
         {
@@ -837,7 +838,7 @@ describe("RALRegistry", () => {
     });
 
     it("should merge fields into existing entries instead of skipping duplicates", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // First: add a basic delegation
       const initialDelegation: PendingDelegation = {
@@ -876,7 +877,7 @@ describe("RALRegistry", () => {
     });
 
     it("should register followupEventId in delegationToRal mapping when merging", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Add initial delegation
       const initialDelegation: PendingDelegation = {
@@ -907,7 +908,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle concurrent merge calls safely", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Simulate two concurrent delegation batches
       const batch1: PendingDelegation[] = [
@@ -949,7 +950,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle mixed inserts and merges in single call", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Add initial delegation
       const initialDelegation: PendingDelegation = {
@@ -993,7 +994,7 @@ describe("RALRegistry", () => {
     });
 
     it("should update lastActivityAt", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       const initialState = registry.getState(agentPubkey, conversationId);
       const initialTime = initialState?.lastActivityAt;
 
@@ -1010,7 +1011,7 @@ describe("RALRegistry", () => {
 
     it("should update delegationToRal mapping on merge with new RAL number", () => {
       // Create RAL 1
-      const ralNumber1 = registry.create(agentPubkey, conversationId);
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
 
       // Add delegation to RAL 1
       const delegation1: PendingDelegation = {
@@ -1024,7 +1025,7 @@ describe("RALRegistry", () => {
       registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber1, [delegation1]);
 
       // Create RAL 2
-      const ralNumber2 = registry.create(agentPubkey, conversationId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
 
       // Merge same delegation ID to RAL 2 (simulating followup from new RAL)
       const delegation2: PendingDelegation = {
@@ -1047,7 +1048,7 @@ describe("RALRegistry", () => {
 
   describe("followup completion routing", () => {
     it("should record completion when e-tag contains followupEventId instead of delegationConversationId", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Add a followup delegation with a followupEventId
       const followupDelegation: PendingDelegation = {
@@ -1087,7 +1088,7 @@ describe("RALRegistry", () => {
     });
 
     it("should find pending delegation via followupEventId", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const followupDelegation: PendingDelegation = {
         type: "followup",
@@ -1112,7 +1113,7 @@ describe("RALRegistry", () => {
     });
 
     it("should find RAL waiting for delegation via followupEventId", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const followupDelegation: PendingDelegation = {
         type: "followup",
@@ -1135,7 +1136,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle completion flow: initial delegate -> followup -> completion via followupEventId", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Step 1: Add initial delegation
       const initialDelegation: PendingDelegation = {
@@ -1188,7 +1189,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clean up followupToCanonical mapping when clearing conversation", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const followupDelegation: PendingDelegation = {
         type: "followup",
@@ -1214,7 +1215,7 @@ describe("RALRegistry", () => {
     });
 
     it("should clean up followupToCanonical mapping when using setPendingDelegations", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Add followup delegation
       const followupDelegation: PendingDelegation = {
@@ -1242,7 +1243,7 @@ describe("RALRegistry", () => {
 
   describe("edge cases", () => {
     it("should handle empty pending delegations array", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
       registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, []);
 
       const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
@@ -1250,7 +1251,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle pending delegation without optional fields", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const delegation: PendingDelegation = {
         type: "delegate",
@@ -1268,7 +1269,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle completed delegation without optional fields", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const pendingDelegations: PendingDelegation[] = [
         {
@@ -1311,7 +1312,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return non-zero runtime when consumed during active LLM stream", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start the LLM stream
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
@@ -1327,7 +1328,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return incremental runtime on subsequent mid-stream consumes", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start the LLM stream
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
@@ -1349,7 +1350,7 @@ describe("RALRegistry", () => {
     });
 
     it("should not double-count runtime after endLLMStream", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start stream and advance 30ms
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
@@ -1373,7 +1374,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return 0 runtime when no stream is active and no prior accumulation", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // No stream started, consume should return 0
       const runtime = registry.consumeUnreportedRuntime(agentPubkey, conversationId, ralNumber);
@@ -1381,7 +1382,7 @@ describe("RALRegistry", () => {
     });
 
     it("should return correct runtime when consuming after multiple start/end cycles", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // First stream cycle: 20ms
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "message 1");
@@ -1414,7 +1415,7 @@ describe("RALRegistry", () => {
     });
 
     it("should handle getUnreportedRuntime (non-consuming) during active stream", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");
       setSystemTime(new Date(startTime + 30));
@@ -1433,7 +1434,7 @@ describe("RALRegistry", () => {
     });
 
     it("should preserve llmStreamStartTime for accurate stream_duration_ms in telemetry", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId);
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       // Start stream
       registry.startLLMStream(agentPubkey, conversationId, ralNumber, "test message");

@@ -103,6 +103,8 @@ export interface RALRegistryEntry {
   /** Sequential number for this RAL within the conversation (1, 2, 3...) */
   ralNumber: number;
   agentPubkey: string;
+  /** The project this RAL belongs to - required for multi-project isolation in daemon mode */
+  projectId: string;
   /** The conversation this RAL belongs to - RAL is scoped per agent+conversation */
   conversationId: string;
   queuedInjections: QueuedInjection[];

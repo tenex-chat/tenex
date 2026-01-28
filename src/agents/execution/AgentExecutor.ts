@@ -125,9 +125,14 @@ export class AgentExecutor {
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
+                // Get project ID for multi-project isolation in daemon mode
+                const projectCtx = getProjectContext();
+                const projectId = projectCtx.project.tagReference().join(":");
+
                 const { ralNumber, isResumption } = await resolveRAL({
                     agentPubkey: context.agent.pubkey,
                     conversationId: context.conversationId,
+                    projectId,
                     triggeringEventId: context.triggeringEvent.id,
                     span,
                 });
