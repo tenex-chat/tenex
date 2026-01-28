@@ -204,7 +204,7 @@ export function createMockProvider(config?: MockLLMConfig): ProviderV3 {
                     let sawToolCall = false;
                     let toolCallIndex = 0;
 
-                    const ensureTextStart = () => {
+                    const ensureTextStart = (): void => {
                         if (!textId) {
                             textId = `text-${Date.now()}`;
                             controller.enqueue({ type: "text-start", id: textId });
