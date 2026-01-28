@@ -66,14 +66,16 @@ interface ShellBackgroundResult {
     message: string;
 }
 
-// Track background tasks
-const backgroundTasks = new Map<string, {
+type BackgroundTaskInfo = {
     pid: number;
     command: string;
     description: string | null;
     outputFile: string;
     startTime: Date;
-}>();
+};
+
+// Track background tasks
+const backgroundTasks = new Map<string, BackgroundTaskInfo>();
 
 /**
  * Generate a unique task ID for background processes
@@ -235,8 +237,12 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         child.stderr?.pipe(outputStream);
 
         // Track the background task
+        if (child.pid === undefined) {
+            throw new Error("Failed to start background task: process ID unavailable");
+        }
+
         backgroundTasks.set(taskId, {
-            pid: child.pid!,
+            pid: child.pid,
             command: command.substring(0, 200),
             description: description || null,
             outputFile,
@@ -448,14 +454,14 @@ Use for: git operations, npm/build tools, docker, system commands where speciali
 /**
  * Get information about a background task by its ID
  */
-export function getBackgroundTaskInfo(taskId: string) {
+export function getBackgroundTaskInfo(taskId: string): BackgroundTaskInfo | undefined {
     return backgroundTasks.get(taskId);
 }
 
 /**
  * Get all background tasks
  */
-export function getAllBackgroundTasks() {
+export function getAllBackgroundTasks(): Array<{ taskId: string } & BackgroundTaskInfo> {
     return Array.from(backgroundTasks.entries()).map(([id, info]) => ({
         taskId: id,
         ...info,
