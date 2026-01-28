@@ -40,6 +40,7 @@ export type ToolName =
     | "reports_list"
     | "report_delete"
     | "schedule_task"
+    | "schedule_task_once"
     | "schedule_tasks_list"
     | "schedule_task_cancel"
     | "upload_blob"
@@ -147,7 +148,8 @@ export interface ToolRegistryContext extends ConversationToolContext {
  * Context for MCP tool execution - explicitly lacks conversation.
  * Tools requiring conversation are filtered out when this context is used.
  */
-export interface MCPToolContext extends Omit<ToolExecutionContext, "getConversation" | "conversationId" | "triggeringEvent"> {
+export interface MCPToolContext
+    extends Omit<ToolExecutionContext, "getConversation" | "conversationId" | "triggeringEvent"> {
     getConversation: () => undefined;
     conversationId?: undefined;
     triggeringEvent?: undefined;
@@ -178,4 +180,6 @@ export type ToolFactory = (context: ToolExecutionContext) => AISdkTool<unknown, 
  * Tool factory for tools that require conversation context.
  * These tools are filtered out when no conversation is available (e.g., MCP).
  */
-export type ConversationToolFactory = (context: ConversationToolContext) => AISdkTool<unknown, unknown>;
+export type ConversationToolFactory = (
+    context: ConversationToolContext
+) => AISdkTool<unknown, unknown>;

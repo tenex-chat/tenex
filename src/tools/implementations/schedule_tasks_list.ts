@@ -1,6 +1,6 @@
-import type { ToolExecutionContext } from "@/tools/types";
-import { SchedulerService } from "@/services/scheduling";
 import { getProjectContext } from "@/services/projects";
+import { SchedulerService } from "@/services/scheduling";
+import type { ToolExecutionContext } from "@/tools/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -11,7 +11,7 @@ import { z } from "zod";
  */
 export function createListScheduledTasksTool(_context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
-        description: "List scheduled tasks for the current project",
+        description: "List all scheduled tasks (recurring and one-off) for the current project",
         inputSchema: z.object({
             // Status filter is simplified since we don't track all these states locally
         }),
@@ -37,9 +37,11 @@ export function createListScheduledTasksTool(_context: ToolExecutionContext): AI
                 const formattedTasks = tasks.map((task) => ({
                     id: task.id,
                     title: task.title,
+                    type: task.type || "cron", // Default to "cron" for backward compatibility
                     prompt: task.prompt,
                     createdAt: task.createdAt,
-                    schedule: task.schedule,
+                    schedule: task.type === "oneoff" ? undefined : task.schedule, // Only show schedule for cron tasks
+                    executeAt: task.executeAt, // Only present for one-off tasks
                     lastRun: task.lastRun,
                     nextRun: task.nextRun,
                     toPubkey: task.toPubkey,
