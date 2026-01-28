@@ -41,9 +41,9 @@ async function executeWriteFile(
     const localReportStore = getLocalReportStore();
     if (localReportStore.isPathInReportsDir(path)) {
         throw new Error(
-            `Cannot write to reports directory directly. ` +
+            "Cannot write to reports directory directly. " +
             `Path "${path}" is within the protected reports directory. ` +
-            `Use the report_write tool instead to create or update reports.`
+            "Use the report_write tool instead to create or update reports."
         );
     }
 
