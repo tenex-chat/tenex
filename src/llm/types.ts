@@ -13,10 +13,9 @@ export type {
     FilePart,
 } from "ai";
 
-// AI SDK v5 doesn't export ToolCall/ToolResult as separate types
-// Tool calls are part of the streaming response types
-// Define compatibility types for internal use (legacy mock LLM support)
-export interface ToolCall {
+// AI SDK doesn't export a ToolCall type from the `ai` package.
+// Legacy tool call shape used by mock LLM utilities.
+export interface LegacyToolCall {
     name?: string;
     function?: string;
     params?: Record<string, unknown>;
@@ -41,7 +40,7 @@ export interface CompletionRequest {
 
 export interface CompletionResponse {
     content?: string;
-    toolCalls?: ToolCall[];
+    toolCalls?: LegacyToolCall[];
     model?: string;
     usage?: {
         prompt_tokens?: number;
@@ -61,7 +60,7 @@ export interface StreamEvent {
     response?: {
         type: string;
         content?: string;
-        toolCalls?: ToolCall[];
+        toolCalls?: LegacyToolCall[];
         usage?: {
             prompt_tokens?: number;
             completion_tokens?: number;
