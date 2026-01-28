@@ -371,13 +371,13 @@ export class RALRegistry {
       // - If streaming starts: STREAMING
       // - If streaming stops but any tool is running: ACTING (tool still executing)
       // - If streaming stops and no tools: REASONING (thinking/preparing next action)
-      let newState: 'STREAMING' | 'ACTING' | 'REASONING';
+      let newState: "STREAMING" | "ACTING" | "REASONING";
       if (isStreaming) {
-        newState = 'STREAMING';
+        newState = "STREAMING";
       } else if (ral.activeTools.size > 0) {
-        newState = 'ACTING';
+        newState = "ACTING";
       } else {
-        newState = 'REASONING';
+        newState = "REASONING";
       }
 
       llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
@@ -944,9 +944,14 @@ export class RALRegistry {
       } else {
         // Set currentTool to one of the remaining active tools, including its start time
         // Safe to use ! assertion: we're in the else branch where activeTools.size > 0
-        const remainingToolInfo = ral.activeTools.values().next().value!;
-        ral.currentTool = remainingToolInfo.name;
-        ral.toolStartedAt = remainingToolInfo.startedAt;
+        const remainingToolInfo = ral.activeTools.values().next().value;
+        if (remainingToolInfo) {
+          ral.currentTool = remainingToolInfo.name;
+          ral.toolStartedAt = remainingToolInfo.startedAt;
+        } else {
+          ral.currentTool = undefined;
+          ral.toolStartedAt = undefined;
+        }
       }
     }
 
@@ -956,13 +961,13 @@ export class RALRegistry {
     // - If any tools are active: ACTING
     // - If no tools but streaming: STREAMING
     // - If no tools and not streaming: REASONING
-    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
+    let newState: "ACTING" | "STREAMING" | "REASONING";
     if (ral.activeTools.size > 0) {
-      newState = 'ACTING';
+      newState = "ACTING";
     } else if (ral.isStreaming) {
-      newState = 'STREAMING';
+      newState = "STREAMING";
     } else {
-      newState = 'REASONING';
+      newState = "REASONING";
     }
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
@@ -1004,19 +1009,24 @@ export class RALRegistry {
       ral.toolStartedAt = undefined;
     } else {
       // Set currentTool to one of the remaining active tools, including its start time
-      const remainingToolInfo = ral.activeTools.values().next().value!;
-      ral.currentTool = remainingToolInfo.name;
-      ral.toolStartedAt = remainingToolInfo.startedAt;
+      const remainingToolInfo = ral.activeTools.values().next().value;
+      if (remainingToolInfo) {
+        ral.currentTool = remainingToolInfo.name;
+        ral.toolStartedAt = remainingToolInfo.startedAt;
+      } else {
+        ral.currentTool = undefined;
+        ral.toolStartedAt = undefined;
+      }
     }
 
     // Update state
-    let newState: 'ACTING' | 'STREAMING' | 'REASONING';
+    let newState: "ACTING" | "STREAMING" | "REASONING";
     if (ral.activeTools.size > 0) {
-      newState = 'ACTING';
+      newState = "ACTING";
     } else if (ral.isStreaming) {
-      newState = 'STREAMING';
+      newState = "STREAMING";
     } else {
-      newState = 'REASONING';
+      newState = "REASONING";
     }
 
     llmOpsRegistry.updateRALState(agentPubkey, conversationId, newState);
