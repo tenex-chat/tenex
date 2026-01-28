@@ -201,8 +201,7 @@ function recordInvalidToolCalls(
  * Emit session-captured event from provider metadata
  */
 function emitSessionCapturedFromMetadata(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    emitter: EventEmitter<Record<string, any>>,
+    emitter: EventEmitter<LLMServiceEventMap>,
     provider: string,
     providerMetadata: Record<string, unknown> | undefined,
     recordSpanEvent: boolean
