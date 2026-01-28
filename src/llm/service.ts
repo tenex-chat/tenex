@@ -172,6 +172,15 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 const systemContent = extractSystemContent(messages);
                 if (systemContent) {
                     options.systemPrompt = systemContent;
+                    // Capture system prompt as event with truncation metadata (mirrors llm.prompt pattern in FinishHandler)
+                    // Using event instead of attribute avoids OTel issues with unbounded/high-cardinality data
+                    const maxLength = 10000;
+                    const truncated = systemContent.length > maxLength;
+                    trace.getActiveSpan()?.addEvent("llm.system_prompt", {
+                        "system_prompt.text": truncated ? systemContent.slice(0, maxLength) : systemContent,
+                        "system_prompt.full_length": systemContent.length,
+                        "system_prompt.truncated": truncated,
+                    });
                 }
             }
 
