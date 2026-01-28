@@ -36,7 +36,7 @@ import { delegationCompletionFragment } from "./delegation-completion";
  * This provides a clear view of all available fragments
  */
 export function registerAllFragments(): void {
-    // Global user-configured prompt (appears before everything)
+    // Global user-configured prompt (ordered with other fragments by priority)
     fragmentRegistry.register(globalSystemPromptFragment);
 
     // Core identity and context

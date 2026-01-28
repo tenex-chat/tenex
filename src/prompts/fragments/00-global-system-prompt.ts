@@ -9,8 +9,8 @@ import type { PromptFragment } from "../core/types";
  *
  * Users can configure this via: `tenex setup global-system-prompt`
  *
- * Priority 0.5 ensures it appears very early (before agent-identity at priority 1),
- * giving user-defined global instructions high precedence.
+ * Priority 3 places it after the core identity fragments (priorities 1 and 2),
+ * so it is ordered like other fragments instead of being prepended.
  */
 
 // Empty args - the fragment loads content from config
@@ -20,7 +20,7 @@ interface GlobalSystemPromptArgs {
 
 export const globalSystemPromptFragment: PromptFragment<GlobalSystemPromptArgs> = {
     id: "global-system-prompt",
-    priority: 0.5,
+    priority: 3,
     template: () => {
         try {
             const tenexConfig = config.getConfig();
