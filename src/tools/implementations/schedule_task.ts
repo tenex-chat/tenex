@@ -1,7 +1,7 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling";
 import type { AISdkTool } from "@/tools/types";
-import { resolveRecipientToPubkey } from "@/services/agents";
+import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import * as cron from "node-cron";
@@ -29,71 +29,63 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
                 .string()
                 .nullable()
                 .describe(
-                    "Target agent slug (e.g., 'architect'), name (e.g., 'Architect'), npub, or hex pubkey"
+                    "Target agent slug (e.g., 'architect', 'claude-code'). Only agent slugs are accepted."
                 ),
         }),
         execute: async ({ title, prompt, schedule, targetAgent }) => {
-            try {
-                // Validate cron expression
-                if (!cron.validate(schedule)) {
-                    return {
-                        success: false,
-                        error: `Invalid cron expression: ${schedule}. Examples: '0 9 * * *' (daily at 9am), '*/5 * * * *' (every 5 minutes), '0 0 * * 0' (weekly on Sunday)`,
-                    };
-                }
-
-                const schedulerService = SchedulerService.getInstance();
-
-                // Resolve target agent to pubkey if specified
-                let toPubkey: string;
-                if (targetAgent) {
-                    const resolved = resolveRecipientToPubkey(targetAgent);
-                    if (!resolved) {
-                        return {
-                            success: false,
-                            error: `Could not resolve target agent: ${targetAgent}. Use agent slug (e.g., 'architect'), name, npub, or hex pubkey.`,
-                        };
-                    }
-                    toPubkey = resolved;
-                } else {
-                    // Default to self if no target specified
-                    toPubkey = context.agent.pubkey;
-                }
-
-                // The agent scheduling the task is always the current agent
-                const fromPubkey = context.agent.pubkey;
-
-                // Add task to scheduler with both pubkeys and optional title
-                const taskId = await schedulerService.addTask(
-                    schedule,
-                    prompt,
-                    fromPubkey,
-                    toPubkey,
-                    undefined, // projectId - let it be resolved from context
-                    title
+            // Validate cron expression - throw for invalid input (consistent with delegate tool)
+            if (!cron.validate(schedule)) {
+                throw new Error(
+                    `Invalid cron expression: ${schedule}. Examples: '0 9 * * *' (daily at 9am), '*/5 * * * *' (every 5 minutes), '0 0 * * 0' (weekly on Sunday)`
                 );
-
-                logger.info(
-                    `Successfully created scheduled task ${taskId} with cron schedule: ${schedule}`
-                );
-
-                return {
-                    success: true,
-                    taskId,
-                    message: `Task scheduled successfully with ID: ${taskId}`,
-                    title,
-                    schedule,
-                    prompt,
-                    targetAgent: targetAgent || "self",
-                };
-            } catch (error: unknown) {
-                logger.error("Failed to schedule task:", error);
-
-                return {
-                    success: false,
-                    error: error instanceof Error ? error.message : "Failed to schedule task",
-                };
             }
+
+            // Resolve target agent to pubkey if specified - throw for invalid slugs (consistent with delegate tool)
+            let toPubkey: string;
+            if (targetAgent) {
+                const resolution = resolveAgentSlug(targetAgent);
+                if (!resolution.pubkey) {
+                    const availableSlugsStr = resolution.availableSlugs.length > 0
+                        ? `Available agent slugs: ${resolution.availableSlugs.join(", ")}`
+                        : "No agents available in the current project context.";
+                    throw new Error(
+                        `Invalid agent slug: "${targetAgent}". Only agent slugs are accepted. ${availableSlugsStr}`
+                    );
+                }
+                toPubkey = resolution.pubkey;
+            } else {
+                // Default to self if no target specified
+                toPubkey = context.agent.pubkey;
+            }
+
+            const schedulerService = SchedulerService.getInstance();
+
+            // The agent scheduling the task is always the current agent
+            const fromPubkey = context.agent.pubkey;
+
+            // Add task to scheduler with both pubkeys and optional title
+            const taskId = await schedulerService.addTask(
+                schedule,
+                prompt,
+                fromPubkey,
+                toPubkey,
+                undefined, // projectId - let it be resolved from context
+                title
+            );
+
+            logger.info(
+                `Successfully created scheduled task ${taskId} with cron schedule: ${schedule}`
+            );
+
+            return {
+                success: true,
+                taskId,
+                message: `Task scheduled successfully with ID: ${taskId}`,
+                title,
+                schedule,
+                prompt,
+                targetAgent: targetAgent || "self",
+            };
         },
     });
 

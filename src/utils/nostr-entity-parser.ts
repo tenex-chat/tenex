@@ -147,7 +147,7 @@ export function isHexPrefix(input: string | undefined): boolean {
  *
  * IMPORTANT: This function is TYPE-AGNOSTIC - it returns any matching ID without
  * validating whether it's an event ID or pubkey. For resolving specifically to
- * agent pubkeys, use `resolveRecipientToPubkey` from AgentResolution service.
+ * agent pubkeys, use `resolveAgentSlug` from the AgentResolution service.
  *
  * @param prefix - A 12-character hex string prefix
  * @returns The full 64-character ID, or null if not found or invalid input
