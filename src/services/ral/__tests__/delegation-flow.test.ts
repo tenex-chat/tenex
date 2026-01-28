@@ -19,6 +19,7 @@ const mockAgent2 = {
 };
 
 const CONVERSATION_ID = "conv-test-123";
+const PROJECT_ID = "31933:pubkey:test-project";
 
 mock.module("@/services/projects", () => ({
     getProjectContext: () => ({
@@ -43,7 +44,7 @@ describe("RAL Delegation Flow", () => {
 
     describe("RALRegistry State Management", () => {
         it("should create a new RAL entry for an agent+conversation pair", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             expect(ralNumber).toBeDefined();
             expect(typeof ralNumber).toBe("number");
@@ -61,8 +62,8 @@ describe("RAL Delegation Flow", () => {
             const conversationA = "conv-a";
             const conversationB = "conv-b";
 
-            registry.create(mockAgent.pubkey, conversationA);
-            registry.create(mockAgent.pubkey, conversationB);
+            registry.create(mockAgent.pubkey, conversationA, PROJECT_ID);
+            registry.create(mockAgent.pubkey, conversationB, PROJECT_ID);
 
             const stateA = registry.getState(mockAgent.pubkey, conversationA);
             const stateB = registry.getState(mockAgent.pubkey, conversationB);
@@ -73,7 +74,7 @@ describe("RAL Delegation Flow", () => {
         });
 
         it("should set pending delegations", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             const pendingDelegations: PendingDelegation[] = [
                 {
@@ -94,7 +95,7 @@ describe("RAL Delegation Flow", () => {
         });
 
         it("should find state waiting for a specific delegation via event ID lookup", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             const pendingDelegations: PendingDelegation[] = [
                 {
@@ -119,7 +120,7 @@ describe("RAL Delegation Flow", () => {
         });
 
         it("should record completion and remove from pending", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             const pendingDelegations: PendingDelegation[] = [
                 {
@@ -151,7 +152,7 @@ describe("RAL Delegation Flow", () => {
         });
 
         it("should track partial completions correctly", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             const pendingDelegations: PendingDelegation[] = [
                 {
@@ -204,7 +205,7 @@ describe("RAL Delegation Flow", () => {
         });
 
         it("should not affect isStreaming when setting pending delegations", () => {
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
 
             const initialState = registry.getState(mockAgent.pubkey, CONVERSATION_ID);
             expect(initialState?.isStreaming).toBe(false);
@@ -265,7 +266,7 @@ describe("RAL Delegation Flow", () => {
     describe("DelegationCompletionHandler Integration", () => {
         it("should detect delegation completion via e-tag matching", async () => {
             // Setup: Create RAL with pending delegation
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     type: "delegate",
@@ -316,7 +317,7 @@ describe("RAL Delegation Flow", () => {
 
         it("should not record completion for unrelated events", async () => {
             // Setup: Create RAL with pending delegation
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     type: "delegate",
@@ -354,7 +355,7 @@ describe("RAL Delegation Flow", () => {
 
         it("should record each completion independently (routing via p-tags)", async () => {
             // Setup: Create RAL with multiple pending delegations
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
             registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
                 {
                     type: "delegate",
@@ -444,7 +445,7 @@ describe("RAL Delegation Flow", () => {
     describe("Full Delegation Flow", () => {
         it("should handle complete delegation lifecycle", async () => {
             // 1. Agent starts execution
-            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID);
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
             expect(registry.getState(mockAgent.pubkey, CONVERSATION_ID)?.isStreaming).toBe(false);
 
             // 2. Agent calls delegate tool, which sets pending delegations

@@ -74,7 +74,7 @@ describe("Supervision Correction Message Injection", () => {
             });
 
             // Step 2: Agent starts first RAL and produces output (with tool calls)
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             // Agent's tool calls and text response (simulating first run)
@@ -189,7 +189,7 @@ describe("Supervision Correction Message Injection", () => {
                 messageType: "text",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             // Agent's first response
@@ -246,7 +246,7 @@ describe("Supervision Correction Message Injection", () => {
                 messageType: "text",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             store.addMessage({
@@ -304,7 +304,7 @@ describe("Supervision Correction Message Injection", () => {
                 messageType: "text",
             });
 
-            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID);
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             store.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
             store.addMessage({

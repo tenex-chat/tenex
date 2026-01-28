@@ -24,6 +24,7 @@ mockResolve.mockImplementation((recipient: string) => {
 
 describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
+    const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
     const createMockContext = (ralNumber: number): ToolExecutionContext => ({
@@ -130,7 +131,7 @@ describe("Delegation tools - Self-delegation validation", () => {
         it("should error when delegation conversation not found", async () => {
             // Create RAL first, then pass its number to context
             const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
             const context = createMockContext(ralNumber);
             const followupTool = createDelegateFollowupTool(context);
 
@@ -192,7 +193,7 @@ describe("Delegation tools - RAL isolation", () => {
             const agentPubkey = "agent-pubkey-123";
 
             // Create RAL 1 with pending delegations (simulating previous execution)
-            const ral1Number = registry.create(agentPubkey, conversationId);
+            const ral1Number = registry.create(agentPubkey, conversationId, projectId);
             registry.setPendingDelegations(agentPubkey, conversationId, ral1Number, [
                 {
                     delegationConversationId: "old-delegation-id",
@@ -204,7 +205,7 @@ describe("Delegation tools - RAL isolation", () => {
             ]);
 
             // Create RAL 2 (current execution) with NO pending delegations
-            const ral2Number = registry.create(agentPubkey, conversationId);
+            const ral2Number = registry.create(agentPubkey, conversationId, projectId);
 
             // Verify RAL 1 still has pending delegations (using conversation-level API)
             const ral1Pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ral1Number);
@@ -237,7 +238,7 @@ describe("Delegation tools - RAL isolation", () => {
             const agentPubkey = "agent-pubkey-123";
 
             // Create a RAL with pending delegations
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
             registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [
                 {
                     delegationConversationId: "pending-delegation-id",
@@ -307,7 +308,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
     describe("delegate tool", () => {
         it("should register pending delegation in RALRegistry after successful delegation", async () => {
             const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
             const context = createMockContext(ralNumber);
             const delegateTool = createDelegateTool(context);
 
@@ -335,7 +336,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
 
         it("should register multiple pending delegations correctly", async () => {
             const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
             const context = createMockContext(ralNumber);
             const delegateTool = createDelegateTool(context);
 
@@ -361,7 +362,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
 
         it("should atomically merge delegations from concurrent calls without losing any", async () => {
             const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
             // Pre-seed with existing delegation (simulating concurrent call)
             registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [
@@ -402,7 +403,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
 
         it("should merge fields into existing delegations with the same delegationConversationId", async () => {
             const agentPubkey = "agent-pubkey-123";
-            const ralNumber = registry.create(agentPubkey, conversationId);
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
             // Add a delegation manually
             const { insertedCount: firstInserted } = registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [

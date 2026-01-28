@@ -16,7 +16,6 @@ import { createLocalReportStore, LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
-import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
@@ -181,8 +180,13 @@ export class ProjectRuntime {
                 );
             });
 
-            // Start operations status publisher
-            this.operationsStatusPublisher = new OperationsStatusService(llmOpsRegistry);
+            // Start operations status publisher (uses RALRegistry for streaming-only semantics)
+            // Pass projectId and context for multi-project isolation in daemon mode
+            this.operationsStatusPublisher = new OperationsStatusService(
+                RALRegistry.getInstance(),
+                this.projectId,
+                this.context
+            );
             this.operationsStatusPublisher.start();
 
             this.isRunning = true;
