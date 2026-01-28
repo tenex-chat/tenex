@@ -14,7 +14,7 @@ mock.module("ai-sdk-provider-codex-app-server", () => ({
 }));
 
 // Import after mocking
-import { CodexAppServerToolsAdapter, isCodexBuiltinTool, CODEX_BUILTIN_PREFIXES } from "../CodexAppServerToolsAdapter";
+import { CodexAppServerToolsAdapter } from "../CodexAppServerToolsAdapter";
 
 describe("CodexAppServerToolsAdapter", () => {
     const mockTool: AISdkTool = {
@@ -24,47 +24,11 @@ describe("CodexAppServerToolsAdapter", () => {
     };
 
     beforeEach(() => {
-        // Reset call tracking before each test
         createSdkMcpServerCalls = [];
     });
 
-    describe("isCodexBuiltinTool", () => {
-        it("should identify fs_* tools as built-in", () => {
-            expect(isCodexBuiltinTool("fs_read")).toBe(true);
-            expect(isCodexBuiltinTool("fs_write")).toBe(true);
-            expect(isCodexBuiltinTool("fs_glob")).toBe(true);
-            expect(isCodexBuiltinTool("fs_grep")).toBe(true);
-            expect(isCodexBuiltinTool("fs_edit")).toBe(true);
-            expect(isCodexBuiltinTool("fs_anything")).toBe(true);
-        });
-
-        it("should NOT identify todo_write as built-in", () => {
-            expect(isCodexBuiltinTool("todo_write")).toBe(false);
-        });
-
-        it("should NOT identify TENEX tools as built-in", () => {
-            expect(isCodexBuiltinTool("delegate")).toBe(false);
-            expect(isCodexBuiltinTool("ask")).toBe(false);
-            expect(isCodexBuiltinTool("lesson_learn")).toBe(false);
-            expect(isCodexBuiltinTool("report_write")).toBe(false);
-            expect(isCodexBuiltinTool("conversation_get")).toBe(false);
-        });
-
-        it("should match all defined prefixes", () => {
-            for (const prefix of CODEX_BUILTIN_PREFIXES) {
-                expect(isCodexBuiltinTool(`${prefix}test`)).toBe(true);
-            }
-        });
-    });
-
-    describe("CODEX_BUILTIN_PREFIXES", () => {
-        it("should only contain fs_ prefix", () => {
-            expect(CODEX_BUILTIN_PREFIXES).toEqual(["fs_"]);
-        });
-    });
-
     describe("createSdkMcpServer", () => {
-        it("should filter out fs_* tools (Codex has built-in file tools)", () => {
+        it("should include fs_* tools", () => {
             const tools: Record<string, AISdkTool> = {
                 fs_read: mockTool,
                 fs_write: mockTool,
@@ -76,42 +40,41 @@ describe("CodexAppServerToolsAdapter", () => {
 
             CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
-            // Assert the arguments passed to createSdkMcpServer
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
             expect(callArgs.name).toBe("tenex");
-            expect(callArgs.tools).toHaveLength(2);
+            expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
 
             const toolNames = callArgs.tools.map((t: unknown) => (t as { name: string }).name);
             expect(toolNames).toContain("delegate");
             expect(toolNames).toContain("ask");
-            expect(toolNames).not.toContain("fs_read");
-            expect(toolNames).not.toContain("fs_write");
+            expect(toolNames).toContain("fs_read");
+            expect(toolNames).toContain("fs_write");
+            expect(toolNames).toContain("fs_glob");
+            expect(toolNames).toContain("fs_grep");
         });
 
-        it("should NOT filter out todo_write tool (Codex does not have built-in todo)", () => {
+        it("should include shell tool", () => {
             const tools: Record<string, AISdkTool> = {
-                todo_write: mockTool,
+                shell: mockTool,
                 delegate: mockTool,
                 fs_read: mockTool,
             };
 
             CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
-            // Assert the arguments passed to createSdkMcpServer
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
-            expect(callArgs.tools).toHaveLength(2);
+            expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
 
             const toolNames = callArgs.tools.map((t: unknown) => (t as { name: string }).name);
-            expect(toolNames).toContain("todo_write");
+            expect(toolNames).toContain("shell");
             expect(toolNames).toContain("delegate");
-            expect(toolNames).not.toContain("fs_read");
+            expect(toolNames).toContain("fs_read");
         });
 
-        it("should include all TENEX-specific tools", () => {
+        it("should include all provided tools", () => {
             const tools: Record<string, AISdkTool> = {
-                // TENEX tools that should be included
                 todo_write: mockTool,
                 delegate: mockTool,
                 delegate_followup: mockTool,
@@ -126,7 +89,7 @@ describe("CodexAppServerToolsAdapter", () => {
                 conversation_list: mockTool,
                 project_list: mockTool,
                 schedule_task: mockTool,
-                // Codex built-in tools that should be filtered
+                shell: mockTool,
                 fs_read: mockTool,
                 fs_write: mockTool,
                 fs_glob: mockTool,
@@ -136,19 +99,17 @@ describe("CodexAppServerToolsAdapter", () => {
 
             CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
-            // Assert the arguments passed to createSdkMcpServer
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
-
-            // 19 total - 5 fs_* tools = 14 tools
-            expect(callArgs.tools).toHaveLength(14);
+            expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
 
             const toolNames = callArgs.tools.map((t: unknown) => (t as { name: string }).name);
             expect(toolNames).toContain("todo_write");
-            expect(toolNames.filter((n: string) => n.startsWith("fs_"))).toHaveLength(0);
+            expect(toolNames).toContain("shell");
+            expect(toolNames.filter((n: string) => n.startsWith("fs_"))).toHaveLength(5);
         });
 
-        it("should return undefined when no tools remain after filtering", () => {
+        it("should create server with only fs_* tools", () => {
             const tools: Record<string, AISdkTool> = {
                 fs_read: mockTool,
                 fs_write: mockTool,
@@ -156,9 +117,9 @@ describe("CodexAppServerToolsAdapter", () => {
 
             const server = CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
-            // All tools filtered out - createSdkMcpServer should not be called
-            expect(server).toBeUndefined();
-            expect(createSdkMcpServerCalls).toHaveLength(0);
+            expect(server).toBeDefined();
+            expect(createSdkMcpServerCalls).toHaveLength(1);
+            expect(createSdkMcpServerCalls[0].tools).toHaveLength(Object.keys(tools).length);
         });
 
         it("should handle empty tools object", () => {
