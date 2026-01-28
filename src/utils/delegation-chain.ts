@@ -55,17 +55,19 @@ export function truncateConversationId(conversationId: string): string {
  * SEMANTICS: Each entry's `conversationId` represents "the conversation where this agent
  * was DELEGATED TO". When displaying [A -> B] [conversation X], X comes from B.conversationId.
  * - Origin agent has no conversationId (they started the chain, weren't delegated)
- * - Current agent's conversationId = parentConversationId (where they were delegated to)
+ * - Current agent's conversationId = currentConversationId (the conversation being created for them)
  *
  * @param event - The event that triggered this conversation
  * @param currentAgentPubkey - The pubkey of the agent receiving the delegation
  * @param projectOwnerPubkey - The pubkey of the project owner (human user)
+ * @param currentConversationId - The ID of the conversation being created for the current agent (required to ensure correct semantics)
  * @returns The delegation chain entries, or undefined if this is a direct user message
  */
 export function buildDelegationChain(
     event: NDKEvent,
     currentAgentPubkey: string,
-    projectOwnerPubkey: string
+    projectOwnerPubkey: string,
+    currentConversationId: string
 ): DelegationChainEntry[] | undefined {
     // Check for delegation tag - if not present, this is a direct user conversation
     const delegationTag = event.tags.find(t => t[0] === "delegation");
@@ -269,7 +271,7 @@ export function buildDelegationChain(
     }
 
     // Add the current agent at the end (if not already in chain)
-    // Current agent was delegated TO in parentConversationId
+    // Current agent was delegated TO in currentConversationId (the conversation being created for them)
     // Store FULL conversation ID - truncation happens at display time
     if (!seenPubkeys.has(currentAgentPubkey) && !chain.some(e => e.pubkey === currentAgentPubkey)) {
         const currentAgentInfo = resolveDisplayName(currentAgentPubkey);
@@ -277,7 +279,7 @@ export function buildDelegationChain(
             pubkey: currentAgentPubkey,
             displayName: currentAgentInfo.displayName,
             isUser: false,
-            conversationId: parentConversationId, // Store full ID
+            conversationId: currentConversationId,
         });
     }
 
