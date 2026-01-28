@@ -3,7 +3,7 @@ import type { EmbeddingProvider } from "@/services/embedding";
 import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
 import { RAGDatabaseService } from "./RAGDatabaseService";
 import { RAGOperations } from "./RAGOperations";
-import type { RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
+import type { LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
 /**
  * Facade for RAG functionality
@@ -65,11 +65,10 @@ export class RAGService {
      */
     public async createCollection(
         name: string,
-        schema?: Record<string, unknown>
+        schema?: Partial<LanceDBSchema>
     ): Promise<RAGCollection> {
         await this.ensureInitialized();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return this.operations.createCollection(name, schema as any);
+        return this.operations.createCollection(name, schema);
     }
 
     /**
