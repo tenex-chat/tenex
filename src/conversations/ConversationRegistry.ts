@@ -37,6 +37,7 @@ let ConversationStoreClass: typeof import("./ConversationStore").ConversationSto
 
 function getConversationStoreClass(): typeof import("./ConversationStore").ConversationStore {
     if (!ConversationStoreClass) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy load to avoid circular dependency
         ConversationStoreClass = require("./ConversationStore").ConversationStore;
     }
     return ConversationStoreClass;
