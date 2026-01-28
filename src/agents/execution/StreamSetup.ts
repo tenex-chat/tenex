@@ -9,7 +9,7 @@
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { NudgeService } from "@/services/nudge";
+import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -35,6 +35,10 @@ export interface StreamSetupResult {
     messages: ModelMessage[];
     ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     nudgeContent: string;
+    /** Individual nudge data for system prompt rendering */
+    nudges: NudgeData[];
+    /** Tool permissions extracted from nudge events */
+    nudgeToolPermissions: NudgeToolPermissions;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
@@ -56,8 +60,19 @@ export async function setupStreamExecution(
     ralNumber: number,
     injectionProcessor: InjectionProcessor
 ): Promise<StreamSetupResult> {
+    // === FETCH NUDGES FIRST ===
+    // Must fetch nudges BEFORE getToolsObject because nudges can modify available tools
+    const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+    const nudgeResult = nudgeEventIds.length > 0
+        ? await NudgeService.getInstance().fetchNudgesWithPermissions(nudgeEventIds)
+        : { nudges: [], content: "", toolPermissions: {} };
+
+    // Now get tools with nudge permissions applied
+    // IMPORTANT: Always call getToolsObject even with empty base tools,
+    // because nudge permissions (allow-tool, only-tool) can grant tools
+    // to agents that have no default tools configured.
     const toolNames = context.agent.tools || [];
-    let toolsObject = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};
+    let toolsObject = getToolsObject(toolNames, context, nudgeResult.toolPermissions);
 
     // Wrap tools with pre-tool supervision checks
     toolsObject = wrapToolsWithSupervision(toolsObject, context);
@@ -121,12 +136,8 @@ export async function setupStreamExecution(
         throw new Error(`Conversation ${context.conversationId} not found`);
     }
 
-    // Fetch nudge content if triggering event has nudge tags
-    const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
-    const nudgeContent =
-        nudgeEventIds.length > 0
-            ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
-            : "";
+    // Use already-fetched nudge content (fetched at the top of this function)
+    const nudgeContent = nudgeResult.content;
 
     const abortSignal = llmOpsRegistry.registerOperation(context);
 
@@ -215,6 +226,8 @@ export async function setupStreamExecution(
         mcpManager: projectContext.mcpManager,
         agentLessons: projectContext.agentLessons,
         nudgeContent,
+        nudges: nudgeResult.nudges,
+        nudgeToolPermissions: nudgeResult.toolPermissions,
         respondingToPubkey: context.triggeringEvent.pubkey,
         pendingDelegations,
         completedDelegations,
@@ -240,6 +253,8 @@ export async function setupStreamExecution(
         messages,
         ephemeralMessages,
         nudgeContent,
+        nudges: nudgeResult.nudges,
+        nudgeToolPermissions: nudgeResult.toolPermissions,
         abortSignal,
         metaModelSystemPrompt,
         variantSystemPrompt,
