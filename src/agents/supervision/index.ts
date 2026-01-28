@@ -21,3 +21,10 @@ export {
 
 // Registration
 export { registerDefaultHeuristics, updateKnownAgentSlugs } from "./registerHeuristics";
+
+// Health Check
+export {
+    checkSupervisionHealth,
+    assertSupervisionHealth,
+    type SupervisionHealthCheckResult,
+} from "./supervisionHealthCheck";

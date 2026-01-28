@@ -58,7 +58,7 @@ export async function checkPostCompletion(
     const ralRegistry = RALRegistry.getInstance();
     const executionId = `${agent.pubkey}:${context.conversationId}:${ralNumber}`;
 
-    logger.info("[PostCompletionChecker] Running supervision check", {
+    logger.debug("[PostCompletionChecker] Running supervision check", {
         agent: agent.slug,
         ralNumber,
     });
@@ -230,7 +230,7 @@ export async function checkPostCompletion(
             };
         }
     } else {
-        logger.info("[PostCompletionChecker] Supervision check passed", {
+        logger.debug("[PostCompletionChecker] Supervision check passed", {
             agent: agent.slug,
             ralNumber,
         });

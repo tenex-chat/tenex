@@ -5,6 +5,7 @@ import { SilentAgentHeuristic } from "../heuristics/SilentAgentHeuristic";
 import { MAX_SUPERVISION_RETRIES } from "../types";
 import type { Heuristic, PostCompletionContext, PreToolContext } from "../types";
 import { supervisorLLMService } from "../SupervisorLLMService";
+import { resetRegistrationForTesting } from "../registerHeuristics";
 
 // Mock logger
 vi.mock("@/utils/logger", () => ({
@@ -30,8 +31,9 @@ describe("SupervisorOrchestrator", () => {
     let orchestrator: SupervisorOrchestrator;
 
     beforeEach(() => {
-        // Clear registry before each test
-        HeuristicRegistry.getInstance().clear();
+        // Reset registration state AND clear registry before each test
+        // This allows tests to verify fail-closed behavior when registry is empty
+        resetRegistrationForTesting();
         orchestrator = new SupervisorOrchestrator();
     });
 
@@ -141,11 +143,12 @@ describe("SupervisorOrchestrator", () => {
     });
 
     describe("checkPostCompletion", () => {
-        it("should return no violation when no heuristics registered", async () => {
+        it("should throw error when no heuristics registered (fail-closed behavior)", async () => {
             const context = createContext();
-            const result = await orchestrator.checkPostCompletion(context);
 
-            expect(result.hasViolation).toBe(false);
+            await expect(orchestrator.checkPostCompletion(context)).rejects.toThrow(
+                "Supervision system misconfigured: no post-completion heuristics registered"
+            );
         });
 
         it("should return no violation when heuristic does not trigger", async () => {
@@ -393,6 +396,7 @@ describe("SupervisorOrchestrator", () => {
         });
 
         it("should skip already-enforced heuristics when executionId is provided", async () => {
+            // Register the enforced heuristic
             const mockHeuristic: Heuristic<PostCompletionContext> = {
                 id: "test-skip-enforced",
                 name: "Test Skip Enforced",
@@ -406,7 +410,22 @@ describe("SupervisorOrchestrator", () => {
                 getCorrectionAction: vi.fn(),
             };
 
+            // Also register a second non-triggered heuristic so we don't get the empty registry error
+            const dummyHeuristic: Heuristic<PostCompletionContext> = {
+                id: "dummy-heuristic",
+                name: "Dummy Heuristic",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "Not triggered",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
             HeuristicRegistry.getInstance().register(mockHeuristic);
+            HeuristicRegistry.getInstance().register(dummyHeuristic);
 
             // Mark the heuristic as enforced
             orchestrator.markHeuristicEnforced("exec-1", "test-skip-enforced");
@@ -416,6 +435,8 @@ describe("SupervisorOrchestrator", () => {
 
             // Should not have called detect because heuristic was already enforced
             expect(mockHeuristic.detect).not.toHaveBeenCalled();
+            // Dummy heuristic should have been checked
+            expect(dummyHeuristic.detect).toHaveBeenCalled();
             expect(result.hasViolation).toBe(false);
         });
 
@@ -489,7 +510,7 @@ describe("SupervisorOrchestrator", () => {
 
             HeuristicRegistry.getInstance().register(mockHeuristic);
 
-            // Mark heuristic as enforced for some execution
+            // Mark heuristic as enforced for some execution (but we'll call without executionId)
             orchestrator.markHeuristicEnforced("exec-1", "test-no-execution-id");
 
             const context = createContext();
@@ -498,6 +519,32 @@ describe("SupervisorOrchestrator", () => {
 
             // Should have called detect because no executionId was provided
             expect(mockHeuristic.detect).toHaveBeenCalled();
+            expect(result.hasViolation).toBe(false);
+        });
+
+        it("should still run heuristics even when some are enforced (checks all registered)", async () => {
+            // This test verifies that having registered heuristics (even if some are enforced)
+            // still allows the supervision check to proceed - it runs all applicable heuristics
+            const enforcedHeuristic: Heuristic<PostCompletionContext> = {
+                id: "only-enforced-heuristic",
+                name: "Only Enforced Heuristic",
+                timing: "post-completion",
+                detect: vi.fn().mockResolvedValue({
+                    triggered: false,
+                    reason: "Not triggered",
+                }),
+                buildVerificationPrompt: vi.fn(),
+                buildCorrectionMessage: vi.fn(),
+                getCorrectionAction: vi.fn(),
+            };
+
+            HeuristicRegistry.getInstance().register(enforcedHeuristic);
+
+            const context = createContext();
+            const result = await orchestrator.checkPostCompletion(context, "exec-1");
+
+            // Should work because there's still a registered heuristic
+            expect(enforcedHeuristic.detect).toHaveBeenCalled();
             expect(result.hasViolation).toBe(false);
         });
     });
