@@ -122,34 +122,34 @@ function buildRipgrepCommand(input: GrepInput, searchPath: string): string {
     // Context lines (only for content mode)
     if (output_mode === "content") {
         if (contextAround != null && contextAround > 0) {
-            parts.push(`-C`, `${contextAround}`);
+            parts.push("-C", `${contextAround}`);
         } else {
             if (contextBefore != null && contextBefore > 0) {
-                parts.push(`-B`, `${contextBefore}`);
+                parts.push("-B", `${contextBefore}`);
             }
             if (contextAfter != null && contextAfter > 0) {
-                parts.push(`-A`, `${contextAfter}`);
+                parts.push("-A", `${contextAfter}`);
             }
         }
     }
 
     // File type filter
     if (fileType) {
-        parts.push(`--type`, fileType);
+        parts.push("--type", fileType);
     }
 
     // Glob pattern filter
     if (globPattern) {
-        parts.push(`--glob`, `'${globPattern}'`);
+        parts.push("--glob", `'${globPattern}'`);
     }
 
     // Default exclusions
-    parts.push(`--glob`, `'!node_modules'`);
-    parts.push(`--glob`, `'!.git'`);
-    parts.push(`--glob`, `'!dist'`);
-    parts.push(`--glob`, `'!build'`);
-    parts.push(`--glob`, `'!.next'`);
-    parts.push(`--glob`, `'!coverage'`);
+    parts.push("--glob", "'!node_modules'");
+    parts.push("--glob", "'!.git'");
+    parts.push("--glob", "'!dist'");
+    parts.push("--glob", "'!build'");
+    parts.push("--glob", "'!.next'");
+    parts.push("--glob", "'!coverage'");
 
     // Pattern (escape for shell)
     parts.push(`'${pattern.replace(/'/g, "'\\''")}'`);
@@ -194,13 +194,13 @@ function buildGrepCommand(input: GrepInput, searchPath: string): string {
     // Context lines (only for content mode)
     if (output_mode === "content") {
         if (contextAround != null && contextAround > 0) {
-            parts.push(`-C`, `${contextAround}`);
+            parts.push("-C", `${contextAround}`);
         } else {
             if (contextBefore != null && contextBefore > 0) {
-                parts.push(`-B`, `${contextBefore}`);
+                parts.push("-B", `${contextBefore}`);
             }
             if (contextAfter != null && contextAfter > 0) {
-                parts.push(`-A`, `${contextAfter}`);
+                parts.push("-A", `${contextAfter}`);
             }
         }
     }
