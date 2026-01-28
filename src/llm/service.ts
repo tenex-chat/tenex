@@ -161,27 +161,31 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
         let baseModel: LanguageModel;
 
+        // Extract system content for ALL providers (provider-agnostic telemetry)
+        const systemContent = messages ? extractSystemContent(messages) : null;
+
+        // Capture system prompt as event for ALL providers when system content exists
+        // Using event instead of attribute avoids OTel issues with unbounded/high-cardinality data
+        if (systemContent) {
+            const maxLength = 10000;
+            const truncated = systemContent.length > maxLength;
+            trace.getActiveSpan()?.addEvent("llm.system_prompt", {
+                "system_prompt.text": truncated ? systemContent.slice(0, maxLength) : systemContent,
+                "system_prompt.full_length": systemContent.length,
+                "system_prompt.truncated": truncated,
+                "system_prompt.provider": this.provider,
+            });
+        }
+
         if (this.claudeCodeProviderFunction) {
             // Claude Code or Codex CLI provider
             // Start with base settings (cwd, env, mcpServers, etc.) from createAgentSettings
             const options: ClaudeCodeSettings = { ...this.claudeCodeBaseSettings };
 
-            // Extract system messages and pass as plain string systemPrompt for Claude Code
+            // Pass system prompt to Claude Code provider (Claude Code-specific requirement)
             // Using plain string (not preset+append) gives full control over agent identity
-            if (messages && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
-                const systemContent = extractSystemContent(messages);
-                if (systemContent) {
-                    options.systemPrompt = systemContent;
-                    // Capture system prompt as event with truncation metadata (mirrors llm.prompt pattern in FinishHandler)
-                    // Using event instead of attribute avoids OTel issues with unbounded/high-cardinality data
-                    const maxLength = 10000;
-                    const truncated = systemContent.length > maxLength;
-                    trace.getActiveSpan()?.addEvent("llm.system_prompt", {
-                        "system_prompt.text": truncated ? systemContent.slice(0, maxLength) : systemContent,
-                        "system_prompt.full_length": systemContent.length,
-                        "system_prompt.truncated": truncated,
-                    });
-                }
+            if (systemContent && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
+                options.systemPrompt = systemContent;
             }
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
