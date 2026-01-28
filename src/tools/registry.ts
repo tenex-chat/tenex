@@ -291,7 +291,7 @@ export function getToolsObject(
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
     // Check if conversation is available
-    const hasConversation = 'conversationStore' in context && context.conversationStore !== undefined;
+    const hasConversation = "conversationStore" in context && context.conversationStore !== undefined;
 
     // Separate regular tools and MCP tools
     const regularTools: ToolName[] = [];
@@ -311,7 +311,7 @@ export function getToolsObject(
     }
 
     // Auto-inject alpha tools when in alpha mode (only for full registry context)
-    if ('alphaMode' in context && context.alphaMode) {
+    if ("alphaMode" in context && context.alphaMode) {
         for (const alphaToolName of ALPHA_TOOLS) {
             if (!regularTools.includes(alphaToolName)) {
                 regularTools.push(alphaToolName);
@@ -330,7 +330,7 @@ export function getToolsObject(
 
     // Auto-inject change_model tool when agent uses a meta model configuration
     // Only inject if we have conversation context (needed for variant override persistence)
-    if (hasConversation && 'agent' in context && context.agent?.llmConfig) {
+    if (hasConversation && "agent" in context && context.agent?.llmConfig) {
         try {
             const rawConfig = configService.getRawLLMConfig(context.agent.llmConfig);
             if (isMetaModelConfiguration(rawConfig)) {
@@ -355,7 +355,7 @@ export function getToolsObject(
     }
 
     // Add only requested MCP tools (only for full registry context)
-    if (mcpToolNames.length > 0 && 'mcpManager' in context && context.mcpManager) {
+    if (mcpToolNames.length > 0 && "mcpManager" in context && context.mcpManager) {
         try {
             const allMcpTools = context.mcpManager.getCachedTools();
             for (const name of mcpToolNames) {
