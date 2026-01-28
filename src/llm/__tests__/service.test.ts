@@ -1,5 +1,7 @@
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, beforeAll, afterAll, mock } from "bun:test";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
+import { createFinishHandler } from "../FinishHandler";
+import { addCacheControl } from "../MessageProcessor";
 import { LLMService } from "../service";
 import type { ProviderCapabilities } from "../providers/types";
 
@@ -31,6 +33,12 @@ const mockStreamText = mock(() => ({
         yield "Hello";
         yield ", ";
         yield "world!";
+    })(),
+    fullStream: (async function* () {
+        yield { type: "text-delta", textDelta: "Hello" };
+        yield { type: "text-delta", textDelta: ", " };
+        yield { type: "text-delta", textDelta: "world!" };
+        yield { type: "finish", finishReason: "stop" };
     })(),
 }));
 
@@ -71,6 +79,30 @@ const mockContext = {
 };
 
 mock.module("@opentelemetry/api", () => ({
+    createContextKey: mock((name: string) => Symbol.for(name)),
+    DiagLogLevel: {
+        NONE: 0,
+        ERROR: 1,
+        WARN: 2,
+        INFO: 3,
+        DEBUG: 4,
+        VERBOSE: 5,
+        ALL: 6,
+    },
+    diag: {
+        setLogger: mock(() => {}),
+        debug: mock(() => {}),
+        error: mock(() => {}),
+        warn: mock(() => {}),
+        info: mock(() => {}),
+    },
+    SpanKind: {
+        INTERNAL: 0,
+        SERVER: 1,
+        CLIENT: 2,
+        PRODUCER: 3,
+        CONSUMER: 4,
+    },
     ROOT_CONTEXT: mockContext,
     trace: {
         getActiveSpan: () => mockSpan,
@@ -106,6 +138,22 @@ mock.module("@/agents/execution/ProgressMonitor", () => ({
         }
     },
 }));
+
+const originalFetch = global.fetch;
+const mockFetch = mock(() =>
+    Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
+    })
+);
+
+beforeAll(() => {
+    global.fetch = mockFetch as unknown as typeof fetch;
+});
+
+afterAll(() => {
+    global.fetch = originalFetch;
+});
 
 /**
  * Create a mock provider registry for testing
@@ -322,65 +370,44 @@ describe("LLMService private methods (via behavior)", () => {
         mockRegistry = createMockRegistry();
     });
 
-    describe("isToolResultError detection", () => {
-        test("detects error-text format in tool results", async () => {
-            // We test this indirectly by checking that tool-did-execute events
-            // include error: true when the result has error format
+    describe("tool result error detection", () => {
+        test("flags error results via tool-did-execute event", () => {
             const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
 
-            // Simulate calling handleToolResult with error result
-            // Since it's private, we need to trigger it through stream()
-            // For now, we'll test the logic directly by accessing private method
+            const chunkHandler = (service as any).chunkHandler;
 
-            // Access private method for testing
-            const isToolResultError = (service as any).isToolResultError.bind(service);
-
-            expect(isToolResultError({ type: "error-text", text: "Something failed" })).toBe(true);
-            expect(isToolResultError({ type: "error-json", json: { message: "Error" } })).toBe(true);
-            expect(isToolResultError({ success: true, data: "result" })).toBe(false);
-            expect(isToolResultError(null)).toBe(false);
-            expect(isToolResultError("string result")).toBe(false);
-        });
-    });
-
-    describe("extractErrorDetails", () => {
-        test("extracts details from error-text format", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
-
-            const result = extractErrorDetails({ type: "error-text", text: "Something went wrong" });
-
-            expect(result).toEqual({
-                message: "Something went wrong",
-                type: "error-text",
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-result",
+                    toolCallId: "call-1",
+                    toolName: "testTool",
+                    output: { type: "error-text", text: "Something failed" },
+                },
             });
-        });
-
-        test("extracts details from error-json format", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
-
-            const result = extractErrorDetails({
-                type: "error-json",
-                json: { message: "JSON error message" },
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-result",
+                    toolCallId: "call-2",
+                    toolName: "testTool",
+                    output: { type: "error", message: "Error" },
+                },
+            });
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-result",
+                    toolCallId: "call-3",
+                    toolName: "testTool",
+                    output: { success: true, data: "result" },
+                },
             });
 
-            expect(result).toEqual({
-                message: "JSON error message",
-                type: "error-json",
-            });
-        });
-
-        test("returns null for non-error results", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
-            const extractErrorDetails = (service as any).extractErrorDetails.bind(service);
-
-            expect(extractErrorDetails({ success: true })).toBeNull();
-            expect(extractErrorDetails(null)).toBeNull();
-            expect(extractErrorDetails("string")).toBeNull();
+            expect(toolDidExecuteSpy).toHaveBeenCalledTimes(3);
+            expect(toolDidExecuteSpy.mock.calls[0][0].error).toBe(true);
+            expect(toolDidExecuteSpy.mock.calls[1][0].error).toBe(true);
+            expect(toolDidExecuteSpy.mock.calls[2][0].error).toBe(false);
         });
     });
 
@@ -400,9 +427,8 @@ describe("LLMService chunk handling", () => {
             const contentSpy = mock(() => {});
             service.on("content", contentSpy);
 
-            // Access private method
-            const handleTextDelta = (service as any).handleTextDelta.bind(service);
-            handleTextDelta("Hello, world!");
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({ chunk: { type: "text-delta", text: "Hello, world!" } });
 
             expect(contentSpy).toHaveBeenCalled();
             expect(contentSpy.mock.calls[0][0]).toEqual({ delta: "Hello, world!" });
@@ -416,8 +442,10 @@ describe("LLMService chunk handling", () => {
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
 
-            const handleReasoningDelta = (service as any).handleReasoningDelta.bind(service);
-            handleReasoningDelta("Thinking about this...");
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({
+                chunk: { type: "reasoning-delta", delta: "Thinking about this..." },
+            });
 
             expect(reasoningSpy).toHaveBeenCalled();
             expect(reasoningSpy.mock.calls[0][0]).toEqual({ delta: "Thinking about this..." });
@@ -429,8 +457,10 @@ describe("LLMService chunk handling", () => {
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
 
-            const handleReasoningDelta = (service as any).handleReasoningDelta.bind(service);
-            handleReasoningDelta("[REDACTED]");
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({
+                chunk: { type: "reasoning-delta", delta: "[REDACTED]" },
+            });
 
             expect(reasoningSpy).not.toHaveBeenCalled();
         });
@@ -443,11 +473,18 @@ describe("LLMService chunk handling", () => {
             const toolWillExecuteSpy = mock(() => {});
             service.on("tool-will-execute", toolWillExecuteSpy);
 
-            const handleToolCall = (service as any).handleToolCall.bind(service);
-            handleToolCall("call-123", "shell", { command: "ls -la" });
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-call",
+                    toolCallId: "call-123",
+                    toolName: "shell",
+                    input: { command: "ls -la" },
+                },
+            });
 
             expect(toolWillExecuteSpy).toHaveBeenCalled();
-            expect(toolWillExecuteSpy.mock.calls[0][0]).toEqual({
+            expect(toolWillExecuteSpy.mock.calls[0][0]).toMatchObject({
                 toolCallId: "call-123",
                 toolName: "shell",
                 args: { command: "ls -la" },
@@ -462,11 +499,18 @@ describe("LLMService chunk handling", () => {
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
 
-            const handleToolResult = (service as any).handleToolResult.bind(service);
-            handleToolResult("call-123", "shell", { output: "file1.txt\nfile2.txt" });
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-result",
+                    toolCallId: "call-123",
+                    toolName: "shell",
+                    output: { output: "file1.txt\nfile2.txt" },
+                },
+            });
 
             expect(toolDidExecuteSpy).toHaveBeenCalled();
-            expect(toolDidExecuteSpy.mock.calls[0][0]).toEqual({
+            expect(toolDidExecuteSpy.mock.calls[0][0]).toMatchObject({
                 toolCallId: "call-123",
                 toolName: "shell",
                 result: { output: "file1.txt\nfile2.txt" },
@@ -480,11 +524,18 @@ describe("LLMService chunk handling", () => {
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
 
-            const handleToolResult = (service as any).handleToolResult.bind(service);
-            handleToolResult("call-123", "shell", { type: "error-text", text: "Command failed" });
+            const chunkHandler = (service as any).chunkHandler;
+            chunkHandler.handleChunk({
+                chunk: {
+                    type: "tool-result",
+                    toolCallId: "call-123",
+                    toolName: "shell",
+                    output: { type: "error-text", text: "Command failed" },
+                },
+            });
 
             expect(toolDidExecuteSpy).toHaveBeenCalled();
-            expect(toolDidExecuteSpy.mock.calls[0][0]).toEqual({
+            expect(toolDidExecuteSpy.mock.calls[0][0]).toMatchObject({
                 toolCallId: "call-123",
                 toolName: "shell",
                 result: { type: "error-text", text: "Command failed" },
@@ -500,18 +551,20 @@ describe("LLMService chunk handling", () => {
             const chunkTypeChangeSpy = mock(() => {});
             service.on("chunk-type-change", chunkTypeChangeSpy);
 
-            const handleChunk = (service as any).handleChunk.bind(service);
+            const chunkHandler = (service as any).chunkHandler;
 
             // First chunk - no event (no previous type)
-            handleChunk({ chunk: { type: "text-delta", text: "Hello" } });
+            chunkHandler.handleChunk({ chunk: { type: "text-delta", text: "Hello" } });
             expect(chunkTypeChangeSpy).not.toHaveBeenCalled();
 
             // Same type - no event
-            handleChunk({ chunk: { type: "text-delta", text: " world" } });
+            chunkHandler.handleChunk({ chunk: { type: "text-delta", text: " world" } });
             expect(chunkTypeChangeSpy).not.toHaveBeenCalled();
 
             // Different type - emit event
-            handleChunk({ chunk: { type: "tool-call", toolCallId: "1", toolName: "test", input: {} } });
+            chunkHandler.handleChunk({
+                chunk: { type: "tool-call", toolCallId: "1", toolName: "test", input: {} },
+            });
             expect(chunkTypeChangeSpy).toHaveBeenCalled();
             expect(chunkTypeChangeSpy.mock.calls[0][0]).toEqual({
                 from: "text-delta",
@@ -525,9 +578,9 @@ describe("LLMService chunk handling", () => {
             const streamErrorSpy = mock(() => {});
             service.on("stream-error", streamErrorSpy);
 
-            const handleChunk = (service as any).handleChunk.bind(service);
+            const chunkHandler = (service as any).chunkHandler;
             const error = new Error("Stream error");
-            handleChunk({ chunk: { type: "error", error } });
+            chunkHandler.handleChunk({ chunk: { type: "error", error } });
 
             expect(streamErrorSpy).toHaveBeenCalled();
             expect(streamErrorSpy.mock.calls[0][0]).toEqual({ error });
@@ -551,8 +604,8 @@ describe("LLMService telemetry configuration", () => {
             "test-agent"
         );
 
-        const getFullTelemetryConfig = (service as any).getFullTelemetryConfig.bind(service);
-        const config = getFullTelemetryConfig();
+        const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
+        const config = getTelemetryConfig();
 
         expect(config.isEnabled).toBe(true);
         expect(config.functionId).toBe("test-agent.openrouter.gpt-4");
@@ -567,8 +620,8 @@ describe("LLMService telemetry configuration", () => {
         const mockRegistry = createMockRegistry();
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
-        const getFullTelemetryConfig = (service as any).getFullTelemetryConfig.bind(service);
-        const config = getFullTelemetryConfig();
+        const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
+        const config = getTelemetryConfig();
 
         expect(config.functionId).toBe("unknown.openrouter.gpt-4");
         expect(config.metadata["agent.slug"]).toBe("unknown");
@@ -595,6 +648,11 @@ describe("LLMService stream()", () => {
                     // Simulate chunks being emitted
                     yield "Hello";
                     yield " world";
+                })(),
+                fullStream: (async function* () {
+                    yield { type: "text-delta", text: "Hello" };
+                    yield { type: "text-delta", text: " world" };
+                    yield { type: "finish", finishReason: "stop" };
                 })(),
             };
         });
@@ -810,6 +868,10 @@ describe("LLMService stream()", () => {
                 textStream: (async function* () {
                     yield "test";
                 })(),
+                fullStream: (async function* () {
+                    yield { type: "text-delta", text: "test" };
+                    yield { type: "finish", finishReason: "stop" };
+                })(),
             };
         });
 
@@ -868,13 +930,27 @@ describe("LLMService createFinishHandler", () => {
     test("uses cached content for non-streaming providers", async () => {
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
-        // Simulate cached content
-        (service as any).cachedContentForComplete = "Cached response text";
+        let cachedContent = "Cached response text";
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
 
-        const finishHandler = (service as any).createFinishHandler();
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => cachedContent,
+                clearCachedContent: () => {
+                    cachedContent = "";
+                },
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
 
         await finishHandler({
             text: "", // Empty text from stream
@@ -891,9 +967,24 @@ describe("LLMService createFinishHandler", () => {
     test("clears cached content after use", async () => {
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
-        (service as any).cachedContentForComplete = "Some cached content";
+        let cachedContent = "Some cached content";
 
-        const finishHandler = (service as any).createFinishHandler();
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => cachedContent,
+                clearCachedContent: () => {
+                    cachedContent = "";
+                },
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
 
         await finishHandler({
             text: "",
@@ -903,13 +994,26 @@ describe("LLMService createFinishHandler", () => {
             providerMetadata: {},
         });
 
-        expect((service as any).cachedContentForComplete).toBe("");
+        expect(cachedContent).toBe("");
     });
 
     test("detects invalid tool calls and logs error", async () => {
         const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
 
-        const finishHandler = (service as any).createFinishHandler();
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "",
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
 
         // Simulate steps with invalid tool call
         await finishHandler({
@@ -960,11 +1064,6 @@ describe("LLMService handleStreamError", () => {
 
 describe("LLMService addCacheControl edge cases", () => {
     test("preserves existing message properties", async () => {
-        const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
-
-        const addCacheControl = (service as any).addCacheControl.bind(service);
-
         const messages: ModelMessage[] = [
             {
                 role: "system",
@@ -973,23 +1072,18 @@ describe("LLMService addCacheControl edge cases", () => {
             } as any,
         ];
 
-        const result = addCacheControl(messages);
+        const result = addCacheControl(messages, "anthropic");
 
         expect((result[0] as any).customProperty).toBe("preserved");
         expect(result[0].providerOptions).toBeDefined();
     });
 
     test("only caches system messages, not user messages", async () => {
-        const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
-
-        const addCacheControl = (service as any).addCacheControl.bind(service);
-
         const messages: ModelMessage[] = [
             { role: "user", content: "x".repeat(5000) },
         ];
 
-        const result = addCacheControl(messages);
+        const result = addCacheControl(messages, "anthropic");
 
         expect(result[0].providerOptions).toBeUndefined();
     });

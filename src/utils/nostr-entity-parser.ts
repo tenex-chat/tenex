@@ -172,7 +172,8 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
     try {
         return prefixKVStore.lookup(cleaned);
     } catch (error) {
-        console.debug("[resolvePrefixToId] Prefix lookup failed:", cleaned, error);
+        const message = error instanceof Error ? error.message : String(error);
+        console.debug("[resolvePrefixToId] Prefix lookup failed:", cleaned, message);
         return null;
     }
 }
@@ -288,4 +289,3 @@ export function normalizeLessonEventId(
         errorType: "invalid_format",
     };
 }
-

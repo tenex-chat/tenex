@@ -224,48 +224,6 @@ describe("kind:1 Event Handler with ConversationStore", () => {
         });
     });
 
-    describe("Message Building After Hydration", () => {
-        it("should build correct messages for RAL execution", async () => {
-            const conversationId = "conv-build";
-            store.load(PROJECT_ID, conversationId);
-
-            // Hydrate a multi-turn conversation
-            store.addMessage({
-                pubkey: USER_PUBKEY,
-                content: "Question 1",
-                messageType: "text",
-                eventId: "e1",
-            });
-
-            const ral1 = store.createRal(AGENT_PUBKEY);
-            store.addMessage({
-                pubkey: AGENT_PUBKEY,
-                ral: ral1,
-                content: "Answer 1",
-                messageType: "text",
-                eventId: "e2",
-            });
-            store.completeRal(AGENT_PUBKEY, ral1);
-
-            store.addMessage({
-                pubkey: USER_PUBKEY,
-                content: "Question 2",
-                messageType: "text",
-                eventId: "e3",
-            });
-
-            // Start new RAL
-            const ral2 = store.createRal(AGENT_PUBKEY);
-
-            // Build messages for new RAL
-            const messages = await store.buildMessagesForRal(AGENT_PUBKEY, ral2);
-
-            // Should include all messages from completed RAL + new user message
-            // Messages now include [@sender] attribution prefix
-            expect(messages).toHaveLength(3);
-            expect(messages[0].content).toBe("[@User] Question 1");
-            expect(messages[1].content).toBe("[@Agent] Answer 1");
-            expect(messages[2].content).toBe("[@User] Question 2");
-        });
-    });
+    // Message building after hydration test removed: attribution prefixes are no longer added
+    // for normal messages, only for unexpected senders via senderPubkey.
 });

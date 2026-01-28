@@ -1,7 +1,19 @@
-import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, beforeAll, afterEach, mock, spyOn } from "bun:test";
 import { getContextWindow, clearCache, resolveContextWindow } from "../context-window-cache";
 
 describe("context-window-cache", () => {
+    let originalFetch: typeof fetch;
+
+    beforeAll(() => {
+        originalFetch = global.fetch;
+    });
+
+    afterEach(() => {
+        if (originalFetch) {
+            global.fetch = originalFetch;
+        }
+    });
+
     beforeEach(() => {
         clearCache();
     });
