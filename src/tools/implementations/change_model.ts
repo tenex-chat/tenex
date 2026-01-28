@@ -114,7 +114,7 @@ export function createChangeModelTool(context: ConversationToolContext): AISdkTo
 
     const aiTool = tool({
         description:
-            `Switch to a different model variant for the rest of this conversation. ` +
+            "Switch to a different model variant for the rest of this conversation. " +
             `Use this when you determine a different capability level is needed for the current task.${variantDescriptions}`,
         inputSchema: changeModelSchema,
         execute: async (input: ChangeModelInput) => {
