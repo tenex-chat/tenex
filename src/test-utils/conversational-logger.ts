@@ -3,18 +3,7 @@
  * showing phase transitions and agent interactions
  */
 
-import type { MockLLMResponse } from "./mock-llm/types";
-
-interface ToolCall {
-    function?:
-        | string
-        | {
-              name?: string;
-              arguments?: string;
-          };
-    name?: string;
-    args?: string;
-}
+import type { MockLLMResponse, MockToolCall } from "./mock-llm/types";
 
 export class ConversationalLogger {
     private static instance: ConversationalLogger;
@@ -94,7 +83,7 @@ export class ConversationalLogger {
         agentName: string,
         response: {
             content?: string;
-            toolCalls?: ToolCall[];
+            toolCalls?: MockToolCall[];
             phase?: string;
             reason?: string;
         }
@@ -127,30 +116,29 @@ export class ConversationalLogger {
 
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
-                const toolName =
-                    typeof toolCall.function === "string"
-                        ? toolCall.function
-                        : toolCall.function?.name || toolCall.name || "unknown";
+                const toolName = toolCall.function || toolCall.name || "unknown";
 
                 this.logToolExecution(agentName, toolName, toolCall);
             }
         }
     }
 
-    logToolExecution(agentName: string, toolName: string, toolCall: ToolCall): void {
+    logToolExecution(agentName: string, toolName: string, toolCall: MockToolCall): void {
         const formattedAgent = this.formatAgentName(agentName);
         const timeStamp = this.formatTime();
+        const parseArgs = (): Record<string, unknown> => {
+            const rawArgs = toolCall.args ?? toolCall.params ?? {};
+            return typeof rawArgs === "string" ? JSON.parse(rawArgs) : rawArgs;
+        };
 
         switch (toolName) {
             case "continue":
                 try {
-                    const args =
-                        typeof toolCall.function === "string"
-                            ? JSON.parse(toolCall.args || "{}")
-                            : JSON.parse(toolCall.function?.arguments || "{}");
+                    const args = parseArgs();
 
-                    if (args.agents) {
-                        const message = `${formattedAgent}: "Passing control to ${args.agents.join(", ")} - ${args.reason || "continuing workflow"}"`;
+                    const agents = Array.isArray(args.agents) ? args.agents : [];
+                    if (agents.length > 0) {
+                        const message = `${formattedAgent}: "Passing control to ${agents.join(", ")} - ${args.reason || "continuing workflow"}"`;
                         console.log(this.formatLogLine(agentName, "🔄", timeStamp, message));
                     } else {
                         const message = `${formattedAgent}: "Continuing with next phase - ${args.summary || args.reason || "proceeding"}"`;
@@ -164,10 +152,7 @@ export class ConversationalLogger {
 
             case "complete":
                 try {
-                    const args =
-                        typeof toolCall.function === "string"
-                            ? JSON.parse(toolCall.args || "{}")
-                            : JSON.parse(toolCall.function?.arguments || "{}");
+                    const args = parseArgs();
                     const message = `${formattedAgent}: "Task completed - ${args.finalResponse || args.summary || "done"}"`;
                     console.log(this.formatLogLine(agentName, "✅", timeStamp, message));
                 } catch {
@@ -178,10 +163,7 @@ export class ConversationalLogger {
 
             case "shell":
                 try {
-                    const args =
-                        typeof toolCall.function === "string"
-                            ? JSON.parse(toolCall.args || "{}")
-                            : JSON.parse(toolCall.function?.arguments || "{}");
+                    const args = parseArgs();
                     const message = `${formattedAgent}: "Executing: ${args.command}"`;
                     console.log(this.formatLogLine(agentName, "⚡", timeStamp, message));
                 } catch {
@@ -192,11 +174,9 @@ export class ConversationalLogger {
 
             case "generateInventory":
                 try {
-                    const args =
-                        typeof toolCall.function === "string"
-                            ? JSON.parse(toolCall.args || "{}")
-                            : JSON.parse(toolCall.function?.arguments || "{}");
-                    const message = `${formattedAgent}: "Analyzing project structure in ${args.paths?.join(", ") || "current directory"}"`;
+                    const args = parseArgs();
+                    const paths = Array.isArray(args.paths) ? args.paths : [];
+                    const message = `${formattedAgent}: "Analyzing project structure in ${paths.length > 0 ? paths.join(", ") : "current directory"}"`;
                     console.log(this.formatLogLine(agentName, "📋", timeStamp, message));
                 } catch {
                     const message = `${formattedAgent}: "Analyzing project structure..."`;
@@ -206,10 +186,7 @@ export class ConversationalLogger {
 
             case "writeFile":
                 try {
-                    const args =
-                        typeof toolCall.function === "string"
-                            ? JSON.parse(toolCall.args || "{}")
-                            : JSON.parse(toolCall.function?.arguments || "{}");
+                    const args = parseArgs();
                     const message = `${formattedAgent}: "Writing to ${args.path || args.filename || "file"}"`;
                     console.log(this.formatLogLine(agentName, "📝", timeStamp, message));
                 } catch {
