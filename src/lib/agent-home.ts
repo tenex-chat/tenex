@@ -1,7 +1,6 @@
 import { mkdirSync, realpathSync, existsSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, dirname } from "node:path";
 import { getTenexBasePath } from "@/constants";
-import { logger } from "@/utils/logger";
 
 /**
  * Get the short pubkey (first 8 characters) for an agent.
@@ -121,7 +120,7 @@ export function ensureAgentHomeDirectory(agentPubkey: string): boolean {
         mkdirSync(homeDir, { recursive: true });
         return true;
     } catch (error) {
-        logger.warn("Failed to create agent home dir:", error);
+        console.error("Failed to create agent home dir:", error);
         return false;
     }
 }
