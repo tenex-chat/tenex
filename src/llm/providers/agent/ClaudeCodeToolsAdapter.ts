@@ -2,6 +2,7 @@ import type { AISdkTool } from "@/tools/types";
 import { isStopExecutionSignal } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import { createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
+import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import { z, type ZodRawShape } from "zod";
 
 // Infer the return type since SdkMcpServer is not exported
@@ -72,11 +73,17 @@ export class ClaudeCodeToolsAdapter {
 
                     // Execute the TENEX tool
                     // If extra contains execution context, pass it; otherwise use minimal fallback
+                    const isToolExecutionOptions = (value: unknown): value is ToolExecutionOptions =>
+                        typeof value === "object" &&
+                        value !== null &&
+                        "toolCallId" in value &&
+                        "messages" in value &&
+                        Array.isArray((value as { messages?: unknown }).messages);
+
                     let result;
-                    if (extra && typeof extra === "object") {
+                    if (isToolExecutionOptions(extra)) {
                         // Try to use the extra context from Claude Code
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        result = await tenexTool.execute(args, extra as any);
+                        result = await tenexTool.execute(args, extra);
                     } else {
                         // Fallback to minimal context (should rarely happen)
                         result = await tenexTool.execute(args, {
