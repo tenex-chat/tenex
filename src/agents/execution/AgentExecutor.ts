@@ -14,7 +14,7 @@
  * - RALResolver: RAL lifecycle resolution
  */
 
-import { registerDefaultHeuristics } from "@/agents/supervision";
+import { assertSupervisionHealth } from "@/agents/supervision";
 import { checkPostCompletion } from "./PostCompletionChecker";
 import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -47,8 +47,9 @@ const tracer = trace.getTracer("tenex.agent-executor");
 
 export class AgentExecutor {
     constructor(private standaloneContext?: StandaloneAgentContext) {
-        // Initialize supervision heuristics
-        registerDefaultHeuristics();
+        // Centralized supervision health check - ensures both total registry size AND
+        // post-completion heuristic count are validated (fail-closed semantics)
+        assertSupervisionHealth("AgentExecutor");
     }
 
     /**
@@ -372,12 +373,15 @@ export class AgentExecutor {
             conversationStore.completeRal(context.agent.pubkey, ralNumber);
             await conversationStore.save();
 
-            trace.getActiveSpan()?.addEvent("executor.ral_cleared_after_supervision", {
+            trace.getActiveSpan()?.addEvent("executor.ral_cleared_post_supervision_check", {
                 "ral.number": ralNumber,
+                "supervision.executed": true,
+                "supervision.had_violation": supervisionCheckResult.shouldReEngage,
             });
         } else if (finalPendingDelegationsForCleanup.length === 0 && startedWithPendingDelegations) {
             trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
                 "ral.number": ralNumber,
+                "supervision.executed": true,
             });
         }
 
