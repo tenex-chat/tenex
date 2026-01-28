@@ -8,7 +8,7 @@
  * - Atomic writes (temp file + rename)
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { logger } from "@/utils/logger";
 import type {
@@ -126,7 +126,7 @@ export class ConversationIndexManager {
             // Clean up temp file if it exists
             try {
                 if (existsSync(tempPath)) {
-                    require("fs").unlinkSync(tempPath);
+                    unlinkSync(tempPath);
                 }
             } catch {
                 // Ignore cleanup errors
