@@ -1,3 +1,4 @@
+import type { MessageInjector as ClaudeMessageInjector } from "ai-sdk-provider-claude-code";
 import type { DefaultEventMap } from "tseep";
 
 // Export AI SDK types directly
@@ -18,6 +19,8 @@ import type { ExecutionContext } from "@/agents/execution/types";
 import type { LanguageModelUsage } from "ai";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 export type { ExecutionContext };
+
+export type MessageInjector = ClaudeMessageInjector;
 
 /**
  * AI SDK supported providers
@@ -62,20 +65,6 @@ export interface LocalStreamChunk {
  * @param delivered - true if the message was successfully delivered to the stream
  */
 export type MessageInjectionCallback = (delivered: boolean) => void;
-
-/**
- * Interface for injecting messages into an active Claude Code stream.
- * This allows mid-execution message delivery without restarting the stream.
- */
-export interface MessageInjector {
-    /**
-     * Inject a user message into the active stream.
-     * The message will be delivered between tool calls (not during continuous text).
-     * @param content - The message content to inject
-     * @param onDelivered - Optional callback invoked when delivery completes
-     */
-    inject(content: string, onDelivered?: MessageInjectionCallback): void;
-}
 
 /**
  * Callback invoked when a stream starts, providing the message injector.
