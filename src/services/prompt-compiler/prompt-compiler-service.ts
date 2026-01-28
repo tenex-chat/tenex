@@ -988,6 +988,24 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
     }
 
     /**
+     * Called when a lesson is deleted for this agent.
+     * Triggers recompilation in the background to remove the deleted lesson from compiled prompts.
+     */
+    onLessonDeleted(): void {
+        const tracer = trace.getTracer("tenex.prompt-compiler");
+        tracer.startActiveSpan("tenex.prompt_compilation.lesson_deleted_trigger", (span) => {
+            span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
+            span.setAttribute("trigger.source", "lesson_deleted");
+            span.end();
+        });
+
+        logger.debug("PromptCompilerService: lesson deleted, triggering recompilation", {
+            agentPubkey: this.agentPubkey.substring(0, 8),
+        });
+        this.triggerCompilation();
+    }
+
+    /**
      * Wait for the current compilation to complete (for testing purposes).
      * Returns immediately if no compilation is in progress.
      */
