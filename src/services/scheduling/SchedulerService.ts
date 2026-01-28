@@ -1,19 +1,19 @@
 import * as fs from "node:fs/promises";
-import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { getNDK } from "@/nostr/ndkClient";
+import { config } from "@/services/ConfigService";
+import { getProjectContext } from "@/services/projects";
+import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
-import * as cron from "node-cron";
 import { CronExpressionParser } from "cron-parser";
-import { logger } from "@/utils/logger";
-import { getProjectContext } from "@/services/projects";
+import * as cron from "node-cron";
 
 interface ScheduledTask {
     id: string;
     title?: string; // Human-readable title for the scheduled task
-    schedule: string; // Cron expression
+    schedule: string; // Cron expression (for recurring) or ISO timestamp (for one-off)
     prompt: string;
     lastRun?: string;
     nextRun?: string;
@@ -21,6 +21,8 @@ interface ScheduledTask {
     fromPubkey: string; // Who scheduled this task (the scheduler)
     toPubkey: string; // Target agent that should execute the task
     projectId: string; // Project A-tag ID (format: "31933:authorPubkey:dTag")
+    type?: "cron" | "oneoff"; // Task type - defaults to "cron" for backward compatibility
+    executeAt?: string; // ISO timestamp for one-off tasks
 }
 
 // Export the type so it can be used by other modules
@@ -39,6 +41,7 @@ const DEFAULT_CATCHUP_CONFIG: CatchUpConfig = {
 export class SchedulerService {
     private static instance: SchedulerService;
     private tasks: Map<string, cron.ScheduledTask> = new Map();
+    private oneoffTimers: Map<string, NodeJS.Timeout> = new Map(); // Timers for one-off tasks
     private taskMetadata: Map<string, ScheduledTask> = new Map();
     private taskFilePath: string;
     private ndk: NDK | null = null;
@@ -70,9 +73,13 @@ export class SchedulerService {
         // This ensures catch-ups happen first and update lastRun
         await this.checkMissedTasks();
 
-        // Start all loaded tasks
+        // Start all loaded tasks (cron or one-off based on type)
         for (const task of this.taskMetadata.values()) {
-            this.startTask(task);
+            if (task.type === "oneoff") {
+                this.startOneoffTask(task);
+            } else {
+                this.startTask(task);
+            }
         }
 
         trace.getActiveSpan()?.addEvent("scheduler.initialized", {
@@ -100,7 +107,9 @@ export class SchedulerService {
                 const projectCtx = getProjectContext();
                 resolvedProjectId = projectCtx.project.tagId();
             } catch {
-                throw new Error("projectId is required when scheduling tasks outside of a project context");
+                throw new Error(
+                    "projectId is required when scheduling tasks outside of a project context"
+                );
             }
         }
 
@@ -133,12 +142,87 @@ export class SchedulerService {
         return taskId;
     }
 
+    /**
+     * Add a one-off task that executes once at a specific time.
+     * The task is automatically deleted after successful execution.
+     */
+    public async addOneoffTask(
+        executeAt: Date,
+        prompt: string,
+        fromPubkey: string,
+        toPubkey: string,
+        projectId?: string,
+        title?: string
+    ): Promise<string> {
+        // Validate execution time is in the future
+        const now = new Date();
+        if (executeAt <= now) {
+            throw new Error(
+                `Execution time must be in the future. Received: ${executeAt.toISOString()}`
+            );
+        }
+
+        // If projectId not provided, try to get it from current context
+        let resolvedProjectId = projectId;
+        if (!resolvedProjectId) {
+            try {
+                const projectCtx = getProjectContext();
+                resolvedProjectId = projectCtx.project.tagId();
+            } catch {
+                throw new Error(
+                    "projectId is required when scheduling tasks outside of a project context"
+                );
+            }
+        }
+
+        const taskId = this.generateTaskId();
+
+        const task: ScheduledTask = {
+            id: taskId,
+            title,
+            schedule: executeAt.toISOString(), // Store ISO timestamp for display
+            prompt,
+            fromPubkey,
+            toPubkey,
+            projectId: resolvedProjectId,
+            createdAt: new Date().toISOString(),
+            type: "oneoff",
+            executeAt: executeAt.toISOString(),
+        };
+
+        this.taskMetadata.set(taskId, task);
+
+        // Start the timer for this one-off task
+        this.startOneoffTask(task);
+
+        await this.saveTasks();
+
+        logger.info(
+            `Created one-off scheduled task ${taskId} to execute at: ${executeAt.toISOString()}`,
+            {
+                projectId: resolvedProjectId,
+                fromPubkey: fromPubkey.substring(0, 8),
+                toPubkey: toPubkey.substring(0, 8),
+                executeAt: executeAt.toISOString(),
+            }
+        );
+
+        return taskId;
+    }
+
     public async removeTask(taskId: string): Promise<boolean> {
         // Stop cron task if exists
         const cronTask = this.tasks.get(taskId);
         if (cronTask) {
             cronTask.stop();
             this.tasks.delete(taskId);
+        }
+
+        // Stop one-off timer if exists
+        const timer = this.oneoffTimers.get(taskId);
+        if (timer) {
+            clearTimeout(timer);
+            this.oneoffTimers.delete(taskId);
         }
 
         // Remove from local storage
@@ -154,7 +238,7 @@ export class SchedulerService {
 
         // If projectId is provided, filter tasks by that project
         if (projectId) {
-            return allTasks.filter(task => task.projectId === projectId);
+            return allTasks.filter((task) => task.projectId === projectId);
         }
 
         // Return all tasks if no filter specified
@@ -184,10 +268,123 @@ export class SchedulerService {
     }
 
     /**
+     * Start a one-off task timer.
+     * Uses setTimeout to schedule execution at the specified time.
+     */
+    private startOneoffTask(task: ScheduledTask): void {
+        if (!task.executeAt) {
+            logger.error(`One-off task ${task.id} missing executeAt timestamp, deleting task`);
+            this.purgeCorruptedOneoffTask(task.id);
+            return;
+        }
+
+        const executeAt = new Date(task.executeAt);
+
+        // Validate the timestamp - if invalid, delayMs will be NaN
+        if (Number.isNaN(executeAt.getTime())) {
+            logger.error(
+                `One-off task ${task.id} has invalid executeAt timestamp: ${task.executeAt}, deleting task`
+            );
+            this.purgeCorruptedOneoffTask(task.id);
+            return;
+        }
+
+        // Check if task already ran (has lastRun set) - prevents re-execution after crash
+        if (task.lastRun) {
+            logger.warn(
+                `One-off task ${task.id} already executed (lastRun: ${task.lastRun}), purging orphaned task`
+            );
+            this.purgeCorruptedOneoffTask(task.id);
+            return;
+        }
+
+        const now = new Date();
+        const delayMs = executeAt.getTime() - now.getTime();
+
+        if (delayMs <= 0) {
+            // Task time has already passed - this shouldn't happen for new tasks
+            // but might happen during startup if task was missed
+            logger.warn(`One-off task ${task.id} execution time has passed, executing immediately`);
+            this.executeOneoffTask(task);
+            return;
+        }
+
+        // Use setTimeout for the delay
+        // Note: setTimeout max delay is ~24.8 days (2^31 - 1 ms)
+        // For longer delays, we'll need to chain timeouts
+        const maxDelay = 2147483647; // Max 32-bit signed int
+        if (delayMs > maxDelay) {
+            // Schedule a re-check after max delay
+            const timer = setTimeout(() => {
+                this.oneoffTimers.delete(task.id);
+                this.startOneoffTask(task); // Re-evaluate
+            }, maxDelay);
+            this.oneoffTimers.set(task.id, timer);
+        } else {
+            const timer = setTimeout(async () => {
+                await this.executeOneoffTask(task);
+            }, delayMs);
+            this.oneoffTimers.set(task.id, timer);
+        }
+
+        trace.getActiveSpan()?.addEvent("scheduler.oneoff_task_started", {
+            "task.id": task.id,
+            "task.executeAt": task.executeAt,
+            "task.delayMs": delayMs,
+        });
+
+        logger.debug(
+            `One-off task ${task.id} scheduled to execute in ${Math.round(delayMs / 1000)}s`
+        );
+    }
+
+    /**
+     * Purge a corrupted or orphaned one-off task from storage.
+     * Used when a task has invalid data or has already been executed.
+     */
+    private purgeCorruptedOneoffTask(taskId: string): void {
+        this.oneoffTimers.delete(taskId);
+        this.taskMetadata.delete(taskId);
+        // Save asynchronously - don't block on corrupted task cleanup
+        this.saveTasks().catch((error) => {
+            logger.error(`Failed to save after purging corrupted task ${taskId}:`, error);
+        });
+
+        trace.getActiveSpan()?.addEvent("scheduler.oneoff_task_purged", {
+            "task.id": taskId,
+            "reason": "corrupted_or_orphaned",
+        });
+    }
+
+    /**
+     * Execute a one-off task and auto-delete it after successful execution.
+     */
+    private async executeOneoffTask(task: ScheduledTask): Promise<void> {
+        try {
+            await this.executeTask(task);
+
+            // Auto-delete after successful execution
+            logger.info(`One-off task ${task.id} executed successfully, auto-deleting`);
+            this.oneoffTimers.delete(task.id);
+            this.taskMetadata.delete(task.id);
+            await this.saveTasks();
+
+            trace.getActiveSpan()?.addEvent("scheduler.oneoff_task_completed", {
+                "task.id": task.id,
+            });
+        } catch (error) {
+            logger.error(`Failed to execute one-off task ${task.id}:`, error);
+            // Don't delete on failure - keep for potential retry or manual investigation
+        }
+    }
+
+    /**
      * Check for tasks that missed their execution window during downtime.
      * Called once during initialize().
      */
-    private async checkMissedTasks(catchUpConfig: CatchUpConfig = DEFAULT_CATCHUP_CONFIG): Promise<void> {
+    private async checkMissedTasks(
+        catchUpConfig: CatchUpConfig = DEFAULT_CATCHUP_CONFIG
+    ): Promise<void> {
         const now = new Date();
         const gracePeriodStart = new Date(now.getTime() - catchUpConfig.gracePeriodMs);
 
@@ -203,8 +400,59 @@ export class SchedulerService {
             taskCount: this.taskMetadata.size,
         });
 
+        // First, delete any expired one-off tasks that are past the grace period
+        await this.deleteExpiredOneoffTasks(gracePeriodStart);
+
         const missedTasks = this.getMissedTasks(now, gracePeriodStart);
         await this.executeCatchUpTasks(missedTasks, catchUpConfig.delayBetweenTasksMs);
+    }
+
+    /**
+     * Delete one-off tasks that have expired (executeAt < gracePeriodStart).
+     * These tasks missed their window and won't be caught up.
+     */
+    private async deleteExpiredOneoffTasks(gracePeriodStart: Date): Promise<void> {
+        const expiredTasks: string[] = [];
+
+        for (const task of this.taskMetadata.values()) {
+            if (task.type !== "oneoff" || !task.executeAt) continue;
+
+            const executeAt = new Date(task.executeAt);
+            if (Number.isNaN(executeAt.getTime())) {
+                // Invalid timestamp - mark for deletion
+                logger.warn(`One-off task ${task.id} has invalid executeAt: ${task.executeAt}, deleting`);
+                expiredTasks.push(task.id);
+                continue;
+            }
+
+            // Check if task is past the grace period (too old to catch up)
+            if (executeAt < gracePeriodStart) {
+                logger.info(
+                    `One-off task ${task.id} expired (executeAt: ${executeAt.toISOString()} < gracePeriod: ${gracePeriodStart.toISOString()}), deleting`,
+                    {
+                        taskId: task.id,
+                        executeAt: task.executeAt,
+                        gracePeriodStart: gracePeriodStart.toISOString(),
+                    }
+                );
+                expiredTasks.push(task.id);
+            }
+        }
+
+        // Delete all expired tasks
+        if (expiredTasks.length > 0) {
+            for (const taskId of expiredTasks) {
+                this.oneoffTimers.delete(taskId);
+                this.taskMetadata.delete(taskId);
+            }
+            await this.saveTasks();
+
+            trace.getActiveSpan()?.addEvent("scheduler.expired_oneoff_tasks_deleted", {
+                "catchup.expiredTasksDeleted": expiredTasks.length,
+            });
+
+            logger.info(`Deleted ${expiredTasks.length} expired one-off task(s)`);
+        }
     }
 
     /**
@@ -227,7 +475,16 @@ export class SchedulerService {
      * Check if a task has a missed execution within the grace period.
      * Returns the missed execution time if within grace period, null otherwise.
      */
-    private getMissedExecutionTime(task: ScheduledTask, now: Date, gracePeriodStart: Date): Date | null {
+    private getMissedExecutionTime(
+        task: ScheduledTask,
+        now: Date,
+        gracePeriodStart: Date
+    ): Date | null {
+        // Handle one-off tasks differently
+        if (task.type === "oneoff") {
+            return this.getMissedOneoffExecutionTime(task, now, gracePeriodStart);
+        }
+
         // Skip tasks that have never run - let normal scheduling handle first run
         if (!task.lastRun) {
             logger.debug(`Task ${task.id} has no lastRun, skipping catch-up check`);
@@ -237,7 +494,9 @@ export class SchedulerService {
         // Validate lastRun date
         const lastRunDate = new Date(task.lastRun);
         if (Number.isNaN(lastRunDate.getTime())) {
-            logger.warn(`Task ${task.id} has invalid lastRun date: ${task.lastRun}, skipping catch-up check`);
+            logger.warn(
+                `Task ${task.id} has invalid lastRun date: ${task.lastRun}, skipping catch-up check`
+            );
             return null;
         }
 
@@ -255,20 +514,22 @@ export class SchedulerService {
             if (nextScheduledExecution < now) {
                 // Check if it's within the grace period
                 if (nextScheduledExecution >= gracePeriodStart) {
-                    logger.info(`Task ${task.id} missed execution at ${nextScheduledExecution.toISOString()}`, {
-                        taskId: task.id,
-                        lastRun: task.lastRun,
-                        missedAt: nextScheduledExecution.toISOString(),
-                        schedule: task.schedule,
-                    });
+                    logger.info(
+                        `Task ${task.id} missed execution at ${nextScheduledExecution.toISOString()}`,
+                        {
+                            taskId: task.id,
+                            lastRun: task.lastRun,
+                            missedAt: nextScheduledExecution.toISOString(),
+                            schedule: task.schedule,
+                        }
+                    );
                     return nextScheduledExecution;
-                } else {
-                    logger.info(`Task ${task.id} missed execution outside grace period, skipping`, {
-                        taskId: task.id,
-                        missedAt: nextScheduledExecution.toISOString(),
-                        gracePeriodStart: gracePeriodStart.toISOString(),
-                    });
                 }
+                logger.info(`Task ${task.id} missed execution outside grace period, skipping`, {
+                    taskId: task.id,
+                    missedAt: nextScheduledExecution.toISOString(),
+                    gracePeriodStart: gracePeriodStart.toISOString(),
+                });
             }
         } catch (error) {
             logger.error(`Failed to parse cron expression for task ${task.id}:`, error);
@@ -278,9 +539,54 @@ export class SchedulerService {
     }
 
     /**
+     * Check if a one-off task was missed.
+     * One-off tasks are missed if their executeAt time has passed and they haven't run yet.
+     */
+    private getMissedOneoffExecutionTime(
+        task: ScheduledTask,
+        now: Date,
+        gracePeriodStart: Date
+    ): Date | null {
+        if (!task.executeAt) {
+            logger.warn(`One-off task ${task.id} missing executeAt timestamp`);
+            return null;
+        }
+
+        // If already run, don't catch up (shouldn't happen as one-off tasks are deleted after execution)
+        if (task.lastRun) {
+            logger.debug(`One-off task ${task.id} already executed, skipping catch-up`);
+            return null;
+        }
+
+        const executeAt = new Date(task.executeAt);
+        if (Number.isNaN(executeAt.getTime())) {
+            logger.warn(`One-off task ${task.id} has invalid executeAt: ${task.executeAt}`);
+            return null;
+        }
+
+        // Check if execution time has passed and is within grace period
+        if (executeAt < now && executeAt >= gracePeriodStart) {
+            logger.info(
+                `One-off task ${task.id} missed execution at ${executeAt.toISOString()}`,
+                {
+                    taskId: task.id,
+                    executeAt: task.executeAt,
+                }
+            );
+            return executeAt;
+        }
+
+        // Tasks past grace period are handled by deleteExpiredOneoffTasks
+        return null;
+    }
+
+    /**
      * Execute catch-up tasks sequentially with delays between executions.
      */
-    private async executeCatchUpTasks(tasks: ScheduledTask[], delayBetweenTasksMs: number): Promise<void> {
+    private async executeCatchUpTasks(
+        tasks: ScheduledTask[],
+        delayBetweenTasksMs: number
+    ): Promise<void> {
         if (tasks.length === 0) {
             trace.getActiveSpan()?.addEvent("scheduler.catchup_check_completed", {
                 "catchup.missedTasksFound": 0,
@@ -302,6 +608,14 @@ export class SchedulerService {
                 logger.info(`Executing catch-up for task ${task.id} (${i + 1}/${tasks.length})`);
                 await this.executeTask(task);
 
+                // Auto-delete one-off tasks after successful catch-up execution
+                if (task.type === "oneoff") {
+                    logger.info(`One-off task ${task.id} catch-up completed, auto-deleting`);
+                    this.oneoffTimers.delete(task.id);
+                    this.taskMetadata.delete(task.id);
+                    await this.saveTasks();
+                }
+
                 // Add delay between tasks (except after the last one)
                 if (i < tasks.length - 1) {
                     await this.delay(delayBetweenTasksMs);
@@ -320,7 +634,7 @@ export class SchedulerService {
     }
 
     private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     /**
@@ -377,7 +691,15 @@ export class SchedulerService {
 
         // Add metadata about the scheduled task
         tags.push(["scheduled-task-id", task.id]);
-        tags.push(["scheduled-task-cron", task.schedule]);
+
+        // Use appropriate tag based on task type
+        if (task.type === "oneoff" && task.executeAt) {
+            // One-off tasks use execute-at tag with ISO timestamp
+            tags.push(["scheduled-task-execute-at", task.executeAt]);
+        } else {
+            // Recurring tasks use cron tag with cron expression
+            tags.push(["scheduled-task-cron", task.schedule]);
+        }
 
         event.tags = tags;
 
@@ -439,12 +761,13 @@ export class SchedulerService {
     }
 
     private generateTaskId(): string {
-        return `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        return `task-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     }
 
     public shutdown(): void {
         trace.getActiveSpan()?.addEvent("scheduler.shutting_down", {
             "tasks.count": this.tasks.size,
+            "oneoff.count": this.oneoffTimers.size,
         });
 
         // Stop all cron tasks
@@ -452,7 +775,13 @@ export class SchedulerService {
             cronTask.stop();
         }
 
+        // Clear all one-off timers
+        for (const [, timer] of this.oneoffTimers.entries()) {
+            clearTimeout(timer);
+        }
+
         this.tasks.clear();
+        this.oneoffTimers.clear();
         this.taskMetadata.clear();
         trace.getActiveSpan()?.addEvent("scheduler.shutdown_complete");
     }
