@@ -7,7 +7,14 @@
 import { config as configService } from "@/services/ConfigService";
 import { isMetaModelConfiguration } from "@/services/config/types";
 import type { Tool as CoreTool } from "ai";
-import type { AISdkTool, ToolExecutionContext, ToolFactory, ToolName, ToolRegistryContext, MCPToolContext } from "./types";
+import type {
+    AISdkTool,
+    MCPToolContext,
+    ToolExecutionContext,
+    ToolFactory,
+    ToolName,
+    ToolRegistryContext,
+} from "./types";
 
 // Helper to coerce MCP tool types without triggering TypeScript infinite recursion
 // The MCP SDK returns tools with compatible structure but different generic params
@@ -16,20 +23,26 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
 }
 import { logger } from "@/utils/logger";
 import { createAgentConfigureTool } from "./implementations/agent_configure";
-import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
+import { createAgentsPublishTool } from "./implementations/agents_publish";
 import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
-import { createFsGlobTool } from "./implementations/fs_glob";
-import { createFsGrepTool } from "./implementations/fs_grep";
+import { createConversationIndexTool } from "./implementations/conversation_index";
 import { createConversationListTool } from "./implementations/conversation_list";
+import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
+import { createFsEditTool } from "./implementations/fs_edit";
+import { createFsGlobTool } from "./implementations/fs_glob";
+import { createFsGrepTool } from "./implementations/fs_grep";
+import { createFsReadTool } from "./implementations/fs_read";
+import { createFsWriteTool } from "./implementations/fs_write";
+import { createKillShellTool } from "./implementations/kill_shell";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
@@ -44,21 +57,16 @@ import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscript
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
 import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
 import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
-import { createFsReadTool } from "./implementations/fs_read";
 import { createReportDeleteTool } from "./implementations/report_delete";
 import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
 import { createReportsListTool } from "./implementations/reports_list";
 import { createScheduleTaskTool } from "./implementations/schedule_task";
 import { createCancelScheduledTaskTool } from "./implementations/schedule_task_cancel";
+import { createScheduleTaskOnceTool } from "./implementations/schedule_task_once";
 import { createListScheduledTasksTool } from "./implementations/schedule_tasks_list";
-import { createConversationSearchTool } from "./implementations/conversation_search";
-import { createConversationIndexTool } from "./implementations/conversation_index";
 import { createShellTool } from "./implementations/shell";
-import { createKillShellTool } from "./implementations/kill_shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
-import { createFsWriteTool } from "./implementations/fs_write";
-import { createFsEditTool } from "./implementations/fs_edit";
 
 // Alpha mode bug reporting tools
 import { createBugListTool } from "./implementations/bug_list";
@@ -174,6 +182,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Schedule tools
     schedule_task_cancel: createCancelScheduledTaskTool,
     schedule_task: createScheduleTaskTool,
+    schedule_task_once: createScheduleTaskOnceTool,
     schedule_tasks_list: createListScheduledTasksTool,
 
     // Conversation search and indexing
@@ -293,7 +302,8 @@ export function getToolsObject(
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
     // Check if conversation is available
-    const hasConversation = "conversationStore" in context && context.conversationStore !== undefined;
+    const hasConversation =
+        "conversationStore" in context && context.conversationStore !== undefined;
 
     // Separate regular tools and MCP tools
     const regularTools: ToolName[] = [];
