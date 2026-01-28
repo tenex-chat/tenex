@@ -188,7 +188,7 @@ async function hybridSearch(
  */
 async function fullTextSearch(
     query: string,
-    filters: any,
+    filters: ConversationSearchInput["filters"],
     limit: number
 ): Promise<{ results: ConversationSearchResult[]; searchType: "full-text" | "title-only"; error?: string }> {
     const advancedResult = conversationRegistry.searchAdvanced({ query, filters }, limit);
