@@ -1,4 +1,4 @@
-import type { Listener } from "tseep";
+import type { DefaultEventMap } from "tseep";
 
 // Export AI SDK types directly
 export type {
@@ -227,18 +227,14 @@ export interface RawChunkEvent {
     chunk: TextStreamPart<Record<string, AISdkTool>>;
 }
 
-export type LLMServiceEventMap = {
-    [event in string | symbol]: Listener;
-} & {
-    __proto__?: never;
-} & {
-    "raw-chunk": (event: RawChunkEvent) => void;
-    "chunk-type-change": (event: ChunkTypeChangeEvent) => void;
-    "content": (event: ContentEvent) => void;
-    "reasoning": (event: ReasoningEvent) => void;
-    "stream-error": (event: StreamErrorEvent) => void;
-    "tool-will-execute": (event: ToolWillExecuteEvent) => void;
-    "tool-did-execute": (event: ToolDidExecuteEvent) => void;
-    "complete": (event: CompleteEvent) => void;
-    "session-captured": (event: SessionCapturedEvent) => void;
+export type LLMServiceEventMap = DefaultEventMap & {
+    "raw-chunk": (...args: [event: RawChunkEvent]) => void;
+    "chunk-type-change": (...args: [event: ChunkTypeChangeEvent]) => void;
+    "content": (...args: [event: ContentEvent]) => void;
+    "reasoning": (...args: [event: ReasoningEvent]) => void;
+    "stream-error": (...args: [event: StreamErrorEvent]) => void;
+    "tool-will-execute": (...args: [event: ToolWillExecuteEvent]) => void;
+    "tool-did-execute": (...args: [event: ToolDidExecuteEvent]) => void;
+    "complete": (...args: [event: CompleteEvent]) => void;
+    "session-captured": (...args: [event: SessionCapturedEvent]) => void;
 };
