@@ -52,6 +52,7 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,
+        pmOverrides: storedAgent.pmOverrides,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);

@@ -34,6 +34,12 @@ export interface AgentInstance {
     maxAgentSteps?: number; // Maximum steps for AI SDK Agent agentic loop (default: 10)
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
+    /**
+     * Project-scoped PM override flags.
+     * Key is project dTag, value is true if this agent is PM for that project.
+     * Set via agent_configure tool.
+     */
+    pmOverrides?: Record<string, boolean>;
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;
