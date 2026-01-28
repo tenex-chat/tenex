@@ -198,7 +198,7 @@ async function executeWebSearch(input: WebSearchInput): Promise<WebSearchOutput>
             return await executeLLMSearch(input, searchConfigName);
         } catch (error) {
             // Log the error and fall back to DuckDuckGo
-            logger.warn(`LLM search failed, falling back to DuckDuckGo`, {
+            logger.warn("LLM search failed, falling back to DuckDuckGo", {
                 error: formatAnyError(error),
                 query: input.query,
             });
