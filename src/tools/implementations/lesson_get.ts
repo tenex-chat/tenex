@@ -1,10 +1,10 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
-import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { createExpectedError } from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { normalizeLessonEventId } from "@/utils/nostr-entity-parser";
+import { formatLessonOutput, type FormattedLessonOutput } from "./lesson-formatter";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -13,34 +13,9 @@ const lessonGetSchema = z.object({
 });
 
 type LessonGetInput = z.infer<typeof lessonGetSchema>;
-type LessonGetOutput = {
-    eventId: string;
-    title: string;
-    lesson: string;
-    detailed?: string;
-    category?: string;
-    hashtags?: string[];
-    hasDetailed: boolean;
-};
-
-/**
- * Formats a lesson into the standard output shape for lesson_get.
- * Consolidates the output mapping to avoid DRY violations.
- */
-function formatLessonOutput(lesson: NDKAgentLesson, eventId: string): LessonGetOutput {
-    return {
-        eventId,
-        title: lesson.title || "Untitled",
-        lesson: lesson.lesson || lesson.content,
-        detailed: lesson.detailed,
-        category: lesson.category,
-        hashtags: lesson.hashtags,
-        hasDetailed: !!lesson.detailed,
-    };
-}
 
 // Type for expected error results
-type LessonGetResult = LessonGetOutput | { type: "error-text"; text: string };
+type LessonGetResult = FormattedLessonOutput | { type: "error-text"; text: string };
 
 // Core implementation - fetches lesson by event ID
 // Returns error-text for expected "not found" conditions
