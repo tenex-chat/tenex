@@ -208,6 +208,13 @@ export class ConversationSummarizer {
                     `Published metadata for conversation ${conversation.id}: ${result.title}`
                 );
 
+                // Also persist summary to local metadata for prompt fragments
+                // This ensures "Recent Conversations" section can display summaries
+                conversation.updateMetadata({
+                    summary: result.summary,
+                });
+                await conversation.save();
+
                 // Update category tally for future consistency
                 if (result.categories && result.categories.length > 0) {
                     await this.categoryManager.updateCategories(result.categories);
