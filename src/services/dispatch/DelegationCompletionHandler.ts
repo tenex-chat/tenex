@@ -64,6 +64,63 @@ export async function handleDelegationCompletion(
                 "etag.index": i,
             });
 
+            // CRITICAL: Look up the pending delegation to get context
+            // We need this to perform BOTH validation checks
+            const pendingInfo = ralRegistry.findDelegation(eTag);
+
+            if (!pendingInfo?.pending) {
+                // No pending delegation found for this e-tag, try next one
+                span.addEvent("no_pending_delegation", {
+                    "delegation.event_id": eTag,
+                });
+                continue;
+            }
+
+            // CRITICAL CHECK #1: Skip if this is the agent's own message
+            // When an agent sends a message (e.g., planning-coordinator publishing delegation status),
+            // that message might e-tag a delegation conversation where the agent is the RECIPIENT.
+            // pendingInfo.agentPubkey is the agent WAITING for the delegation (the coordinator).
+            // event.pubkey is the sender of this message.
+            // If they're the same, this is the coordinator's own status message, not a completion.
+            if (pendingInfo.agentPubkey === event.pubkey) {
+                span.addEvent("completion_self_message_skipped", {
+                    "delegation.event_id": eTag,
+                    "waiting_agent.pubkey": pendingInfo.agentPubkey.substring(0, 12),
+                    "event.sender_pubkey": event.pubkey.substring(0, 12),
+                    "reason": "agent's own message, not completing delegation",
+                });
+                logger.debug("[handleDelegationCompletion] Skipping self-message", {
+                    delegationEventId: eTag.substring(0, 8),
+                    agentPubkey: pendingInfo.agentPubkey.substring(0, 12),
+                    eventSenderPubkey: event.pubkey.substring(0, 12),
+                });
+                continue;
+            }
+
+            // CRITICAL CHECK #2: Validate that the event author is the delegated agent
+            // This prevents OTHER agents from falsely completing delegations
+            if (event.pubkey !== pendingInfo.pending.recipientPubkey) {
+                span.addEvent("completion_sender_mismatch", {
+                    "delegation.event_id": eTag,
+                    "expected.recipient_pubkey": pendingInfo.pending.recipientPubkey.substring(0, 12),
+                    "actual.sender_pubkey": event.pubkey.substring(0, 12),
+                    "validation.matched": false,
+                });
+                logger.debug("[handleDelegationCompletion] Ignoring event - sender is not the delegated agent", {
+                    delegationEventId: eTag.substring(0, 8),
+                    expectedRecipient: pendingInfo.pending.recipientPubkey.substring(0, 12),
+                    actualSender: event.pubkey.substring(0, 12),
+                });
+                continue; // Skip to next e-tag
+            }
+
+            span.addEvent("completion_sender_validated", {
+                "delegation.event_id": eTag,
+                "expected.recipient_pubkey": pendingInfo.pending.recipientPubkey.substring(0, 12),
+                "actual.sender_pubkey": event.pubkey.substring(0, 12),
+                "validation.matched": true,
+            });
+
             // Attempt to build a real transcript from the conversation history
             // This captures user interventions and multi-turn exchanges
             let fullTranscript: DelegationMessage[] | undefined;
