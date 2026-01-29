@@ -125,12 +125,8 @@ export async function checkPostCompletion(
     const todos = conversationStore
         ? conversationStore.getTodos(agent.pubkey)
         : [];
-    const hasTodoList = todos.length > 0;
     const hasBeenNudgedAboutTodos = conversationStore
         ? conversationStore.hasBeenNudgedAboutTodos(agent.pubkey)
-        : false;
-    const hasBeenRemindedAboutTodos = conversationStore
-        ? conversationStore.hasBeenRemindedAboutTodos(agent.pubkey)
         : false;
 
     const supervisionContext: PostCompletionContext = {
@@ -141,9 +137,7 @@ export async function checkPostCompletion(
         systemPrompt,
         conversationHistory: conversationMessages,
         availableTools: toolsObject,
-        hasTodoList,
         hasBeenNudgedAboutTodos,
-        hasBeenRemindedAboutTodos,
         todos: todos.map((t) => ({
             id: t.id,
             title: t.title,
@@ -170,12 +164,6 @@ export async function checkPostCompletion(
         // Mark agent as nudged if this was the todo nudge heuristic
         if (supervisionResult.heuristicId === "consecutive-tools-without-todo" && conversationStore) {
             conversationStore.setNudgedAboutTodos(agent.pubkey);
-            await conversationStore.save();
-        }
-
-        // Mark agent as reminded if this was the todo reminder heuristic
-        if (supervisionResult.heuristicId === "todo-reminder" && conversationStore) {
-            conversationStore.setRemindedAboutTodos(agent.pubkey);
             await conversationStore.save();
         }
 
