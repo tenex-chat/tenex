@@ -126,7 +126,7 @@ async function executeDelegate(
   // Return normal result - agent continues without blocking
   return {
     success: true,
-    message: `Delegated ${pendingDelegations.length} task(s). The agent(s) will respond when ready.`,
+    message: `Delegated ${pendingDelegations.length} task(s). The agent(s) will wake you up when ready with the response(s).`,
     delegationConversationIds,
   };
 }
