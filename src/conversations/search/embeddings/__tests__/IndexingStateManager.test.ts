@@ -46,12 +46,11 @@ describe("IndexingStateManager", () => {
 
             // Mock metadata
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
-                    title: "Test Title",
-                    summary: "Test Summary",
-                    lastActivity: 12345,
-                },
-            } as any);
+                id: conversationId,
+                title: "Test Title",
+                summary: "Test Summary",
+                lastActivity: 12345,
+            });
 
             // Create manager and mark as indexed
             const manager1 = new IndexingStateManager(testBasePath);
@@ -94,12 +93,11 @@ describe("IndexingStateManager", () => {
             const conversationId = "test-conv";
 
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
-                    title: "Test",
-                    summary: "Test",
-                    lastActivity: 12345,
-                },
-            } as any);
+                id: conversationId,
+                title: "Test",
+                summary: "Test",
+                lastActivity: 12345,
+            });
 
             const manager = new IndexingStateManager(testBasePath);
             const needsIndexing = manager.needsIndexing(testBasePath, projectId, conversationId);
@@ -113,12 +111,11 @@ describe("IndexingStateManager", () => {
 
             let currentTitle = "Original Title";
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(() => ({
-                metadata: {
-                    title: currentTitle,
-                    summary: "Summary",
-                    lastActivity: 12345,
-                },
-            })) as any;
+                id: conversationId,
+                title: currentTitle,
+                summary: "Summary",
+                lastActivity: 12345,
+            }));
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -137,12 +134,11 @@ describe("IndexingStateManager", () => {
 
             let currentSummary = "Original Summary";
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(() => ({
-                metadata: {
-                    title: "Title",
-                    summary: currentSummary,
-                    lastActivity: 12345,
-                },
-            })) as any;
+                id: conversationId,
+                title: "Title",
+                summary: currentSummary,
+                lastActivity: 12345,
+            }));
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -159,12 +155,11 @@ describe("IndexingStateManager", () => {
 
             let currentActivity = 12345;
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(() => ({
-                metadata: {
-                    title: "Title",
-                    summary: "Summary",
-                    lastActivity: currentActivity,
-                },
-            })) as any;
+                id: conversationId,
+                title: "Title",
+                summary: "Summary",
+                lastActivity: currentActivity,
+            }));
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -180,12 +175,11 @@ describe("IndexingStateManager", () => {
             const conversationId = "test-conv";
 
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
-                    title: "Title",
-                    summary: "Summary",
-                    lastActivity: 12345,
-                },
-            } as any);
+                id: conversationId,
+                title: "Title",
+                summary: "Summary",
+                lastActivity: 12345,
+            });
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -208,19 +202,95 @@ describe("IndexingStateManager", () => {
             // Cannot determine - should skip
             expect(needsIndexing).toBe(false);
         });
+
+        it("should detect hash changes across batches without forceFullReindex", () => {
+            const projectId = "test-project";
+            const conv1 = "conv-1";
+            const conv2 = "conv-2";
+
+            // Initial metadata state
+            const metadataState = new Map([
+                [
+                    conv1,
+                    {
+                        id: conv1,
+                        title: "Conversation 1",
+                        summary: "Summary 1",
+                        lastActivity: 1000,
+                    },
+                ],
+                [
+                    conv2,
+                    {
+                        id: conv2,
+                        title: "Conversation 2",
+                        summary: "Summary 2",
+                        lastActivity: 2000,
+                    },
+                ],
+            ]);
+
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(
+                (_basePath, _projectId, conversationId) => {
+                    return metadataState.get(conversationId) || null;
+                }
+            );
+
+            const manager = new IndexingStateManager(testBasePath);
+
+            // BATCH 1: Both conversations need indexing (never indexed before)
+            expect(manager.needsIndexing(testBasePath, projectId, conv1)).toBe(true);
+            expect(manager.needsIndexing(testBasePath, projectId, conv2)).toBe(true);
+
+            // Mark both as indexed
+            manager.markIndexed(testBasePath, projectId, conv1);
+            manager.markIndexed(testBasePath, projectId, conv2);
+
+            // BATCH 2: No changes - neither should need indexing
+            expect(manager.needsIndexing(testBasePath, projectId, conv1)).toBe(false);
+            expect(manager.needsIndexing(testBasePath, projectId, conv2)).toBe(false);
+
+            // CHANGE: Update conv1's summary (simulating metadata change between batches)
+            metadataState.set(conv1, {
+                id: conv1,
+                title: "Conversation 1",
+                summary: "UPDATED Summary 1",
+                lastActivity: 1000,
+            });
+
+            // BATCH 3: Only conv1 should need re-indexing (hash changed)
+            expect(manager.needsIndexing(testBasePath, projectId, conv1)).toBe(true);
+            expect(manager.needsIndexing(testBasePath, projectId, conv2)).toBe(false);
+
+            // Mark conv1 as indexed again
+            manager.markIndexed(testBasePath, projectId, conv1);
+
+            // CHANGE: Update conv2's lastActivity (simulating new message)
+            metadataState.set(conv2, {
+                id: conv2,
+                title: "Conversation 2",
+                summary: "Summary 2",
+                lastActivity: 3000, // advanced
+            });
+
+            // BATCH 4: Only conv2 should need re-indexing (activity advanced)
+            expect(manager.needsIndexing(testBasePath, projectId, conv1)).toBe(false);
+            expect(manager.needsIndexing(testBasePath, projectId, conv2)).toBe(true);
+        });
     });
 
     describe("Memory management", () => {
         it("should evict old entries when reaching max size", () => {
             const manager = new IndexingStateManager(testBasePath);
 
-            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(
+                (_basePath, _projectId, conversationId) => ({
+                    id: conversationId,
                     title: "Test",
                     summary: "Test",
                     lastActivity: 12345,
-                },
-            } as any);
+                })
+            );
 
             // Add entries up to max + 1
             const maxEntries = 10000;
@@ -240,13 +310,14 @@ describe("IndexingStateManager", () => {
         it("should provide accurate statistics", () => {
             const manager = new IndexingStateManager(testBasePath);
 
-            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(
+                (_basePath, _projectId, conversationId) => ({
+                    id: conversationId,
                     title: "Test",
                     summary: "Test",
                     lastActivity: 12345,
-                },
-            } as any);
+                })
+            );
 
             const stats1 = manager.getStats();
             expect(stats1.totalEntries).toBe(0);
@@ -271,12 +342,11 @@ describe("IndexingStateManager", () => {
             const conversationId = "test-conv";
 
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
-                    title: "Test",
-                    summary: "Test",
-                    lastActivity: 12345,
-                },
-            } as any);
+                id: conversationId,
+                title: "Test",
+                summary: "Test",
+                lastActivity: 12345,
+            });
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -288,13 +358,14 @@ describe("IndexingStateManager", () => {
         });
 
         it("should clear all state", () => {
-            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(
+                (_basePath, _projectId, conversationId) => ({
+                    id: conversationId,
                     title: "Test",
                     summary: "Test",
                     lastActivity: 12345,
-                },
-            } as any);
+                })
+            );
 
             const manager = new IndexingStateManager(testBasePath);
 
@@ -310,18 +381,90 @@ describe("IndexingStateManager", () => {
         });
     });
 
+    describe("No-content state handling", () => {
+        it("should track conversations with no indexable content", () => {
+            const projectId = "test-project";
+            const conversationId = "test-conv";
+
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
+                id: conversationId,
+                title: "Empty Conversation",
+                summary: undefined,
+                lastActivity: 1000,
+            });
+
+            const manager = new IndexingStateManager(testBasePath);
+
+            // First check - needs indexing
+            expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(true);
+
+            // Mark as indexed with no content
+            manager.markIndexed(testBasePath, projectId, conversationId, true);
+
+            // Should not need re-indexing if nothing changed
+            expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(false);
+        });
+
+        it("should re-check no-content conversations if activity advances", () => {
+            const projectId = "test-project";
+            const conversationId = "test-conv";
+
+            let currentActivity = 1000;
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockImplementation(() => ({
+                id: conversationId,
+                title: "Initially Empty",
+                summary: undefined,
+                lastActivity: currentActivity,
+            }));
+
+            const manager = new IndexingStateManager(testBasePath);
+
+            // Mark as indexed with no content
+            manager.markIndexed(testBasePath, projectId, conversationId, true);
+            expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(false);
+
+            // Activity advances (e.g., new message added)
+            currentActivity = 2000;
+
+            // Should need re-indexing to check if content now exists
+            expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(true);
+        });
+
+        it("should not repeatedly index conversations with persistent no-content", () => {
+            const projectId = "test-project";
+            const conversationId = "test-conv";
+
+            vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
+                id: conversationId,
+                title: "Permanently Empty",
+                summary: undefined,
+                lastActivity: 1000,
+            });
+
+            const manager = new IndexingStateManager(testBasePath);
+
+            // First index attempt
+            expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(true);
+            manager.markIndexed(testBasePath, projectId, conversationId, true);
+
+            // Multiple checks should not require re-indexing
+            for (let i = 0; i < 5; i++) {
+                expect(manager.needsIndexing(testBasePath, projectId, conversationId)).toBe(false);
+            }
+        });
+    });
+
     describe("Disposal", () => {
         it("should save state on dispose", () => {
             const projectId = "test-project";
             const conversationId = "test-conv";
 
             vi.spyOn(conversationDiskReader, "readLightweightMetadata").mockReturnValue({
-                metadata: {
-                    title: "Test",
-                    summary: "Test",
-                    lastActivity: 12345,
-                },
-            } as any);
+                id: conversationId,
+                title: "Test",
+                summary: "Test",
+                lastActivity: 12345,
+            });
 
             const manager = new IndexingStateManager(testBasePath);
             manager.markIndexed(testBasePath, projectId, conversationId);
