@@ -80,7 +80,6 @@ export interface ConversationState {
     metadata: ConversationMetadata;
     agentTodos: Record<string, TodoItem[]>;
     todoNudgedAgents: string[]; // Agents who have been nudged about todo usage
-    todoRemindedAgents: string[]; // Agents who have been reminded about incomplete todos
     blockedAgents: string[];
     executionTime: ExecutionTime;
     /** Meta model variant override per agent - when set, uses this variant instead of keyword detection */

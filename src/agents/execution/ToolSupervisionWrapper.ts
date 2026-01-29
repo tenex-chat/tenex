@@ -58,10 +58,6 @@ export function wrapToolsWithSupervision(
                     const conversation = context.getConversation();
                     const conversationStore = context.conversationStore;
 
-                    // Get todos for the agent to populate hasTodoList
-                    const todos = conversationStore.getTodos(context.agent.pubkey);
-                    const hasTodoList = todos.length > 0;
-
                     // Get system prompt and conversation history
                     const projectContext = getProjectContext();
 
@@ -98,7 +94,6 @@ export function wrapToolsWithSupervision(
                         agentPubkey: context.agent.pubkey,
                         toolName,
                         toolArgs: input,
-                        hasTodoList,
                         systemPrompt,
                         conversationHistory: conversationMessages,
                         availableTools: toolsForContext,
@@ -107,7 +102,6 @@ export function wrapToolsWithSupervision(
                     // Run pre-tool supervision check
                     logger.debug(`[ToolSupervisionWrapper] Running pre-tool supervision for "${toolName}"`, {
                         agent: context.agent.slug,
-                        hasTodoList,
                     });
 
                     // Build executionId for heuristic enforcement tracking
