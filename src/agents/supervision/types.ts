@@ -1,4 +1,5 @@
 import type { ModelMessage, ToolSet } from "ai";
+import type { TodoStatus } from "../../services/ral/types";
 
 /**
  * When heuristic checks run relative to agent execution
@@ -94,14 +95,10 @@ export interface PostCompletionContext {
     conversationHistory: ModelMessage[];
     /** Tools available to the agent */
     availableTools: ToolSet;
-    /** Whether the agent has an active todo list */
-    hasTodoList: boolean;
     /** Whether the agent has already been nudged about todo usage in this conversation */
     hasBeenNudgedAboutTodos: boolean;
-    /** Whether the agent has already been reminded about incomplete todos in this conversation */
-    hasBeenRemindedAboutTodos: boolean;
     /** The agent's todo items (for detailed inspection by heuristics) */
-    todos: Array<{ id: string; title: string; status: string; description?: string }>;
+    todos: Array<{ id: string; title: string; status: TodoStatus; description?: string }>;
 }
 
 /**

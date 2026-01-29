@@ -24,7 +24,7 @@ export class PendingTodosHeuristic implements Heuristic<PostCompletionContext> {
 
     async detect(context: PostCompletionContext): Promise<HeuristicDetection> {
         // Skip if agent has no todos at all
-        if (!context.hasTodoList || context.todos.length === 0) {
+        if (context.todos.length === 0) {
             return { triggered: false };
         }
 
@@ -66,16 +66,13 @@ export class PendingTodosHeuristic implements Heuristic<PostCompletionContext> {
             .map((t) => `- [${t.status}] **${t.title}**${t.description ? `: ${t.description}` : ""}`)
             .join("\n");
 
-        return `**Incomplete Todos Detected:** You have ${incompleteTodos.length} todo item(s) that need attention before finishing:
+        return `You have incomplete items in your todo list:
 
 ${todoList}
 
-Please either:
-1. Complete the remaining tasks and mark them as \`done\`
-2. Mark items as \`skipped\` with a skip_reason if they're no longer needed
-3. If you've completed work but forgot to update the status, update them now
+Would you like to address these before finishing your turn? If you're intentionally leaving them incomplete (waiting on delegation, user request, or other valid reasons), please confirm your intent.
 
-Use \`todo_write\` to update the status of your items.`;
+You can use \`todo_write\` to update item statuses if needed.`;
     }
 
     getCorrectionAction(_verification: VerificationResult): CorrectionAction {
