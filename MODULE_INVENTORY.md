@@ -163,8 +163,6 @@ Use this section to understand each service’s scope and dependencies:
 - **MCP Ownership Boundary (RESOLVED 2025-01-25)**: The MCP subsystem has clear ownership boundaries:
   - `services/mcp/MCPManager.ts`: Owns MCP server lifecycle management (start, stop, health checks, tool caching, resource access). This is the single source of truth for running MCP servers.
   - `services/mcp/mcpInstaller.ts`: Owns MCP server installation (downloading, configuring servers).
-  - `tools/implementations/mcp_discover.ts`: Discovers MCP tool *definitions* published to Nostr (kind:4200 events). This is a tool for agents to browse available MCP tools, not server management.
-  - This separation is correct: discovery of tool definitions (tools/) vs server lifecycle (services/).
 
 ### Target State (Long-Term Vision)
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for our detailed architectural roadmap. The key pillars of our target state are:
