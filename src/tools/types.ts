@@ -30,7 +30,6 @@ export type ToolName =
     | "agents_read"
     | "agents_write"
     | "agents_publish"
-    | "discover_capabilities"
     | "delegate"
     | "delegate_followup"
     | "ask"
