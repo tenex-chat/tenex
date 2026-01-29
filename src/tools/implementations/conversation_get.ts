@@ -61,12 +61,12 @@ const conversationGetSchema = z.object({
     conversationId: z
         .string()
         .min(1, "conversationId is required")
-        .describe("The conversation ID to retrieve."),
+        .describe("The conversation ID to retrieve. Accepts full 64-char hex IDs (case-insensitive), 12-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format."),
     untilId: z
         .string()
         .optional()
         .describe(
-            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs, 12-character hex prefixes, or NIP-19 formats (note1..., nevent1...). Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
+            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs (case-insensitive), 12-character hex prefixes, NIP-19 formats (note1..., nevent1...), or nostr: prefixed versions of any format. Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
         ),
     prompt: z
         .string()
