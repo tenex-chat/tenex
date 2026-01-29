@@ -221,6 +221,12 @@ export class EventHandler {
                 updates.title = title;
             }
 
+            // Parse summary tag
+            const summaryTag = event.tags.find((tag: string[]) => tag[0] === "summary");
+            if (summaryTag && summaryTag[1]) {
+                updates.summary = summaryTag[1];
+            }
+
             // Parse status-label tag
             const statusLabelTag = event.tags.find((tag: string[]) => tag[0] === "status-label");
             if (statusLabelTag && statusLabelTag[1]) {
