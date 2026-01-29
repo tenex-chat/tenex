@@ -48,6 +48,7 @@ import { createKillShellTool } from "./implementations/kill_shell";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
+import { createLessonsListTool } from "./implementations/lessons_list";
 import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createProjectListTool } from "./implementations/project_list";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
@@ -102,6 +103,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     conversation_list: { hasSideEffects: false },
     conversation_search: { hasSideEffects: false },
     lesson_get: { hasSideEffects: false },
+    lessons_list: { hasSideEffects: false },
     agents_list: { hasSideEffects: false },
     agents_read: { hasSideEffects: false },
     agents_discover: { hasSideEffects: false },
@@ -170,6 +172,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     lesson_delete: createLessonDeleteTool,
     lesson_get: createLessonGetTool,
     lesson_learn: createLessonLearnTool,
+    lessons_list: createLessonsListTool,
 
     fs_read: createFsReadTool,
     fs_write: createFsWriteTool,

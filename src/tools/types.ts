@@ -20,6 +20,7 @@ export type ToolName =
     | "lesson_learn"
     | "lesson_get"
     | "lesson_delete"
+    | "lessons_list"
     | "shell"
     | "kill_shell"
     | "agent_configure"
