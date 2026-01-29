@@ -15,6 +15,13 @@ import type { ConversationEntry } from "./types";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
 import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
+import {
+    createImageTracker,
+    processToolResultWithImageTracking,
+    type ImageTracker,
+    type ProcessToolResultOutput,
+} from "./utils/image-placeholder";
+import { extractImageUrls } from "./utils/image-url-utils";
 
 export interface MessageBuilderContext {
     /**
@@ -83,12 +90,18 @@ function deriveRole(
  *
  * For text messages containing image URLs, the content is converted to
  * multimodal format (TextPart + ImagePart array) for AI SDK compatibility.
+ *
+ * Image Placeholder Strategy:
+ * - First appearance of an image: shown in full
+ * - Subsequent appearances: replaced with placeholder referencing eventId
+ * - The imageTracker tracks which images have been seen
  */
 function entryToMessage(
     entry: ConversationEntry,
     viewingAgentPubkey: string,
     truncationContext: TruncationContext | undefined,
-    rootAuthorPubkey: string | undefined
+    rootAuthorPubkey: string | undefined,
+    imageTracker: ImageTracker
 ): ModelMessage {
     const role = deriveRole(entry, viewingAgentPubkey);
 
@@ -97,11 +110,26 @@ function entryToMessage(
     }
 
     if (entry.messageType === "tool-result" && entry.toolData) {
-        // Apply truncation for buried tool results to save context
-        const toolData = truncationContext
-            ? processToolResult(entry.toolData as ToolResultPart[], truncationContext)
-            : (entry.toolData as ToolResultPart[]);
-        return { role: "tool", content: toolData };
+        // First: Apply image placeholder strategy (tracks & replaces seen images)
+        const imageProcessingResult = processToolResultWithImageTracking(
+            entry.toolData as ToolResultPart[],
+            imageTracker,
+            entry.eventId
+        );
+        let toolData = imageProcessingResult.processedParts;
+
+        // Then: Apply truncation for buried tool results to save context
+        toolData = truncationContext
+            ? processToolResult(toolData, truncationContext)
+            : toolData;
+
+        return {
+            role: "tool",
+            content: toolData,
+            _imageReplacementStats: imageProcessingResult.replacedCount > 0
+                ? { replacedCount: imageProcessingResult.replacedCount, uniqueReplacedCount: imageProcessingResult.uniqueReplacedCount }
+                : undefined,
+        } as unknown as ModelMessage;
     }
 
     // Text message - check if attribution prefix needed for unexpected sender
@@ -113,6 +141,14 @@ function entryToMessage(
     if (entry.senderPubkey && rootAuthorPubkey && entry.senderPubkey !== rootAuthorPubkey) {
         const senderName = getPubkeyService().getNameSync(entry.senderPubkey);
         messageContent = `[Note: Message from ${senderName}]\n${messageContent}`;
+    }
+
+    // Track any images in text messages (but don't replace them - user content)
+    // This ensures that if the same image appears later in a tool result,
+    // it will be replaced with a placeholder
+    const imageUrls = extractImageUrls(messageContent);
+    for (const url of imageUrls) {
+        imageTracker.markAsSeen(url);
     }
 
     // Convert to multimodal format if content contains image URLs
@@ -151,6 +187,10 @@ export async function buildMessagesFromEntries(
 
     const result: ModelMessage[] = [];
     const delegationCompletionPrefix = "# DELEGATION COMPLETED";
+
+    // Image placeholder strategy: Track seen images across all messages
+    // First appearance = full image, subsequent = placeholder
+    const imageTracker = createImageTracker();
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
@@ -259,7 +299,7 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -273,7 +313,7 @@ export async function buildMessagesFromEntries(
 
         // TOOL-RESULT: Add to result and mark tool-call as resolved
         if (entry.messageType === "tool-result" && entry.toolData) {
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
 
             for (const part of entry.toolData as ToolResultPart[]) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -282,7 +322,7 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey));
+                    result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker));
                 }
                 deferredMessages.length = 0;
             }
@@ -294,7 +334,7 @@ export async function buildMessagesFromEntries(
         if (pendingToolCalls.size > 0) {
             deferredMessages.push({ entry, truncationContext });
         } else {
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey));
+            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
         }
     }
 
@@ -338,13 +378,38 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey));
+        result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker));
     }
 
     if (prunedDelegationCompletions > 0) {
         trace.getActiveSpan?.()?.addEvent("conversation.delegation_completion_pruned", {
             "delegation.pruned_count": prunedDelegationCompletions,
             "delegation.kept_count": latestDelegationCompletionIndexByRal.size,
+        });
+    }
+
+    // Image placeholder telemetry: Aggregate replacement statistics
+    // The _imageReplacementStats field is set during entryToMessage for tool-result messages
+    let totalReplacedCount = 0;
+    let totalUniqueReplacedCount = 0;
+    for (const msg of result) {
+        const stats = (msg as unknown as { _imageReplacementStats?: { replacedCount: number; uniqueReplacedCount: number } })._imageReplacementStats;
+        if (stats) {
+            totalReplacedCount += stats.replacedCount;
+            totalUniqueReplacedCount += stats.uniqueReplacedCount;
+            // Clean up the internal field (don't send to API)
+            delete (msg as unknown as { _imageReplacementStats?: unknown })._imageReplacementStats;
+        }
+    }
+
+    // Only emit telemetry when actual replacements occurred
+    if (totalReplacedCount > 0) {
+        trace.getActiveSpan?.()?.addEvent("conversation.image_placeholder_applied", {
+            "image.replaced_count": totalReplacedCount, // Total occurrences replaced
+            "image.unique_replaced_count": totalUniqueReplacedCount, // Unique URLs that were replaced
+            "image.unique_urls_tracked": imageTracker.getSeenUrls().size, // All unique URLs seen (including first appearances)
+            // Estimated token savings: ~1,600 tokens per replacement
+            "image.estimated_tokens_saved": totalReplacedCount * 1600,
         });
     }
 
