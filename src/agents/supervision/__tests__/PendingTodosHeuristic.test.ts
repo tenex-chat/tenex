@@ -38,8 +38,8 @@ describe("PendingTodosHeuristic", () => {
         it("should NOT trigger when all todos are completed", async () => {
             const context = createContext({
                 todos: [
-                    { id: "1", title: "Task 1", status: "completed" },
-                    { id: "2", title: "Task 2", status: "completed" },
+                    { id: "1", title: "Task 1", status: "done" },
+                    { id: "2", title: "Task 2", status: "done" },
                 ],
             });
 
@@ -64,7 +64,7 @@ describe("PendingTodosHeuristic", () => {
         it("should NOT trigger when todos are mixed completed and skipped", async () => {
             const context = createContext({
                 todos: [
-                    { id: "1", title: "Task 1", status: "completed" },
+                    { id: "1", title: "Task 1", status: "done" },
                     { id: "2", title: "Task 2", status: "skipped" },
                 ],
             });
@@ -77,7 +77,7 @@ describe("PendingTodosHeuristic", () => {
         it("should trigger when agent has pending todos", async () => {
             const context = createContext({
                 todos: [
-                    { id: "1", title: "Task 1", status: "completed" },
+                    { id: "1", title: "Task 1", status: "done" },
                     { id: "2", title: "Task 2", status: "pending" },
                 ],
             });
@@ -118,7 +118,7 @@ describe("PendingTodosHeuristic", () => {
                 todos: [
                     { id: "1", title: "Task 1", status: "pending" },
                     { id: "2", title: "Task 2", status: "in_progress" },
-                    { id: "3", title: "Task 3", status: "completed" },
+                    { id: "3", title: "Task 3", status: "done" },
                     { id: "4", title: "Task 4", status: "pending" },
                 ],
             });
@@ -154,7 +154,7 @@ describe("PendingTodosHeuristic", () => {
                 todos: [
                     { id: "1", title: "Task A", status: "pending", description: "Do something" },
                     { id: "2", title: "Task B", status: "in_progress" },
-                    { id: "3", title: "Task C", status: "completed" }, // Should not appear
+                    { id: "3", title: "Task C", status: "done" }, // Should not appear
                 ],
             });
 

@@ -7,8 +7,6 @@ export {
     SilentAgentHeuristic,
     DelegationClaimHeuristic,
     PendingTodosHeuristic,
-    TodoReminderHeuristic,
-    TODO_TOOL_NAMES,
 } from "./heuristics";
 
 // Services
