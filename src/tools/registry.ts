@@ -49,7 +49,6 @@ import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createLessonsListTool } from "./implementations/lessons_list";
-import { createMcpDiscoverTool } from "./implementations/mcp_discover";
 import { createProjectListTool } from "./implementations/project_list";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
@@ -116,7 +115,6 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     rag_subscription_list: { hasSideEffects: false },
     rag_subscription_get: { hasSideEffects: false },
     bug_list: { hasSideEffects: false },
-    discover_capabilities: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
     nostr_fetch: { hasSideEffects: false },
@@ -165,8 +163,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     delegate_crossproject: createDelegateCrossProjectTool,
     delegate_followup: createDelegateFollowupTool,
     delegate: createDelegateTool,
-
-    discover_capabilities: createMcpDiscoverTool,
 
     // Lesson tools
     lesson_delete: createLessonDeleteTool,
