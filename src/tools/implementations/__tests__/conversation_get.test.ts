@@ -35,6 +35,25 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
+// Mock PrefixKVStore
+const mockPrefixLookup = mock((prefix: string) => {
+    // Return predefined mappings for test prefixes
+    const mappings: Record<string, string> = {
+        "abc123def456": "abc123def456789012345678901234567890123456789012345678901234",
+        "event1234567": "event123456789012345678901234567890123456789012345678901234",
+    };
+    return mappings[prefix] ?? null;
+});
+
+const mockPrefixStoreIsInitialized = mock(() => true);
+
+mock.module("@/services/storage", () => ({
+    prefixKVStore: {
+        lookup: mockPrefixLookup,
+        isInitialized: mockPrefixStoreIsInitialized,
+    },
+}));
+
 // Mock llmServiceFactory
 mock.module("@/llm", () => ({
     llmServiceFactory: {
@@ -42,6 +61,24 @@ mock.module("@/llm", () => ({
     },
 }));
 
+// Mock RAGService to avoid initialization errors
+mock.module("@/services/rag/RAGService", () => ({
+    RAGService: {
+        getInstance: mock(() => ({
+            initialize: mock(() => Promise.resolve()),
+        })),
+    },
+}));
+
+// Mock ConversationEmbeddingService to avoid RAGService initialization
+mock.module("@/conversations/search/embeddings/ConversationEmbeddingService", () => ({
+    ConversationEmbeddingService: {
+        getInstance: mock(() => ({
+            initialize: mock(() => Promise.resolve()),
+            indexConversation: mock(() => Promise.resolve()),
+        })),
+    },
+}));
 
 // Store mock conversation data
 let mockConversationData: {
@@ -685,6 +722,341 @@ describe("conversation_get Tool", () => {
         });
     });
 
+    describe("untilId Parameter", () => {
+        it("should return all messages when untilId is not provided", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Third",
+                        pubkey: "user-pubkey",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "test-conversation-id" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(3);
+            expect(lines[0]).toContain("First");
+            expect(lines[1]).toContain("Second");
+            expect(lines[2]).toContain("Third");
+        });
+
+        it("should return messages up to and including untilId", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Third",
+                        pubkey: "user-pubkey",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-2",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should only have first two messages (up to and including event-2)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("First");
+            expect(lines[1]).toContain("Second");
+            expect(messages).not.toContain("Third");
+        });
+
+        it("should return single message when untilId is first message", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-1",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+            expect(messages).not.toContain("Second");
+        });
+
+        it("should return all messages when untilId is last message", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-2",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("First");
+            expect(lines[1]).toContain("Second");
+        });
+
+        it("should return all messages when untilId is not found (graceful fallback)", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "non-existent-event-id",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should return all messages when untilId not found
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("First");
+            expect(lines[1]).toContain("Second");
+        });
+
+        it("should work with includeToolResults parameter", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
+                        pubkey: "agent-pub",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "some result" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Thanks!",
+                        pubkey: "user-pubkey",
+                        eventId: "event-4",
+                        timestamp: 1700000003000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-3",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should have 2 lines: "Hello" and merged tool-call/tool-result (up to event-3)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Hello");
+            expect(lines[1]).toContain("[tool-use test_tool");
+            expect(lines[1]).toContain("[tool-result");
+            expect(messages).not.toContain("Thanks!");
+        });
+
+        it("should filter correctly with tool-call merging when untilId is tool-call", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
+                        pubkey: "agent-pub",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "some result" }],
+                        pubkey: "agent-pub",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-2",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should have 2 lines: "Hello" and tool-call (without merged result since event-3 is excluded)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Hello");
+            expect(lines[1]).toContain("[tool-use test_tool");
+            // The result should not be merged since event-3 is after untilId
+            expect(lines[1]).not.toContain("[tool-result");
+        });
+
+        it("should correctly report messageCount for filtered conversation", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Third",
+                        pubkey: "user-pubkey",
+                        eventId: "event-3",
+                        timestamp: 1700000002000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "event-2",
+            });
+
+            // messageCount should reflect filtered count (2)
+            expect((result.conversation as any).messageCount).toBe(2);
+        });
+    });
+
     describe("Agent Name Resolution", () => {
         it("should resolve agent pubkeys to their slugs", async () => {
             // Uses pubkeys registered in mockAgentPubkeyToSlug
@@ -764,6 +1136,393 @@ describe("conversation_get Tool", () => {
             // Agents should show their slugs
             expect(lines[1]).toBe("[+1] [@claude-code -> @user12345678] Hi! I can help");
             expect(lines[2]).toBe("[+2] [@debugger] Investigating...");
+        });
+    });
+
+    describe("untilId Format Support", () => {
+        it("should accept full 64-character hex IDs", async () => {
+            const fullHexId = "event123456789012345678901234567890123456789012345678901234";
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: fullHexId,
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: fullHexId,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+            expect(messages).not.toContain("Second");
+        });
+
+        it("should accept and resolve 12-character hex prefixes via PrefixKVStore", async () => {
+            const fullEventId = "abc123def456789012345678901234567890123456789012345678901234";
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: fullEventId,
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "abc123def456", // 12-char prefix
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should resolve prefix and filter correctly
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+            expect(messages).not.toContain("Second");
+        });
+
+        it("should gracefully fallback when prefix cannot be resolved", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "999999999999", // Unresolvable prefix
+            });
+
+            // Should return all messages (graceful fallback)
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("First");
+            expect(lines[1]).toContain("Second");
+        });
+
+        it("should handle prefix store not initialized", async () => {
+            // Temporarily mock store as uninitialized
+            mockPrefixStoreIsInitialized.mockReturnValueOnce(false);
+
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "abc123def456", // 12-char prefix
+            });
+
+            // Should return all messages (graceful fallback when store not initialized)
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+            expect(lines).toHaveLength(2);
+        });
+
+        it("should accept NIP-19 note1 format", async () => {
+            // note1 encodes a full hex event ID
+            // For testing, we'll use a real note1 encoding
+            const hexEventId = "0000000000000000000000000000000000000000000000000000000000000001";
+            // note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgfjq9j
+            const note1Id = "note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgfjq9j";
+
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: hexEventId,
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: note1Id,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+            expect(messages).not.toContain("Second");
+        });
+
+        it("should accept nostr: prefixed IDs", async () => {
+            const fullHexId = "event123456789012345678901234567890123456789012345678901234";
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: fullHexId,
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: `nostr:${fullHexId}`,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+        });
+
+        it("should handle invalid untilId format gracefully", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: "invalid-format", // Invalid format
+            });
+
+            // Should return all messages (graceful fallback)
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+            expect(lines).toHaveLength(2);
+        });
+
+        it("should handle case-insensitive hex IDs", async () => {
+            const lowerCaseId = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+            const upperCaseId = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789";
+
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: lowerCaseId,
+                        timestamp: 1700000000000,
+                    },
+                    {
+                        messageType: "text",
+                        content: "Second",
+                        pubkey: "user-pubkey",
+                        eventId: "event-2",
+                        timestamp: 1700000001000,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "test-conversation-id",
+                untilId: upperCaseId, // Uppercase version
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should match case-insensitively
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain("First");
+        });
+    });
+
+    describe("conversationId Format Support", () => {
+        it("should reject invalid conversationId format", async () => {
+            mockConversationData = {
+                id: "test-conversation-id",
+                messages: [],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "invalid-format", // Invalid format
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.message).toContain("Could not resolve");
+        });
+
+        it("should accept 12-char prefix for conversationId", async () => {
+            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234";
+            mockConversationData = {
+                id: fullConvId,
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            // Override getConversation to handle prefix lookup
+            mockGetConversation.mockImplementation((id?: string) => {
+                if (id === fullConvId || id === "abc123def456") {
+                    return mockConversationData ? {
+                        id: mockConversationData.id,
+                        title: mockConversationData.title,
+                        metadata: mockConversationData.metadata,
+                        executionTime: mockConversationData.executionTime,
+                        getAllMessages: mockGetAllMessages,
+                        getMessageCount: mockGetMessageCount,
+                    } : null;
+                }
+                return null;
+            });
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "abc123def456", // 12-char prefix
+            });
+
+            expect(result.success).toBe(true);
+            expect((result.conversation as any).messages).toContain("Hello");
+        });
+
+        it("should accept full 64-char hex for conversationId", async () => {
+            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234";
+            mockConversationData = {
+                id: fullConvId,
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "event-1",
+                        timestamp: 1700000000000,
+                    },
+                ],
+            };
+
+            mockGetConversation.mockImplementation((id?: string) => {
+                if (id === fullConvId) {
+                    return mockConversationData ? {
+                        id: mockConversationData.id,
+                        title: mockConversationData.title,
+                        metadata: mockConversationData.metadata,
+                        executionTime: mockConversationData.executionTime,
+                        getAllMessages: mockGetAllMessages,
+                        getMessageCount: mockGetMessageCount,
+                    } : null;
+                }
+                return null;
+            });
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: fullConvId,
+            });
+
+            expect(result.success).toBe(true);
+            expect((result.conversation as any).messages).toContain("Hello");
         });
     });
 });
