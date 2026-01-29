@@ -9,12 +9,65 @@ import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import { z } from "zod";
+import { nip19 } from "nostr-tools";
+
+/**
+ * Normalizes various event ID formats to a canonical 64-char lowercase hex ID.
+ *
+ * Accepts:
+ * - Full 64-character hex IDs
+ * - 12-character hex prefixes (resolved via PrefixKVStore)
+ * - NIP-19 formats: note1..., nevent1...
+ * - nostr: prefixed versions of all the above
+ *
+ * @param input - The event ID in any supported format
+ * @returns The normalized 64-char hex ID, or null if resolution fails
+ */
+function normalizeEventId(input: string): string | null {
+    const trimmed = input.trim();
+
+    // Strip nostr: prefix if present
+    const cleaned = trimmed.startsWith("nostr:") ? trimmed.slice(6) : trimmed;
+
+    // 1. Check for full 64-char hex ID
+    if (/^[0-9a-f]{64}$/i.test(cleaned)) {
+        return cleaned.toLowerCase();
+    }
+
+    // 2. Check for 12-char hex prefix - resolve via PrefixKVStore
+    if (isHexPrefix(cleaned)) {
+        const resolved = resolvePrefixToId(cleaned);
+        return resolved; // Returns null if not found
+    }
+
+    // 3. Try NIP-19 decoding (note1..., nevent1...)
+    try {
+        const decoded = nip19.decode(cleaned);
+        if (decoded.type === "note") {
+            return (decoded.data as string).toLowerCase();
+        }
+        if (decoded.type === "nevent") {
+            return (decoded.data as { id: string }).id.toLowerCase();
+        }
+    } catch {
+        // Not a valid NIP-19 format, fall through
+    }
+
+    // Invalid format or resolution failed
+    return null;
+}
 
 const conversationGetSchema = z.object({
     conversationId: z
         .string()
         .min(1, "conversationId is required")
         .describe("The conversation ID to retrieve."),
+    untilId: z
+        .string()
+        .optional()
+        .describe(
+            "Optional message ID to retrieve conversation slice up to and including this message. Accepts full 64-char hex IDs, 12-character hex prefixes, or NIP-19 formats (note1..., nevent1...). Useful for synthetic conversation forks where a new conversation references a parent conversation up to a specific message point."
+        ),
     prompt: z
         .string()
         .optional()
@@ -208,10 +261,25 @@ function formatLine(
  */
 function serializeConversation(
     conversation: ConversationStore,
-    options: { includeToolResults?: boolean } = {}
+    options: { includeToolResults?: boolean; untilId?: string } = {}
 ): Record<string, unknown> {
-    const messages = conversation.getAllMessages();
+    let messages = conversation.getAllMessages();
     const pubkeyService = getPubkeyService();
+
+    // Filter messages up to and including untilId if provided
+    if (options.untilId) {
+        const untilIndex = messages.findIndex(msg => msg.eventId === options.untilId);
+        if (untilIndex === -1) {
+            // Message not found - return all messages as graceful fallback
+            logger.warn("untilId not found in conversation, returning all messages", {
+                untilId: options.untilId,
+                conversationId: conversation.id,
+            });
+        } else {
+            // Include messages up to and including the untilId message
+            messages = messages.slice(0, untilIndex + 1);
+        }
+    }
 
     // Get the first message timestamp as baseline for relative times
     const firstTimestamp = messages.length > 0 ? (messages[0].timestamp ?? 0) : 0;
@@ -346,16 +414,28 @@ async function executeConversationGet(
         };
     }
 
-    // Resolve prefix to full conversation ID if needed
-    let targetConversationId = input.conversationId;
-    if (isHexPrefix(input.conversationId)) {
-        const resolved = await resolvePrefixToId(input.conversationId);
-        if (!resolved) {
-            throw new Error(
-                `Could not resolve prefix "${input.conversationId}" to a conversation ID. The prefix may be ambiguous or no matching conversation was found.`
-            );
+    // Normalize conversation ID to full 64-char hex
+    const targetConversationId = normalizeEventId(input.conversationId);
+    if (!targetConversationId) {
+        return {
+            success: false,
+            message: `Could not resolve conversation ID "${input.conversationId}". Expected 64-char hex, 12-char hex prefix, or NIP-19 format (note1.../nevent1...).`,
+        };
+    }
+
+    // Normalize untilId if provided - graceful fallback for optional parameter
+    let targetUntilId: string | undefined = undefined;
+    if (input.untilId) {
+        targetUntilId = normalizeEventId(input.untilId);
+        if (!targetUntilId) {
+            logger.warn("Could not resolve untilId, proceeding without filtering", {
+                untilId: input.untilId,
+                conversationId: targetConversationId,
+                agent: context.agent.name,
+            });
+            // Fall back to undefined - return unfiltered conversation
+            targetUntilId = undefined;
         }
-        targetConversationId = resolved;
     }
 
     logger.info("📖 Retrieving conversation", {
@@ -386,11 +466,13 @@ async function executeConversationGet(
         conversationId: conversation.id,
         title: conversation.title,
         messageCount: conversation.getMessageCount(),
+        untilId: targetUntilId,
         agent: context.agent.name,
     });
 
     const serializedConversation = serializeConversation(conversation, {
         includeToolResults: input.includeToolResults,
+        untilId: targetUntilId,
     });
 
     // If a prompt is provided, process the conversation through the LLM
@@ -509,13 +591,14 @@ export function createConversationGetTool(context: ToolExecutionContext): AISdkT
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ conversationId, prompt }: ConversationGetInput) => {
+        value: ({ conversationId, untilId, prompt }: ConversationGetInput) => {
             const target = conversationId
                 ? `conversation: ${conversationId}`
                 : "conversation (missing id)";
+            const upTo = untilId ? ` up to message ${untilId}` : "";
             return prompt
-                ? `Analyzing ${target} with prompt`
-                : `Retrieving ${target}`;
+                ? `Analyzing ${target}${upTo} with prompt`
+                : `Retrieving ${target}${upTo}`;
         },
         enumerable: false,
         configurable: true,
