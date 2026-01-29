@@ -5,6 +5,10 @@ import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
+import { resolveRecipientToPubkey } from "@/services/agents";
+import { config as configService } from "@/services/ConfigService";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -67,6 +71,102 @@ const askSchema = z.object({
 type AskInput = z.infer<typeof askSchema>;
 type AskOutput = StopExecutionSignal;
 
+/**
+ * Helper: Format questions with their full details for escalation prompt
+ */
+function formatQuestions(questions: AskInput["questions"]): string {
+  return questions.map((q, idx) => {
+    let formatted = `${idx + 1}. [${q.type}] ${q.title}\n   Question: ${q.question}\n`;
+    if (q.type === "question" && q.suggestions) {
+      formatted += `   Suggestions: ${q.suggestions.join(", ")}\n`;
+    } else if (q.type === "multiselect" && q.options) {
+      formatted += `   Options: ${q.options.join(", ")}\n`;
+    } else {
+      formatted += `   Type: Open-ended\n`;
+    }
+    return formatted;
+  }).join("\n");
+}
+
+/**
+ * Helper: Build escalation prompt for delegating ask to escalation agent
+ */
+function buildEscalationPrompt(
+  input: AskInput,
+  context: ToolExecutionContext,
+  agentRole: string,
+  delegationChain?: Array<{ displayName: string; pubkey: string }>
+): string {
+  const { title, context: askContext, questions } = input;
+
+  let chainDisplay = "";
+  if (delegationChain && delegationChain.length > 0) {
+    chainDisplay = `\n## Delegation Chain\n${delegationChain.map(e => `- ${e.displayName} (${e.pubkey.substring(0, 8)})`).join("\n")}\n`;
+  }
+
+  const formattedQuestions = formatQuestions(questions);
+
+  return `# Question Escalation Request
+
+## Source
+- Agent: ${context.agent.slug}
+- Role: ${agentRole}
+- Conversation: ${context.conversationId}
+${chainDisplay}
+## Questions Requiring Response
+
+### ${title}
+**Context:**
+${askContext}
+
+**Questions:**
+${formattedQuestions}
+
+## Your Task
+You are acting as the project owner's proxy. Either:
+1. Answer directly if you can make the decision
+2. Use ask() to escalate to the actual human if you need their input
+
+When responding, provide your answers in a clear format that addresses each question.`;
+}
+
+/**
+ * Helper: Build prompt summary for delegation tracking
+ */
+function buildPromptSummary(input: AskInput): string {
+  const { title, context: askContext, questions } = input;
+  const questionSummary = questions.map(q => `[${q.title}] ${q.question}`).join("\n");
+  return `${title}\n\n${askContext}\n\n---\n\n${questionSummary}`;
+}
+
+/**
+ * Helper: Get escalation target (agent slug) from config, with validation
+ * Returns null if no escalation agent configured or config not loaded
+ */
+function getEscalationTarget(): string | null {
+  try {
+    const config = configService.getConfig();
+    const escalationAgentSlug = config.escalation?.agent;
+
+    // Validate that if escalation agent is configured, it resolves to a valid pubkey
+    if (escalationAgentSlug) {
+      const pubkey = resolveRecipientToPubkey(escalationAgentSlug);
+      if (!pubkey) {
+        logger.warn("[ask] Escalation agent configured but not found", {
+          escalationAgentSlug,
+        });
+        return null;
+      }
+    }
+
+    return escalationAgentSlug || null;
+  } catch (error) {
+    // Config not loaded - this is fine, just means no escalation agent configured
+    logger.debug("[ask] Config not loaded, no escalation routing", { error });
+    return null;
+  }
+}
+
 async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
   const { title, context: askContext, questions } = input;
 
@@ -75,6 +175,84 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
   if (!ownerPubkey) {
     throw new Error("No project owner configured - cannot determine who to ask");
+  }
+
+  // Check for escalation agent configuration using helper
+  const escalationAgentSlug = getEscalationTarget();
+
+  // If escalation agent is configured AND current agent is not the escalation agent,
+  // route through escalation agent instead of directly to user
+  if (escalationAgentSlug && context.agent.slug !== escalationAgentSlug) {
+    const escalationAgentPubkey = resolveRecipientToPubkey(escalationAgentSlug);
+
+    if (!escalationAgentPubkey) {
+      // This shouldn't happen since getEscalationTarget() validates it,
+      // but handle gracefully just in case
+      logger.warn("[ask] Escalation agent not found, falling back to direct ask", {
+        escalationAgentSlug,
+        fromAgent: context.agent.slug,
+      });
+      // Fall through to normal ask flow
+    } else {
+      // Get delegation chain for circular delegation check
+      const conversationStore = ConversationStore.get(context.conversationId);
+      const delegationChain = conversationStore?.metadata?.delegationChain;
+
+      // Check for circular delegation using stored chain
+      if (delegationChain && wouldCreateCircularDelegation(delegationChain, escalationAgentPubkey)) {
+        const targetAgent = projectCtx.getAgentByPubkey(escalationAgentPubkey);
+        const targetName = targetAgent?.slug || escalationAgentPubkey.substring(0, 8);
+        const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
+
+        logger.warn("[ask] Circular delegation detected, falling back to direct ask", {
+          escalationAgent: escalationAgentSlug,
+          targetPubkey: escalationAgentPubkey.substring(0, 8),
+          chain: chainDisplay,
+        });
+
+        // Fall through to normal ask flow instead of throwing
+        // This allows the question to still be asked directly to the user
+      } else {
+        // Route through escalation agent
+        logger.info("[ask] Routing ask through escalation agent", {
+          fromAgent: context.agent.slug,
+          escalationAgent: escalationAgentSlug,
+          toUser: ownerPubkey.substring(0, 8),
+          questionCount: questions.length,
+        });
+
+        // Get full agent info for role
+        const fullAgent = projectCtx.getAgentByPubkey(context.agent.pubkey);
+        const agentRole = fullAgent?.role || "N/A";
+
+        // Build escalation prompt using helper
+        const escalationPrompt = buildEscalationPrompt(input, context, agentRole, delegationChain);
+
+        // Delegate to escalation agent
+        const eventContext = createEventContext(context);
+        const eventId = await context.agentPublisher.delegate({
+          recipient: escalationAgentPubkey,
+          content: escalationPrompt,
+        }, eventContext);
+
+        // Build prompt summary for delegation tracking using helper
+        const promptSummary = buildPromptSummary(input);
+
+        return {
+          __stopExecution: true,
+          pendingDelegations: [
+            {
+              type: "ask" as const,
+              delegationConversationId: eventId,
+              recipientPubkey: escalationAgentPubkey,
+              senderPubkey: context.agent.pubkey,
+              prompt: promptSummary,
+              ralNumber: context.ralNumber,
+            },
+          ],
+        };
+      }
+    }
   }
 
   // Get human-readable name for the recipient
@@ -100,8 +278,8 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     eventContext
   );
 
-  // Build prompt summary for delegation tracking
-  const promptSummary = questions.map(q => `[${q.title}] ${q.question}`).join("\n");
+  // Build prompt summary for delegation tracking using helper
+  const promptSummary = buildPromptSummary(input);
 
   return {
     __stopExecution: true,
@@ -111,7 +289,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
         delegationConversationId: eventId,
         recipientPubkey: ownerPubkey,
         senderPubkey: context.agent.pubkey,
-        prompt: `${title}\n\n${askContext}\n\n---\n\n${promptSummary}`,
+        prompt: promptSummary,
         ralNumber: context.ralNumber,
       },
     ],
