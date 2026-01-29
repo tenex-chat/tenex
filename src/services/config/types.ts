@@ -48,6 +48,12 @@ export interface TenexConfig {
         content?: string; // The actual system prompt content
     };
 
+    // Escalation agent configuration
+    // When set, ask() tool calls are routed through this agent instead of directly to the user
+    escalation?: {
+        agent?: string; // Agent slug to route ask() calls through (acts as first line of defense)
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -88,6 +94,11 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             content: z.string().optional(),
+        })
+        .optional(),
+    escalation: z
+        .object({
+            agent: z.string().optional(),
         })
         .optional(),
     description: z.string().optional(),
