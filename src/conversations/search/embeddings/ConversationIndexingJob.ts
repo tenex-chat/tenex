@@ -221,6 +221,13 @@ export class ConversationIndexingJob {
                         this.stateManager.markIndexed(this.projectsBasePath, projectId, conversationId);
                     } else {
                         // indexConversation returns false for empty/missing content
+                        // Mark as indexed with noContent flag to avoid re-trying every batch
+                        this.stateManager.markIndexed(
+                            this.projectsBasePath,
+                            projectId,
+                            conversationId,
+                            true
+                        );
                         failed++;
                     }
                 } catch (error) {

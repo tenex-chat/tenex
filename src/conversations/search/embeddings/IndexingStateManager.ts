@@ -28,6 +28,8 @@ interface ConversationIndexState {
     lastIndexedAt: number;
     /** Last known activity timestamp */
     lastActivity?: number;
+    /** Whether this conversation has no indexable content */
+    noContent?: boolean;
 }
 
 /**
@@ -39,7 +41,8 @@ interface StateFile {
 }
 
 /**
- * Manager for conversation indexing state with LRU eviction
+ * Manager for conversation indexing state with bounded storage
+ * Eviction strategy: FIFO based on lastIndexedAt timestamp
  */
 export class IndexingStateManager {
     private static readonly STATE_VERSION = 1;
@@ -146,21 +149,22 @@ export class IndexingStateManager {
 
     /**
      * Evict oldest entries when reaching max size
+     * Uses FIFO eviction based on lastIndexedAt timestamp (oldest indexed first)
      */
     private evictOldEntries(): void {
-        // Sort by lastIndexedAt
+        // Sort by lastIndexedAt (oldest first)
         const entries = Array.from(this.states.entries()).sort(
             (a, b) => a[1].lastIndexedAt - b[1].lastIndexedAt
         );
 
-        // Remove oldest batch
+        // Remove oldest batch (FIFO)
         const toRemove = entries.slice(0, IndexingStateManager.EVICTION_BATCH_SIZE);
         for (const [key] of toRemove) {
             this.states.delete(key);
         }
 
         logger.info(
-            `Evicted ${toRemove.length} old indexing state entries (max: ${IndexingStateManager.MAX_ENTRIES})`
+            `Evicted ${toRemove.length} old indexing state entries via FIFO (max: ${IndexingStateManager.MAX_ENTRIES})`
         );
     }
 
@@ -173,27 +177,33 @@ export class IndexingStateManager {
 
     /**
      * Calculate metadata hash for a conversation
-     * Hash includes: title, summary, last_user_message, lastActivity
+     * Hash includes: title, summary, lastUserMessage, lastActivity
+     * Returns both hash and lastActivity to avoid double reads
      */
     private calculateMetadataHash(
         basePath: string,
         projectId: string,
         conversationId: string
-    ): string | null {
+    ): { hash: string; lastActivity: number } | null {
         try {
             const metadata = readLightweightMetadata(basePath, projectId, conversationId);
             if (!metadata) return null;
 
             // Build a stable string representation
             const parts: string[] = [
-                metadata.metadata.title || "",
-                metadata.metadata.summary || "",
-                metadata.metadata.last_user_message || "",
-                String(metadata.metadata.lastActivity || 0),
+                metadata.title || "",
+                metadata.summary || "",
+                metadata.lastUserMessage || "",
+                String(metadata.lastActivity || 0),
             ];
 
             const hashInput = parts.join("|");
-            return createHash("sha256").update(hashInput).digest("hex");
+            const hash = createHash("sha256").update(hashInput).digest("hex");
+
+            return {
+                hash,
+                lastActivity: metadata.lastActivity || 0,
+            };
         } catch (error) {
             logger.debug(`Failed to calculate metadata hash for ${conversationId.substring(0, 8)}`, {
                 error,
@@ -207,7 +217,7 @@ export class IndexingStateManager {
      * Returns true if:
      * - Never indexed before
      * - Metadata has changed (different hash)
-     * - Activity timestamp advanced
+     * - Activity timestamp advanced (only if conversation had content before)
      */
     public needsIndexing(
         basePath: string,
@@ -217,16 +227,25 @@ export class IndexingStateManager {
         const key = this.buildKey(projectId, conversationId);
         const currentState = this.states.get(key);
 
-        // Calculate current metadata hash
-        const currentHash = this.calculateMetadataHash(basePath, projectId, conversationId);
-        if (!currentHash) {
+        // Calculate current metadata hash (includes lastActivity to avoid double read)
+        const result = this.calculateMetadataHash(basePath, projectId, conversationId);
+        if (!result) {
             // Can't read metadata - skip
             return false;
         }
 
+        const { hash: currentHash, lastActivity: currentActivity } = result;
+
         // Never indexed before
         if (!currentState) {
             return true;
+        }
+
+        // If previously marked as no-content, check if activity changed
+        // (which might mean new messages were added)
+        if (currentState.noContent) {
+            const lastActivity = currentState.lastActivity || 0;
+            return currentActivity > lastActivity;
         }
 
         // Metadata changed
@@ -235,14 +254,9 @@ export class IndexingStateManager {
         }
 
         // Check if activity advanced
-        const metadata = readLightweightMetadata(basePath, projectId, conversationId);
-        if (metadata?.metadata.lastActivity) {
-            const currentActivity = metadata.metadata.lastActivity;
-            const lastActivity = currentState.lastActivity || 0;
-
-            if (currentActivity > lastActivity) {
-                return true;
-            }
+        const lastActivity = currentState.lastActivity || 0;
+        if (currentActivity > lastActivity) {
+            return true;
         }
 
         // Already indexed and unchanged
@@ -251,24 +265,29 @@ export class IndexingStateManager {
 
     /**
      * Mark a conversation as indexed
+     * @param noContent - Set to true if the conversation has no indexable content
      */
-    public markIndexed(basePath: string, projectId: string, conversationId: string): void {
+    public markIndexed(
+        basePath: string,
+        projectId: string,
+        conversationId: string,
+        noContent = false
+    ): void {
         const key = this.buildKey(projectId, conversationId);
-        const hash = this.calculateMetadataHash(basePath, projectId, conversationId);
+        const result = this.calculateMetadataHash(basePath, projectId, conversationId);
 
-        if (!hash) {
+        if (!result) {
             logger.debug(`Cannot mark ${conversationId.substring(0, 8)} as indexed - no metadata`);
             return;
         }
 
-        // Get current activity timestamp
-        const metadata = readLightweightMetadata(basePath, projectId, conversationId);
-        const lastActivity = metadata?.metadata.lastActivity;
+        const { hash, lastActivity } = result;
 
         this.states.set(key, {
             metadataHash: hash,
             lastIndexedAt: Date.now(),
             lastActivity,
+            noContent,
         });
 
         this.scheduleSave();
