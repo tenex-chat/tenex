@@ -461,4 +461,381 @@ describe("MessageBuilder", () => {
             expect(messages[0].role).toBe("user");
         });
     });
+
+    describe("Image Placeholder Strategy", () => {
+        test("first image appearance shows full image URL", async () => {
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        output: {
+                            type: "text",
+                            value: "Screenshot saved: https://example.com/first.png",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // Tool result should preserve full image URL on first appearance
+            expect(messages).toHaveLength(2);
+            const toolResult = messages[1];
+            expect(toolResult.role).toBe("tool");
+            const output = (toolResult.content as any[])[0].output;
+            const outputValue = typeof output === "string" ? output : output.value;
+            expect(outputValue).toContain("https://example.com/first.png");
+            expect(outputValue).not.toContain("[Image:");
+        });
+
+        test("second image appearance is replaced with placeholder", async () => {
+            const entries: ConversationEntry[] = [
+                // First screenshot - full image
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        output: {
+                            type: "text",
+                            value: "Screenshot saved: https://example.com/same.png",
+                        },
+                    }],
+                },
+                // Agent response
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "I see the screenshot",
+                    messageType: "text",
+                },
+                // Second screenshot with SAME image URL - should be placeholder
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-3",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-2",
+                        toolName: "screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-4",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-2",
+                        toolName: "screenshot",
+                        output: {
+                            type: "text",
+                            value: "Screenshot saved: https://example.com/same.png",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // First tool result should have full URL
+            const firstToolResult = messages[1];
+            const firstOutput = (firstToolResult.content as any[])[0].output;
+            const firstValue = typeof firstOutput === "string" ? firstOutput : firstOutput.value;
+            expect(firstValue).toContain("https://example.com/same.png");
+            expect(firstValue).not.toContain("[Image:");
+
+            // Second tool result (same URL) should have placeholder
+            const secondToolResult = messages[4]; // [call-1, result-1, text, call-2, result-2]
+            const secondOutput = (secondToolResult.content as any[])[0].output;
+            const secondValue = typeof secondOutput === "string" ? secondOutput : secondOutput.value;
+            expect(secondValue).toContain("[Image:");
+            expect(secondValue).toContain("same.png");
+            expect(secondValue).toContain("fs_read");
+            expect(secondValue).toContain("event-4");
+        });
+
+        test("handles multiple different images in same tool result", async () => {
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "multi-screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "multi-screenshot",
+                        output: {
+                            type: "text",
+                            value: "Screenshots:\n- https://example.com/a.png\n- https://example.com/b.png",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            const toolResult = messages[1];
+            const output = (toolResult.content as any[])[0].output;
+            const outputValue = typeof output === "string" ? output : output.value;
+
+            // Both images should be preserved (first appearance)
+            expect(outputValue).toContain("https://example.com/a.png");
+            expect(outputValue).toContain("https://example.com/b.png");
+            expect(outputValue).not.toContain("[Image:");
+        });
+
+        test("mixed new and seen images in same tool result", async () => {
+            const entries: ConversationEntry[] = [
+                // First screenshot
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "screenshot",
+                        output: {
+                            type: "text",
+                            value: "Old: https://example.com/old.png",
+                        },
+                    }],
+                },
+                // Second screenshot with mixed old+new
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-3",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-2",
+                        toolName: "multi-screenshot",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-4",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-2",
+                        toolName: "multi-screenshot",
+                        output: {
+                            type: "text",
+                            value: "Old: https://example.com/old.png\nNew: https://example.com/new.png",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // Second tool result should have mixed content
+            const secondToolResult = messages[3]; // [call-1, result-1, call-2, result-2]
+            const output = (secondToolResult.content as any[])[0].output;
+            const outputValue = typeof output === "string" ? output : output.value;
+
+            // Old image should be placeholder
+            expect(outputValue).toContain("[Image:");
+            expect(outputValue).toContain("old.png");
+
+            // New image should be preserved
+            expect(outputValue).toContain("https://example.com/new.png");
+        });
+
+        test("tool results without images pass through unchanged", async () => {
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "fs_read",
+                        args: { path: "/file.txt" },
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "fs_read",
+                        output: {
+                            type: "text",
+                            value: "File contents: hello world",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            const toolResult = messages[1];
+            const output = (toolResult.content as any[])[0].output;
+            const outputValue = typeof output === "string" ? output : output.value;
+
+            expect(outputValue).toBe("File contents: hello world");
+            expect(outputValue).not.toContain("[Image:");
+        });
+
+        test("image in user text message is tracked but not replaced", async () => {
+            // User messages might contain image URLs in text
+            // We track them but don't replace them (user messages are user's content)
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: userPubkey,
+                    content: "Look at this image: https://example.com/user-img.png",
+                    messageType: "text",
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "event-1",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "analyze",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "event-2",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-1",
+                        toolName: "analyze",
+                        output: {
+                            type: "text",
+                            value: "Analyzed: https://example.com/user-img.png",
+                        },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({ totalMessages: entries.length });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // User message with image is converted to multimodal format
+            // It should still contain the URL in the text part (not replaced)
+            const userMessage = messages[0];
+            const userContent = userMessage.content;
+
+            // Content could be a string or multimodal array
+            if (Array.isArray(userContent)) {
+                // Multimodal format - check the text part contains the URL
+                const textPart = userContent.find((p: any) => p.type === "text");
+                expect(textPart).toBeDefined();
+                expect((textPart as any).text).toContain("https://example.com/user-img.png");
+            } else {
+                // String format
+                expect(userContent).toContain("https://example.com/user-img.png");
+            }
+
+            // Tool result with same image should have placeholder
+            // (because the user message already "showed" it)
+            const toolResult = messages[2];
+            const output = (toolResult.content as any[])[0].output;
+            const outputValue = typeof output === "string" ? output : output.value;
+            expect(outputValue).toContain("[Image:");
+            expect(outputValue).toContain("user-img.png");
+        });
+    });
 });
