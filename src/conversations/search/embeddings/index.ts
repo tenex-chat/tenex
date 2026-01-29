@@ -11,3 +11,8 @@ export {
     type SemanticSearchResult,
     type SemanticSearchOptions,
 } from "./ConversationEmbeddingService";
+
+export {
+    ConversationIndexingJob,
+    conversationIndexingJob,
+} from "./ConversationIndexingJob";

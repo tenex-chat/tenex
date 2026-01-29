@@ -27,6 +27,7 @@ import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "
 import { logDropped, logRouted } from "./utils/routing-log";
 import { UnixSocketTransport } from "./UnixSocketTransport";
 import { streamPublisher } from "@/llm";
+import { conversationIndexingJob } from "@/conversations/search/embeddings";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -143,7 +144,11 @@ export class Daemon {
             streamPublisher.setTransport(this.streamTransport);
             logger.info("Local streaming socket started", { path: this.streamTransport.getSocketPath() });
 
-            // 11. Setup graceful shutdown
+            // 11. Start automatic conversation indexing job
+            conversationIndexingJob.start();
+            logger.info("Automatic conversation indexing job started");
+
+            // 12. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -811,6 +816,11 @@ export class Daemon {
                     console.log(" done");
                 }
 
+                // Stop conversation indexing job
+                process.stdout.write("Stopping conversation indexing job...");
+                conversationIndexingJob.stop();
+                console.log(" done");
+
                 if (this.subscriptionManager) {
                     process.stdout.write("Stopping subscriptions...");
                     this.subscriptionManager.stop();
@@ -1060,6 +1070,9 @@ export class Daemon {
             streamPublisher.setTransport(null);
             this.streamTransport = null;
         }
+
+        // Stop conversation indexing job
+        conversationIndexingJob.stop();
 
         // Stop subscription
         if (this.subscriptionManager) {
