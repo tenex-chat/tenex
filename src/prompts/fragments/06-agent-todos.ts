@@ -57,7 +57,7 @@ export const agentTodosFragment: PromptFragment<AgentTodosArgs> = {
         parts.push("");
         parts.push("**Instructions:**");
         parts.push(
-            "- Use `todo_update` to mark items as 'in_progress' when starting, 'done' when complete"
+            "- Use `todo_write` to mark items as 'in_progress' when starting, 'done' when complete"
         );
         parts.push("- If skipping an item, set status='skipped' and provide a skip_reason");
         parts.push("- Items with 'pending' status have not been started and require attention");

@@ -171,7 +171,6 @@ export class ConversationStore {
         metadata: {},
         agentTodos: {},
         todoNudgedAgents: [],
-        todoRemindedAgents: [],
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
     };
@@ -215,7 +214,7 @@ export class ConversationStore {
                 metadata: loaded.metadata ?? {},
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
-                todoRemindedAgents: loaded.todoRemindedAgents ?? [],
+                // Note: todoRemindedAgents removed in refactor - ignore if present in old files
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
@@ -233,7 +232,6 @@ export class ConversationStore {
                 metadata: {},
                 agentTodos: {},
                 todoNudgedAgents: [],
-                todoRemindedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
             };
@@ -510,16 +508,6 @@ export class ConversationStore {
     setNudgedAboutTodos(agentPubkey: string): void {
         if (!this.state.todoNudgedAgents.includes(agentPubkey)) {
             this.state.todoNudgedAgents.push(agentPubkey);
-        }
-    }
-
-    hasBeenRemindedAboutTodos(agentPubkey: string): boolean {
-        return this.state.todoRemindedAgents.includes(agentPubkey);
-    }
-
-    setRemindedAboutTodos(agentPubkey: string): void {
-        if (!this.state.todoRemindedAgents.includes(agentPubkey)) {
-            this.state.todoRemindedAgents.push(agentPubkey);
         }
     }
 

@@ -29,7 +29,7 @@ export class ConsecutiveToolsWithoutTodoHeuristic implements Heuristic<PostCompl
 
     async detect(context: PostCompletionContext): Promise<HeuristicDetection> {
         // Skip if agent already has todos
-        if (context.hasTodoList) {
+        if (context.todos.length > 0) {
             return { triggered: false };
         }
 
