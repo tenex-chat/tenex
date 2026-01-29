@@ -62,9 +62,7 @@ describe("todo_write tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.totalItems).toBe(2);
-            expect(result.items).toHaveLength(2);
-            expect(result.items[0].id).toBe("task-1");
-            expect(result.items[1].id).toBe("task-2");
+            expect(result.message).toBe("Todo list updated with 2 items");
         });
 
         it("should preserve item order based on array position", async () => {
@@ -130,6 +128,8 @@ describe("todo_write tool", () => {
             expect(result.error).toContain("Safety check failed");
             expect(result.error).toContain("1 existing item(s) would be removed");
             expect(result.missingIds).toContain("remove-me");
+            expect(result.message).toContain("Safety check failed");
+            expect(result.message).toContain("1 existing item(s) would be removed");
         });
 
         it("should list all missing IDs in the error", async () => {
@@ -151,6 +151,8 @@ describe("todo_write tool", () => {
             expect(result.missingIds).toContain("item-2");
             expect(result.missingIds).toContain("item-3");
             expect(result.missingIds).toHaveLength(2);
+            expect(result.message).toContain("Safety check failed");
+            expect(result.message).toContain("2 existing item(s) would be removed");
         });
     });
 
@@ -207,6 +209,7 @@ describe("todo_write tool", () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toContain("Safety check failed");
+            expect(result.message).toContain("Safety check failed");
         });
     });
 
@@ -222,6 +225,8 @@ describe("todo_write tool", () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain("Duplicate IDs");
             expect(result.error).toContain("same-id");
+            expect(result.message).toContain("Duplicate IDs");
+            expect(result.message).toContain("same-id");
         });
 
         it("should identify all duplicate IDs", async () => {
@@ -238,6 +243,9 @@ describe("todo_write tool", () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain("dup-a");
             expect(result.error).toContain("dup-b");
+            expect(result.message).toContain("Duplicate IDs");
+            expect(result.message).toContain("dup-a");
+            expect(result.message).toContain("dup-b");
         });
     });
 
@@ -252,6 +260,8 @@ describe("todo_write tool", () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain("skip_reason is required");
             expect(result.error).toContain("skip-task");
+            expect(result.message).toContain("skip_reason is required");
+            expect(result.message).toContain("skip-task");
         });
 
         it("should accept skip_reason when status is skipped", async () => {
@@ -297,7 +307,10 @@ describe("todo_write tool", () => {
             }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
 
             expect(result.success).toBe(true);
-            expect(result.items[0].status).toBe("in_progress");
+            expect(result.message).toBe("Todo list updated with 1 item");
+            // Verify the status changed in the stored todos
+            const todos = context.getTodosRaw();
+            expect(todos[0].status).toBe("in_progress");
         });
 
         it("should allow in_progress -> done transition", async () => {
@@ -310,7 +323,10 @@ describe("todo_write tool", () => {
             }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
 
             expect(result.success).toBe(true);
-            expect(result.items[0].status).toBe("done");
+            expect(result.message).toBe("Todo list updated with 1 item");
+            // Verify the status changed in the stored todos
+            const todos = context.getTodosRaw();
+            expect(todos[0].status).toBe("done");
         });
 
         it("should allow any status -> skipped transition with reason", async () => {
@@ -323,7 +339,10 @@ describe("todo_write tool", () => {
             }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
 
             expect(result.success).toBe(true);
-            expect(result.items[0].status).toBe("skipped");
+            expect(result.message).toBe("Todo list updated with 1 item");
+            // Verify the status changed in the stored todos
+            const todos = context.getTodosRaw();
+            expect(todos[0].status).toBe("skipped");
         });
 
         it("should update updatedAt when status changes", async () => {
@@ -334,7 +353,7 @@ describe("todo_write tool", () => {
             const firstUpdatedAt = context.getTodosRaw()[0].updatedAt;
 
             // Small delay to ensure timestamp difference
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise(resolve => setTimeout(resolve, 50));
 
             await tool.execute({
                 todos: [{ id: "task", title: "Task", description: "Desc", status: "in_progress" }],
@@ -352,7 +371,7 @@ describe("todo_write tool", () => {
             const firstUpdatedAt = context.getTodosRaw()[0].updatedAt;
 
             // Small delay
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise(resolve => setTimeout(resolve, 50));
 
             // Update title but keep status the same
             await tool.execute({
@@ -381,15 +400,41 @@ describe("todo_write tool", () => {
         });
     });
 
-    describe("debug info", () => {
-        it("should include debug info in response", async () => {
+    describe("success messages", () => {
+        it("should return appropriate message for single item", async () => {
             const result = await tool.execute({
                 todos: [{ id: "task", title: "Task", description: "Desc", status: "pending" }],
             }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
 
-            expect(result.debug).toBeDefined();
-            expect(result.debug.conversationId).toBe("test-conversation-123");
-            expect(result.debug.agentPubkey).toBe("test-agent-pubkey");
+            expect(result.success).toBe(true);
+            expect(result.message).toBe("Todo list updated with 1 item");
+        });
+
+        it("should return appropriate message for multiple items", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { id: "task1", title: "Task 1", description: "Desc", status: "pending" },
+                    { id: "task2", title: "Task 2", description: "Desc", status: "pending" },
+                    { id: "task3", title: "Task 3", description: "Desc", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            expect(result.message).toBe("Todo list updated with 3 items");
+        });
+
+        it("should return appropriate message when clearing list", async () => {
+            await tool.execute({
+                todos: [{ id: "task", title: "Task", description: "Desc", status: "pending" }],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            const result = await tool.execute({
+                todos: [],
+                force: true,
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            expect(result.message).toBe("Todo list cleared");
         });
     });
 });
