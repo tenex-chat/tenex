@@ -85,7 +85,6 @@ const applyStateToStore = (
         metadata,
         agentTodos: {},
         todoNudgedAgents: [],
-        todoRemindedAgents: [],
         blockedAgents: [],
         executionTime: {
             totalSeconds: 0,

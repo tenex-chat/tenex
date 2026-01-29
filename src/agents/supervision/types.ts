@@ -113,8 +113,6 @@ export interface PreToolContext {
     toolName: string;
     /** Arguments passed to the tool */
     toolArgs: unknown;
-    /** Whether the agent has an active todo list */
-    hasTodoList: boolean;
     /** The agent's system prompt */
     systemPrompt: string;
     /** Full conversation history */
