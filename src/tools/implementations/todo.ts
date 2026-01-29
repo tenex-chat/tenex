@@ -143,14 +143,10 @@ type TodoWriteInput = z.infer<typeof todoWriteSchema>;
 
 interface TodoWriteOutput {
     success: boolean;
-    items: Array<{ id: string; title: string; status: string }>;
+    message: string;
     totalItems: number;
     error?: string;
     missingIds?: string[];
-    debug: {
-        conversationId: string;
-        agentPubkey: string;
-    };
 }
 
 async function executeTodoWrite(
@@ -172,20 +168,24 @@ async function executeTodoWrite(
         input.force ?? false
     );
 
+    // Generate a concise message based on the operation
+    let message: string;
+    if (!result.success) {
+        message = result.error || "Failed to write todos";
+    } else if (result.items.length === 0) {
+        message = "Todo list cleared";
+    } else if (result.items.length === 1) {
+        message = `Todo list updated with 1 item`;
+    } else {
+        message = `Todo list updated with ${result.items.length} items`;
+    }
+
     return {
         success: result.success,
-        items: result.items.map((t: TodoItem) => ({
-            id: t.id,
-            title: t.title,
-            status: t.status,
-        })),
+        message,
         totalItems: result.items.length,
         error: result.error,
         missingIds: result.missingIds,
-        debug: {
-            conversationId: conversation.id,
-            agentPubkey: context.agent.pubkey,
-        },
     };
 }
 
