@@ -7,6 +7,7 @@ import type { ToolName } from "@/tools/types";
  */
 export const CORE_AGENT_TOOLS: ToolName[] = [
     "lesson_get", // All agents should access lessons
+    "lessons_list", // All agents should be able to list lessons
     "lesson_learn", // All agents should be able to learn
     "lesson_delete", // All agents should be able to delete their lessons
     "reports_list", // All agents should see available reports
