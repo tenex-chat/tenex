@@ -426,8 +426,9 @@ async function executeConversationGet(
     // Normalize untilId if provided - graceful fallback for optional parameter
     let targetUntilId: string | undefined = undefined;
     if (input.untilId) {
-        targetUntilId = normalizeEventId(input.untilId);
-        if (!targetUntilId) {
+        const resolved = normalizeEventId(input.untilId);
+        targetUntilId = resolved ?? undefined;
+        if (!resolved) {
             logger.warn("Could not resolve untilId, proceeding without filtering", {
                 untilId: input.untilId,
                 conversationId: targetConversationId,

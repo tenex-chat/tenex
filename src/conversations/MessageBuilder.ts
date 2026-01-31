@@ -19,7 +19,6 @@ import {
     createImageTracker,
     processToolResultWithImageTracking,
     type ImageTracker,
-    type ProcessToolResultOutput,
 } from "./utils/image-placeholder";
 import { extractImageUrls } from "./utils/image-url-utils";
 

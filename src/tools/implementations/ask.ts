@@ -200,8 +200,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
       // Check for circular delegation using stored chain
       if (delegationChain && wouldCreateCircularDelegation(delegationChain, escalationAgentPubkey)) {
-        const targetAgent = projectCtx.getAgentByPubkey(escalationAgentPubkey);
-        const targetName = targetAgent?.slug || escalationAgentPubkey.substring(0, 8);
         const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
 
         logger.warn("[ask] Circular delegation detected, falling back to direct ask", {

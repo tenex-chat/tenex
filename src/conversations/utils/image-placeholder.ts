@@ -13,7 +13,7 @@
  */
 
 import type { ToolResultPart } from "ai";
-import { isImageUrl, IMAGE_EXTENSIONS } from "./image-url-utils";
+import { isImageUrl } from "./image-url-utils";
 
 /**
  * Prefix used for image placeholders - allows detection of replaced images
@@ -236,7 +236,7 @@ export function processToolResultWithImageTracking(
     });
 
     return {
-        processedParts,
+        processedParts: processedParts as ToolResultPart[],
         replacedCount: totalReplacedCount,
         uniqueReplacedCount: uniqueReplacedUrls.size,
     };
