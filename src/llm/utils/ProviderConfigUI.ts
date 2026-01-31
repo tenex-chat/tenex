@@ -4,6 +4,13 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 
 /**
+ * Extended type for editor use - includes providers
+ */
+type TenexLLMsWithProviders = TenexLLMs & {
+    providers: Record<string, { apiKey: string }>;
+};
+
+/**
  * UI utilities for provider configuration
  * Extracted from LLMConfigEditor to separate concerns
  */
@@ -29,7 +36,7 @@ export class ProviderConfigUI {
      */
     static async configureProvider(
         provider: string,
-        currentConfig?: TenexLLMs
+        currentConfig?: TenexLLMsWithProviders
     ): Promise<{ apiKey: string }> {
         if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             // Agent providers don't require an API key
@@ -103,7 +110,7 @@ export class ProviderConfigUI {
     /**
      * Display current configuration status
      */
-    static displayCurrentConfig(llmsConfig: TenexLLMs): void {
+    static displayCurrentConfig(llmsConfig: TenexLLMsWithProviders): void {
         console.log(chalk.bold("Configured Providers:"));
         const providers = Object.keys(llmsConfig.providers).filter(
             (p) => llmsConfig.providers[p]?.apiKey

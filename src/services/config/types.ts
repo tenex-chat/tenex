@@ -172,12 +172,6 @@ export type AnyLLMConfiguration = LLMConfiguration | MetaModelConfiguration;
  * Main LLM configuration structure
  */
 export interface TenexLLMs {
-    providers: Record<
-        string,
-        {
-            apiKey: string;
-        }
-    >;
     configurations: Record<string, AnyLLMConfiguration>;
     default?: string;
     summarization?: string; // Named config to use for generating summaries (kind 513 events)
@@ -230,20 +224,45 @@ export const LLMConfigurationSchema = z.union([
 ]);
 
 export const TenexLLMsSchema = z.object({
-    providers: z
-        .record(
-            z.string(),
-            z.object({
-                apiKey: z.string(),
-            })
-        )
-        .default({}),
     configurations: z.record(z.string(), LLMConfigurationSchema).default({}),
     default: z.string().optional(),
     summarization: z.string().optional(),
     supervision: z.string().optional(),
     search: z.string().optional(),
     promptCompilation: z.string().optional(),
+});
+
+// =====================================================================================
+// PROVIDER CREDENTIALS SCHEMA (providers.json)
+// =====================================================================================
+
+/**
+ * Provider credentials configuration
+ * Contains API keys and connection details for external providers
+ */
+export interface ProviderCredentials {
+    apiKey: string;
+    baseUrl?: string;
+    timeout?: number;
+    options?: Record<string, unknown>;
+}
+
+/**
+ * Main provider credentials structure
+ */
+export interface TenexProviders {
+    providers: Record<string, ProviderCredentials>;
+}
+
+export const ProviderCredentialsSchema = z.object({
+    apiKey: z.string(),
+    baseUrl: z.string().optional(),
+    timeout: z.number().optional(),
+    options: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const TenexProvidersSchema = z.object({
+    providers: z.record(z.string(), ProviderCredentialsSchema).default({}),
 });
 
 // =====================================================================================
@@ -286,13 +305,14 @@ export interface LoadedConfig {
     config: TenexConfig;
     llms: TenexLLMs;
     mcp: TenexMCP;
+    providers: TenexProviders;
 }
 
 // =====================================================================================
 // HELPER TYPES
 // =====================================================================================
 
-export type ConfigFile = "config.json" | "llms.json" | "mcp.json";
+export type ConfigFile = "config.json" | "llms.json" | "mcp.json" | "providers.json";
 
 export interface ConfigPaths {
     global: string;

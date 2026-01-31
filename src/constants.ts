@@ -29,6 +29,7 @@ export function getTenexBasePath(): string {
 export const CONFIG_FILE = "config.json" as const;
 export const MCP_CONFIG_FILE = "mcp.json" as const;
 export const LLMS_FILE = "llms.json" as const;
+export const PROVIDERS_FILE = "providers.json" as const;
 
 /**
  * Alpha mode constants

@@ -120,25 +120,19 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
 }
 
 /**
- * OpenAI-compatible embedding provider (for future use)
+ * OpenAI-compatible embedding provider
+ * Works with OpenAI, OpenRouter, and other OpenAI-compatible APIs
  */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     private apiKey: string;
     private modelId: string;
-    private dimensions: number;
+    private baseUrl: string;
+    private dimensions: number | null = null;
 
-    constructor(apiKey: string, modelId = "text-embedding-3-small") {
+    constructor(apiKey: string, modelId = "text-embedding-3-small", baseUrl = "https://api.openai.com/v1") {
         this.apiKey = apiKey;
         this.modelId = modelId;
-        // Default dimensions for common models
-        this.dimensions =
-            modelId === "text-embedding-3-small"
-                ? 1536
-                : modelId === "text-embedding-3-large"
-                  ? 3072
-                  : modelId === "text-embedding-ada-002"
-                    ? 1536
-                    : 1536;
+        this.baseUrl = baseUrl.replace(/\/$/, ""); // Remove trailing slash
     }
 
     public async embed(text: string): Promise<Float32Array> {
@@ -147,7 +141,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     }
 
     public async embedBatch(texts: string[]): Promise<Float32Array[]> {
-        const response = await fetch("https://api.openai.com/v1/embeddings", {
+        const response = await fetch(`${this.baseUrl}/embeddings`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -169,11 +163,22 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
         const data = (await response.json()) as EmbeddingResponse;
 
-        return data.data.map((item) => new Float32Array(item.embedding));
+        const embeddings = data.data.map((item) => new Float32Array(item.embedding));
+
+        // Cache dimensions from first successful response
+        if (this.dimensions === null && embeddings.length > 0) {
+            this.dimensions = embeddings[0].length;
+        }
+
+        return embeddings;
     }
 
     public async getDimensions(): Promise<number> {
-        return this.dimensions;
+        // If we haven't cached dimensions yet, make a test embedding call
+        if (this.dimensions === null) {
+            await this.embed("test");
+        }
+        return this.dimensions!;
     }
 
     public getModelId(): string {

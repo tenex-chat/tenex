@@ -350,6 +350,9 @@ export class AgentEventEncoder {
         if ("cachedInputTokens" in usage && usage.cachedInputTokens !== undefined) {
             event.tag(["llm-cached-input-tokens", String(usage.cachedInputTokens)]);
         }
+        if ("contextWindow" in usage && usage.contextWindow !== undefined) {
+            event.tag(["llm-context-window", String(usage.contextWindow)]);
+        }
     }
 
     aTagProject(event: NDKEvent): undefined {

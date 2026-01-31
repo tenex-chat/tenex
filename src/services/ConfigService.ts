@@ -1,9 +1,10 @@
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
+import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, PROVIDERS_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MetaModelResolver } from "@/llm/meta";
+import { ensureCacheLoaded as ensureModelsDevCacheLoaded } from "@/llm/utils/models-dev-cache";
 import type { MCPConfig } from "@/llm/providers/types";
 import type { LLMService } from "@/llm/service";
 import type { OnStreamStartCallback } from "@/llm/types";
@@ -15,8 +16,9 @@ import type {
     TenexConfig,
     TenexLLMs,
     TenexMCP,
+    TenexProviders,
 } from "@/services/config/types";
-import { isMetaModelConfiguration, TenexConfigSchema, TenexLLMsSchema, TenexMCPSchema } from "@/services/config/types";
+import { isMetaModelConfiguration, TenexConfigSchema, TenexLLMsSchema, TenexMCPSchema, TenexProvidersSchema } from "@/services/config/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -131,8 +133,14 @@ export class ConfigService {
         // Load global config only (no project-level config.json)
         const config = await this.loadTenexConfig(globalPath);
 
+        // Load providers from providers.json
+        const providers = await this.loadTenexProviders(globalPath);
+
         // Load global LLMs only (no project-level llms.json)
         const llms = await this.loadTenexLLMs(globalPath);
+
+        // Validate provider references
+        this.validateProviderReferences(llms, providers);
 
         // Load MCP (merge global and project metadata path)
         const globalMCP = await this.loadTenexMCP(globalPath);
@@ -144,13 +152,16 @@ export class ConfigService {
             enabled: projectMCP.enabled !== undefined ? projectMCP.enabled : globalMCP.enabled,
         };
 
-        const loadedConfig = { config, llms, mcp };
+        const loadedConfig = { config, llms, mcp, providers };
         this.loadedConfig = loadedConfig;
 
         // Initialize the LLM factory with provider configs and global settings
-        await llmServiceFactory.initializeProviders(llms.providers, {
+        await llmServiceFactory.initializeProviders(providers.providers, {
             enableTenexTools: config.claudeCode?.enableTenexTools,
         });
+
+        // Load models.dev cache for model metadata (context windows, output limits)
+        await ensureModelsDevCacheLoaded();
 
         return loadedConfig;
     }
@@ -169,7 +180,6 @@ export class ConfigService {
 
     async loadTenexLLMs(basePath: string): Promise<TenexLLMs> {
         return this.loadConfigFile(this.getConfigFilePath(basePath, LLMS_FILE), TenexLLMsSchema, {
-            providers: {},
             configurations: {},
             default: undefined,
         });
@@ -189,6 +199,14 @@ export class ConfigService {
             servers: result.servers || {},
             enabled: result.enabled ?? true,
         };
+    }
+
+    async loadTenexProviders(basePath: string): Promise<TenexProviders> {
+        return this.loadConfigFile(
+            this.getConfigFilePath(basePath, PROVIDERS_FILE),
+            TenexProvidersSchema,
+            { providers: {} }
+        );
     }
 
     // =====================================================================================
@@ -216,6 +234,14 @@ export class ConfigService {
             this.getConfigFilePath(basePath, MCP_CONFIG_FILE),
             mcp,
             TenexMCPSchema
+        );
+    }
+
+    async saveTenexProviders(basePath: string, providers: TenexProviders): Promise<void> {
+        await this.saveConfigFile(
+            this.getConfigFilePath(basePath, PROVIDERS_FILE),
+            providers,
+            TenexProvidersSchema
         );
     }
 
@@ -557,6 +583,12 @@ export class ConfigService {
         await this.saveTenexMCP(globalPath, mcp);
     }
 
+    async saveGlobalProviders(providers: TenexProviders): Promise<void> {
+        const globalPath = this.getGlobalPath();
+        await ensureDirectory(globalPath);
+        await this.saveTenexProviders(globalPath, providers);
+    }
+
     // =====================================================================================
     // FILE EXISTENCE CHECKS
     // =====================================================================================
@@ -572,6 +604,25 @@ export class ConfigService {
     // =====================================================================================
     // PRIVATE IMPLEMENTATION
     // =====================================================================================
+
+    private validateProviderReferences(llms: TenexLLMs, providers: TenexProviders): void {
+        const missingProviders = new Set<string>();
+
+        for (const configValue of Object.values(llms.configurations)) {
+            if (configValue.provider === "meta") continue;
+
+            const providerName = configValue.provider;
+            if (!providers.providers[providerName]) {
+                missingProviders.add(providerName);
+            }
+        }
+
+        if (missingProviders.size > 0) {
+            logger.warn(
+                `LLM configurations reference providers not in providers.json: ${Array.from(missingProviders).join(", ")}`
+            );
+        }
+    }
 
     private async loadConfigFile<T>(
         filePath: string,
