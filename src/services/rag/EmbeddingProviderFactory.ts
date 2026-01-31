@@ -12,9 +12,10 @@ import {
  * Configuration for embedding providers
  */
 export interface EmbeddingConfig {
-    provider: "local" | "openai";
+    provider: string; // "local" or any configured provider ID (openai, openrouter, etc.)
     model: string;
     apiKey?: string;
+    baseUrl?: string;
 }
 
 export interface EmbeddingConfigOptions {
@@ -41,7 +42,7 @@ export interface EmbeddingConfigOptions {
 type RawEmbeddingConfig =
     | string // Old format: just model name
     | { model: string; provider?: never } // Old format: object with just model
-    | { provider: "local" | "openai"; model: string; apiKey?: string }; // New format
+    | { provider: string; model: string; apiKey?: string; baseUrl?: string }; // New format
 
 function isRawEmbeddingConfig(value: unknown): value is RawEmbeddingConfig {
     if (typeof value === "string") {
@@ -59,15 +60,18 @@ function isRawEmbeddingConfig(value: unknown): value is RawEmbeddingConfig {
         return false;
     }
 
-    // If provider is present, must be valid
-    if ("provider" in obj) {
-        if (obj.provider !== "local" && obj.provider !== "openai") {
-            return false;
-        }
+    // If provider is present, must be a string
+    if ("provider" in obj && typeof obj.provider !== "string") {
+        return false;
     }
 
     // If apiKey is present, must be string
     if ("apiKey" in obj && typeof obj.apiKey !== "string") {
+        return false;
+    }
+
+    // If baseUrl is present, must be string
+    if ("baseUrl" in obj && typeof obj.baseUrl !== "string") {
         return false;
     }
 
@@ -85,25 +89,41 @@ export class EmbeddingProviderFactory {
     };
 
     /**
+     * Base URLs for known OpenAI-compatible providers
+     */
+    private static readonly PROVIDER_BASE_URLS: Record<string, string> = {
+        openai: "https://api.openai.com/v1",
+        openrouter: "https://openrouter.ai/api/v1",
+    };
+
+    /**
      * Create an embedding provider based on configuration
      */
     static async create(
         customConfig?: EmbeddingConfig,
         options?: EmbeddingConfigOptions
     ): Promise<EmbeddingProvider> {
-        const config = customConfig || (await EmbeddingProviderFactory.loadConfiguration(options));
+        const embeddingConfig = customConfig || (await EmbeddingProviderFactory.loadConfiguration(options));
 
-        logger.debug(`Creating embedding provider: ${config.provider}/${config.model}`);
+        logger.debug(`Creating embedding provider: ${embeddingConfig.provider}/${embeddingConfig.model}`);
 
-        switch (config.provider) {
-            case "openai":
-                if (!config.apiKey) {
-                    throw new Error("OpenAI API key is required for OpenAI embedding provider");
-                }
-                return new OpenAIEmbeddingProvider(config.apiKey, config.model);
-            default:
-                return new LocalTransformerEmbeddingProvider(config.model);
+        // Local provider
+        if (embeddingConfig.provider === "local") {
+            return new LocalTransformerEmbeddingProvider(embeddingConfig.model);
         }
+
+        // All other providers are treated as OpenAI-compatible
+        if (!embeddingConfig.apiKey) {
+            throw new Error(
+                `API key required for ${embeddingConfig.provider}. Configure with 'tenex setup embed'.`
+            );
+        }
+
+        const baseUrl = embeddingConfig.baseUrl ||
+            EmbeddingProviderFactory.PROVIDER_BASE_URLS[embeddingConfig.provider] ||
+            "https://api.openai.com/v1";
+
+        return new OpenAIEmbeddingProvider(embeddingConfig.apiKey, embeddingConfig.model, baseUrl);
     }
 
     /**
@@ -126,7 +146,7 @@ export class EmbeddingProviderFactory {
                 }
 
                 logger.debug(`Loaded embedding config from ${configPath}`);
-                return EmbeddingProviderFactory.parseConfig(rawConfig);
+                return await EmbeddingProviderFactory.parseConfig(rawConfig);
             }
 
             logger.debug("No embedding configuration found, using defaults");
@@ -138,9 +158,27 @@ export class EmbeddingProviderFactory {
     }
 
     /**
+     * Load provider credentials from providers.json
+     */
+    private static async loadProviderCredentials(providerId: string): Promise<{ apiKey?: string; baseUrl?: string }> {
+        try {
+            const globalPath = config.getGlobalPath();
+            const providersConfig = await config.loadTenexProviders(globalPath);
+            const providerCreds = providersConfig.providers[providerId];
+            return {
+                apiKey: providerCreds?.apiKey,
+                baseUrl: providerCreds?.baseUrl,
+            };
+        } catch (error) {
+            logger.debug(`Failed to load provider credentials for ${providerId}`, { error });
+            return {};
+        }
+    }
+
+    /**
      * Parse and validate embedding configuration
      */
-    private static parseConfig(raw: RawEmbeddingConfig): EmbeddingConfig {
+    private static async parseConfig(raw: RawEmbeddingConfig): Promise<EmbeddingConfig> {
         // Support both old format (just model string) and new format
         if (typeof raw === "string" || (raw?.model && !raw.provider)) {
             // Old format or just model specified
@@ -148,10 +186,12 @@ export class EmbeddingProviderFactory {
 
             // Infer provider from model name
             if (modelId.includes("text-embedding")) {
+                const creds = await EmbeddingProviderFactory.loadProviderCredentials("openai");
                 return {
                     provider: "openai",
                     model: modelId,
-                    apiKey: process.env.OPENAI_API_KEY,
+                    apiKey: creds.apiKey,
+                    baseUrl: creds.baseUrl,
                 };
             }
 
@@ -162,11 +202,24 @@ export class EmbeddingProviderFactory {
         }
 
         // New format with explicit provider
-        const config = raw as { provider?: "local" | "openai"; model?: string; apiKey?: string };
+        const rawConfig = raw as { provider?: string; model?: string; apiKey?: string; baseUrl?: string };
+        const provider = rawConfig.provider || "local";
+
+        // Load credentials from providers.json if not provided inline
+        let apiKey = rawConfig.apiKey;
+        let baseUrl = rawConfig.baseUrl;
+
+        if (provider !== "local" && !apiKey) {
+            const creds = await EmbeddingProviderFactory.loadProviderCredentials(provider);
+            apiKey = creds.apiKey;
+            baseUrl = baseUrl || creds.baseUrl;
+        }
+
         return {
-            provider: config.provider || "local",
-            model: config.model || EmbeddingProviderFactory.DEFAULT_CONFIG.model,
-            apiKey: config.apiKey || process.env.OPENAI_API_KEY,
+            provider,
+            model: rawConfig.model || EmbeddingProviderFactory.DEFAULT_CONFIG.model,
+            apiKey,
+            baseUrl,
         };
     }
 
@@ -186,11 +239,17 @@ export class EmbeddingProviderFactory {
 
         const configPath = path.join(basePath, EmbeddingProviderFactory.EMBED_CONFIG_FILE);
 
-        // Don't save API key to file
-        const configToSave = {
+        // Don't save API key to file - it's stored in providers.json
+        const configToSave: { provider: string; model: string; baseUrl?: string } = {
             provider: embeddingConfig.provider,
             model: embeddingConfig.model,
         };
+
+        // Only save baseUrl if it's a custom one (not the default for the provider)
+        const defaultBaseUrl = EmbeddingProviderFactory.PROVIDER_BASE_URLS[embeddingConfig.provider];
+        if (embeddingConfig.baseUrl && embeddingConfig.baseUrl !== defaultBaseUrl) {
+            configToSave.baseUrl = embeddingConfig.baseUrl;
+        }
 
         const { writeJsonFile, ensureDirectory } = await import("@/lib/fs");
         await ensureDirectory(basePath);

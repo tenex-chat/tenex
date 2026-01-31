@@ -1,4 +1,5 @@
 import * as fileSystem from "@/lib/fs";
+import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import {
     type EmbeddingConfig,
     EmbeddingProviderFactory,
@@ -7,6 +8,38 @@ import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
 import inquirer from "inquirer";
+
+/**
+ * Providers that support embeddings (OpenAI-compatible API)
+ */
+const EMBEDDING_CAPABLE_PROVIDERS = [
+    PROVIDER_IDS.OPENAI,
+    PROVIDER_IDS.OPENROUTER,
+] as const;
+
+/**
+ * Display names for providers
+ */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+    [PROVIDER_IDS.OPENAI]: "OpenAI",
+    [PROVIDER_IDS.OPENROUTER]: "OpenRouter",
+};
+
+/**
+ * Common embedding models by provider
+ */
+const EMBEDDING_MODELS: Record<string, Array<{ name: string; value: string }>> = {
+    [PROVIDER_IDS.OPENAI]: [
+        { name: "text-embedding-3-small (fast, good quality)", value: "text-embedding-3-small" },
+        { name: "text-embedding-3-large (slower, best quality)", value: "text-embedding-3-large" },
+        { name: "text-embedding-ada-002 (legacy)", value: "text-embedding-ada-002" },
+    ],
+    [PROVIDER_IDS.OPENROUTER]: [
+        { name: "openai/text-embedding-3-small", value: "openai/text-embedding-3-small" },
+        { name: "openai/text-embedding-3-large", value: "openai/text-embedding-3-large" },
+        { name: "openai/text-embedding-ada-002", value: "openai/text-embedding-ada-002" },
+    ],
+};
 
 /**
  * Command for configuring embedding provider
@@ -45,62 +78,74 @@ export const embedCommand = new Command("embed")
                 projectPath: scope === "project" ? projectPath : undefined,
             });
 
+            // Load configured providers from providers.json
+            const providersConfig = await configService.loadTenexProviders(configService.getGlobalPath());
+            const configuredProviders = Object.keys(providersConfig.providers);
+
+            // Build provider choices: local + any configured embedding-capable providers
+            const providerChoices: Array<{ name: string; value: string }> = [
+                { name: "Local Transformers (runs on your machine)", value: "local" },
+            ];
+
+            for (const providerId of EMBEDDING_CAPABLE_PROVIDERS) {
+                if (configuredProviders.includes(providerId)) {
+                    const displayName = PROVIDER_DISPLAY_NAMES[providerId] || providerId;
+                    providerChoices.push({
+                        name: `${displayName} (configured)`,
+                        value: providerId,
+                    });
+                }
+            }
+
             // Prompt for provider selection
             const { provider } = await inquirer.prompt([
                 {
                     type: "list",
                     name: "provider",
                     message: "Select embedding provider:",
-                    choices: [
-                        { name: "Local Transformers (runs on your machine)", value: "local" },
-                        { name: "OpenAI (requires API key)", value: "openai" },
-                    ],
+                    choices: providerChoices,
                     default: existing?.provider || "local",
                 },
             ]);
 
             let model: string;
-            let apiKey: string | undefined;
 
-            if (provider === "openai") {
-                // OpenAI configuration
-                const openaiAnswers = await inquirer.prompt([
+            if (provider !== "local") {
+                // OpenAI-compatible provider configuration
+                const displayName = PROVIDER_DISPLAY_NAMES[provider] || provider;
+                const modelChoices = EMBEDDING_MODELS[provider] || [
+                    { name: "Enter custom model ID", value: "custom" },
+                ];
+
+                // Add custom model option if not already present
+                if (!modelChoices.some((c) => c.value === "custom")) {
+                    modelChoices.push({ name: "Enter custom model ID", value: "custom" });
+                }
+
+                const providerAnswers = await inquirer.prompt([
                     {
                         type: "list",
                         name: "model",
-                        message: "Select OpenAI embedding model:",
-                        choices: [
-                            {
-                                name: "text-embedding-3-small (fast, good quality)",
-                                value: "text-embedding-3-small",
-                            },
-                            {
-                                name: "text-embedding-3-large (slower, best quality)",
-                                value: "text-embedding-3-large",
-                            },
-                            {
-                                name: "text-embedding-ada-002 (legacy)",
-                                value: "text-embedding-ada-002",
-                            },
-                        ],
-                        default: existing?.model || "text-embedding-3-small",
-                    },
-                    {
-                        type: "input",
-                        name: "apiKey",
-                        message:
-                            "Enter OpenAI API key (leave empty to use OPENAI_API_KEY env var):",
-                        validate: (input: string) => {
-                            if (!input && !process.env.OPENAI_API_KEY) {
-                                return "API key required (or set OPENAI_API_KEY environment variable)";
-                            }
-                            return true;
-                        },
+                        message: `Select ${displayName} embedding model:`,
+                        choices: modelChoices,
+                        default: existing?.provider === provider ? existing?.model : modelChoices[0]?.value,
                     },
                 ]);
 
-                model = openaiAnswers.model;
-                apiKey = openaiAnswers.apiKey || undefined;
+                if (providerAnswers.model === "custom") {
+                    const customAnswer = await inquirer.prompt([
+                        {
+                            type: "input",
+                            name: "customModel",
+                            message: "Enter model ID:",
+                            validate: (input: string) =>
+                                input.trim().length > 0 || "Model ID cannot be empty",
+                        },
+                    ]);
+                    model = customAnswer.customModel;
+                } else {
+                    model = providerAnswers.model;
+                }
             } else {
                 // Local transformer configuration
                 const localAnswers = await inquirer.prompt([
@@ -147,13 +192,13 @@ export const embedCommand = new Command("embed")
                 }
             }
 
-            // Save configuration
+            // Save configuration (API key comes from providers.json, not stored here)
             const embeddingConfig: EmbeddingConfig = {
-                provider: provider as "local" | "openai",
+                provider,
                 model,
-                apiKey,
             };
 
+            // Save model selection to embed.json
             await EmbeddingProviderFactory.saveConfiguration(embeddingConfig, scope, {
                 projectPath: scope === "project" ? projectPath : undefined,
             });

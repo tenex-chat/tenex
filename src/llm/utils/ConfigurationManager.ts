@@ -1,4 +1,11 @@
 import type { LLMConfiguration, MetaModelConfiguration, MetaModelVariant, TenexLLMs } from "@/services/config/types";
+
+/**
+ * Extended type for editor use - includes providers
+ */
+type TenexLLMsWithProviders = TenexLLMs & {
+    providers: Record<string, { apiKey: string }>;
+};
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -11,7 +18,7 @@ import { listCodexModels, formatCodexModel } from "./codex-models";
  * Manages LLM configuration CRUD operations
  */
 export class ConfigurationManager {
-    static async add(llmsConfig: TenexLLMs, isFirstConfig = false): Promise<void> {
+    static async add(llmsConfig: TenexLLMsWithProviders, isFirstConfig = false): Promise<void> {
         const configuredProviders = Object.keys(llmsConfig.providers).filter(
             (p) => llmsConfig.providers[p]?.apiKey
         );
@@ -146,7 +153,7 @@ export class ConfigurationManager {
     /**
      * Create a meta model configuration with multiple variants
      */
-    static async addMetaModel(llmsConfig: TenexLLMs): Promise<void> {
+    static async addMetaModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         // Get existing non-meta configurations to use as variants
         const standardConfigs = Object.keys(llmsConfig.configurations).filter((name) => {
             const config = llmsConfig.configurations[name];
@@ -358,7 +365,7 @@ export class ConfigurationManager {
         }
     }
 
-    static async delete(llmsConfig: TenexLLMs): Promise<void> {
+    static async delete(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -404,7 +411,7 @@ export class ConfigurationManager {
         }
     }
 
-    static async setDefault(llmsConfig: TenexLLMs): Promise<void> {
+    static async setDefault(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -428,7 +435,7 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Default configuration set to "${name}"`));
     }
 
-    static async setSummarizationModel(llmsConfig: TenexLLMs): Promise<void> {
+    static async setSummarizationModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -467,7 +474,7 @@ export class ConfigurationManager {
         }
     }
 
-    static async setSupervisionModel(llmsConfig: TenexLLMs): Promise<void> {
+    static async setSupervisionModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -491,7 +498,7 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Supervision model set to "${name}"`));
     }
 
-    static async setSearchModel(llmsConfig: TenexLLMs): Promise<void> {
+    static async setSearchModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -515,7 +522,7 @@ export class ConfigurationManager {
         console.log(chalk.green(`✅ Search model set to "${name}"`));
     }
 
-    static async setPromptCompilationModel(llmsConfig: TenexLLMs): Promise<void> {
+    static async setPromptCompilationModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {

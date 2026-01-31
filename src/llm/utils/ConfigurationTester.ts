@@ -8,10 +8,17 @@ import { z } from "zod";
 import { llmServiceFactory } from "../LLMServiceFactory";
 
 /**
+ * Extended type for editor use - includes providers
+ */
+type TenexLLMsWithProviders = TenexLLMs & {
+    providers: Record<string, { apiKey: string }>;
+};
+
+/**
  * Tests LLM configurations
  */
 export class ConfigurationTester {
-    static async test(llmsConfig: TenexLLMs): Promise<void> {
+    static async test(llmsConfig: TenexLLMsWithProviders): Promise<void> {
         const configNames = Object.keys(llmsConfig.configurations);
 
         if (configNames.length === 0) {
@@ -119,7 +126,7 @@ export class ConfigurationTester {
     /**
      * Test a configuration for summarization using generateObject
      */
-    static async testSummarization(llmsConfig: TenexLLMs, configName: string): Promise<void> {
+    static async testSummarization(llmsConfig: TenexLLMsWithProviders, configName: string): Promise<void> {
         const rawConfig = llmsConfig.configurations[configName];
         if (!rawConfig) {
             console.log(chalk.red(`❌ Configuration "${configName}" not found`));

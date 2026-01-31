@@ -9,6 +9,14 @@ import { ConfigurationTester } from "./utils/ConfigurationTester";
 import { ProviderConfigUI } from "./utils/ProviderConfigUI";
 
 /**
+ * Internal type used by editor to work with providers
+ * Merges providers with llms for internal convenience
+ */
+type LLMConfigWithProviders = TenexLLMs & {
+    providers: Record<string, { apiKey: string }>;
+};
+
+/**
  * LLM Configuration Editor - Simple menu orchestrator
  * Note: LLM configs are now global only (no project-level llms.json)
  */
@@ -112,7 +120,7 @@ export class LLMConfigEditor {
         console.log(chalk.green("\n✅ LLM configuration complete!"));
     }
 
-    private async configureProviders(llmsConfig: TenexLLMs): Promise<void> {
+    private async configureProviders(llmsConfig: LLMConfigWithProviders): Promise<void> {
         const choices = AI_SDK_PROVIDERS.map((p) => {
             const isConfigured =
                 llmsConfig.providers[p]?.apiKey && llmsConfig.providers[p]?.apiKey !== "none";
@@ -146,12 +154,31 @@ export class LLMConfigEditor {
         }
     }
 
-    private async loadConfig(): Promise<TenexLLMs> {
-        return await config.loadTenexLLMs(config.getGlobalPath());
+    private async loadConfig(): Promise<LLMConfigWithProviders> {
+        const globalPath = config.getGlobalPath();
+
+        // Load providers and llms separately
+        const providersConfig = await config.loadTenexProviders(globalPath);
+        const llmsConfig = await config.loadTenexLLMs(globalPath);
+
+        // Merge for internal editor use
+        return {
+            ...llmsConfig,
+            providers: providersConfig.providers,
+        };
     }
 
-    private async saveConfig(llmsConfig: TenexLLMs): Promise<void> {
-        await config.saveGlobalLLMs(llmsConfig);
-        await llmServiceFactory.initializeProviders(llmsConfig.providers);
+    private async saveConfig(llmsConfig: LLMConfigWithProviders): Promise<void> {
+        // Split providers and llms for separate storage
+        const { providers, ...llmsWithoutProviders } = llmsConfig;
+
+        // Save providers to providers.json
+        await config.saveGlobalProviders({ providers });
+
+        // Save llms to llms.json
+        await config.saveGlobalLLMs(llmsWithoutProviders as TenexLLMs);
+
+        // Re-initialize factory with updated providers
+        await llmServiceFactory.initializeProviders(providers);
     }
 }

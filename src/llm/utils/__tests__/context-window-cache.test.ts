@@ -1,104 +1,48 @@
-import { describe, test, expect, beforeEach, beforeAll, afterEach, mock, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { getContextWindow, clearCache, resolveContextWindow } from "../context-window-cache";
+import * as modelsDevCache from "../models-dev-cache";
 
 describe("context-window-cache", () => {
-    let originalFetch: typeof fetch;
-
-    beforeAll(() => {
-        originalFetch = global.fetch;
-    });
-
-    afterEach(() => {
-        if (originalFetch) {
-            global.fetch = originalFetch;
-        }
-    });
-
-    beforeEach(() => {
-        clearCache();
-    });
-
     describe("getContextWindow", () => {
-        test("returns undefined for unknown models", () => {
-            expect(getContextWindow("unknown", "unknown-model")).toBeUndefined();
+        test("delegates to getContextWindowFromModelsdev", () => {
+            const spy = spyOn(modelsDevCache, "getContextWindowFromModelsdev").mockReturnValue(200000);
+
+            const result = getContextWindow("anthropic", "claude-opus-4-5-20251101");
+
+            expect(spy).toHaveBeenCalledWith("anthropic", "claude-opus-4-5-20251101");
+            expect(result).toBe(200000);
+
+            spy.mockRestore();
         });
 
-        test("returns hardcoded value for known Anthropic models", () => {
-            expect(getContextWindow("anthropic", "claude-sonnet-4-20250514")).toBe(200_000);
-        });
+        test("returns undefined when model not found", () => {
+            const spy = spyOn(modelsDevCache, "getContextWindowFromModelsdev").mockReturnValue(undefined);
 
-        test("returns hardcoded value for known OpenAI models", () => {
-            expect(getContextWindow("openai", "gpt-4o")).toBe(128_000);
+            const result = getContextWindow("unknown", "unknown-model");
+
+            expect(result).toBeUndefined();
+
+            spy.mockRestore();
         });
     });
 
     describe("resolveContextWindow", () => {
-        beforeEach(() => {
+        test("is a no-op (models-dev-cache handles loading at startup)", async () => {
+            // resolveContextWindow should complete without error
+            await resolveContextWindow("anthropic", "claude-opus-4-5-20251101");
+            // No assertion needed - just verify it doesn't throw
+        });
+    });
+
+    describe("clearCache", () => {
+        test("delegates to clearModelsDevCache", () => {
+            const spy = spyOn(modelsDevCache, "clearModelsDevCache").mockImplementation(() => {});
+
             clearCache();
-        });
 
-        test("fetches and caches OpenRouter model context window", async () => {
-            const mockFetch = mock(() =>
-                Promise.resolve({
-                    ok: true,
-                    json: () =>
-                        Promise.resolve({
-                            data: [
-                                { id: "openai/gpt-4o", context_length: 128000 },
-                                { id: "anthropic/claude-3-opus", context_length: 200000 },
-                            ],
-                        }),
-                })
-            );
-            global.fetch = mockFetch as unknown as typeof fetch;
+            expect(spy).toHaveBeenCalled();
 
-            await resolveContextWindow("openrouter", "openai/gpt-4o");
-
-            expect(getContextWindow("openrouter", "openai/gpt-4o")).toBe(128000);
-            // Should cache all models from response
-            expect(getContextWindow("openrouter", "anthropic/claude-3-opus")).toBe(200000);
-        });
-
-        test("does not fetch if already cached", async () => {
-            const mockFetch = mock(() =>
-                Promise.resolve({
-                    ok: true,
-                    json: () =>
-                        Promise.resolve({ data: [{ id: "test/model", context_length: 50000 }] }),
-                })
-            );
-            global.fetch = mockFetch as unknown as typeof fetch;
-
-            await resolveContextWindow("openrouter", "test/model");
-            await resolveContextWindow("openrouter", "test/model");
-
-            expect(mockFetch).toHaveBeenCalledTimes(1);
-        });
-
-        test("fetches Ollama model context window via /api/show", async () => {
-            const mockFetch = mock(() =>
-                Promise.resolve({
-                    ok: true,
-                    json: () =>
-                        Promise.resolve({
-                            model_info: {
-                                "llama.context_length": 8192,
-                            },
-                        }),
-                })
-            );
-            global.fetch = mockFetch as unknown as typeof fetch;
-
-            await resolveContextWindow("ollama", "llama3.2:3b");
-
-            expect(getContextWindow("ollama", "llama3.2:3b")).toBe(8192);
-            expect(mockFetch).toHaveBeenCalledWith(
-                "http://localhost:11434/api/show",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({ name: "llama3.2:3b" }),
-                })
-            );
+            spy.mockRestore();
         });
     });
 });
