@@ -154,6 +154,36 @@ export interface RALRegistryEntry {
   llmStreamStartTime?: number;
   /** Checkpoint timestamp for incremental runtime reporting mid-stream (resets on each consume) */
   lastRuntimeCheckpointAt?: number;
+  /** Heuristic state - namespaced under 'heuristics' */
+  heuristics?: {
+    /** Pending violations waiting to be injected */
+    pendingViolations: Array<{
+      id: string;
+      title: string;
+      message: string;
+      severity: "warning" | "error";
+      timestamp: number;
+      heuristicId: string;
+    }>;
+    /** Set of violation IDs shown in this RAL (for deduplication) */
+    shownViolationIds: Set<string>;
+    /** O(1) precomputed summary for heuristic evaluation */
+    summary?: {
+      /** Tool call history (bounded to last N tools) */
+      recentTools: Array<{ name: string; timestamp: number }>;
+      /** Flags for quick checks */
+      flags: {
+        hasTodoWrite: boolean;
+        hasDelegation: boolean;
+        hasVerification: boolean;
+        hasGitAgentCommit: boolean;
+      };
+      /** Pending delegation count for this RAL (O(1) counter) */
+      pendingDelegationCount: number;
+    };
+    /** Tool args storage: toolCallId -> args (for passing to heuristics) */
+    toolArgs?: Map<string, unknown>;
+  };
 }
 
 export interface StopExecutionSignal {

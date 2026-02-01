@@ -17,6 +17,8 @@ import type { LLMService } from "@/llm/service";
 import type { EventContext } from "@/nostr/types";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import type { FullRuntimeContext } from "./types";
+import { getHeuristicEngine } from "@/services/heuristics";
+import { buildHeuristicContext } from "@/services/heuristics/ContextBuilder";
 
 /**
  * Configuration for setting up tool event handlers
@@ -53,6 +55,26 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             event.toolCallId,
             true,
             event.toolName
+        );
+
+        // === HEURISTIC: Store tool args for later retrieval ===
+        // This enables BLOCKER 2 fix: pass real args to heuristics, not result
+        ralRegistry.storeToolArgs(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber,
+            event.toolCallId,
+            event.args
+        );
+
+        // === HEURISTIC: Update O(1) summary ===
+        // Track tool execution for heuristic evaluation (BLOCKER 1 fix)
+        ralRegistry.updateHeuristicSummary(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber,
+            event.toolName,
+            event.args
         );
 
         conversationStore.addMessage({
@@ -136,6 +158,67 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                 insertedCount,
                 mergedCount,
                 totalPending,
+            });
+        }
+
+        // === HEURISTIC EVALUATION POST-TOOL ===
+        // Evaluate heuristics after tool execution to detect pattern violations
+        try {
+            const heuristicEngine = getHeuristicEngine();
+
+            // Retrieve stored tool args (BLOCKER 2 fix: use real args, not result)
+            const storedArgs = ralRegistry.getToolArgs(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber,
+                event.toolCallId
+            );
+
+            // Build O(1) context from current RAL state
+            const heuristicContext = buildHeuristicContext({
+                agentPubkey: context.agent.pubkey,
+                conversationId: context.conversationId,
+                ralNumber,
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                toolArgs: storedArgs ?? {}, // Use stored args (fallback to empty object)
+                toolResult: event.result,
+                ralRegistry,
+                conversationStore,
+                currentBranch: context.currentBranch,
+            });
+
+            // Evaluate all heuristics (with hard error boundaries)
+            const violations = heuristicEngine.evaluate(heuristicContext);
+
+            // Add violations to RAL state for injection in next LLM step
+            if (violations.length > 0) {
+                ralRegistry.addHeuristicViolations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber,
+                    violations
+                );
+
+                trace.getActiveSpan()?.addEvent("heuristic.violations_queued", {
+                    "ral.number": ralNumber,
+                    "tool.name": event.toolName,
+                    "violation.count": violations.length,
+                });
+            }
+
+            // Clean up stored tool args to prevent memory leak
+            ralRegistry.clearToolArgs(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber,
+                event.toolCallId
+            );
+        } catch (error) {
+            // HARD ERROR BOUNDARY: Never crash tool pipeline
+            logger.error("[ToolEventHandlers] Heuristic evaluation failed", {
+                error: error instanceof Error ? error.message : String(error),
+                toolName: event.toolName,
             });
         }
 
