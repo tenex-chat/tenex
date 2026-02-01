@@ -773,6 +773,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         ralNumber: pendingDelegation.ralNumber,
         transcript,
         completedAt: completion.completedAt,
+        status: "completed",
       });
 
       const remainingPending = this.getConversationPendingDelegations(agentPubkey, conversationId, location.ralNumber).length - 1;
@@ -1282,6 +1283,84 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * these prefixes directly with delegate_followup which will resolve them.
    * Format: [@sender -> @recipient]: message content
    */
+  /**
+   * Helper to format transcript with error handling for name resolution.
+   */
+  private async formatTranscript(transcript: DelegationMessage[]): Promise<string[]> {
+    const pubkeyService = getPubkeyService();
+    const lines: string[] = [];
+
+    for (const msg of transcript) {
+      try {
+        const senderName = await pubkeyService.getName(msg.senderPubkey);
+        const recipientName = await pubkeyService.getName(msg.recipientPubkey);
+        lines.push(`[@${senderName} -> @${recipientName}]: ${msg.content}`);
+      } catch (error) {
+        // Fallback to shortened pubkeys on error
+        const senderFallback = msg.senderPubkey.substring(0, 12);
+        const recipientFallback = msg.recipientPubkey.substring(0, 12);
+        lines.push(`[@${senderFallback} -> @${recipientFallback}]: ${msg.content}`);
+      }
+    }
+
+    return lines;
+  }
+
+  /**
+   * Helper to render a list of pending delegations with error handling.
+   */
+  private async renderPendingList(pending: PendingDelegation[]): Promise<string[]> {
+    if (pending.length === 0) {
+      return [];
+    }
+
+    const pubkeyService = getPubkeyService();
+    const lines: string[] = [];
+
+    lines.push("## Still Pending");
+    for (const p of pending) {
+      try {
+        const recipientName = await pubkeyService.getName(p.recipientPubkey);
+        lines.push(`- @${recipientName} (${p.delegationConversationId.substring(0, PREFIX_LENGTH)})`);
+      } catch (error) {
+        const fallbackName = p.recipientPubkey.substring(0, 12);
+        lines.push(`- @${fallbackName} (${p.delegationConversationId.substring(0, PREFIX_LENGTH)})`);
+      }
+    }
+    lines.push("");
+
+    return lines;
+  }
+
+  /**
+   * Helper to render delegation header (agent name + ID) with error handling.
+   */
+  private async renderDelegationHeader(
+    recipientPubkey: string,
+    conversationId: string,
+    statusText: string
+  ): Promise<string[]> {
+    const pubkeyService = getPubkeyService();
+    const lines: string[] = [];
+
+    try {
+      const recipientName = await pubkeyService.getName(recipientPubkey);
+      lines.push(`**@${recipientName} ${statusText}**`);
+    } catch (error) {
+      const fallbackName = recipientPubkey.substring(0, 12);
+      lines.push(`**@${fallbackName} ${statusText}**`);
+    }
+
+    lines.push("");
+    lines.push(`## Delegation ID: ${conversationId.substring(0, PREFIX_LENGTH)}`);
+
+    return lines;
+  }
+
+  /**
+   * Build a message for completed delegations.
+   * Shows the agent name, conversation ID, and full transcript.
+   */
   async buildDelegationResultsMessage(
     completions: CompletedDelegation[],
     pending: PendingDelegation[] = []
@@ -1290,38 +1369,83 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       return "";
     }
 
-    const pubkeyService = getPubkeyService();
     const lines: string[] = [];
 
-    // Clear header indicating this is a completion event
     lines.push("# DELEGATION COMPLETED");
     lines.push("");
 
-    // Format each completed delegation with clear completion context
     for (const c of completions) {
-      const recipientName = await pubkeyService.getName(c.recipientPubkey);
-      lines.push(`**@${recipientName} has finished and returned their final response.**`);
-      lines.push("");
-      lines.push(`## Delegation ID: ${c.delegationConversationId.substring(0, PREFIX_LENGTH)}`);
+      lines.push(...await this.renderDelegationHeader(
+        c.recipientPubkey,
+        c.delegationConversationId,
+        "has finished and returned their final response."
+      ));
       lines.push("");
       lines.push("### Transcript:");
-
-      for (const msg of c.transcript) {
-        const senderName = await pubkeyService.getName(msg.senderPubkey);
-        const msgRecipientName = await pubkeyService.getName(msg.recipientPubkey);
-        lines.push(`[@${senderName} -> @${msgRecipientName}]: ${msg.content}`);
-      }
+      lines.push(...await this.formatTranscript(c.transcript));
       lines.push("");
     }
 
     // Show pending delegations if any remain
     if (pending.length > 0) {
-      lines.push("## Still Pending");
-      for (const p of pending) {
-        const recipientName = await pubkeyService.getName(p.recipientPubkey);
-        lines.push(`- @${recipientName} (${p.delegationConversationId.substring(0, PREFIX_LENGTH)})`);
+      lines.push(...await this.renderPendingList(pending));
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Build a message for aborted delegations.
+   * Shows the agent name, conversation ID, abort details, and partial transcript.
+   * Format matches buildDelegationResultsMessage for consistency.
+   */
+  async buildDelegationAbortMessage(
+    abortedDelegations: CompletedDelegation[],
+    pending: PendingDelegation[] = []
+  ): Promise<string> {
+    if (abortedDelegations.length === 0) {
+      return "";
+    }
+
+    const lines: string[] = [];
+
+    // Header indicating abort event
+    lines.push("# DELEGATION ABORTED");
+    lines.push("");
+
+    // Format each aborted delegation
+    for (const c of abortedDelegations) {
+      if (c.status !== "aborted") continue; // Type guard for discriminated union
+
+      lines.push(...await this.renderDelegationHeader(
+        c.recipientPubkey,
+        c.delegationConversationId,
+        "was aborted and did not complete their task."
+      ));
+
+      // Add abort-specific metadata with error handling for timestamp
+      try {
+        lines.push(`**Aborted at:** ${new Date(c.completedAt).toISOString()}`);
+      } catch {
+        lines.push(`**Aborted at:** (invalid timestamp)`);
+      }
+      lines.push(`**Reason:** ${c.abortReason}`);
+      lines.push("");
+
+      // Show partial transcript if available
+      if (c.transcript && c.transcript.length > 0) {
+        lines.push("### Partial Progress:");
+        lines.push(...await this.formatTranscript(c.transcript));
+      } else {
+        lines.push("### Partial Progress:");
+        lines.push("(No messages exchanged before abort)");
       }
       lines.push("");
+    }
+
+    // Show remaining pending delegations if any
+    if (pending.length > 0) {
+      lines.push(...await this.renderPendingList(pending));
     }
 
     return lines.join("\n");
@@ -1443,7 +1567,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
     const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
 
-    // Abort the target agent first
+    // CRITICAL: Capture pending delegations AND conversation delegations BEFORE aborting/clearing
+    // The abort operation will clear conversation delegations, so we must snapshot them first
+    const pendingDelegations = this.getConversationPendingDelegations(agentPubkey, conversationId);
+    const key = this.makeKey(agentPubkey, conversationId);
+    const convDelegations = this.conversationDelegations.get(key);
+
+    // Abort the target agent
     const directAbortCount = this.abortAllForAgent(agentPubkey, conversationId);
     if (directAbortCount > 0) {
       abortedTuples.push({ conversationId, agentPubkey });
@@ -1466,9 +1596,6 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         await conversation.save();
       }
     }
-
-    // Find nested delegations by checking the conversation's pending delegations
-    const pendingDelegations = this.getConversationPendingDelegations(agentPubkey, conversationId);
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
       "cascade.root_conversation_id": conversationId.substring(0, 12),
@@ -1505,6 +1632,57 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
       // Collect all aborted tuples from descendants
       abortedTuples.push(...descendantResult.descendantConversations);
+
+      // Mark this delegation as aborted by moving it from pending to completed with abort status
+      // Use the captured convDelegations from before the abort
+      if (convDelegations) {
+        // Remove from pending
+        const pendingDelegation = convDelegations.pending.get(descendantConvId);
+        if (pendingDelegation) {
+          convDelegations.pending.delete(descendantConvId);
+
+          // Load partial transcript from the aborted conversation
+          const abortedConv = ConversationStore.get(descendantConvId);
+          const partialTranscript: DelegationMessage[] = [];
+          if (abortedConv) {
+            const messages = abortedConv.getAllMessages();
+            for (const msg of messages) {
+              if (msg.messageType === "text" && msg.targetedPubkeys && msg.targetedPubkeys.length > 0) {
+                partialTranscript.push({
+                  senderPubkey: msg.pubkey,
+                  recipientPubkey: msg.targetedPubkeys[0],
+                  content: msg.content,
+                  timestamp: msg.timestamp ?? Date.now(),
+                });
+              }
+            }
+          }
+
+          // Add to completed with "aborted" status
+          convDelegations.completed.set(descendantConvId, {
+            delegationConversationId: descendantConvId,
+            recipientPubkey: descendantAgentPubkey,
+            senderPubkey: pendingDelegation.senderPubkey,
+            ralNumber: pendingDelegation.ralNumber,
+            transcript: partialTranscript,
+            completedAt: Date.now(),
+            status: "aborted",
+            abortReason: `cascaded from ${conversationId.substring(0, 12)}`,
+          });
+
+          trace.getActiveSpan()?.addEvent("ral.delegation_marked_aborted", {
+            "delegation.conversation_id": descendantConvId.substring(0, 12),
+            "delegation.transcript_length": partialTranscript.length,
+          });
+        }
+      }
+    }
+
+    // Re-insert the modified convDelegations back into the Map so it's queryable later
+    // This is critical because abortAllForAgent() deleted the Map entry, but we've
+    // now added aborted completions to the captured reference
+    if (convDelegations && (convDelegations.pending.size > 0 || convDelegations.completed.size > 0)) {
+      this.conversationDelegations.set(key, convDelegations);
     }
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_completed", {
