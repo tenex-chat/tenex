@@ -62,7 +62,8 @@ export type ToolName =
     | "web_fetch"
     | "web_search"
     | "nostr_fetch"
-    | "change_model";
+    | "change_model"
+    | "kill";
 
 /**
  * AI SDK tool with optional human-readable formatter and side effect declaration.

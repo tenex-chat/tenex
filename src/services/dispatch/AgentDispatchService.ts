@@ -336,6 +336,20 @@ export class AgentDispatchService {
         );
 
         try {
+            // Check if this agent is in cooldown for this conversation
+            const isInCooldown = await this.checkAndBlockIfCooldown(
+                projectCtx.project.dTag,
+                delegationTarget.conversationId,
+                delegationTarget.agent.pubkey,
+                delegationTarget.agent.slug,
+                span,
+                "delegation_completion"
+            );
+
+            if (isInCooldown) {
+                return;
+            }
+
             const ralRegistry = RALRegistry.getInstance();
             const activeRal = ralRegistry.getState(
                 delegationTarget.agent.pubkey,
@@ -578,6 +592,20 @@ export class AgentDispatchService {
             );
 
             try {
+                // Check if this agent is in cooldown for this conversation
+                const isInCooldown = await this.checkAndBlockIfCooldown(
+                    projectCtx.project.dTag,
+                    conversationId,
+                    targetAgent.pubkey,
+                    targetAgent.slug,
+                    agentSpan,
+                    "routing"
+                );
+
+                if (isInCooldown) {
+                    return;
+                }
+
                 const activeRal = ralRegistry.getState(targetAgent.pubkey, conversationId);
 
                 agentSpan.setAttributes({
@@ -673,6 +701,46 @@ export class AgentDispatchService {
         // In real monitoring, you'd use setImmediate to measure actual lag
         // For diagnostic purposes, this gives us a baseline timestamp
         return Number((process.hrtime.bigint() - start) / 1000000n);
+    }
+
+    /**
+     * Check if an agent is in cooldown for a conversation and block routing if so.
+     * Returns true if the agent is in cooldown and routing should be blocked.
+     * Returns false if the agent is not in cooldown and routing should proceed.
+     *
+     * This helper consolidates the cooldown check logic used in multiple dispatch paths.
+     */
+    private async checkAndBlockIfCooldown(
+        projectId: string,
+        conversationId: string,
+        agentPubkey: string,
+        agentSlug: string,
+        span: ReturnType<typeof tracer.startSpan>,
+        eventType: "delegation_completion" | "routing"
+    ): Promise<boolean> {
+        const { CooldownRegistry } = await import("@/services/CooldownRegistry");
+        const cooldownRegistry = CooldownRegistry.getInstance();
+
+        if (cooldownRegistry.isInCooldown(projectId, conversationId, agentPubkey)) {
+            // Agent is in cooldown - skip routing
+            logger.info(`[dispatch] ${eventType === "delegation_completion" ? "Delegation completion routing" : "Routing"} blocked due to cooldown`, {
+                projectId: projectId.substring(0, 12),
+                conversationId: conversationId.substring(0, 12),
+                agentSlug,
+                agentPubkey: agentPubkey.substring(0, 12),
+            });
+
+            span.addEvent(`dispatch.${eventType}_blocked_cooldown`, {
+                "cooldown.project_id": projectId.substring(0, 12),
+                "cooldown.conversation_id": conversationId.substring(0, 12),
+                "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
+                "cooldown.agent_slug": agentSlug,
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+            return true;
+        }
+
+        return false;
     }
 
     /**
