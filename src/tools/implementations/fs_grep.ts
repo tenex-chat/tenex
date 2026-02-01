@@ -8,6 +8,9 @@ import { z } from "zod";
 
 const execAsync = promisify(exec);
 
+// Maximum content size before auto-fallback to files_with_matches mode
+const MAX_CONTENT_SIZE = 50_000; // 50KB threshold
+
 const grepSchema = z.object({
     pattern: z
         .string()
@@ -233,6 +236,87 @@ function applyPagination(lines: string[], offset: number, limit: number): string
     return limit > 0 ? offsetLines.slice(0, limit) : offsetLines;
 }
 
+async function runGrepCommand(
+    input: GrepInput,
+    workingDirectory: string,
+    searchPath: string,
+): Promise<string[]> {
+    const useRipgrep = await isRipgrepAvailable();
+    const command = useRipgrep
+        ? buildRipgrepCommand(input, searchPath)
+        : buildGrepCommand(input, searchPath);
+
+    try {
+        const { stdout } = await execAsync(command, {
+            cwd: workingDirectory,
+            timeout: 30000,
+            maxBuffer: 1024 * 1024 * 10, // 10MB
+        });
+
+        if (!stdout.trim()) {
+            return [];
+        }
+
+        return stdout.trim().split("\n").filter(Boolean);
+    } catch (error) {
+        // Exit code 1 from grep/rg means no matches - not an error
+        if (error && typeof error === "object" && "code" in error && error.code === 1) {
+            return [];
+        }
+        // maxBuffer error - rethrow to trigger fallback
+        if (error && typeof error === "object" && "message" in error &&
+            typeof error.message === "string" && error.message.includes("maxBuffer")) {
+            throw error;
+        }
+        throw error;
+    }
+}
+
+function extractFilePathsFromContent(contentLines: string[]): string[] {
+    const uniquePaths = new Set<string>();
+
+    for (const line of contentLines) {
+        // Content format: filepath:linenum:content or filepath:content
+        const firstColon = line.indexOf(":");
+        if (firstColon > 0) {
+            const filePath = line.substring(0, firstColon);
+            uniquePaths.add(filePath);
+        }
+    }
+
+    return Array.from(uniquePaths);
+}
+
+function truncateToMaxSize(text: string, maxBytes: number): { truncated: string; originalLength: number } {
+    const originalLength = Buffer.byteLength(text, "utf8");
+
+    if (originalLength <= maxBytes) {
+        return { truncated: text, originalLength };
+    }
+
+    // Binary search for the right character position that fits in maxBytes
+    const lines = text.split("\n");
+    let left = 0;
+    let right = lines.length;
+    let bestFit = 0;
+
+    while (left <= right) {
+        const mid = Math.floor((left + right) / 2);
+        const candidate = lines.slice(0, mid).join("\n");
+        const candidateSize = Buffer.byteLength(candidate, "utf8");
+
+        if (candidateSize <= maxBytes) {
+            bestFit = mid;
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    const truncated = lines.slice(0, bestFit).join("\n");
+    return { truncated, originalLength };
+}
+
 async function executeGrep(
     input: GrepInput,
     workingDirectory: string,
@@ -262,26 +346,63 @@ async function executeGrep(
         return `Path "${searchPath}" is outside your working directory "${workingDirectory}". If this was intentional, retry with allowOutsideWorkingDirectory: true`;
     }
 
-    const useRipgrep = await isRipgrepAvailable();
-    const command = useRipgrep
-        ? buildRipgrepCommand(input, searchPath)
-        : buildGrepCommand(input, searchPath);
-
     try {
-        const { stdout } = await execAsync(command, {
-            cwd: workingDirectory,
-            timeout: 30000,
-            maxBuffer: 1024 * 1024 * 10, // 10MB
-        });
+        // Execute the search
+        let lines: string[];
 
-        if (!stdout.trim()) {
+        try {
+            lines = await runGrepCommand(input, workingDirectory, searchPath);
+        } catch (error) {
+            // Handle maxBuffer error by falling back to files_with_matches mode
+            if (
+                output_mode === "content" &&
+                error &&
+                typeof error === "object" &&
+                "message" in error &&
+                typeof error.message === "string" &&
+                error.message.includes("maxBuffer")
+            ) {
+                // Retry with files_with_matches mode
+                const fallbackInput = { ...input, output_mode: "files_with_matches" as const };
+                const fallbackLines = await runGrepCommand(fallbackInput, workingDirectory, searchPath);
+
+                // Convert to relative paths
+                const fallbackProcessed = fallbackLines.map((line) => relative(workingDirectory, line));
+
+                // Apply pagination
+                const fallbackPaginated = applyPagination(fallbackProcessed, offset, head_limit);
+                const fileListResult = fallbackPaginated.join("\n");
+
+                // Build message prefix
+                const messagePrefix =
+                    `Content output exceeded buffer limit.\n` +
+                    `Showing matching files instead (${fallbackLines.length} total):\n\n`;
+
+                // Calculate available space
+                const availableSpace = MAX_CONTENT_SIZE - Buffer.byteLength(messagePrefix, "utf8") - 200;
+
+                // Enforce hard cap on output size
+                const { truncated: finalOutput, originalLength } = truncateToMaxSize(
+                    fileListResult,
+                    availableSpace
+                );
+
+                const truncationNote =
+                    originalLength > availableSpace
+                        ? `\n\n[Output truncated to 50KB limit - ${fallbackPaginated.length} files matched, showing partial list]`
+                        : "";
+
+                return messagePrefix + finalOutput + truncationNote;
+            }
+            throw error;
+        }
+
+        if (lines.length === 0) {
             return `No matches found for pattern: ${pattern}`;
         }
 
-        let lines = stdout.trim().split("\n").filter(Boolean);
-
         // Convert absolute paths to relative
-        lines = lines.map((line) => {
+        let processedLines = lines.map((line) => {
             // Handle different output formats
             if (output_mode === "files_with_matches") {
                 return relative(workingDirectory, line);
@@ -305,23 +426,53 @@ async function executeGrep(
             return line;
         });
 
-        // Apply pagination
-        const paginatedLines = applyPagination(lines, offset, head_limit);
-
-        const truncated = paginatedLines.length < lines.length;
+        // Apply pagination first
+        const paginatedLines = applyPagination(processedLines, offset, head_limit);
         const result = paginatedLines.join("\n");
 
+        // Auto-fallback logic for content mode when PAGINATED output is too large
+        if (output_mode === "content") {
+            const paginatedSize = Buffer.byteLength(result, "utf8");
+
+            if (paginatedSize > MAX_CONTENT_SIZE) {
+                // Extract unique file paths from the content we already have
+                const filePaths = extractFilePathsFromContent(processedLines);
+
+                // Apply pagination to file list
+                const paginatedFiles = applyPagination(filePaths, offset, head_limit);
+                const fileListResult = paginatedFiles.join("\n");
+
+                // Build message prefix
+                const messagePrefix =
+                    `Content output would exceed 50KB limit (actual: ${(paginatedSize / 1024).toFixed(1)}KB).\n` +
+                    `Showing ${paginatedFiles.length} matching files instead:\n\n`;
+
+                // Calculate available space for file list (leave room for prefix and potential truncation note)
+                const availableSpace = MAX_CONTENT_SIZE - Buffer.byteLength(messagePrefix, "utf8") - 200;
+
+                // Enforce hard cap on file list output
+                const { truncated: finalOutput, originalLength } = truncateToMaxSize(
+                    fileListResult,
+                    availableSpace
+                );
+
+                const truncationNote =
+                    originalLength > availableSpace
+                        ? `\n\n[File list truncated to 50KB limit - ${filePaths.length} files matched, showing partial list]`
+                        : "";
+
+                return messagePrefix + finalOutput + truncationNote;
+            }
+        }
+
+        // Normal output (no fallback needed)
+        const truncated = paginatedLines.length < processedLines.length;
         if (truncated) {
-            return `${result}\n\n[Truncated: showing ${paginatedLines.length} of ${lines.length} results]`;
+            return `${result}\n\n[Truncated: showing ${paginatedLines.length} of ${processedLines.length} results]`;
         }
 
         return result;
     } catch (error) {
-        // Exit code 1 from grep/rg means no matches - not an error
-        if (error && typeof error === "object" && "code" in error && error.code === 1) {
-            return `No matches found for pattern: ${pattern}`;
-        }
-
         const message = error instanceof Error ? error.message : String(error);
         return `Grep error: ${message}`;
     }
