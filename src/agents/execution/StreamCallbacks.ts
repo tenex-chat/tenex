@@ -19,6 +19,7 @@ import type { LanguageModel, ModelMessage, StepResult } from "ai";
 import { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import type { FullRuntimeContext, RALExecutionContext } from "./types";
+import { getHeuristicEngine } from "@/services/heuristics";
 
 /**
  * Step data passed to prepareStep callback
@@ -167,6 +168,39 @@ export function createPrepareStep(
                         "injection.ephemeral_count": midStepEphemeralMessages.length,
                         "ral.number": ralNumber,
                     });
+                }
+
+                // === HEURISTIC VIOLATIONS INJECTION ===
+                // Inject pending heuristic violations as ephemeral system messages
+                const heuristicViolations = ralRegistry.getAndConsumeHeuristicViolations(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+
+                if (heuristicViolations.length > 0) {
+                    const heuristicEngine = getHeuristicEngine();
+                    const warningMessage = heuristicEngine.formatForInjection(heuristicViolations);
+
+                    if (warningMessage) {
+                        // Add as ephemeral system message (not persisted, just for this LLM step)
+                        midStepEphemeralMessages.push({
+                            role: "system",
+                            content: warningMessage,
+                        });
+
+                        executionSpan?.addEvent("heuristic.violations_injected", {
+                            "ral.number": ralNumber,
+                            "violation.count": heuristicViolations.length,
+                            "violation.ids": heuristicViolations.map((v) => v.id).join(","),
+                        });
+
+                        logger.info("[StreamCallbacks] Injected heuristic violations", {
+                            agent: context.agent.slug,
+                            ralNumber,
+                            violationCount: heuristicViolations.length,
+                        });
+                    }
                 }
 
                 const pendingDelegations = ralRegistry.getConversationPendingDelegations(
