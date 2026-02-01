@@ -90,9 +90,11 @@ interface AgentsMdContext {
  * Derive the appropriate role for a message based on viewer perspective.
  *
  * Rules:
+ * - Explicit role override: If entry.role is set (for synthetic entries like compressed summaries), use it
  * - assistant: Only for the viewing agent's own messages
  * - user: All other messages (regardless of targeting)
  * - tool: Tool results (fixed)
+ * - system: Synthetic system messages (compressed summaries, etc.)
  *
  * Note: Attribution context is not added to LLM input. Role simply distinguishes
  * between the agent's own messages and messages from others.
@@ -100,7 +102,14 @@ interface AgentsMdContext {
 function deriveRole(
     entry: ConversationEntry,
     viewingAgentPubkey: string
-): "user" | "assistant" | "tool" {
+): "user" | "assistant" | "tool" | "system" {
+    // Explicit role override for synthetic entries (e.g., compressed summaries)
+    // CRITICAL: Without this, compressed summaries with pubkey="system" would become "user" role,
+    // turning compressed history into user instructions and causing catastrophic LLM behavior.
+    if (entry.role) {
+        return entry.role;
+    }
+
     // Tool messages have fixed roles
     if (entry.messageType === "tool-call") return "assistant";
     if (entry.messageType === "tool-result") return "tool";

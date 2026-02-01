@@ -13,6 +13,9 @@ import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
+import type { LLMService } from "@/llm/service";
+import { createCompressionService } from "@/services/compression/CompressionService.js";
+import { logger } from "@/utils/logger";
 
 const tracer = trace.getTracer("tenex.message-compiler");
 
@@ -28,6 +31,14 @@ export interface EphemeralMessage {
     role: "user" | "system";
     content: string;
 }
+
+/**
+ * CompiledMessage - A message with event ID for compression tracking.
+ * Combines ModelMessage with optional eventId field.
+ */
+export type CompiledMessage = ModelMessage & {
+    eventId?: string;
+};
 
 export interface MessageCompilerContext {
     agent: AgentInstance;
@@ -74,7 +85,8 @@ export class MessageCompiler {
     constructor(
         private providerId: string,
         private sessionManager: SessionManager,
-        private conversationStore: ConversationStore
+        private conversationStore: ConversationStore,
+        private llmService?: LLMService
     ) {
         this.plan = this.buildPlan();
         this.currentCursor = this.plan.cursor ?? -1;
@@ -83,6 +95,14 @@ export class MessageCompiler {
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
         return tracer.startActiveSpan("tenex.message.compile", async (span) => {
             try {
+                // Validate conversation source - context.conversation must match conversationStore
+                if (context.conversation.id !== this.conversationStore.getId()) {
+                    throw new Error(
+                        `Conversation mismatch: context.conversation.id (${context.conversation.id}) ` +
+                        `does not match conversationStore.id (${this.conversationStore.getId()})`
+                    );
+                }
+
                 span.setAttribute("agent.slug", context.agent.slug);
                 span.setAttribute("conversation.id", context.conversation.id.substring(0, 12));
                 span.setAttribute("ral.number", context.ralNumber);
@@ -103,6 +123,9 @@ export class MessageCompiler {
                             sysSpan.end();
                         }
                     });
+
+                    // Apply compression: load existing segments and apply to conversation history
+                    await this.applyCompression(context);
 
                     const conversationMessages = await tracer.startActiveSpan("tenex.message.build_conversation_history", async (convSpan) => {
                         try {
@@ -209,7 +232,9 @@ export class MessageCompiler {
 
                 // Update cursor for subsequent prepareStep calls within same execution.
                 // This prevents resending the same messages during streaming.
-                this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
+                // CRITICAL: Use compressed count, not raw count. Cursor must be in compressed space
+                // to match the space used by buildMessagesForRalAfterIndex.
+                this.currentCursor = Math.max(this.conversationStore.getCompressedMessageCount() - 1, cursor);
 
                 return { messages, mode: this.plan.mode, counts };
             } catch (error) {
@@ -233,7 +258,8 @@ export class MessageCompiler {
         // Use current message count (includes agent's response), not compile-time cursor.
         // advanceCursor is called after agent responds, so we want the cursor to point
         // to the last message the agent knows about (its own response).
-        const messageCount = this.conversationStore.getMessageCount();
+        // CRITICAL: Use compressed count to save cursor in compressed space.
+        const messageCount = this.conversationStore.getCompressedMessageCount();
         const cursorToSave = messageCount - 1;
         this.sessionManager.saveLastSentMessageIndex(cursorToSave);
     }
@@ -245,7 +271,7 @@ export class MessageCompiler {
         const hasSession = Boolean(session.sessionId);
         const cursor = session.lastSentMessageIndex;
         const cursorIsValid =
-            typeof cursor === "number" && cursor < this.conversationStore.getMessageCount();
+            typeof cursor === "number" && cursor < this.conversationStore.getCompressedMessageCount();
 
         if (isStateful && hasSession && cursorIsValid) {
             return { mode: "delta", cursor };
@@ -324,5 +350,56 @@ export class MessageCompiler {
         }
 
         return responseContextContent;
+    }
+
+    /**
+     * Apply reactive compression if needed.
+     * This ensures conversation history fits within the token budget.
+     */
+    private async applyCompression(context: MessageCompilerContext): Promise<void> {
+        // Skip compression if LLMService not available
+        if (!this.llmService) {
+            return;
+        }
+
+        const compressionService = createCompressionService(
+            this.conversationStore,
+            this.llmService!
+        );
+
+        // Get compression config with proper defaults (enabled: true by default)
+        // CRITICAL: Don't check config.compression?.enabled directly - it bypasses
+        // CompressionService defaults. Let CompressionService handle the enabled check.
+        const compressionConfig = compressionService.getCompressionConfig();
+        if (!compressionConfig.enabled) {
+            return;
+        }
+
+        return tracer.startActiveSpan("tenex.message.apply_compression", async (span) => {
+            try {
+                span.setAttribute("conversation.id", context.conversation.id.substring(0, 12));
+
+                // Reactive blocking compression - use configured budget or CompressionService default
+                const tokenBudget = compressionConfig.tokenBudget;
+                await compressionService.ensureUnderLimit(
+                    context.conversation.id,
+                    tokenBudget
+                );
+
+                span.setAttribute("compression.budget", tokenBudget);
+                span.setStatus({ code: SpanStatusCode.OK });
+            } catch (error) {
+                span.recordException(error as Error);
+                span.setStatus({ code: SpanStatusCode.ERROR });
+                // Non-critical - log and continue without compression
+                logger.warn("Reactive compression failed", {
+                    conversationId: context.conversation.id,
+                    ralNumber: context.ralNumber,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            } finally {
+                span.end();
+            }
+        });
     }
 }
