@@ -278,6 +278,9 @@ export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
 
+/** Core agent tools - auto-injected for all agents (critical system capabilities) */
+const CORE_AGENT_TOOLS: ToolName[] = ["kill"];
+
 /** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
 const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];
 
@@ -407,6 +410,13 @@ export function getToolsObject(
                 continue;
             }
             regularTools.push(name as ToolName);
+        }
+    }
+
+    // Auto-inject core agent tools for all agents (critical system capabilities)
+    for (const coreToolName of CORE_AGENT_TOOLS) {
+        if (!regularTools.includes(coreToolName)) {
+            regularTools.push(coreToolName);
         }
     }
 
