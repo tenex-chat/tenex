@@ -99,7 +99,9 @@ describe("Nudge Tool Permissions", () => {
 
                 expect(toolNames).toContain("fs_read");
                 expect(toolNames).toContain("shell");
-                expect(toolNames.length).toBe(2); // Should not have duplicates
+                // Core tools (kill) are auto-injected when conversation context is present
+                expect(toolNames).toContain("kill");
+                expect(toolNames.length).toBe(3); // Should not have duplicates (fs_read, shell, kill)
             });
         });
 
@@ -129,6 +131,21 @@ describe("Nudge Tool Permissions", () => {
                 const toolNames = Object.keys(tools);
 
                 // Original tools should remain
+                expect(toolNames).toContain("fs_read");
+                expect(toolNames).toContain("shell");
+            });
+
+            it("should block auto-injected core tools (kill) when denied", () => {
+                const baseTools = ["fs_read", "shell"];
+                const nudgePermissions: NudgeToolPermissions = {
+                    denyTools: ["kill"], // Block the auto-injected kill tool
+                };
+
+                const tools = getToolsObject(baseTools, mockContext, nudgePermissions);
+                const toolNames = Object.keys(tools);
+
+                // Core tools should NOT be auto-injected when explicitly denied (SECURITY)
+                expect(toolNames).not.toContain("kill");
                 expect(toolNames).toContain("fs_read");
                 expect(toolNames).toContain("shell");
             });
@@ -329,13 +346,15 @@ describe("Nudge Tool Permissions", () => {
                 expect(toolNames).toContain("ask");
             });
 
-            it("should return empty when no base tools and no nudge permissions", () => {
+            it("should return only core tools when no base tools and no nudge permissions", () => {
                 const baseTools: string[] = [];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
                 const toolNames = Object.keys(tools);
 
-                expect(toolNames.length).toBe(0);
+                // Core tools (kill) are auto-injected when conversation context is present
+                expect(toolNames).toContain("kill");
+                expect(toolNames.length).toBe(1); // Only core tools (kill)
             });
         });
     });

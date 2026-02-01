@@ -1,0 +1,1 @@
+=== Test 2: Testing kill tool on background shell === echo  echo Step 1: Starting a long-running background task...  -d  create-thread killtest transparent --wait 45 Please use the shell tool to run the command 'sleep 120' with run_in_background=true. After starting it, tell me the task_id so I can test killing it.

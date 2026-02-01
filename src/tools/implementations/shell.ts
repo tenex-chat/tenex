@@ -72,6 +72,7 @@ type BackgroundTaskInfo = {
     description: string | null;
     outputFile: string;
     startTime: Date;
+    projectId: string;
 };
 
 // Track background tasks
@@ -236,9 +237,16 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         child.stdout?.pipe(outputStream);
         child.stderr?.pipe(outputStream);
 
-        // Track the background task
+        // Track the background task with project isolation
         if (child.pid === undefined) {
             throw new Error("Failed to start background task: process ID unavailable");
+        }
+
+        // Get project ID for isolation enforcement
+        const conversation = context.getConversation?.();
+        const projectId = conversation?.getProjectId();
+        if (!projectId) {
+            throw new Error("Cannot create background task: no project context available");
         }
 
         backgroundTasks.set(taskId, {
@@ -247,6 +255,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
             description: description || null,
             outputFile,
             startTime: new Date(),
+            projectId,
         });
 
         // Unref so parent can exit independently
