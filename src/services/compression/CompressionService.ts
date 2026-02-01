@@ -156,10 +156,7 @@ export class CompressionService {
         // Attempt LLM compression
         try {
           const rangeEntries = entries.slice(range.startIndex, range.endIndex);
-          const newSegments = await this.compressEntries(
-            rangeEntries,
-            span
-          );
+          const newSegments = await this.compressEntries(rangeEntries);
 
           // Emit telemetry for successful summary generation
           span.addEvent("compression.summary_generated", {
@@ -259,12 +256,10 @@ export class CompressionService {
    * Compress a range of entries using LLM.
    */
   private async compressEntries(
-    entries: ConversationEntry[],
-    parentSpan: Span
+    entries: ConversationEntry[]
   ): Promise<CompressionSegment[]> {
     return tracer.startActiveSpan(
       "compression.llm_compress",
-      { parent: parentSpan },
       async (span) => {
         try {
           span.setAttribute("entries.count", entries.length);
@@ -287,10 +282,11 @@ export class CompressionService {
                       // ToolCallPart
                       return `Tool: ${tool.toolName}`;
                     } else if ('toolCallId' in tool) {
-                      // ToolResultPart
-                      const resultPreview = typeof tool.result === 'string'
-                        ? tool.result.substring(0, 100)
-                        : JSON.stringify(tool.result).substring(0, 100);
+                      // ToolResultPart - cast to any to avoid type narrowing issues
+                      const toolResult = tool as any;
+                      const resultPreview = typeof toolResult.result === 'string'
+                        ? toolResult.result.substring(0, 100)
+                        : JSON.stringify(toolResult.result).substring(0, 100);
                       return `Result: ${resultPreview}${resultPreview.length >= 100 ? '...' : ''}`;
                     }
                     return '';
@@ -316,9 +312,11 @@ export class CompressionService {
           }
 
           // Call LLM to compress
-          const result = await this.llmService.generateObject({
-            schema: CompressionSegmentsSchema,
-            prompt: `You are compressing conversation history. Analyze the following messages and create 1-3 compressed segments that preserve key information while being concise.
+          const result = await this.llmService.generateObject(
+            [
+              {
+                role: "user",
+                content: `You are compressing conversation history. Analyze the following messages and create 1-3 compressed segments that preserve key information while being concise.
 
 For each segment, provide:
 - fromEventId: starting message event ID
@@ -331,7 +329,10 @@ ${formattedEntries}
 Event IDs in order: ${eventIds.join(", ")}
 
 Create segments that group related topics together. Preserve important decisions, errors, and outcomes.`,
-          });
+              },
+            ],
+            CompressionSegmentsSchema
+          );
 
           // Convert LLM output to CompressionSegment format
           const segments: CompressionSegment[] = result.object.map(

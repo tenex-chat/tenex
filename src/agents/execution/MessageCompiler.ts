@@ -15,7 +15,6 @@ import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
 import type { LLMService } from "@/llm/service";
 import { createCompressionService } from "@/services/compression/CompressionService.js";
-import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 
 const tracer = trace.getTracer("tenex.message-compiler");
@@ -35,11 +34,11 @@ export interface EphemeralMessage {
 
 /**
  * CompiledMessage - A message with event ID for compression tracking.
- * Extends ModelMessage with optional eventId field.
+ * Combines ModelMessage with optional eventId field.
  */
-export interface CompiledMessage extends ModelMessage {
+export type CompiledMessage = ModelMessage & {
     eventId?: string;
-}
+};
 
 export interface MessageCompilerContext {
     agent: AgentInstance;
