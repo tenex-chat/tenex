@@ -26,6 +26,13 @@ const tracer = trace.getTracer("tenex.compression");
  *
  * Works at the ConversationEntry level (storage layer) before messages
  * are compiled for LLM consumption.
+ *
+ * LLM REQUIREMENTS:
+ * - Compression requires an LLM provider with structured output (JSON mode) support
+ * - If summarization fails (e.g., non-JSON-capable models like some Ollama models),
+ *   the service gracefully falls back to sliding window truncation
+ * - Check telemetry events (compression.summary_failed) to diagnose failures
+ * - Recommended: Use OpenAI, Anthropic, or other providers with native JSON support
  */
 export class CompressionService {
   constructor(
@@ -154,6 +161,12 @@ export class CompressionService {
             span
           );
 
+          // Emit telemetry for successful summary generation
+          span.addEvent("compression.summary_generated", {
+            "segments.count": newSegments.length,
+            "model": this.llmService.model,
+          });
+
           // Validate segments
           const validation = validateSegmentsForEntries(
             newSegments,
@@ -165,6 +178,12 @@ export class CompressionService {
             logger.warn("Compression segment validation failed", {
               conversationId,
               error: validation.error,
+            });
+
+            // Emit telemetry for validation failure
+            span.addEvent("compression.summary_failed", {
+              "reason": "validation_failed",
+              "error": validation.error,
             });
 
             if (blocking) {
@@ -184,15 +203,34 @@ export class CompressionService {
             newSegments
           );
 
+          // Emit telemetry for reactive compression completion
+          if (blocking) {
+            span.addEvent("compression.reactive_applied", {
+              "segments.added": newSegments.length,
+              "tokens.before": currentTokens,
+              "tokens.budget": effectiveBudget,
+            });
+          }
+
           span.setAttribute("segments.added", newSegments.length);
           span.setStatus({ code: SpanStatusCode.OK });
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
           logger.warn("LLM compression failed", {
             conversationId,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
+            blocking,
+          });
+
+          // Emit telemetry for LLM failure
+          span.addEvent("compression.summary_failed", {
+            "reason": "llm_error",
+            "error": errorMessage,
+            "blocking": blocking,
           });
 
           if (blocking) {
+            // Graceful degradation: use fallback truncation
             await this.useFallback(
               conversationId,
               entries,
@@ -200,7 +238,11 @@ export class CompressionService {
               span
             );
           } else {
-            throw error;
+            // Proactive mode: fail silently, don't throw
+            // This prevents compression failures from breaking the main flow
+            logger.warn("Proactive compression skipped due to LLM error", {
+              conversationId,
+            });
           }
         }
       } catch (error) {
@@ -227,10 +269,41 @@ export class CompressionService {
         try {
           span.setAttribute("entries.count", entries.length);
 
-          // Format entries for LLM
+          // Format entries for LLM, including tool payloads
           const formattedEntries = entries
             .map((e) => {
-              return `[${e.messageType}] ${e.content}`;
+              let formatted = `[${e.messageType}]`;
+
+              // Add text content if present
+              if (e.content) {
+                formatted += ` ${e.content}`;
+              }
+
+              // Add tool payload summary for tool-call/tool-result entries
+              if (e.toolData && e.toolData.length > 0) {
+                const toolSummary = e.toolData
+                  .map((tool) => {
+                    if ('toolName' in tool) {
+                      // ToolCallPart
+                      return `Tool: ${tool.toolName}`;
+                    } else if ('toolCallId' in tool) {
+                      // ToolResultPart
+                      const resultPreview = typeof tool.result === 'string'
+                        ? tool.result.substring(0, 100)
+                        : JSON.stringify(tool.result).substring(0, 100);
+                      return `Result: ${resultPreview}${resultPreview.length >= 100 ? '...' : ''}`;
+                    }
+                    return '';
+                  })
+                  .filter(Boolean)
+                  .join(', ');
+
+                if (toolSummary) {
+                  formatted += ` [${toolSummary}]`;
+                }
+              }
+
+              return formatted;
             })
             .join("\n\n");
 
@@ -331,8 +404,9 @@ Create segments that group related topics together. Preserve important decisions
 
   /**
    * Get compression configuration from config service.
+   * Public to allow external callers (e.g., MessageCompiler) to check config.
    */
-  private getCompressionConfig(): {
+  getCompressionConfig(): {
     enabled: boolean;
     tokenThreshold: number;
     tokenBudget: number;
