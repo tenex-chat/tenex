@@ -278,6 +278,9 @@ export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
 
+/** Core agent tools - auto-injected for all agents (critical system capabilities) */
+const CORE_AGENT_TOOLS: ToolName[] = ["kill"];
+
 /** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
 const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];
 
@@ -305,12 +308,16 @@ export function getToolsObject(
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
     // Check if conversation is available
-    const hasConversation =
-        "conversationStore" in context && context.conversationStore !== undefined;
+    // Use getConversation() check to properly exclude MCPToolContext (which returns undefined)
+    const hasConversation = context.getConversation?.() !== undefined;
 
     // === ONLY-TOOL MODE: STRICT EXCLUSIVITY ===
     // When only-tool mode is active, return EXACTLY those tools - no auto-injection whatsoever.
     // This is a security feature: the nudge author has complete control over available tools.
+    //
+    // IMPORTANT: Core agent tools (like 'kill') are NOT auto-injected in only-tool mode.
+    // If the nudge author wants core tools, they must explicitly include them in onlyTools.
+    // This ensures the nudge author has complete, unambiguous control over the tool set.
     if (nudgePermissions && isOnlyToolMode(nudgePermissions)) {
         const onlyToolNames = nudgePermissions.onlyTools!;
         logger.debug("[ToolRegistry] Nudge only-tool mode: strict exclusive tool set", {
@@ -362,6 +369,14 @@ export function getToolsObject(
     }
 
     // === ALLOW/DENY MODE OR NO NUDGE PERMISSIONS ===
+    // In allow/deny mode, the base tool set is modified by allow-tool and deny-tool directives.
+    //
+    // POLICY:
+    // 1. Initial filtering: deny-tool removes tools from base set
+    // 2. Auto-injection: Core tools, alpha tools, etc. are added
+    // 3. Final enforcement: deny-tool is re-applied to block any auto-injected tools
+    // - This ensures deny-tool CAN block core tools if explicitly denied (e.g., deny-tool: kill)
+    // - Provides flexibility: nudges can restrict even critical tools when needed
     let effectiveNames = names;
 
     if (nudgePermissions) {
@@ -410,6 +425,17 @@ export function getToolsObject(
         }
     }
 
+    // Auto-inject core agent tools for all agents (critical system capabilities)
+    // GATING: Only inject when conversation context is present to prevent leakage into MCP-only contexts
+    // MCPToolContext has getConversation: () => undefined, so this check properly excludes MCP contexts
+    if (hasConversation) {
+        for (const coreToolName of CORE_AGENT_TOOLS) {
+            if (!regularTools.includes(coreToolName)) {
+                regularTools.push(coreToolName);
+            }
+        }
+    }
+
     // Auto-inject alpha tools when in alpha mode (only for full registry context)
     if ("alphaMode" in context && context.alphaMode) {
         for (const alphaToolName of ALPHA_TOOLS) {
@@ -442,6 +468,27 @@ export function getToolsObject(
             }
         } catch {
             // Config not loaded or not available - skip meta model tool injection
+        }
+    }
+
+    // === FINAL DENY-TOOL ENFORCEMENT ===
+    // Apply deny-tool filtering AFTER all auto-injection (core tools, alpha, edit, meta-model)
+    // This ensures deny-tool can block even core tools if explicitly denied
+    if (nudgePermissions?.denyTools && nudgePermissions.denyTools.length > 0) {
+        const beforeDenyCount = regularTools.length;
+        const deniedTools = regularTools.filter((name) => nudgePermissions.denyTools!.includes(name));
+
+        if (deniedTools.length > 0) {
+            // Remove denied tools (including auto-injected ones)
+            const filtered = regularTools.filter((name) => !nudgePermissions.denyTools!.includes(name));
+            regularTools.length = 0;
+            regularTools.push(...filtered);
+
+            logger.info("[ToolRegistry] Final deny-tool enforcement: blocked auto-injected tools", {
+                deniedTools,
+                beforeCount: beforeDenyCount,
+                afterCount: regularTools.length,
+            });
         }
     }
 
