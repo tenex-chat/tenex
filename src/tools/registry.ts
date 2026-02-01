@@ -44,7 +44,7 @@ import { createFsGlobTool } from "./implementations/fs_glob";
 import { createFsGrepTool } from "./implementations/fs_grep";
 import { createFsReadTool } from "./implementations/fs_read";
 import { createFsWriteTool } from "./implementations/fs_write";
-import { createKillShellTool } from "./implementations/kill_shell";
+import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
@@ -191,7 +191,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     conversation_index: createConversationIndexTool,
 
     shell: createShellTool,
-    kill_shell: createKillShellTool,
+    kill: createKillTool,
 
     // Upload tools
     upload_blob: createUploadBlobTool,
