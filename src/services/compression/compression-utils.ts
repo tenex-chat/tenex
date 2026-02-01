@@ -435,12 +435,23 @@ export function applySegmentsToEntries(
  * Estimate token count for conversation entries using rough heuristic (chars/4).
  * This is faster than actual tokenization and sufficient for compression decisions.
  *
+ * Accounts for both text content and tool payloads (toolData) to prevent
+ * tool-heavy conversations from bypassing compression thresholds.
+ *
  * @param entries - Entries to estimate
  * @returns Estimated token count
  */
 export function estimateTokensFromEntries(entries: ConversationEntry[]): number {
   const totalChars = entries.reduce((sum, entry) => {
-    return sum + entry.content.length;
+    let entryChars = entry.content.length;
+
+    // Account for tool payloads (tool-call/tool-result)
+    if (entry.toolData && entry.toolData.length > 0) {
+      const toolDataSize = JSON.stringify(entry.toolData).length;
+      entryChars += toolDataSize;
+    }
+
+    return sum + entryChars;
   }, 0);
   return Math.ceil(totalChars / 4);
 }
