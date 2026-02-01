@@ -108,7 +108,8 @@ export class MessageCompiler {
                         try {
                             const result = await this.conversationStore.buildMessagesForRal(
                                 context.agent.pubkey,
-                                context.ralNumber
+                                context.ralNumber,
+                                context.projectBasePath
                             );
                             convSpan.setAttribute("message.count", result.length);
                             return result;
@@ -172,7 +173,8 @@ export class MessageCompiler {
                     const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
                         context.agent.pubkey,
                         context.ralNumber,
-                        cursor
+                        cursor,
+                        context.projectBasePath
                     );
                     messages.push(...conversationMessages);
 

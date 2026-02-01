@@ -441,7 +441,11 @@ export class ConversationStore {
 
     // Message Building
 
-    async buildMessagesForRal(agentPubkey: string, ralNumber: number): Promise<ModelMessage[]> {
+    async buildMessagesForRal(
+        agentPubkey: string,
+        ralNumber: number,
+        projectRoot?: string
+    ): Promise<ModelMessage[]> {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const rootAuthorPubkey = this.state.messages[0]?.pubkey;
         return buildMessagesFromEntries(this.state.messages, {
@@ -450,13 +454,15 @@ export class ConversationStore {
             activeRals,
             totalMessages: this.state.messages.length,
             rootAuthorPubkey,
+            projectRoot,
         });
     }
 
     async buildMessagesForRalAfterIndex(
         agentPubkey: string,
         ralNumber: number,
-        afterIndex: number
+        afterIndex: number,
+        projectRoot?: string
     ): Promise<ModelMessage[]> {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const startIndex = Math.max(afterIndex + 1, 0);
@@ -470,6 +476,7 @@ export class ConversationStore {
             indexOffset: startIndex,
             totalMessages: this.state.messages.length,
             rootAuthorPubkey,
+            projectRoot,
         });
     }
 

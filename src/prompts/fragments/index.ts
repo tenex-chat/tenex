@@ -27,6 +27,7 @@ import { mcpResourcesFragment } from "./26-mcp-resources";
 import { memorizedReportsFragment } from "./27-memorized-reports";
 import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring";
 import { worktreeContextFragment } from "./30-worktree-context";
+import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
 import { alphaModeFragment } from "./alpha-mode";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
@@ -67,6 +68,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(memorizedReportsFragment);
     fragmentRegistry.register(agentDirectedMonitoringFragment);
     fragmentRegistry.register(worktreeContextFragment);
+    fragmentRegistry.register(agentsMdGuidanceFragment);
 }
 
 // Auto-register all fragments on import
