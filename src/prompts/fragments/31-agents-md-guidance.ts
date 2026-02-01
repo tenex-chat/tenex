@@ -42,39 +42,39 @@ export const agentsMdGuidanceFragment: PromptFragment<AgentsMdGuidanceArgs> = {
         parts.push(`This project uses AGENTS.md files to provide contextual guidelines for different directories.
 
 ### How AGENTS.md Works
-- AGENTS.md files contain instructions relevant to their directory and subdirectories
-- When you read files, you may see \`<system-reminder>\` blocks with AGENTS.md content
-- Multiple AGENTS.md files can apply (from the file's directory up to project root)
-- More specific (deeper) AGENTS.md files take precedence over general ones
+- AGENTS.md files serve as a "README for Agents," containing context, commands, and conventions.
+- Unlike human-focused READMEs, these files focus on actionable instructions (build steps, test commands, code style).
+- Multiple AGENTS.md files may apply (Root + Directory specific).
+- Deeper, more specific AGENTS.md files override general root instructions.
 
 ### Writing AGENTS.md Files
-When working in a directory that would benefit from specific guidelines:
-1. Create an AGENTS.md file in that directory
-2. Keep content focused on that directory's purpose and conventions
-3. Include coding style, naming conventions, and important patterns
-4. Reference related AGENTS.md files for inherited guidelines
+When working in a directory that needs specific agent guidance:
+1. Create an AGENTS.md file in that directory.
+2. Focus on **executable commands** (test/build) and **strict conventions**.
+3. Do not duplicate generic info; focus on what is unique to this directory.
 
 ### AGENTS.md Format
 \`\`\`markdown
-# Directory Guidelines
+# Directory Context
+Specific architectural details or business logic for this directory.
 
-Brief description of this directory's purpose.
+## Commands
+- Test: \`npm test path/to/dir\`
+- Lint: \`npm run lint:specific\`
 
 ## Conventions
-- Specific coding patterns to follow
-- Naming conventions for this area
-- Important dependencies or imports
+- Code Style: Functional patterns preferred
+- Naming: CamelCase for files, PascalCase for classes
 
 ## Related
-- Links to relevant documentation
-- Cross-references to other important files
+- [API Docs](./docs/api.md)
 \`\`\``);
 
         // If root AGENTS.md content is available and short, include it
         if (rootAgentsMdContent && rootAgentsMdContent.length < MAX_ROOT_CONTENT_LENGTH_FOR_SYSTEM_PROMPT) {
             parts.push("\n### Root AGENTS.md\n");
             parts.push("This project's root AGENTS.md:\n");
-            parts.push("```markdown");
+            parts.push("```");
             parts.push(rootAgentsMdContent.trim());
             parts.push("```");
         }
