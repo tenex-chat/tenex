@@ -22,7 +22,6 @@ export type ToolName =
     | "lesson_delete"
     | "lessons_list"
     | "shell"
-    | "kill_shell"
     | "agent_configure"
     | "agents_discover"
     | "agents_hire"
