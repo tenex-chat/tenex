@@ -1,19 +1,160 @@
-# Repository Guidelines
+# TENEX Backend Repository Guidelines
+
+## Overview
+TENEX is a multi-agent AI coordination system built on Nostr. This Bun CLI application enables agents to collaborate, delegate tasks, and maintain persistent conversations across a distributed network.
+
+## Quick Reference
+
+### Essential Commands
+```bash
+bun run start              # Run CLI
+bun run build              # Build to dist/
+bun test                   # Run all tests
+bun test --watch           # Watch mode
+bun test --coverage        # With coverage
+bun run typecheck          # TypeScript strict check
+bun run lint               # ESLint
+bun run lint:architecture  # Layer violation check
+```
+
+### Layer Architecture
+Dependencies flow **DOWN only**. Violations are blocking errors.
+```
+Layer 4: commands/ daemon/ event-handler/     [Entrypoints]
+    ↓
+Layer 3: services/ agents/ conversations/ tools/  [Domain Logic]
+    ↓
+Layer 2: llm/ nostr/ prompts/ events/            [Protocol/Abstraction]
+    ↓
+Layer 1: utils/                                   [TENEX-specific helpers]
+    ↓
+Layer 0: lib/                                     [Pure utilities - ZERO @/ imports]
+```
 
 ## Project Structure & Module Organization
-TENEX is a Bun CLI with its runtime entry in `src/tenex.ts`; core domains live in `src/agents`, `src/commands`, `src/conversations`, `src/daemon`, `src/events`, `src/llm`, `src/nostr`, `src/prompts`, `src/services`, and `src/tools`, all accessed with the `@/` alias. Scripts covering builds, telemetry, and compatibility reside in `scripts/`, supporting tooling lives under `tools/`, bundled output lands in `dist/`, and e2e docs live in `tests/` and `E2E_TESTING_ARCHITECTURE.md`.
+Runtime entry is `src/tenex.ts`. Core domains are accessed via `@/` alias:
+
+| Directory | Layer | Purpose |
+|-----------|-------|---------|
+| `src/agents/` | 3 | Agent execution, registration, supervision |
+| `src/services/` | 3 | Stateful orchestration, configuration |
+| `src/conversations/` | 3 | Conversation persistence, formatting |
+| `src/tools/` | 3 | Tool implementations (57+) |
+| `src/llm/` | 2 | LLM provider abstraction |
+| `src/nostr/` | 2 | Nostr protocol wrappers |
+| `src/prompts/` | 2 | Prompt composition, fragments |
+| `src/events/` | 2 | Event schemas, constants |
+| `src/utils/` | 1 | TENEX-specific utilities |
+| `src/lib/` | 0 | Pure utilities (NO @/ imports) |
+| `src/commands/` | 4 | CLI entry points |
+| `src/daemon/` | 4 | Background orchestration |
+| `src/event-handler/` | 4 | Event processing |
+
+Supporting directories:
+- `scripts/` - Build scripts, telemetry helpers
+- `tools/` - Supporting tooling
+- `dist/` - Bundled output
+- `tests/` - E2E tests (see `E2E_TESTING_ARCHITECTURE.md`)
 
 ## System Inventory & Code Organization
-Use `MODULE_INVENTORY.md` as the canonical map of components, services, and utilities. Consult it before writing code to confirm where work belongs, and update it in the same PR whenever a module’s responsibility shifts. If conventions are fuzzy, log the situation in the \"Mixed Patterns\" section so follow-up refactors are tracked. Follow the domain-first placement rules captured there (thin commands, orchestration in `src/services`, pure helpers in `src/lib`, tools hosting all IO) and call out any exception inside the PR description in addition to the inventory.
+Use `MODULE_INVENTORY.md` as the canonical map of components. Consult it before writing code to confirm where work belongs. Update it in the same PR whenever a module's responsibility shifts.
 
-## Build, Test, and Development Commands
-`bun run start` exercises the CLI entry, while `bun run build` produces the bundled distribution in `dist/`. Run `bun test` before every push; add `--watch` or `--coverage` locally when needed. `bun run typecheck` (wrapper around `scripts/typecheck.sh`) enforces strict TS flags, `bun run lint` applies ESLint, and `bun run lint:architecture` checks layering.
+**Key principles:**
+- Thin commands (delegate to services)
+- Orchestration in `src/services`
+- Pure helpers in `src/lib`
+- Tools host all IO operations
 
 ## Coding Style & Naming Conventions
-Source files are TypeScript ES modules formatted per the Biome config (4 spaces, double quotes, trailing commas) and linted by ESLint; keep strict compiler flags (`strict`, `noUnused*`, `isolatedModules`) satisfied. Directories use kebab-case, service/class files use PascalCase, and helper/util files use kebab-case or camelCase within a folder’s conventions. Prefer domain folders over dumping helpers in `utils/`, and import shared helpers via `@/…` so bundling stays consistent.
+
+### Formatting
+- **Formatter**: Biome (4 spaces, double quotes, trailing commas)
+- **Linter**: ESLint with strict TypeScript rules
+- **Compiler flags**: `strict`, `noUnused*`, `isolatedModules`
+
+### Naming
+| Type | Convention | Example |
+|------|------------|---------|
+| Directories | kebab-case | `event-handler/` |
+| Services/Classes | PascalCase | `ConfigService.ts` |
+| Utilities | kebab-case | `error-formatter.ts` |
+| Tools | `<domain>_<action>` | `rag_query.ts` |
+| Tests | `*.test.ts` in `__tests__/` | `AgentExecutor.test.ts` |
+
+### Import Patterns
+```typescript
+// CORRECT: Direct imports with @/ alias
+import { RALRegistry } from "@/services/ral";
+import { formatAnyError } from "@/lib/error-formatter";
+
+// WRONG: Barrel imports
+import { RALRegistry } from "@/services";
+
+// WRONG: Relative cross-module imports
+import { config } from "../../../services/ConfigService";
+```
 
 ## Testing Guidelines
-Place unit tests beside their targets under `src/**/__tests__` with `*.test.ts` names; integration suites use `*.integration.test.ts`, and e2e flows run in `tests/` per `E2E_TESTING_ARCHITECTURE.md`. Run `bun test` and `bun run typecheck` for every PR, adding `bun test --coverage` when touching routing, telemetry, or services. Use descriptive `describe` labels and clean up fake nostr clients or mock LLM providers to avoid leaked handles.
+- Unit tests: `src/**/__tests__/*.test.ts`
+- Integration tests: `*.integration.test.ts`
+- E2E tests: `tests/` directory
+
+Run `bun test` and `bun run typecheck` for every PR. Add `--coverage` when touching routing, telemetry, or services.
+
+Use test utilities from `src/test-utils/`:
+- `mock-llm/` - Mock LLM providers
+- Nostr fixtures
+- Scenario harnesses
 
 ## Commit & Pull Request Guidelines
-Follow the Conventional Commit style seen in history (`refactor: …`, `feat: …`) so changelog tooling stays accurate. Keep commits small, scoped to one domain surface, and include doc/test updates. Pull requests need a problem statement, a checklist of commands run (`bun test`, `bun run lint`, etc.), linked issues, and screenshots or logs for UI or agent-output changes; call out any config or secrets reviewers require.
+Follow Conventional Commits: `refactor:`, `feat:`, `fix:`, `docs:`, `test:`
+
+**PR checklist:**
+- [ ] Problem statement
+- [ ] Commands run (`bun test`, `bun run lint`, etc.)
+- [ ] Linked issues
+- [ ] Doc/test updates for code changes
+- [ ] Screenshots/logs for UI or agent-output changes
+
+## Key Architectural Rules
+
+### ABSOLUTE: No Temporary Solutions
+Never acceptable: "TODO", "FIXME", "HACK", "temporary", "backwards compatible", wrapper classes like `*V2`
+
+### Configuration Access
+```typescript
+// Always use ConfigService
+import { config } from "@/services/ConfigService";
+const path = config.getConfigPath("agents");
+
+// Never construct paths manually
+const path = `${process.env.HOME}/.tenex/...`;  // WRONG
+```
+
+### NDK/Nostr Access
+```typescript
+// Use wrappers from src/nostr/
+import { AgentPublisher } from "@/nostr/AgentPublisher";
+
+// Never use NDK directly outside nostr/
+import { NDKEvent } from "@nostr-dev-kit/ndk";  // Only for types
+```
+
+### Tools Pattern
+Tools delegate to services, never hold state:
+```typescript
+// CORRECT
+export const my_tool = tool({
+  execute: async (params) => {
+    const service = new MyService();
+    return service.process(params);
+  }
+});
+```
+
+## Related Documentation
+- [MODULE_INVENTORY.md](MODULE_INVENTORY.md) - Canonical architecture reference
+- [CLAUDE.md](CLAUDE.md) - Development standards
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Full architecture guide
+- [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) - Developer workflow
+- [E2E_TESTING_ARCHITECTURE.md](E2E_TESTING_ARCHITECTURE.md) - E2E testing guide

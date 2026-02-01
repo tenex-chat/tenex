@@ -44,7 +44,8 @@ export const agentsMdGuidanceFragment: PromptFragment<AgentsMdGuidanceArgs> = {
 ### How AGENTS.md Works
 - AGENTS.md files serve as a "README for Agents," containing context, commands, and conventions.
 - Unlike human-focused READMEs, these files focus on actionable instructions (build steps, test commands, code style).
-- Multiple AGENTS.md files may apply (Root + Directory specific).
+- **Automatic Injection**: When you use tools that interact with files in a directory containing an AGENTS.md, the system automatically injects relevant AGENTS.md content as a \`<system-reminder>\`. You do NOT need to manually search for or read these files—they are provided to you when relevant.
+- Multiple AGENTS.md files may apply (Root + Directory specific). The system handles this hierarchy automatically.
 - Deeper, more specific AGENTS.md files override general root instructions.
 
 ### Writing AGENTS.md Files
