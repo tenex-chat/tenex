@@ -36,6 +36,7 @@ import { createPrepareStep, createOnStopCheck } from "./StreamCallbacks";
 import { setupToolEventHandlers } from "./ToolEventHandlers";
 import type { FullRuntimeContext, RALExecutionContext, StreamExecutionResult } from "./types";
 import { extractLastUserMessage } from "./utils";
+import { CompressionService } from "@/services/compression/CompressionService.js";
 
 /**
  * Configuration for stream execution
@@ -339,6 +340,10 @@ export class StreamExecutionHandler {
                     "ral.number": ralNumber,
                 });
             }
+
+            // Trigger proactive background compression after LLM response
+            // Non-blocking - fires and forgets
+            this.triggerProactiveCompression();
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
@@ -462,6 +467,33 @@ export class StreamExecutionHandler {
             }
         }
         throw streamError;
+    }
+
+    /**
+     * Trigger proactive background compression after LLM response.
+     * Non-blocking - runs async without blocking the completion flow.
+     */
+    private triggerProactiveCompression(): void {
+        const { context, llmService } = this.config;
+
+        try {
+            const compressionService = new CompressionService(
+                context.conversationStore,
+                llmService
+            );
+
+            // Fire and forget - non-blocking
+            compressionService.maybeCompressAsync(context.conversationId);
+
+            this.executionSpan?.addEvent("compression.proactive_triggered", {
+                "conversation.id": context.conversationId.substring(0, 12),
+            });
+        } catch (error) {
+            // Non-blocking - just log if compression setup fails
+            logger.warn("[StreamExecutionHandler] Failed to trigger proactive compression", {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 
     /**

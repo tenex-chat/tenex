@@ -11,7 +11,6 @@ import {
   CompressionSegmentsSchema,
   type CompressionSegmentInput,
 } from "./compression-schema.js";
-import { generateObject } from "ai";
 import {
   estimateTokensFromEntries,
   selectCandidateRangeFromEntries,
@@ -50,10 +49,11 @@ export class CompressionService {
   /**
    * Blocking reactive compression.
    * Called when messages must fit within token budget.
+   * If tokenBudget is undefined, uses the configured default.
    */
   async ensureUnderLimit(
     conversationId: string,
-    tokenBudget: number
+    tokenBudget?: number
   ): Promise<void> {
     await this.performCompression(conversationId, true, tokenBudget);
   }
@@ -243,8 +243,7 @@ export class CompressionService {
           }
 
           // Call LLM to compress
-          const result = await generateObject({
-            model: this.llmService.getModel(),
+          const result = await this.llmService.generateObject({
             schema: CompressionSegmentsSchema,
             prompt: `You are compressing conversation history. Analyze the following messages and create 1-3 compressed segments that preserve key information while being concise.
 
