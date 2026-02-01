@@ -46,6 +46,16 @@ function getTelemetryConfig(): TelemetryConfig {
 const telemetryConfig = getTelemetryConfig();
 initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName, telemetryConfig.endpoint);
 
+// Initialize heuristics system with default rules
+import { getHeuristicEngine, getDefaultHeuristics } from "@/services/heuristics";
+const heuristicEngine = getHeuristicEngine({
+    telemetry: telemetryConfig.enabled,
+    debug: process.env.DEBUG_HEURISTICS === "true",
+});
+for (const heuristic of getDefaultHeuristics()) {
+    heuristicEngine.register(heuristic);
+}
+
 import { handleCliError } from "@/utils/cli-error";
 // CLI entry point for TENEX
 import { Command } from "commander";

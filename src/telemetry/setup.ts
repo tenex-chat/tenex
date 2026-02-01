@@ -10,6 +10,7 @@ import {
 } from "@opentelemetry/semantic-conventions";
 import { ToolCallSpanProcessor } from "./ToolCallSpanProcessor.js";
 import { NostrSpanProcessor } from "./NostrSpanProcessor.js";
+import { HeuristicSpanProcessor } from "@/services/heuristics/HeuristicsTelemetry";
 
 const DEFAULT_SERVICE_NAME = "tenex-daemon";
 const DEFAULT_ENDPOINT = "http://localhost:4318/v1/traces";
@@ -54,11 +55,14 @@ class ErrorHandlingExporterWrapper implements SpanExporter {
 class EnrichedBatchSpanProcessor extends BatchSpanProcessor {
     private enricher = new ToolCallSpanProcessor();
     private nostrProcessor = new NostrSpanProcessor();
+    private heuristicProcessor = new HeuristicSpanProcessor();
 
     onEnd(span: ReadableSpan): void {
         // First fix Nostr span IDs (must happen before export)
         this.nostrProcessor.onEnd(span);
-        // Then enrich the span name
+        // Then enrich heuristic spans
+        this.heuristicProcessor.onEnd(span);
+        // Then enrich tool call spans
         this.enricher.onEnd(span);
         // Then pass to batch processor
         super.onEnd(span);
