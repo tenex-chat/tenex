@@ -55,8 +55,29 @@ export function createFinishHandler(
             // - BUT we still need to re-publish it in the completion event for delegations
             // This creates intentional duplication (conversation + completion both have same text)
             // but ensures delegated agents receive the full response via p-tag on completion.
+            //
+            // Three-level fallback for finalMessage:
+            // 1. Use cachedContent if available (normal case)
+            // 2. Use e.text if cachedContent is empty AND e.text is non-empty (fallback when content was already published)
+            // 3. Use error message if both are empty (edge case where no content was captured)
+            const ERROR_FALLBACK_MESSAGE =
+                "There was an error capturing the work done, please review the conversation for the results";
+
             const cachedContent = state.getCachedContent();
-            const finalMessage = cachedContent.length > 0 ? cachedContent : (e.text ?? "");
+            const text = e.text ?? "";
+
+            const fallbackLevel =
+                cachedContent.length > 0 ? "cached" :
+                text.length > 0 ? "text" :
+                "error";
+
+            const finalMessage =
+                fallbackLevel === "cached" ? cachedContent :
+                fallbackLevel === "text" ? text :
+                ERROR_FALLBACK_MESSAGE;
+
+            const usedFallbackToText = fallbackLevel === "text";
+            const usedErrorFallback = fallbackLevel === "error";
 
             emitSessionCapturedFromMetadata(
                 emitter,
@@ -83,12 +104,12 @@ export function createFinishHandler(
 
             // DIAGNOSTIC: Log right before emitting complete event
             const beforeEmitTime = Date.now();
-            const usedFallback = cachedContent.length === 0 && (e.text?.length ?? 0) > 0;
             activeSpan?.addEvent("llm.complete_will_emit", {
                 "complete.message_length": finalMessage.length,
                 "complete.cached_content_length": cachedContent.length,
-                "complete.e_text_length": e.text?.length ?? 0,
-                "complete.used_fallback_to_e_text": usedFallback,
+                "complete.e_text_length": text.length,
+                "complete.used_fallback_to_e_text": usedFallbackToText,
+                "complete.used_error_fallback": usedErrorFallback,
                 "complete.usage_input_tokens": usage.inputTokens,
                 "complete.usage_output_tokens": usage.outputTokens,
                 "complete.finish_reason": e.finishReason,

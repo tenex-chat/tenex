@@ -925,6 +925,8 @@ describe("LLMService createFinishHandler", () => {
 
     beforeEach(() => {
         mockRegistry = createMockRegistry();
+        // Clear mock span calls between tests
+        mockSpan.addEvent.mockClear();
     });
 
     test("uses cached content for non-streaming providers", async () => {
@@ -1037,6 +1039,226 @@ describe("LLMService createFinishHandler", () => {
 
         // The test verifies no exception is thrown and the handler completes
         // Error logging is verified by the mock
+    });
+
+    test("emits e.text when cachedContent is empty and e.text is non-empty", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        const completeSpy = mock(() => {});
+        service.on("complete", completeSpy);
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "", // Empty cached content
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: "Fallback text from e.text", // Non-empty e.text
+            steps: [],
+            totalUsage: { inputTokens: 10, outputTokens: 20 },
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        expect(completeSpy).toHaveBeenCalled();
+        expect(completeSpy.mock.calls[0][0].message).toBe("Fallback text from e.text");
+    });
+
+    test("emits error fallback when both cachedContent and e.text are empty", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        const completeSpy = mock(() => {});
+        service.on("complete", completeSpy);
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "", // Empty cached content
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: "", // Empty e.text
+            steps: [],
+            totalUsage: { inputTokens: 10, outputTokens: 20 },
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        expect(completeSpy).toHaveBeenCalled();
+        expect(completeSpy.mock.calls[0][0].message).toBe(
+            "There was an error capturing the work done, please review the conversation for the results"
+        );
+    });
+
+    test("emits error fallback when cachedContent is empty and e.text is undefined", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        const completeSpy = mock(() => {});
+        service.on("complete", completeSpy);
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "", // Empty cached content
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: undefined, // Undefined e.text
+            steps: [],
+            totalUsage: { inputTokens: 10, outputTokens: 20 },
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        expect(completeSpy).toHaveBeenCalled();
+        expect(completeSpy.mock.calls[0][0].message).toBe(
+            "There was an error capturing the work done, please review the conversation for the results"
+        );
+    });
+
+    test("telemetry flags match emitted message for cached content", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        service.on("complete", mock(() => {}));
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "Cached content",
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: "Some other text",
+            steps: [],
+            totalUsage: {},
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        // Verify mockSpan.addEvent was called with correct flags
+        expect(mockSpan.addEvent).toHaveBeenCalled();
+        const eventCalls = mockSpan.addEvent.mock.calls.filter(
+            (call: any) => call[0] === "llm.complete_will_emit"
+        );
+        expect(eventCalls.length).toBeGreaterThan(0);
+        const eventData = eventCalls[0][1];
+        expect(eventData["complete.used_fallback_to_e_text"]).toBe(false);
+        expect(eventData["complete.used_error_fallback"]).toBe(false);
+    });
+
+    test("telemetry flags match emitted message for e.text fallback", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        service.on("complete", mock(() => {}));
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "", // Empty cached content
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: "Fallback text",
+            steps: [],
+            totalUsage: {},
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        // Verify mockSpan.addEvent was called with correct flags
+        expect(mockSpan.addEvent).toHaveBeenCalled();
+        const eventCalls = mockSpan.addEvent.mock.calls.filter(
+            (call: any) => call[0] === "llm.complete_will_emit"
+        );
+        expect(eventCalls.length).toBeGreaterThan(0);
+        const eventData = eventCalls[0][1];
+        expect(eventData["complete.used_fallback_to_e_text"]).toBe(true);
+        expect(eventData["complete.used_error_fallback"]).toBe(false);
+    });
+
+    test("telemetry flags match emitted message for error fallback", async () => {
+        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+
+        service.on("complete", mock(() => {}));
+
+        const finishHandler = createFinishHandler(
+            service,
+            {
+                provider: "openrouter",
+                model: "gpt-4",
+                getModelContextWindow: () => undefined,
+            },
+            {
+                getCachedContent: () => "", // Empty cached content
+                clearCachedContent: () => {},
+                getLastUserMessage: () => undefined,
+                clearLastUserMessage: () => {},
+            }
+        );
+
+        await finishHandler({
+            text: "", // Empty e.text
+            steps: [],
+            totalUsage: {},
+            finishReason: "stop",
+            providerMetadata: {},
+        });
+
+        // Verify mockSpan.addEvent was called with correct flags
+        expect(mockSpan.addEvent).toHaveBeenCalled();
+        const eventCalls = mockSpan.addEvent.mock.calls.filter(
+            (call: any) => call[0] === "llm.complete_will_emit"
+        );
+        expect(eventCalls.length).toBeGreaterThan(0);
+        const eventData = eventCalls[0][1];
+        expect(eventData["complete.used_fallback_to_e_text"]).toBe(false);
+        expect(eventData["complete.used_error_fallback"]).toBe(true);
     });
 });
 
