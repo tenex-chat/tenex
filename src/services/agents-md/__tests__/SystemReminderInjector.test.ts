@@ -165,24 +165,24 @@ describe("SystemReminderInjector", () => {
 
     describe("extractPathFromToolInput", () => {
         it("should extract path parameter", () => {
-            const result = extractPathFromToolInput("fs_read", { path: "/foo/bar.ts" });
+            const result = extractPathFromToolInput({ path: "/foo/bar.ts" });
             expect(result).toBe("/foo/bar.ts");
         });
 
         it("should extract file_path parameter", () => {
-            const result = extractPathFromToolInput("Read", { file_path: "/foo/bar.ts" });
+            const result = extractPathFromToolInput({ file_path: "/foo/bar.ts" });
             expect(result).toBe("/foo/bar.ts");
         });
 
         it("should extract directory parameter", () => {
-            const result = extractPathFromToolInput("list_dir", { directory: "/foo" });
+            const result = extractPathFromToolInput({ directory: "/foo" });
             expect(result).toBe("/foo");
         });
 
         it("should return null for invalid input", () => {
-            expect(extractPathFromToolInput("fs_read", null)).toBeNull();
-            expect(extractPathFromToolInput("fs_read", "string")).toBeNull();
-            expect(extractPathFromToolInput("fs_read", { other: "value" })).toBeNull();
+            expect(extractPathFromToolInput(null)).toBeNull();
+            expect(extractPathFromToolInput("string")).toBeNull();
+            expect(extractPathFromToolInput({ other: "value" })).toBeNull();
         });
     });
 
