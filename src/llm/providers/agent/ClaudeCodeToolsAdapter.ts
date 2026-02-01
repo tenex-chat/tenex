@@ -25,10 +25,10 @@ export class ClaudeCodeToolsAdapter {
     ): SdkMcpServer | undefined {
         // Filter out tools that Claude Code has its own version of:
         // - fs_* (Claude Code has Read, Write, Edit, Glob, Grep)
-        // - todo_* (Claude Code has TodoWrite)
         // - web_fetch (Claude Code has WebFetch)
         // - shell (Claude Code has Bash)
         // - web_search (Claude Code has WebSearch)
+        // Note: todo_* tools are now exposed via MCP to give Claude Code agents access to TENEX todo functionality
         const claudeCodeBuiltinTools = new Set([
             "web_fetch",
             "shell",
@@ -36,7 +36,6 @@ export class ClaudeCodeToolsAdapter {
         ]);
         const localTools = Object.entries(tools).filter(([name]) =>
             !name.startsWith("fs_") &&
-            !name.startsWith("todo_") &&
             !claudeCodeBuiltinTools.has(name)
         );
 
