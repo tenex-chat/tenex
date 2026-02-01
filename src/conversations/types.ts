@@ -14,6 +14,12 @@ export interface ConversationEntry {
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
     /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
     senderPubkey?: string;
+    /**
+     * Explicit role override for synthetic entries (e.g., compressed summaries).
+     * When present, this role is used instead of deriving from pubkey.
+     * Used to ensure compressed summaries are rendered as "system" role, not "user".
+     */
+    role?: "user" | "assistant" | "tool" | "system";
 }
 
 export interface Injection {

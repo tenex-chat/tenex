@@ -26,6 +26,9 @@ import type {
     ExecutionTime,
     Injection,
 } from "./types";
+import type { CompressionSegment, CompressionLog } from "@/services/compression/compression-types.js";
+import { applySegmentsToEntries } from "@/services/compression/compression-utils.js";
+import { logger } from "@/utils/logger";
 
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
@@ -269,6 +272,28 @@ export class ConversationStore {
         return this.state.messages.length;
     }
 
+    /**
+     * Get the message count after applying compression segments.
+     * This is the count in "compressed space" used for delta-mode cursors.
+     *
+     * CRITICAL: Delta-mode cursors must reference compressed space, not raw space.
+     * If cursor is in raw space, it can exceed compressed array length after compression,
+     * causing buildMessagesForRalAfterIndex to silently drop new messages.
+     */
+    getCompressedMessageCount(): number {
+        if (!this.conversationId) {
+            return this.state.messages.length;
+        }
+
+        const segments = this.loadCompressionLog(this.conversationId);
+        if (segments.length === 0) {
+            return this.state.messages.length;
+        }
+
+        const compressed = applySegmentsToEntries(this.state.messages, segments);
+        return compressed.length;
+    }
+
     getLastActivityTime(): number {
         const lastMessage = this.state.messages[this.state.messages.length - 1];
         return lastMessage?.timestamp || 0;
@@ -452,11 +477,18 @@ export class ConversationStore {
     ): Promise<ModelMessage[]> {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const rootAuthorPubkey = this.state.messages[0]?.pubkey;
-        return buildMessagesFromEntries(this.state.messages, {
+
+        // Apply compression segments if they exist
+        const segments = this.conversationId ? this.loadCompressionLog(this.conversationId) : [];
+        const entries = segments.length > 0
+            ? applySegmentsToEntries(this.state.messages, segments)
+            : this.state.messages;
+
+        return buildMessagesFromEntries(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
-            totalMessages: this.state.messages.length,
+            totalMessages: entries.length,
             rootAuthorPubkey,
             projectRoot,
         });
@@ -470,15 +502,23 @@ export class ConversationStore {
     ): Promise<ModelMessage[]> {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const startIndex = Math.max(afterIndex + 1, 0);
-        if (startIndex >= this.state.messages.length) return [];
-        const entries = this.state.messages.slice(startIndex);
-        const rootAuthorPubkey = this.state.messages[0]?.pubkey;
+
+        // Apply compression segments if they exist
+        const segments = this.conversationId ? this.loadCompressionLog(this.conversationId) : [];
+        const allEntries = segments.length > 0
+            ? applySegmentsToEntries(this.state.messages, segments)
+            : this.state.messages;
+
+        if (startIndex >= allEntries.length) return [];
+        const entries = allEntries.slice(startIndex);
+        const rootAuthorPubkey = allEntries[0]?.pubkey;
+
         return buildMessagesFromEntries(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
             indexOffset: startIndex,
-            totalMessages: this.state.messages.length,
+            totalMessages: allEntries.length,
             rootAuthorPubkey,
             projectRoot,
         });
@@ -574,6 +614,72 @@ export class ConversationStore {
         if (!isFromAgent) {
             this.state.metadata.last_user_message = event.content;
         }
+    }
+
+    // Compression Operations
+
+    /**
+     * Load compression log for a conversation.
+     * Returns empty array if no compression log exists.
+     */
+    loadCompressionLog(conversationId: string): CompressionSegment[] {
+        if (!this.projectId) {
+            return [];
+        }
+
+        const conversationsDir = join(this.basePath, this.projectId, "conversations");
+        const compressionsDir = join(conversationsDir, "compressions");
+        if (!existsSync(compressionsDir)) {
+            return [];
+        }
+
+        const compressionPath = join(compressionsDir, `${conversationId}.json`);
+        if (!existsSync(compressionPath)) {
+            return [];
+        }
+
+        try {
+            const data = readFileSync(compressionPath, "utf-8");
+            const log = JSON.parse(data) as CompressionLog;
+            return log.segments || [];
+        } catch (error) {
+            // CRITICAL: Use imported logger, not this.logger (which doesn't exist)
+            logger.warn(`Failed to load compression log for ${conversationId}:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Append new compression segments to the log.
+     * Creates the compressions directory if needed.
+     */
+    async appendCompressionSegments(
+        conversationId: string,
+        segments: CompressionSegment[]
+    ): Promise<void> {
+        if (!this.projectId) {
+            throw new Error("Conversations directory not initialized");
+        }
+
+        const conversationsDir = join(this.basePath, this.projectId, "conversations");
+        const compressionsDir = join(conversationsDir, "compressions");
+        if (!existsSync(compressionsDir)) {
+            mkdirSync(compressionsDir, { recursive: true });
+        }
+
+        const compressionPath = join(compressionsDir, `${conversationId}.json`);
+
+        // Load existing segments
+        const existingSegments = this.loadCompressionLog(conversationId);
+
+        // Append new segments
+        const log: CompressionLog = {
+            conversationId,
+            segments: [...existingSegments, ...segments],
+            updatedAt: Date.now(),
+        };
+
+        await writeFile(compressionPath, JSON.stringify(log, null, 2), "utf-8");
     }
 }
 
