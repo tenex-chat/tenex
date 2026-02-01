@@ -59,19 +59,42 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             agentPubkey, conversationId, resumableRal.ralNumber
         );
 
-        // Inject delegation results into the RAL as user message
-        // Include pending delegations so agent knows what's still outstanding
-        const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
-            completedDelegations,
-            pendingDelegations
-        );
-        if (resultsMessage) {
-            ralRegistry.queueUserMessage(
-                agentPubkey,
-                conversationId,
-                ralNumber,
-                resultsMessage
+        // Separate aborted and completed delegations
+        const abortedDelegations = completedDelegations.filter(d => d.status === "aborted");
+        const successfulDelegations = completedDelegations.filter(d => d.status !== "aborted");
+
+        // Build messages for aborted delegations
+        // Only include pending list if there are NO successful delegations (to avoid duplication)
+        if (abortedDelegations.length > 0) {
+            const includePendingInAbort = successfulDelegations.length === 0;
+            const abortMessage = await ralRegistry.buildDelegationAbortMessage(
+                abortedDelegations,
+                includePendingInAbort ? pendingDelegations : []
             );
+            if (abortMessage) {
+                ralRegistry.queueUserMessage(
+                    agentPubkey,
+                    conversationId,
+                    ralNumber,
+                    abortMessage
+                );
+            }
+        }
+
+        // Build messages for successfully completed delegations (always include pending list)
+        if (successfulDelegations.length > 0) {
+            const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
+                successfulDelegations,
+                pendingDelegations
+            );
+            if (resultsMessage) {
+                ralRegistry.queueUserMessage(
+                    agentPubkey,
+                    conversationId,
+                    ralNumber,
+                    resultsMessage
+                );
+            }
         }
 
         // Don't clear completedDelegations here - they'll be cleared when the RAL ends.
@@ -79,7 +102,8 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
 
         span.addEvent("executor.ral_resumed", {
             "ral.number": ralNumber,
-            "delegation.completed_count": completedDelegations.length,
+            "delegation.completed_count": successfulDelegations.length,
+            "delegation.aborted_count": abortedDelegations.length,
             "delegation.pending_count": pendingDelegations.length,
         });
     } else if (injectionRal) {
