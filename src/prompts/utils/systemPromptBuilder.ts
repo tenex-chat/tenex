@@ -491,6 +491,25 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         });
     }
 
+    // Add AGENTS.md guidance if project has a root AGENTS.md
+    // This is checked asynchronously but cached for subsequent calls
+    if (projectBasePath) {
+        try {
+            const { agentsMdService } = await import("@/services/agents-md");
+            const hasRootAgentsMd = await agentsMdService.hasRootAgentsMd(projectBasePath);
+            if (hasRootAgentsMd) {
+                const rootContent = await agentsMdService.getRootAgentsMdContent(projectBasePath);
+                systemPromptBuilder.add("agents-md-guidance", {
+                    hasRootAgentsMd: true,
+                    rootAgentsMdContent: rootContent || undefined,
+                });
+            }
+        } catch (error) {
+            // AGENTS.md service not available or error - skip the fragment
+            logger.debug("Could not check for root AGENTS.md:", error);
+        }
+    }
+
     // Add core agent fragments using shared composition
     await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager);
 

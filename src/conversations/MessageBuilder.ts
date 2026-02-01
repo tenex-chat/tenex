@@ -8,19 +8,39 @@
  * - Message deference during pending tool execution
  * - Delegation completion pruning
  * - Message attribution for unexpected senders
+ * - AGENTS.md system reminder injection for file-read operations
  */
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { ConversationEntry } from "./types";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
-import { processToolResult, type TruncationContext } from "./utils/tool-result-truncator";
+import { processToolResult, shouldTruncateToolResult, type TruncationContext } from "./utils/tool-result-truncator";
 import {
     createImageTracker,
     processToolResultWithImageTracking,
     type ImageTracker,
 } from "./utils/image-placeholder";
 import { extractImageUrls } from "./utils/image-url-utils";
+import {
+    createAgentsMdVisibilityTracker,
+    getSystemRemindersForPath,
+    shouldInjectForTool,
+    extractPathFromToolInput,
+    appendSystemReminderToOutput,
+    type AgentsMdVisibilityTracker,
+} from "@/services/agents-md";
+
+/**
+ * Extract tool input from a ToolCallPart.
+ * AI SDK v6 uses 'input' property, but some storage formats use 'args'.
+ * This utility handles both cases in a type-safe manner.
+ */
+function getToolInput(part: ToolCallPart): unknown {
+    // ToolCallPart type may not include 'args', but storage format might
+    const partWithArgs = part as ToolCallPart & { args?: unknown };
+    return partWithArgs.input ?? partWithArgs.args;
+}
 
 export interface MessageBuilderContext {
     /**
@@ -47,6 +67,23 @@ export interface MessageBuilderContext {
      * Root author pubkey for attribution detection
      */
     rootAuthorPubkey?: string;
+    /**
+     * Project root directory for AGENTS.md discovery.
+     * If provided, enables system reminder injection after file-read tool results.
+     */
+    projectRoot?: string;
+}
+
+/**
+ * Context for AGENTS.md system reminder injection
+ */
+interface AgentsMdContext {
+    /** Project root for AGENTS.md discovery */
+    projectRoot: string;
+    /** Visibility tracker for deduplication */
+    tracker: AgentsMdVisibilityTracker;
+    /** Map of toolCallId -> path for file-read tools */
+    toolCallPaths: Map<string, string>;
 }
 
 /**
@@ -94,17 +131,35 @@ function deriveRole(
  * - First appearance of an image: shown in full
  * - Subsequent appearances: replaced with placeholder referencing eventId
  * - The imageTracker tracks which images have been seen
+ *
+ * AGENTS.md System Reminders:
+ * - When a file-read tool result is processed, check for AGENTS.md files
+ * - Inject system reminders after the tool output for newly visible AGENTS.md files
+ * - Track visibility to avoid duplication in subsequent tool results
  */
-function entryToMessage(
+async function entryToMessage(
     entry: ConversationEntry,
     viewingAgentPubkey: string,
     truncationContext: TruncationContext | undefined,
     rootAuthorPubkey: string | undefined,
-    imageTracker: ImageTracker
-): ModelMessage {
+    imageTracker: ImageTracker,
+    agentsMdContext?: AgentsMdContext
+): Promise<ModelMessage> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
     if (entry.messageType === "tool-call" && entry.toolData) {
+        // Track paths from file-read tool calls for AGENTS.md injection
+        if (agentsMdContext) {
+            for (const part of entry.toolData as ToolCallPart[]) {
+                if (shouldInjectForTool(part.toolName)) {
+                    const toolInput = getToolInput(part);
+                    const path = extractPathFromToolInput(toolInput);
+                    if (path) {
+                        agentsMdContext.toolCallPaths.set(part.toolCallId, path);
+                    }
+                }
+            }
+        }
         return { role: "assistant", content: entry.toolData as ToolCallPart[] };
     }
 
@@ -117,10 +172,49 @@ function entryToMessage(
         );
         let toolData = imageProcessingResult.processedParts;
 
+        // Check if result will be truncated (for AGENTS.md visibility tracking)
+        const willBeTruncated = truncationContext
+            ? shouldTruncateToolResult(toolData, truncationContext)
+            : false;
+
         // Then: Apply truncation for buried tool results to save context
         toolData = truncationContext
             ? processToolResult(toolData, truncationContext)
             : toolData;
+
+        // Inject AGENTS.md system reminders after file-read tool results
+        // Only inject if:
+        // 1. AGENTS.md context is available
+        // 2. Tool result is NOT truncated (reminders would be lost)
+        // 3. Tool is a file-read operation with a tracked path
+        if (agentsMdContext && !willBeTruncated) {
+            for (const part of toolData) {
+                const path = agentsMdContext.toolCallPaths.get(part.toolCallId);
+                if (path) {
+                    const reminders = await getSystemRemindersForPath(
+                        path,
+                        agentsMdContext.projectRoot,
+                        agentsMdContext.tracker,
+                        willBeTruncated
+                    );
+
+                    if (reminders.hasReminders) {
+                        // Cast is needed because appendSystemReminderToOutput returns unknown
+                        (part as { output: unknown }).output = appendSystemReminderToOutput(part.output, reminders.content);
+
+                        // Telemetry for AGENTS.md injection
+                        trace.getActiveSpan?.()?.addEvent("conversation.agents_md_injected", {
+                            "agents_md.file_count": reminders.includedFiles.length,
+                            "agents_md.paths": reminders.includedFiles.map(f => f.directory).join(","),
+                            "agents_md.target_path": path,
+                        });
+                    }
+
+                    // Clean up the tracked path
+                    agentsMdContext.toolCallPaths.delete(part.toolCallId);
+                }
+            }
+        }
 
         return {
             role: "tool",
@@ -182,6 +276,7 @@ export async function buildMessagesFromEntries(
         indexOffset = 0,
         totalMessages,
         rootAuthorPubkey,
+        projectRoot,
     } = ctx;
 
     const result: ModelMessage[] = [];
@@ -190,6 +285,15 @@ export async function buildMessagesFromEntries(
     // Image placeholder strategy: Track seen images across all messages
     // First appearance = full image, subsequent = placeholder
     const imageTracker = createImageTracker();
+
+    // AGENTS.md system reminder context (only if projectRoot is provided)
+    const agentsMdContext: AgentsMdContext | undefined = projectRoot
+        ? {
+            projectRoot,
+            tracker: createAgentsMdVisibilityTracker(),
+            toolCallPaths: new Map(),
+        }
+        : undefined;
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
@@ -298,7 +402,7 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -312,7 +416,7 @@ export async function buildMessagesFromEntries(
 
         // TOOL-RESULT: Add to result and mark tool-call as resolved
         if (entry.messageType === "tool-result" && entry.toolData) {
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
 
             for (const part of entry.toolData as ToolResultPart[]) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -321,7 +425,7 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker));
+                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
                 }
                 deferredMessages.length = 0;
             }
@@ -333,7 +437,7 @@ export async function buildMessagesFromEntries(
         if (pendingToolCalls.size > 0) {
             deferredMessages.push({ entry, truncationContext });
         } else {
-            result.push(entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
         }
     }
 
@@ -377,7 +481,7 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker));
+        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
     }
 
     if (prunedDelegationCompletions > 0) {
