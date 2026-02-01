@@ -76,15 +76,32 @@ export interface DelegationMessage {
   timestamp: number;
 }
 
-export interface CompletedDelegation {
-  delegationConversationId: string;
-  recipientPubkey: string;
-  senderPubkey: string;
-  transcript: DelegationMessage[];
-  completedAt: number;
-  /** Which RAL created this delegation (for provenance tracking) */
-  ralNumber: number;
-}
+/**
+ * Discriminated union for completed delegations.
+ * Either successfully completed or aborted with a reason.
+ */
+export type CompletedDelegation =
+  | {
+      delegationConversationId: string;
+      recipientPubkey: string;
+      senderPubkey: string;
+      transcript: DelegationMessage[];
+      completedAt: number;
+      /** Which RAL created this delegation (for provenance tracking) */
+      ralNumber: number;
+      status: "completed";
+    }
+  | {
+      delegationConversationId: string;
+      recipientPubkey: string;
+      senderPubkey: string;
+      transcript: DelegationMessage[];
+      completedAt: number;
+      /** Which RAL created this delegation (for provenance tracking) */
+      ralNumber: number;
+      status: "aborted";
+      abortReason: string;
+    };
 
 export interface QueuedInjection {
   role: InjectionRole;

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, setSystemTime } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, setSystemTime } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 
@@ -1467,5 +1467,127 @@ describe("RALRegistry", () => {
       expect(ralAfter?.accumulatedRuntime).toBe(50);
     });
   });
+
+  describe("buildDelegationAbortMessage", () => {
+    it("should format aborted delegation message correctly", async () => {
+      const abortedDelegation: CompletedDelegation = {
+        delegationConversationId: "aborted-conv-123",
+        recipientPubkey: "recipient-pubkey",
+        senderPubkey: agentPubkey,
+        transcript: [
+          {
+            senderPubkey: agentPubkey,
+            recipientPubkey: "recipient-pubkey",
+            content: "Please analyze this code",
+            timestamp: Date.now() - 5000,
+          },
+          {
+            senderPubkey: "recipient-pubkey",
+            recipientPubkey: agentPubkey,
+            content: "Starting analysis...",
+            timestamp: Date.now() - 2000,
+          },
+        ],
+        completedAt: Date.now(),
+        ralNumber: 1,
+        status: "aborted",
+        abortReason: "manual abort via kill() tool",
+      };
+
+      const message = await registry.buildDelegationAbortMessage([abortedDelegation]);
+
+      expect(message).toContain("# DELEGATION ABORTED");
+      expect(message).toContain("was aborted and did not complete their task");
+      expect(message).toContain("**Reason:** manual abort via kill() tool");
+      expect(message).toContain("### Partial Progress:");
+      expect(message).toContain("Please analyze this code");
+      expect(message).toContain("Starting analysis...");
+    });
+
+    it("should handle empty transcript gracefully", async () => {
+      const abortedDelegation: CompletedDelegation = {
+        delegationConversationId: "aborted-conv-456",
+        recipientPubkey: "recipient-pubkey",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber: 1,
+        status: "aborted",
+        abortReason: "cascaded from parent abort",
+      };
+
+      const message = await registry.buildDelegationAbortMessage([abortedDelegation]);
+
+      expect(message).toContain("# DELEGATION ABORTED");
+      expect(message).toContain("(No messages exchanged before abort)");
+    });
+
+    it("should include pending delegations when provided", async () => {
+      const abortedDelegation: CompletedDelegation = {
+        delegationConversationId: "aborted-conv-789",
+        recipientPubkey: "recipient-pubkey",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber: 1,
+        status: "aborted",
+        abortReason: "manual abort",
+      };
+
+      const pendingDelegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: "pending-conv-123",
+        recipientPubkey: "other-recipient",
+        senderPubkey: agentPubkey,
+        prompt: "Still running task",
+        ralNumber: 1,
+      };
+
+      const message = await registry.buildDelegationAbortMessage(
+        [abortedDelegation],
+        [pendingDelegation]
+      );
+
+      expect(message).toContain("## Still Pending");
+    });
+
+    it("should return empty string for empty array", async () => {
+      const message = await registry.buildDelegationAbortMessage([]);
+      expect(message).toBe("");
+    });
+
+    it("should handle multiple aborted delegations", async () => {
+      const abortedDelegation1: CompletedDelegation = {
+        delegationConversationId: "aborted-1",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber: 1,
+        status: "aborted",
+        abortReason: "timeout",
+      };
+
+      const abortedDelegation2: CompletedDelegation = {
+        delegationConversationId: "aborted-2",
+        recipientPubkey: "recipient-2",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber: 1,
+        status: "aborted",
+        abortReason: "cascaded abort",
+      };
+
+      const message = await registry.buildDelegationAbortMessage([
+        abortedDelegation1,
+        abortedDelegation2,
+      ]);
+
+      expect(message).toContain("timeout");
+      expect(message).toContain("cascaded abort");
+    });
+  });
+
 
 });
