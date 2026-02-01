@@ -26,6 +26,7 @@ import type {
     ExecutionTime,
     Injection,
 } from "./types";
+import type { CompressionSegment, CompressionLog } from "@/services/compression/compression-types.js";
 
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
@@ -574,6 +575,71 @@ export class ConversationStore {
         if (!isFromAgent) {
             this.state.metadata.last_user_message = event.content;
         }
+    }
+
+    // Compression Operations
+
+    /**
+     * Load compression log for a conversation.
+     * Returns empty array if no compression log exists.
+     */
+    loadCompressionLog(conversationId: string): CompressionSegment[] {
+        if (!this.projectId) {
+            return [];
+        }
+
+        const conversationsDir = join(this.basePath, this.projectId, "conversations");
+        const compressionsDir = join(conversationsDir, "compressions");
+        if (!existsSync(compressionsDir)) {
+            return [];
+        }
+
+        const compressionPath = join(compressionsDir, `${conversationId}.json`);
+        if (!existsSync(compressionPath)) {
+            return [];
+        }
+
+        try {
+            const data = readFileSync(compressionPath, "utf-8");
+            const log = JSON.parse(data) as CompressionLog;
+            return log.segments || [];
+        } catch (error) {
+            this.logger.warn(`Failed to load compression log for ${conversationId}:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Append new compression segments to the log.
+     * Creates the compressions directory if needed.
+     */
+    async appendCompressionSegments(
+        conversationId: string,
+        segments: CompressionSegment[]
+    ): Promise<void> {
+        if (!this.projectId) {
+            throw new Error("Conversations directory not initialized");
+        }
+
+        const conversationsDir = join(this.basePath, this.projectId, "conversations");
+        const compressionsDir = join(conversationsDir, "compressions");
+        if (!existsSync(compressionsDir)) {
+            mkdirSync(compressionsDir, { recursive: true });
+        }
+
+        const compressionPath = join(compressionsDir, `${conversationId}.json`);
+
+        // Load existing segments
+        const existingSegments = this.loadCompressionLog(conversationId);
+
+        // Append new segments
+        const log: CompressionLog = {
+            conversationId,
+            segments: [...existingSegments, ...segments],
+            updatedAt: Date.now(),
+        };
+
+        await writeFile(compressionPath, JSON.stringify(log, null, 2), "utf-8");
     }
 }
 

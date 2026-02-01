@@ -54,6 +54,15 @@ export interface TenexConfig {
         agent?: string; // Agent slug to route ask() calls through (acts as first line of defense)
     };
 
+    // Compression configuration
+    // Controls conversation history compression to manage context window
+    compression?: {
+        enabled?: boolean; // Enable compression (default: true)
+        tokenThreshold?: number; // Token count that triggers compression (default: 50000)
+        tokenBudget?: number; // Target token count after compression (default: 40000)
+        slidingWindowSize?: number; // Number of recent messages to keep in fallback mode (default: 50)
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -99,6 +108,14 @@ export const TenexConfigSchema = z.object({
     escalation: z
         .object({
             agent: z.string().optional(),
+        })
+        .optional(),
+    compression: z
+        .object({
+            enabled: z.boolean().optional(),
+            tokenThreshold: z.number().optional(),
+            tokenBudget: z.number().optional(),
+            slidingWindowSize: z.number().optional(),
         })
         .optional(),
     description: z.string().optional(),

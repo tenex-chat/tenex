@@ -29,6 +29,14 @@ export interface EphemeralMessage {
     content: string;
 }
 
+/**
+ * CompiledMessage - A message with event ID for compression tracking.
+ * Extends ModelMessage with optional eventId field.
+ */
+export interface CompiledMessage extends ModelMessage {
+    eventId?: string;
+}
+
 export interface MessageCompilerContext {
     agent: AgentInstance;
     project: NDKProject;
