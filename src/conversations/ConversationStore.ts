@@ -249,6 +249,10 @@ export class ConversationStore {
         return this.getId();
     }
 
+    getProjectId(): string | null {
+        return this.projectId;
+    }
+
     get title(): string | undefined {
         return this.state.metadata.title;
     }
