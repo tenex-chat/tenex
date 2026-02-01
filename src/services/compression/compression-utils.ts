@@ -407,13 +407,15 @@ export function applySegmentsToEntries(
       currentIndex++;
     }
 
-    // Add compressed summary as system entry
+    // Add compressed summary as system entry with explicit role
+    // CRITICAL: role field prevents deriveRole from misclassifying as "user"
     result.push({
       pubkey: "system",
       content: `[Compressed history]\n${segment.compressed}`,
       messageType: "text",
       eventId: `compressed-${segment.fromEventId}-${segment.toEventId}`,
       timestamp: segment.createdAt / 1000,
+      role: "system",
     });
 
     // Skip the compressed range
