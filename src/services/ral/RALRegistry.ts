@@ -4,6 +4,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type {
   InjectionResult,
   InjectionRole,
@@ -1419,6 +1420,103 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.clear(agentPubkey, conversationId);
 
     return abortedCount;
+  }
+
+  /**
+   * Abort an agent in a conversation with cascading support.
+   * If the conversation has nested delegations (found via delegation chain),
+   * this will recursively abort all descendant agents in their respective conversations.
+   *
+   * @param agentPubkey - The agent's pubkey
+   * @param conversationId - The conversation ID
+   * @param projectId - The project ID (for cooldown isolation)
+   * @param reason - Optional reason for the abort
+   * @param cooldownRegistry - Optional cooldown registry to track aborted tuples
+   * @returns An object with abortedCount and descendantConversations array
+   */
+  async abortWithCascade(
+    agentPubkey: string,
+    conversationId: string,
+    projectId: string,
+    reason?: string,
+    cooldownRegistry?: { add: (projectId: string, convId: string, agentPubkey: string, reason?: string) => void }
+  ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
+    const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
+
+    // Abort the target agent first
+    const directAbortCount = this.abortAllForAgent(agentPubkey, conversationId);
+    if (directAbortCount > 0) {
+      abortedTuples.push({ conversationId, agentPubkey });
+
+      // Add to cooldown registry if provided
+      if (cooldownRegistry) {
+        cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
+      }
+
+      // Persist abort message in conversation store
+      const conversation = ConversationStore.get(conversationId);
+      if (conversation) {
+        const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason ?? "manual abort"}`;
+        conversation.addMessage({
+          pubkey: "system",
+          content: abortMessage,
+          messageType: "text",
+          timestamp: Math.floor(Date.now() / 1000),
+        });
+        await conversation.save();
+      }
+    }
+
+    // Find nested delegations by checking the conversation's pending delegations
+    const pendingDelegations = this.getConversationPendingDelegations(agentPubkey, conversationId);
+
+    trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
+      "cascade.root_conversation_id": conversationId.substring(0, 12),
+      "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
+      "cascade.pending_delegations": pendingDelegations.length,
+      "cascade.reason": reason ?? "unknown",
+    });
+
+    // Recursively abort each pending delegation
+    for (const delegation of pendingDelegations) {
+      const descendantConvId = delegation.delegationConversationId;
+      const descendantAgentPubkey = delegation.recipientPubkey;
+
+      // Get the projectId for the descendant conversation
+      const descendantConversation = ConversationStore.get(descendantConvId);
+      const descendantProjectId = descendantConversation?.getProjectId() ?? projectId;
+
+      logger.info("[RALRegistry] Cascading abort to nested delegation", {
+        parentConversation: conversationId.substring(0, 12),
+        parentAgent: agentPubkey.substring(0, 12),
+        childConversation: descendantConvId.substring(0, 12),
+        childAgent: descendantAgentPubkey.substring(0, 12),
+        projectId: descendantProjectId?.substring(0, 12),
+      });
+
+      // Recursively abort the descendant
+      const descendantResult = await this.abortWithCascade(
+        descendantAgentPubkey,
+        descendantConvId,
+        descendantProjectId,
+        `cascaded from ${conversationId.substring(0, 12)}`,
+        cooldownRegistry
+      );
+
+      // Collect all aborted tuples from descendants
+      abortedTuples.push(...descendantResult.descendantConversations);
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.cascade_abort_completed", {
+      "cascade.root_conversation_id": conversationId.substring(0, 12),
+      "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
+      "cascade.total_aborted": abortedTuples.length,
+    });
+
+    return {
+      abortedCount: directAbortCount,
+      descendantConversations: abortedTuples,
+    };
   }
 
   /**
