@@ -337,9 +337,10 @@ export class AgentDispatchService {
 
         try {
             // Check if this agent is in cooldown for this conversation
+            // Non-null assertion: delegationTarget.conversationId and dTag are guaranteed to be defined (checked in resolveDelegationTarget)
             const isInCooldown = await this.checkAndBlockIfCooldown(
-                projectCtx.project.dTag,
-                delegationTarget.conversationId,
+                projectCtx.project.dTag!,
+                delegationTarget.conversationId!,
                 delegationTarget.agent.pubkey,
                 delegationTarget.agent.slug,
                 span,
@@ -593,9 +594,10 @@ export class AgentDispatchService {
 
             try {
                 // Check if this agent is in cooldown for this conversation
+                // Non-null assertion: conversationId and dTag are guaranteed to be defined from function params
                 const isInCooldown = await this.checkAndBlockIfCooldown(
-                    projectCtx.project.dTag,
-                    conversationId,
+                    projectCtx.project.dTag!,
+                    conversationId!,
                     targetAgent.pubkey,
                     targetAgent.slug,
                     agentSpan,
