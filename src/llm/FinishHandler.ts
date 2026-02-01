@@ -49,11 +49,14 @@ export function createFinishHandler(
         try {
             recordInvalidToolCalls(e.steps, "response", config.model, config.provider);
 
-            // For streaming, use cached content only. Don't fall back to e.text.
-            // When cachedContentForComplete is empty, it means all content was already
-            // published via chunk-type-change events (interim text before tool calls).
-            // Falling back to e.text would cause duplicate publishing.
-            const finalMessage = state.getCachedContent();
+            // For streaming, use cached content if available.
+            // When cachedContentForComplete is empty but e.text has content, it means:
+            // - Content was already published as conversation event(s) via chunk-type-change
+            // - BUT we still need to re-publish it in the completion event for delegations
+            // This creates intentional duplication (conversation + completion both have same text)
+            // but ensures delegated agents receive the full response via p-tag on completion.
+            const cachedContent = state.getCachedContent();
+            const finalMessage = cachedContent.length > 0 ? cachedContent : (e.text ?? "");
 
             emitSessionCapturedFromMetadata(
                 emitter,
@@ -80,8 +83,12 @@ export function createFinishHandler(
 
             // DIAGNOSTIC: Log right before emitting complete event
             const beforeEmitTime = Date.now();
+            const usedFallback = cachedContent.length === 0 && (e.text?.length ?? 0) > 0;
             activeSpan?.addEvent("llm.complete_will_emit", {
                 "complete.message_length": finalMessage.length,
+                "complete.cached_content_length": cachedContent.length,
+                "complete.e_text_length": e.text?.length ?? 0,
+                "complete.used_fallback_to_e_text": usedFallback,
                 "complete.usage_input_tokens": usage.inputTokens,
                 "complete.usage_output_tokens": usage.outputTokens,
                 "complete.finish_reason": e.finishReason,
