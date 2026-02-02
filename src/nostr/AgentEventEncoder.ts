@@ -70,8 +70,17 @@ export class AgentEventEncoder {
             this.addLLMUsageTags(event, intent.usage);
         }
 
-        // Note: LLM runtime is now added via addStandardTags() using context.llmRuntime
+        // Note: LLM runtime (incremental) is added via addStandardTags() using context.llmRuntime
         this.addStandardTags(event, context);
+
+        // For completion events, add llm-runtime-total tag when available
+        // This preserves semantic contract:
+        // - llm-runtime = incremental runtime since last publish (from addStandardTags)
+        // - llm-runtime-total = total accumulated runtime (completion-specific)
+        if (context.llmRuntimeTotal !== undefined && context.llmRuntimeTotal > 0) {
+            event.tag(["llm-runtime-total", context.llmRuntimeTotal.toString(), "ms"]);
+        }
+
         this.forwardBranchTag(event, context);
 
         logger.debug("Encoded completion event", {
