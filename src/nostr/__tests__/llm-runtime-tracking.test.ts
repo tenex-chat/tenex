@@ -492,6 +492,171 @@ describe("LLM Runtime Tracking", () => {
         });
     });
 
+    describe("llm-runtime tag in completion events", () => {
+        it("should include llm-runtime-total tag when only llmRuntimeTotal is provided", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey";
+            mockTriggeringEvent.id = "event-id";
+            mockTriggeringEvent.tags = [];
+
+            // Context with llmRuntimeTotal but no llmRuntime (incremental is 0)
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                executionTime: 42,
+                model: "claude-3-opus",
+                ralNumber: 1,
+                llmRuntimeTotal: 6, // Total accumulated LLM runtime in ms
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                { content: "Final response" },
+                context
+            );
+
+            // Should NOT have llm-runtime tag (no incremental runtime)
+            const runtimeTag = completionEvent.tags.find((t) => t[0] === "llm-runtime");
+            expect(runtimeTag).toBeUndefined();
+
+            // Should have llm-runtime-total tag
+            const runtimeTotalTag = completionEvent.tags.find((t) => t[0] === "llm-runtime-total");
+            expect(runtimeTotalTag).toBeDefined();
+            expect(runtimeTotalTag?.[1]).toBe("6");
+            expect(runtimeTotalTag?.[2]).toBe("ms");
+        });
+
+        it("should include llm-runtime tag from llmRuntime if provided", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey";
+            mockTriggeringEvent.id = "event-id";
+            mockTriggeringEvent.tags = [];
+
+            // Context with both llmRuntime (incremental) and llmRuntimeTotal
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                executionTime: 42,
+                model: "claude-3-opus",
+                ralNumber: 1,
+                llmRuntime: 3, // Incremental runtime since last publish
+                llmRuntimeTotal: 6, // Total accumulated runtime
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                { content: "Final response" },
+                context
+            );
+
+            // Should use llmRuntime (incremental) from addStandardTags
+            const runtimeTag = completionEvent.tags.find((t) => t[0] === "llm-runtime");
+            expect(runtimeTag).toBeDefined();
+            expect(runtimeTag?.[1]).toBe("3");
+            expect(runtimeTag?.[2]).toBe("ms");
+        });
+
+        it("should include both llm-runtime and llm-runtime-total tags when both values exist", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey";
+            mockTriggeringEvent.id = "event-id";
+            mockTriggeringEvent.tags = [];
+
+            // Context with both llmRuntime and llmRuntimeTotal
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                executionTime: 42,
+                model: "claude-3-opus",
+                ralNumber: 1,
+                llmRuntime: 3,
+                llmRuntimeTotal: 6,
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                { content: "Final response" },
+                context
+            );
+
+            // Should have llm-runtime tag (incremental)
+            const runtimeTag = completionEvent.tags.find((t) => t[0] === "llm-runtime");
+            expect(runtimeTag).toBeDefined();
+            expect(runtimeTag?.[1]).toBe("3");
+            expect(runtimeTag?.[2]).toBe("ms");
+
+            // Should also have llm-runtime-total tag (total)
+            const runtimeTotalTag = completionEvent.tags.find((t) => t[0] === "llm-runtime-total");
+            expect(runtimeTotalTag).toBeDefined();
+            expect(runtimeTotalTag?.[1]).toBe("6");
+            expect(runtimeTotalTag?.[2]).toBe("ms");
+        });
+
+        it("should not include llm-runtime tag when neither llmRuntime nor llmRuntimeTotal is provided", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey";
+            mockTriggeringEvent.id = "event-id";
+            mockTriggeringEvent.tags = [];
+
+            // Context without runtime info
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                executionTime: 42,
+                model: "claude-3-opus",
+                ralNumber: 1,
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                { content: "Final response" },
+                context
+            );
+
+            // Should not have llm-runtime tag
+            const runtimeTag = completionEvent.tags.find((t) => t[0] === "llm-runtime");
+            expect(runtimeTag).toBeUndefined();
+        });
+
+        it("should include llm-runtime-total tag when provided", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey";
+            mockTriggeringEvent.id = "event-id";
+            mockTriggeringEvent.tags = [];
+
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                executionTime: 42,
+                model: "claude-3-opus",
+                ralNumber: 1,
+                llmRuntimeTotal: 15,
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                { content: "Final response" },
+                context
+            );
+
+            // Verify llm-runtime-total tag
+            const runtimeTotalTag = completionEvent.tags.find((t) => t[0] === "llm-runtime-total");
+            expect(runtimeTotalTag).toBeDefined();
+            expect(runtimeTotalTag?.[1]).toBe("15");
+            expect(runtimeTotalTag?.[2]).toBe("ms");
+        });
+    });
+
     describe("Edge cases and robustness", () => {
         it("should handle zero execution time", () => {
             const encoder = new AgentEventEncoder();
