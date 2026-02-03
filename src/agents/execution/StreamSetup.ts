@@ -202,7 +202,8 @@ export async function setupStreamExecution(
         llmService.provider,
         sessionManager,
         conversationStore,
-        llmService
+        llmService,
+        projectContext.agentRegistry
     );
 
     const pendingDelegations = ralRegistry.getConversationPendingDelegations(

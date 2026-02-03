@@ -213,7 +213,7 @@ describe("validateSegments", () => {
     expect(result.error).toContain("must start at range beginning");
   });
 
-  it("should reject segments with gaps", () => {
+  it("should allow segments with gaps", () => {
     const messages = createMessages(10);
     const segments: CompressionSegment[] = [
       {
@@ -224,8 +224,33 @@ describe("validateSegments", () => {
         model: "test",
       },
       {
-        fromEventId: "event-5", // Gap from event-3 to event-4
-        toEventId: "event-7",
+        fromEventId: "event-5", // Gap from event-3 to event-4 is now allowed
+        toEventId: "event-9",
+        compressed: "Summary 2",
+        createdAt: Date.now(),
+        model: "test",
+      },
+    ];
+    const result = validateSegments(segments, messages, {
+      startIndex: 0,
+      endIndex: 10,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("should reject segments with overlaps", () => {
+    const messages = createMessages(10);
+    const segments: CompressionSegment[] = [
+      {
+        fromEventId: "event-0",
+        toEventId: "event-5",
+        compressed: "Summary 1",
+        createdAt: Date.now(),
+        model: "test",
+      },
+      {
+        fromEventId: "event-4", // Overlaps with previous segment
+        toEventId: "event-9",
         compressed: "Summary 2",
         createdAt: Date.now(),
         model: "test",
@@ -236,8 +261,7 @@ describe("validateSegments", () => {
       endIndex: 10,
     });
     expect(result.valid).toBe(false);
-    // Now catches range boundary issue first (last segment doesn't end at range end)
-    expect(result.error).toContain("must end at range end");
+    expect(result.error).toContain("Overlap between segment");
   });
 
   it("should reject empty segments array", () => {
