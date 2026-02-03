@@ -5,7 +5,6 @@ import type { ConversationEntry } from "@/conversations/types";
 import { trace, SpanStatusCode, type Span } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import { config } from "@/services/ConfigService";
-import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type {
   CompressionSegment,
 } from "./compression-types.js";
@@ -24,19 +23,6 @@ import {
 const tracer = trace.getTracer("tenex.compression");
 
 /**
- * Escape XML special characters in attributes and content.
- * Prevents malformed XML from <, >, &, ", ' in message content.
- */
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/**
  * CompressionService - Orchestrates conversation history compression.
  *
  * Works at the ConversationEntry level (storage layer) before messages
@@ -52,8 +38,7 @@ function escapeXml(text: string): string {
 export class CompressionService {
   constructor(
     private conversationStore: ConversationStore,
-    private llmService: LLMService,
-    private agentRegistry: AgentRegistry
+    private llmService: LLMService
   ) {}
 
   /**
@@ -277,8 +262,44 @@ export class CompressionService {
         try {
           span.setAttribute("entries.count", entries.length);
 
-          // Format entries for LLM with full metadata
-          const formattedEntries = await this.formatEntriesForCompression(entries);
+          // Format entries for LLM, including tool payloads
+          const formattedEntries = entries
+            .map((e) => {
+              let formatted = `[${e.messageType}]`;
+
+              // Add text content if present
+              if (e.content) {
+                formatted += ` ${e.content}`;
+              }
+
+              // Add tool payload summary for tool-call/tool-result entries
+              if (e.toolData && e.toolData.length > 0) {
+                const toolSummary = e.toolData
+                  .map((tool) => {
+                    if ('toolName' in tool) {
+                      // ToolCallPart
+                      return `Tool: ${tool.toolName}`;
+                    } else if ('toolCallId' in tool) {
+                      // ToolResultPart - cast to any to avoid type narrowing issues
+                      const toolResult = tool as any;
+                      const resultPreview = typeof toolResult.result === 'string'
+                        ? toolResult.result.substring(0, 100)
+                        : JSON.stringify(toolResult.result).substring(0, 100);
+                      return `Result: ${resultPreview}${resultPreview.length >= 100 ? '...' : ''}`;
+                    }
+                    return '';
+                  })
+                  .filter(Boolean)
+                  .join(', ');
+
+                if (toolSummary) {
+                  formatted += ` [${toolSummary}]`;
+                }
+              }
+
+              return formatted;
+            })
+            .join("\n\n");
 
           const eventIds = entries
             .filter((e) => e.eventId)
@@ -288,38 +309,24 @@ export class CompressionService {
             throw new Error("No eventIds found in entries to compress");
           }
 
-          // Call LLM to compress with improved prompt
+          // Call LLM to compress
           const result = await this.llmService.generateObject(
             [
               {
                 role: "user",
-                content: `You are compressing conversation history. Analyze the following messages and create compression segments that preserve key information while being concise.
-
-IMPORTANT INSTRUCTIONS:
-1. You MUST create at least one segment that covers the entire range from the first event ID to the last event ID
-2. Create 1-N segments based on natural topic boundaries (NOT a fixed number)
-3. Each segment should cover a coherent topic or set of related exchanges
-4. The compressed summary should be as long or short as needed to capture the key information
-5. DO NOT force a specific sentence count - use what's appropriate for the content
-6. Segments MUST be contiguous with no gaps - the toEventId of segment N must be immediately before the fromEventId of segment N+1
-7. Preserve important decisions, errors, outcomes, and context
+                content: `You are compressing conversation history. Analyze the following messages and create 1-3 compressed segments that preserve key information while being concise.
 
 For each segment, provide:
-- fromEventId: starting message event ID (full 64-character ID) from the list below
-- toEventId: ending message event ID (full 64-character ID) from the list below
-- compressed: a summary that captures the essential information (length depends on content complexity)
+- fromEventId: starting message event ID
+- toEventId: ending message event ID
+- compressed: a concise summary (2-4 sentences) of the key points
 
 Messages to compress:
 ${formattedEntries}
 
-Available event IDs (in chronological order): ${eventIds.join(", ")}
+Event IDs in order: ${eventIds.join(", ")}
 
-Guidelines for compression length:
-- Trivial exchanges (greetings, acknowledgments): Compress to 1 sentence
-- Simple tasks (file reads, basic operations): 1-2 sentences
-- Complex discussions or debugging: As many sentences as needed to preserve context
-- Tool calls: Mention tool name and outcome, not full details
-- Preserve WHO said/did WHAT, especially for multi-agent conversations`,
+Create segments that group related topics together. Preserve important decisions, errors, and outcomes.`,
               },
             ],
             CompressionSegmentsSchema
@@ -349,110 +356,6 @@ Guidelines for compression length:
         }
       }
     );
-  }
-
-  /**
-   * Format entries for compression with full metadata in XML format.
-   * Includes speaker attribution, timestamps, event IDs, and target information.
-   */
-  private async formatEntriesForCompression(
-    entries: ConversationEntry[]
-  ): Promise<string> {
-    const formattedMessages: string[] = [];
-
-    for (const entry of entries) {
-      if (!entry.eventId) {
-        // Skip entries without event IDs as they can't be referenced
-        continue;
-      }
-
-      // Use FULL event ID (64 chars) to match validation expectations
-      const eventId = entry.eventId;
-      // Keep short ID for readability
-      const shortEventId = entry.eventId.substring(0, 12);
-
-      // Resolve sender slug - use senderPubkey if available for correct attribution
-      const senderPubkey = entry.senderPubkey ?? entry.pubkey;
-      let fromSlug = "unknown";
-      if (senderPubkey === "system") {
-        fromSlug = "system";
-      } else {
-        const agent = this.agentRegistry.getAgentByPubkey(senderPubkey);
-        if (agent) {
-          fromSlug = agent.slug;
-        } else {
-          // Use shortened pubkey if agent not found
-          fromSlug = senderPubkey.substring(0, 8);
-        }
-      }
-
-      // Build message attributes with XML escaping
-      const attributes: string[] = [
-        `id="${escapeXml(eventId)}"`,
-        `shortId="${escapeXml(shortEventId)}"`,
-        `from="${escapeXml(fromSlug)}"`,
-      ];
-
-      // Add timestamp if available
-      if (entry.timestamp) {
-        const date = new Date(entry.timestamp * 1000);
-        attributes.push(`timestamp="${escapeXml(date.toISOString())}"`);
-      }
-
-      // Add target (p-tags) if present
-      if (entry.targetedPubkeys && entry.targetedPubkeys.length > 0) {
-        const targetSlugs = entry.targetedPubkeys
-          .map((pubkey) => {
-            const agent = this.agentRegistry.getAgentByPubkey(pubkey);
-            return agent ? agent.slug : pubkey.substring(0, 8);
-          })
-          .join(", ");
-        attributes.push(`to="${escapeXml(targetSlugs)}"`);
-      }
-
-      // Build message content
-      let messageContent = "";
-
-      if (entry.messageType === "text") {
-        messageContent = entry.content;
-      } else if (entry.messageType === "tool-call" && entry.toolData) {
-        // Summarize tool calls
-        const toolCalls = entry.toolData
-          .map((tool) => {
-            if ('toolName' in tool) {
-              return `[Tool: ${escapeXml(tool.toolName)}]`;
-            }
-            return '';
-          })
-          .filter(Boolean)
-          .join(', ');
-        messageContent = entry.content ? `${entry.content}\n${toolCalls}` : toolCalls;
-      } else if (entry.messageType === "tool-result" && entry.toolData) {
-        // Summarize tool results
-        const toolResults = entry.toolData
-          .map((tool) => {
-            if ('toolCallId' in tool) {
-              const toolResult = tool as any;
-              const resultPreview = typeof toolResult.result === 'string'
-                ? toolResult.result.substring(0, 200)
-                : JSON.stringify(toolResult.result).substring(0, 200);
-              return `[Result: ${escapeXml(resultPreview)}${resultPreview.length >= 200 ? '...' : ''}]`;
-            }
-            return '';
-          })
-          .filter(Boolean)
-          .join(', ');
-        messageContent = entry.content ? `${entry.content}\n${toolResults}` : toolResults;
-      }
-
-      // Format as XML message with escaped content
-      // Use CDATA for content to avoid escaping issues with complex text
-      formattedMessages.push(
-        `<message ${attributes.join(" ")}>\n<![CDATA[${messageContent}]]>\n</message>`
-      );
-    }
-
-    return formattedMessages.join("\n\n");
   }
 
   /**
@@ -523,8 +426,7 @@ Guidelines for compression length:
  */
 export function createCompressionService(
   conversationStore: ConversationStore,
-  llmService: LLMService,
-  agentRegistry: AgentRegistry
+  llmService: LLMService
 ): CompressionService {
-  return new CompressionService(conversationStore, llmService, agentRegistry);
+  return new CompressionService(conversationStore, llmService);
 }

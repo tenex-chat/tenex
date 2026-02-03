@@ -87,8 +87,7 @@ export class MessageCompiler {
         private providerId: string,
         private sessionManager: SessionManager,
         private conversationStore: ConversationStore,
-        private llmService?: LLMService,
-        private agentRegistry?: import("@/agents/AgentRegistry").AgentRegistry
+        private llmService?: LLMService
     ) {
         this.plan = this.buildPlan();
         this.currentCursor = this.plan.cursor ?? -1;
@@ -338,15 +337,14 @@ export class MessageCompiler {
      * This ensures conversation history fits within the token budget.
      */
     private async applyCompression(context: MessageCompilerContext): Promise<void> {
-        // Skip compression if LLMService or AgentRegistry not available
-        if (!this.llmService || !this.agentRegistry) {
+        // Skip compression if LLMService not available
+        if (!this.llmService) {
             return;
         }
 
         const compressionService = createCompressionService(
             this.conversationStore,
-            this.llmService!,
-            this.agentRegistry!
+            this.llmService!
         );
 
         // Get compression config with proper defaults (enabled: true by default)
