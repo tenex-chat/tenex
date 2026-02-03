@@ -1,6 +1,7 @@
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
@@ -227,7 +228,7 @@ export async function handleDelegationCompletion(
         span.setAttributes({
             "agent.pubkey": location.agentPubkey,
             "agent.slug": agentSlug || "unknown",
-            "conversation.id": location.conversationId,
+            "conversation.id": shortenConversationId(location.conversationId),
             "delegation.pending_count": pendingDelegations.length,
             "delegation.completed_count": completedDelegations.length,
         });

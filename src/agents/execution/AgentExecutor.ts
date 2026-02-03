@@ -20,6 +20,7 @@ import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError } from "@/lib/error-formatter";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
@@ -117,7 +118,7 @@ export class AgentExecutor {
                 "agent.slug": context.agent.slug,
                 "agent.pubkey": context.agent.pubkey,
                 "agent.role": context.agent.role || "worker",
-                "conversation.id": context.conversationId,
+                "conversation.id": shortenConversationId(context.conversationId),
                 "triggering_event.id": context.triggeringEvent.id,
                 "triggering_event.kind": context.triggeringEvent.kind || 0,
             },

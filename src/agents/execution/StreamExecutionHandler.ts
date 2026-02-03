@@ -18,6 +18,7 @@ import {
 } from "@/llm/types";
 import { streamPublisher } from "@/llm";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
+import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
@@ -117,7 +118,7 @@ export class StreamExecutionHandler {
                     "tenex.agent.slug": context.agent.slug,
                     "tenex.agent.name": context.agent.name,
                     "tenex.agent.pubkey": context.agent.pubkey,
-                    "tenex.conversation.id": context.conversationId,
+                    "tenex.conversation.id": shortenConversationId(context.conversationId),
                     "tenex.ral.number": ralNumber,
                     "tenex.delegation.chain":
                         conversationStore.metadata.delegationChain
@@ -253,7 +254,7 @@ export class StreamExecutionHandler {
                 "stream.accumulated_runtime_ms": accumulatedRuntime,
                 "agent.slug": context.agent.slug,
                 "agent.pubkey": context.agent.pubkey.substring(0, 8),
-                "conversation.id": context.conversationId.substring(0, 8),
+                "conversation.id": shortenConversationId(context.conversationId),
                 "llm.provider": svc.provider,
                 "llm.model": svc.model,
             });
@@ -397,7 +398,7 @@ export class StreamExecutionHandler {
         // DIAGNOSTIC: Track event context creation to debug llm-ral=0 issues
         this.executionSpan?.addEvent("executor.event_context_created", {
             "context.ral_number": eventContext.ralNumber,
-            "context.conversation_id": eventContext.conversationId?.substring(0, 8) ?? "none",
+            "context.conversation_id": eventContext.conversationId ? shortenConversationId(eventContext.conversationId) : "none",
             "context.model": eventContext.model ?? "none",
             "config.ral_number": this.config.ralNumber,
         });
@@ -444,7 +445,7 @@ export class StreamExecutionHandler {
             this.executionSpan?.addEvent("executor.aborted_by_stop_signal", {
                 "ral.number": ralNumber,
                 "agent.slug": context.agent.slug,
-                "conversation.id": context.conversationId,
+                "conversation.id": shortenConversationId(context.conversationId),
             });
             logger.info("[StreamExecutionHandler] Execution aborted by stop signal", {
                 agent: context.agent.slug,
@@ -486,7 +487,7 @@ export class StreamExecutionHandler {
             compressionService.maybeCompressAsync(context.conversationId);
 
             this.executionSpan?.addEvent("compression.proactive_triggered", {
-                "conversation.id": context.conversationId.substring(0, 12),
+                "conversation.id": shortenConversationId(context.conversationId),
             });
         } catch (error) {
             // Non-blocking - just log if compression setup fails

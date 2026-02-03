@@ -36,13 +36,7 @@ import { getProjectContext, isProjectContextInitialized } from "@/services/proje
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
-
-/**
- * Truncate a conversation ID to PREFIX_LENGTH hex characters for display.
- */
-export function truncateConversationId(conversationId: string): string {
-    return conversationId.substring(0, PREFIX_LENGTH);
-}
+import { shortenConversationId } from "@/utils/conversation-id";
 
 /**
  * Build a delegation chain from a triggering event.
@@ -343,7 +337,7 @@ export function formatDelegationChain(
         // Get the conversation ID for this link from RECIPIENT.conversationId
         // Truncate to PREFIX_LENGTH chars for display (full IDs are stored in chain entries)
         const convId = recipient.conversationId
-            ? truncateConversationId(recipient.conversationId)
+            ? shortenConversationId(recipient.conversationId)
             : "unknown";
 
         // Build the line with proper indentation
