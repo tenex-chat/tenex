@@ -20,6 +20,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { trace } from "@opentelemetry/api";
 
 const killSchema = z.object({
@@ -188,7 +189,7 @@ async function killAgent(
         trace.getActiveSpan()?.addEvent("kill.authorization_failed", {
             "kill.reason": "caller_no_project",
             "kill.caller_agent": context.agent.slug,
-            "kill.target_conversation_id": conversationId.substring(0, 12),
+            "kill.target_conversation_id": shortenConversationId(conversationId),
         });
 
         return {
@@ -235,7 +236,7 @@ async function killAgent(
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_starting", {
         "kill.project_id": projectId.substring(0, 12),
-        "kill.conversation_id": conversationId.substring(0, 12),
+        "kill.conversation_id": shortenConversationId(conversationId),
         "kill.agent_pubkey": agentPubkey.substring(0, 12),
         "kill.reason": reason ?? "manual kill",
         "kill.cascade_enabled": true,
@@ -243,7 +244,7 @@ async function killAgent(
 
     logger.info("[kill] Aborting agent with cascade", {
         projectId: projectId.substring(0, 12),
-        conversationId: conversationId.substring(0, 12),
+        conversationId: shortenConversationId(conversationId),
         agentPubkey: agentPubkey.substring(0, 12),
         reason,
     });
@@ -258,7 +259,7 @@ async function killAgent(
     );
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_completed", {
-        "kill.conversation_id": conversationId.substring(0, 12),
+        "kill.conversation_id": shortenConversationId(conversationId),
         "kill.agent_pubkey": agentPubkey.substring(0, 12),
         "kill.direct_aborted": result.abortedCount,
         "kill.cascade_aborted": result.descendantConversations.length,

@@ -6,6 +6,7 @@
  */
 
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { formatViolations } from "./formatters";
 import { heuristicsTracer, recordViolation, recordEvaluation } from "./HeuristicsTelemetry";
@@ -98,7 +99,7 @@ export class HeuristicEngine {
       {
         attributes: {
           "agent.pubkey": context.agentPubkey.substring(0, 8),
-          "conversation.id": context.conversationId.substring(0, 12),
+          "conversation.id": shortenConversationId(context.conversationId),
           "ral.number": context.ralNumber,
           "tool.name": context.tool.name,
           "heuristic.count": this.heuristics.size,
