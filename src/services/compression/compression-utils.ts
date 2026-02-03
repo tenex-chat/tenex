@@ -72,10 +72,11 @@ export function selectCandidateRange(
  *
  * Checks:
  * 1. All event IDs exist in the message range
- * 2. Segments are in chronological order
- * 3. No gaps or overlaps between segments
- * 4. First segment starts at range beginning
- * 5. Last segment ends at range end
+ * 2. Segments are in chronological order (no overlaps)
+ * 3. First segment starts at range beginning
+ * 4. Last segment ends at range end
+ *
+ * Note: Gaps between segments are allowed - some messages may remain uncompressed.
  *
  * @param segments - LLM-generated segments
  * @param messages - All messages
@@ -136,7 +137,7 @@ export function validateSegments(
     };
   }
 
-  // Check chronological order and no gaps
+  // Check chronological order (no overlaps, but gaps are allowed)
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const fromIndex = rangeMessages.findIndex(
@@ -153,16 +154,16 @@ export function validateSegments(
       };
     }
 
-    // Check for gaps between segments
+    // Check for overlaps between segments (gaps are allowed)
     if (i > 0) {
       const prevSegment = segments[i - 1];
       const prevToIndex = rangeMessages.findIndex(
         (m) => m.eventId === prevSegment.toEventId
       );
-      if (fromIndex !== prevToIndex + 1) {
+      if (fromIndex <= prevToIndex) {
         return {
           valid: false,
-          error: `Gap between segment ${i - 1} and ${i}`,
+          error: `Overlap between segment ${i - 1} and ${i}`,
         };
       }
     }
@@ -177,10 +178,11 @@ export function validateSegments(
  *
  * Checks:
  * 1. All event IDs exist in the entry range
- * 2. Segments are in chronological order
- * 3. No gaps or overlaps between segments
- * 4. First segment starts at range beginning
- * 5. Last segment ends at range end
+ * 2. Segments are in chronological order (no overlaps)
+ * 3. First segment starts at range beginning
+ * 4. Last segment ends at range end
+ *
+ * Note: Gaps between segments are allowed - some entries may remain uncompressed.
  *
  * @param segments - LLM-generated segments
  * @param entries - All entries
@@ -241,7 +243,7 @@ export function validateSegmentsForEntries(
     };
   }
 
-  // Check chronological order and no gaps
+  // Check chronological order (no overlaps, but gaps are allowed)
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const fromIndex = rangeEntries.findIndex(
@@ -258,16 +260,16 @@ export function validateSegmentsForEntries(
       };
     }
 
-    // Check for gaps between segments
+    // Check for overlaps between segments (gaps are allowed)
     if (i > 0) {
       const prevSegment = segments[i - 1];
       const prevToIndex = rangeEntries.findIndex(
         (e) => e.eventId === prevSegment.toEventId
       );
-      if (fromIndex !== prevToIndex + 1) {
+      if (fromIndex <= prevToIndex) {
         return {
           valid: false,
-          error: `Gap between segment ${i - 1} and ${i}`,
+          error: `Overlap between segment ${i - 1} and ${i}`,
         };
       }
     }
