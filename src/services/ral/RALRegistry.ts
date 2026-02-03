@@ -669,6 +669,10 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * For followups, appends both the followup prompt and response to the transcript.
    * Returns location info for the caller to use for resumption.
    *
+   * INVARIANT: Completions for killed delegations are rejected at the domain layer.
+   * This prevents the race condition where a delegation completes after being killed
+   * via the kill tool but before the abort fully propagates.
+   *
    * @param completion.fullTranscript - Optional rich transcript to use instead of
    *   constructing a synthetic 2-message transcript. Useful for capturing user
    *   interventions and multi-turn exchanges within a delegation.
@@ -697,6 +701,20 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     if (!pendingDelegation) {
       logger.warn("[RALRegistry] No pending delegation found for completion", {
         delegationConversationId: completion.delegationConversationId.substring(0, 8),
+      });
+      return undefined;
+    }
+
+    // DOMAIN INVARIANT: Reject completions for killed delegations.
+    // This is the authoritative check - no caller can bypass it.
+    if (pendingDelegation.killed) {
+      trace.getActiveSpan()?.addEvent("ral.completion_rejected_killed", {
+        "delegation.conversation_id": shortenConversationId(canonicalId),
+        "delegation.killed_at": pendingDelegation.killedAt,
+      });
+      logger.info("[RALRegistry.recordCompletion] Rejected completion - delegation was killed", {
+        delegationConversationId: canonicalId.substring(0, 12),
+        killedAt: pendingDelegation.killedAt,
       });
       return undefined;
     }
@@ -1580,6 +1598,19 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const key = this.makeKey(agentPubkey, conversationId);
     const convDelegations = this.conversationDelegations.get(key);
 
+    // RACE CONDITION FIX: Mark all pending delegations as killed BEFORE aborting.
+    // This prevents the race where a delegation completes between the time we abort
+    // and the time we process the cascade. The killed flag ensures that any
+    // completion events arriving for these delegations will be ignored.
+    const killedDelegationCount = this.markAllDelegationsKilled(agentPubkey, conversationId);
+    if (killedDelegationCount > 0) {
+      trace.getActiveSpan()?.addEvent("ral.delegations_marked_killed_before_abort", {
+        "cascade.agent_pubkey": agentPubkey.substring(0, 12),
+        "cascade.conversation_id": shortenConversationId(conversationId),
+        "cascade.killed_delegation_count": killedDelegationCount,
+      });
+    }
+
     // Abort the target agent
     const directAbortCount = this.abortAllForAgent(agentPubkey, conversationId);
     if (directAbortCount > 0) {
@@ -1715,6 +1746,138 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.abortControllers.clear();
     this.conversationDelegations.clear();
     this.followupToCanonical.clear();
+  }
+
+  // ============================================================================
+  // Killed Delegation Methods (Race Condition Prevention)
+  // ============================================================================
+
+  /**
+   * Mark a pending delegation as killed.
+   * This prevents the race condition where a delegation completes after being
+   * killed but before the abort fully propagates. The killed flag ensures that
+   * completion events for killed delegations are ignored.
+   *
+   * @param delegationConversationId - The delegation conversation ID to mark as killed
+   * @returns true if the delegation was found and marked, false otherwise
+   */
+  markDelegationKilled(delegationConversationId: string): boolean {
+    // Look up the delegation's location
+    const location = this.delegationToRal.get(delegationConversationId);
+    if (!location) {
+      logger.debug("[RALRegistry.markDelegationKilled] No delegation found for ID", {
+        delegationConversationId: delegationConversationId.substring(0, 12),
+      });
+      return false;
+    }
+
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return false;
+    }
+
+    // Resolve followup event ID to canonical delegation conversation ID if needed
+    const canonicalId = this.followupToCanonical.get(delegationConversationId)
+      ?? delegationConversationId;
+
+    const pendingDelegation = convDelegations.pending.get(canonicalId);
+    if (!pendingDelegation) {
+      logger.debug("[RALRegistry.markDelegationKilled] No pending delegation found", {
+        delegationConversationId: canonicalId.substring(0, 12),
+      });
+      return false;
+    }
+
+    // Idempotent: preserve original kill time for audit trail
+    if (pendingDelegation.killed) {
+      logger.debug("[RALRegistry.markDelegationKilled] Delegation already killed", {
+        delegationConversationId: canonicalId.substring(0, 12),
+        killedAt: pendingDelegation.killedAt,
+      });
+      return true; // Already killed, but return true to indicate it's in killed state
+    }
+
+    // Mark the delegation as killed
+    pendingDelegation.killed = true;
+    pendingDelegation.killedAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed", {
+      "delegation.conversation_id": shortenConversationId(canonicalId),
+      "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+    });
+
+    logger.info("[RALRegistry.markDelegationKilled] Delegation marked as killed", {
+      delegationConversationId: canonicalId.substring(0, 12),
+      recipientPubkey: pendingDelegation.recipientPubkey.substring(0, 12),
+    });
+
+    return true;
+  }
+
+  /**
+   * Check if a delegation has been marked as killed.
+   * Used by completion handlers to skip processing killed delegations.
+   *
+   * @param delegationConversationId - The delegation conversation ID to check
+   * @returns true if the delegation is killed, false if not found or not killed
+   */
+  isDelegationKilled(delegationConversationId: string): boolean {
+    const location = this.delegationToRal.get(delegationConversationId);
+    if (!location) {
+      return false;
+    }
+
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return false;
+    }
+
+    // Resolve followup event ID to canonical delegation conversation ID if needed
+    const canonicalId = this.followupToCanonical.get(delegationConversationId)
+      ?? delegationConversationId;
+
+    const pendingDelegation = convDelegations.pending.get(canonicalId);
+    return pendingDelegation?.killed === true;
+  }
+
+  /**
+   * Mark all pending delegations for an agent+conversation as killed.
+   * Used when killing an agent to prevent any of its delegations from completing.
+   *
+   * @returns The number of delegations marked as killed
+   */
+  markAllDelegationsKilled(agentPubkey: string, conversationId: string): number {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const convDelegations = this.conversationDelegations.get(key);
+    if (!convDelegations) {
+      return 0;
+    }
+
+    let killedCount = 0;
+    const now = Date.now();
+
+    for (const [delegationId, pendingDelegation] of convDelegations.pending) {
+      if (!pendingDelegation.killed) {
+        pendingDelegation.killed = true;
+        pendingDelegation.killedAt = now;
+        killedCount++;
+
+        trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed_bulk", {
+          "delegation.conversation_id": shortenConversationId(delegationId),
+          "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+        });
+      }
+    }
+
+    if (killedCount > 0) {
+      logger.info("[RALRegistry.markAllDelegationsKilled] Marked delegations as killed", {
+        agentPubkey: agentPubkey.substring(0, 12),
+        conversationId: conversationId.substring(0, 12),
+        killedCount,
+      });
+    }
+
+    return killedCount;
   }
 
   // ============================================================================
