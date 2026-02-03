@@ -23,66 +23,28 @@ The compression system is implemented with a clean 4-file architecture:
 
 **Location**: `src/agents/execution/StreamExecutionHandler.ts`
 
-**After line 342** (after `llmService.on("complete", ...)` handler), add:
+**Status**: ✅ IMPLEMENTED
 
-```typescript
-// Trigger proactive compression after LLM response
-llmService.on("complete", async () => {
-    try {
-        const compressionService = createCompressionService(
-            context.conversation,
-            llmService
-        );
-        await compressionService.maybeCompressAsync(context.conversation.id);
-    } catch (error) {
-        // Non-blocking - just log
-        logger.warn("Proactive compression failed", { error });
-    }
-});
-```
+Proactive compression is triggered after each LLM response via `triggerProactiveCompression()` method.
 
-**Import needed**:
-```typescript
-import { createCompressionService } from "@/services/compression/CompressionService.js";
-```
+**Requirements**:
+- AgentRegistry is obtained via `getProjectContext().agentRegistry`
+- Non-blocking (fire-and-forget)
+- Errors are logged but don't affect main flow
 
 ### 2. MessageCompiler Integration - Reactive Compression
 
 **Location**: `src/agents/execution/MessageCompiler.ts`
 
-**In the `compile()` method**, before building messages from conversation history, apply compression:
+**Status**: ✅ IMPLEMENTED
 
-```typescript
-// Around line 107, before building conversation messages
-const compressionService = createCompressionService(
-    this.conversationStore,
-    // Note: Need to pass LLMService instance here
-    // This requires modifying MessageCompiler constructor to accept LLMService
-);
+Reactive compression is applied in `applyCompression()` method, called during `compile()`.
 
-// Get existing compressions and apply them
-const segments = await compressionService.getSegments(
-    context.conversation.id
-);
-
-// Get entries with compressions applied
-let entries = this.conversationStore.getAllMessages();
-if (segments.length > 0) {
-    entries = compressionService.applyExistingCompressions(entries, segments);
-}
-
-// Then build messages from compressed entries
-const conversationMessages = await buildMessagesFromEntries(entries, {
-    viewingAgentPubkey: context.agent.pubkey,
-    ralNumber: context.ralNumber,
-    activeRals,
-    totalMessages: entries.length,
-    rootAuthorPubkey,
-    projectRoot: context.projectBasePath,
-});
-```
-
-**Note**: This requires refactoring `buildMessagesForRal()` in ConversationStore to accept pre-compressed entries, OR creating a new method `buildMessagesForRalWithCompression()`.
+**Requirements**:
+- MessageCompiler constructor accepts optional `llmService` and `agentRegistry` parameters
+- AgentRegistry is passed from StreamSetup via `projectContext.agentRegistry`
+- Compression only runs when both LLMService and AgentRegistry are available
+- Uses blocking `ensureUnderLimit()` to guarantee budget compliance
 
 ### 3. Configuration
 
@@ -141,11 +103,17 @@ Format:
 
 ```typescript
 class CompressionService {
+  constructor(
+    conversationStore: ConversationStore,
+    llmService: LLMService,
+    agentRegistry: AgentRegistry  // Required for speaker attribution
+  )
+
   // Proactive: Fire-and-forget compression after LLM response
   async maybeCompressAsync(conversationId: string): Promise<void>
 
   // Reactive: Blocking compression when budget exceeded
-  async ensureUnderLimit(conversationId: string, tokenBudget: number): Promise<void>
+  async ensureUnderLimit(conversationId: string, tokenBudget?: number): Promise<void>
 
   // Get existing segments
   async getSegments(conversationId: string): Promise<CompressionSegment[]>
@@ -157,6 +125,22 @@ class CompressionService {
   ): ConversationEntry[]
 }
 ```
+
+**Key Updates**:
+- ✅ AgentRegistry required for speaker attribution (resolving pubkeys to agent slugs)
+- ✅ Compression prompt includes XML-formatted messages with:
+  - Event IDs (full 64-char IDs in `id` attribute, short 12-char IDs in `shortId` for readability)
+  - Speaker attribution (`from` field with agent slug, using `senderPubkey ?? pubkey`)
+  - Timestamps (ISO 8601 format)
+  - Target information (`to` field with agent slugs from p-tags)
+  - Tool call/result summaries
+  - XML escaping for all attributes and CDATA wrapping for content
+- ✅ No fixed sentence count - LLM can use appropriate length for content complexity
+- ✅ **CRITICAL**: Segments MUST be contiguous with full coverage from first to last event ID
+  - At least one segment required
+  - No gaps allowed between segments
+  - First segment must start at range beginning
+  - Last segment must end at range end
 
 ### ConversationStore Extensions
 
