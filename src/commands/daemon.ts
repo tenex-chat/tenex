@@ -66,11 +66,15 @@ export const daemonCommand = new Command("daemon")
         console.log();
 
         // Initialize NDK for Nostr communication
+        console.log(chalk.gray("🔌 Initializing Nostr connection..."));
         await initNDK();
+        console.log(chalk.gray("✓ Nostr connected"));
 
         // Initialize services that the daemon needs
+        console.log(chalk.gray("⚙️  Initializing scheduler service..."));
         const schedulerService = SchedulerService.getInstance();
         await schedulerService.initialize(getNDK(), ".tenex");
+        console.log(chalk.gray("✓ Scheduler initialized"));
 
         // DIAGNOSTIC: Start event loop monitoring for concurrent streaming bottleneck analysis
         eventLoopMonitor.start(
@@ -78,9 +82,10 @@ export const daemonCommand = new Command("daemon")
             100, // Sample every 100ms
             50   // Consider >50ms lag as blocked
         );
-        console.log(chalk.gray("📊 Event loop monitoring enabled for diagnostics"));
+        console.log(chalk.gray("📊 Event loop monitoring enabled"));
 
         // Get the daemon instance
+        console.log(chalk.gray("🚀 Starting daemon..."));
         const daemon = getDaemon();
 
         // Set boot patterns if provided
@@ -110,6 +115,7 @@ export const daemonCommand = new Command("daemon")
         try {
             // Start the daemon
             await daemon.start();
+            console.log(chalk.gray("✓ Daemon core started"));
 
             console.log(chalk.green("✅ Daemon started successfully"));
 
