@@ -12,7 +12,6 @@ import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
-import { trace } from "@opentelemetry/api";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
@@ -241,33 +240,19 @@ async function addCoreAgentFragments(
  * @param compiler The PromptCompilerService for this agent
  * @param lessons The agent's lessons (used for fallback formatting if needed)
  * @param baseAgentInstructions The Base Agent Instructions (from agent.instructions)
- * @param agentSlug The agent's slug for telemetry (optional)
  * @returns The Effective Agent Instructions (compiled if available, base otherwise)
  */
 function getEffectiveInstructionsSync(
     compiler: PromptCompilerService,
     lessons: NDKAgentLesson[],
-    baseAgentInstructions: string,
-    agentSlug?: string
+    baseAgentInstructions: string
 ): string {
-    const tracer = trace.getTracer("tenex.system-prompt-builder");
-
     // Use the synchronous method - NEVER blocks on compilation
     const result = compiler.getEffectiveInstructionsSync();
 
-    // Record what source we're using for agent execution
-    tracer.startActiveSpan("tenex.agent_execution.instructions_source", (span) => {
-        span.setAttribute("instructions.source", result.source);
-        span.setAttribute("instructions.is_compiled", result.isCompiled);
-        span.setAttribute("instructions.length", result.instructions.length);
-        if (agentSlug) {
-            span.setAttribute("agent.slug", agentSlug);
-        }
-        if (result.compiledAt) {
-            span.setAttribute("instructions.compiled_at", result.compiledAt);
-        }
-        span.end();
-    });
+    // No span needed here - this is called every RAL and the info is available
+    // on the parent agent.execute span or in logs. The instructions_source span
+    // was creating 18+ spans per conversation with no debugging value.
 
     logger.debug("📋 Retrieved effective instructions synchronously", {
         source: result.source,
@@ -284,16 +269,6 @@ function getEffectiveInstructionsSync(
     // Not compiled yet - check if we have lessons to format as fallback
     // This provides a better experience than raw base instructions when lessons exist
     if (lessons.length > 0) {
-        // Record fallback usage
-        tracer.startActiveSpan("tenex.agent_execution.fallback_lessons", (span) => {
-            span.setAttribute("fallback.reason", result.source);
-            span.setAttribute("fallback.lessons_count", lessons.length);
-            if (agentSlug) {
-                span.setAttribute("agent.slug", agentSlug);
-            }
-            span.end();
-        });
-
         logger.debug("📋 Using fallback lesson formatting (compilation not ready)", {
             lessonsCount: lessons.length,
             compilationStatus: result.source,
@@ -412,8 +387,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         effectiveAgentInstructions = getEffectiveInstructionsSync(
             promptCompiler,
             lessons,
-            baseAgentInstructions,
-            agent.slug
+            baseAgentInstructions
         );
 
         logger.debug("✅ Retrieved Effective Agent Instructions (sync)", {

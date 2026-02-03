@@ -14,9 +14,9 @@ import { RALRegistry, extractPendingDelegations } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
+import type { LanguageModel, ModelMessage, StepResult } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
-import type { LanguageModel, ModelMessage, StepResult } from "ai";
 import { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import type { FullRuntimeContext, RALExecutionContext } from "./types";
@@ -120,27 +120,16 @@ export function createPrepareStep(
                 execContext.accumulatedMessages = step.messages;
 
                 // Sync any tool calls/results from AI SDK to ConversationStore
-                await tracer.startActiveSpan("tenex.agent.sync_messages", async (syncSpan) => {
-                    try {
-                        const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
-                        syncer.syncFromSDK(step.messages);
-                    } finally {
-                        syncSpan.end();
-                    }
-                });
+                // (sub-span removed - parent prepare_step span is sufficient)
+                const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
+                syncer.syncFromSDK(step.messages);
 
-                // Process any new injections
-                const newInjections = await tracer.startActiveSpan("tenex.agent.consume_injections", async (injectSpan) => {
-                    try {
-                        return ralRegistry.getAndConsumeInjections(
-                            context.agent.pubkey,
-                            context.conversationId,
-                            ralNumber
-                        );
-                    } finally {
-                        injectSpan.end();
-                    }
-                });
+                // Process any new injections (sub-span removed - parent prepare_step span is sufficient)
+                const newInjections = ralRegistry.getAndConsumeInjections(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
 
                 const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
 
@@ -215,34 +204,26 @@ export function createPrepareStep(
                     ralNumber
                 );
 
-                const { messages: rebuiltMessages, mode } = await tracer.startActiveSpan("tenex.agent.compile_messages", async (compileSpan) => {
-                    try {
-                        const result = await messageCompiler.compile({
-                            agent: context.agent,
-                            project: projectContext.project,
-                            conversation,
-                            projectBasePath: context.projectBasePath,
-                            workingDirectory: context.workingDirectory,
-                            currentBranch: context.currentBranch,
-                            availableAgents: Array.from(projectContext.agents.values()),
-                            mcpManager: projectContext.mcpManager,
-                            agentLessons: projectContext.agentLessons,
-                            nudgeContent,
-                            respondingToPubkey: context.triggeringEvent.pubkey,
-                            pendingDelegations,
-                            completedDelegations,
-                            ralNumber,
-                            ephemeralMessages:
-                                [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
-                                    ? [...ephemeralMessages, ...midStepEphemeralMessages]
-                                    : undefined,
-                        });
-                        compileSpan.setAttribute("compilation.mode", result.mode);
-                        compileSpan.setAttribute("compiled.message_count", result.messages.length);
-                        return result;
-                    } finally {
-                        compileSpan.end();
-                    }
+                // Compile messages (sub-span removed - MessageCompiler.compile has its own span)
+                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
+                    agent: context.agent,
+                    project: projectContext.project,
+                    conversation,
+                    projectBasePath: context.projectBasePath,
+                    workingDirectory: context.workingDirectory,
+                    currentBranch: context.currentBranch,
+                    availableAgents: Array.from(projectContext.agents.values()),
+                    mcpManager: projectContext.mcpManager,
+                    agentLessons: projectContext.agentLessons,
+                    nudgeContent,
+                    respondingToPubkey: context.triggeringEvent.pubkey,
+                    pendingDelegations,
+                    completedDelegations,
+                    ralNumber,
+                    ephemeralMessages:
+                        [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
+                            ? [...ephemeralMessages, ...midStepEphemeralMessages]
+                            : undefined,
                 });
 
                 span.setAttribute("compilation.mode", mode);

@@ -867,14 +867,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 cached.maxCreatedAt >= currentMaxCreatedAt;
 
             if (cacheIsFresh) {
-                // Cache is fresh - emit telemetry and return
-                tracer.startActiveSpan("tenex.prompt_compilation.cache_hit", (span) => {
-                    span.setAttribute("compilation.timestamp", cached.timestamp);
-                    span.setAttribute("compilation.is_compiled", true);
-                    span.setAttribute("compilation.max_created_at", cached.maxCreatedAt);
-                    span.end();
-                });
-
+                // Cache is fresh - return immediately (no span needed for happy path)
                 logger.debug("PromptCompilerService: returning fresh cached effective instructions", {
                     agentPubkey: this.agentPubkey.substring(0, 8),
                     cacheTimestamp: cached.timestamp,

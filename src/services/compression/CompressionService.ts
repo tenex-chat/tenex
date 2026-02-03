@@ -101,53 +101,50 @@ export class CompressionService {
 
   /**
    * Internal method to perform compression.
+   * Only creates a span when actual compression work is performed to reduce telemetry noise.
    */
   private async performCompression(
     conversationId: string,
     blocking: boolean,
     tokenBudget?: number
   ): Promise<void> {
+    // Get all entries
+    const entries = this.conversationStore.getAllMessages();
+    const existingSegments =
+      await this.conversationStore.loadCompressionLog(conversationId);
+
+    // Get compression config
+    const compressionConfig = this.getCompressionConfig();
+    if (!compressionConfig.enabled) {
+      return;
+    }
+
+    const effectiveBudget = tokenBudget ?? compressionConfig.tokenBudget;
+    const currentTokens = estimateTokensFromEntries(entries);
+
+    // Check if compression is needed - exit early without creating span
+    if (
+      !blocking &&
+      currentTokens < compressionConfig.tokenThreshold
+    ) {
+      // Proactive mode: only compress if over threshold
+      return;
+    }
+
+    if (blocking && currentTokens <= effectiveBudget) {
+      // Already under budget
+      return;
+    }
+
+    // Compression IS needed - now create the span for actual work
     return tracer.startActiveSpan("compression.perform", async (span) => {
       try {
         span.setAttribute("conversation.id", shortenConversationId(conversationId));
         span.setAttribute("blocking", blocking);
-
-        // Get all entries
-        const entries = this.conversationStore.getAllMessages();
-        const existingSegments =
-          await this.conversationStore.loadCompressionLog(conversationId);
-
         span.setAttribute("entries.total", entries.length);
         span.setAttribute("segments.existing", existingSegments.length);
-
-        // Get compression config
-        const compressionConfig = this.getCompressionConfig();
-        if (!compressionConfig.enabled) {
-          span.setStatus({ code: SpanStatusCode.OK });
-          return;
-        }
-
-        const effectiveBudget = tokenBudget ?? compressionConfig.tokenBudget;
-        const currentTokens = estimateTokensFromEntries(entries);
-
         span.setAttribute("tokens.current", currentTokens);
         span.setAttribute("tokens.budget", effectiveBudget);
-
-        // Check if compression is needed
-        if (
-          !blocking &&
-          currentTokens < compressionConfig.tokenThreshold
-        ) {
-          // Proactive mode: only compress if over threshold
-          span.setStatus({ code: SpanStatusCode.OK });
-          return;
-        }
-
-        if (blocking && currentTokens <= effectiveBudget) {
-          // Already under budget
-          span.setStatus({ code: SpanStatusCode.OK });
-          return;
-        }
 
         // Find range to compress
         const range = selectCandidateRangeFromEntries(

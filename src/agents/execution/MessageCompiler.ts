@@ -116,42 +116,21 @@ export class MessageCompiler {
                 let dynamicContextCount = 0;
 
                 if (this.plan.mode === "full") {
-                    const systemPromptMessages = await tracer.startActiveSpan("tenex.message.build_system_prompt", async (sysSpan) => {
-                        try {
-                            const result = await buildSystemPromptMessages(context);
-                            sysSpan.setAttribute("message.count", result.length);
-                            return result;
-                        } finally {
-                            sysSpan.end();
-                        }
-                    });
+                    // Build system prompt messages (sub-span removed - parent compile span is sufficient)
+                    const systemPromptMessages = await buildSystemPromptMessages(context);
 
                     // Apply compression: load existing segments and apply to conversation history
                     await this.applyCompression(context);
 
-                    const conversationMessages = await tracer.startActiveSpan("tenex.message.build_conversation_history", async (convSpan) => {
-                        try {
-                            const result = await this.conversationStore.buildMessagesForRal(
-                                context.agent.pubkey,
-                                context.ralNumber,
-                                context.projectBasePath
-                            );
-                            convSpan.setAttribute("message.count", result.length);
-                            return result;
-                        } finally {
-                            convSpan.end();
-                        }
-                    });
+                    // Build conversation history (sub-span removed - parent compile span is sufficient)
+                    const conversationMessages = await this.conversationStore.buildMessagesForRal(
+                        context.agent.pubkey,
+                        context.ralNumber,
+                        context.projectBasePath
+                    );
 
-                    const dynamicContextMessages = await tracer.startActiveSpan("tenex.message.build_dynamic_context", async (dynSpan) => {
-                        try {
-                            const result = await this.buildDynamicContextMessages(context);
-                            dynSpan.setAttribute("message.count", result.length);
-                            return result;
-                        } finally {
-                            dynSpan.end();
-                        }
-                    });
+                    // Build dynamic context (sub-span removed - parent compile span is sufficient)
+                    const dynamicContextMessages = await this.buildDynamicContextMessages(context);
 
                     messages.push(...systemPromptMessages.map((sm) => sm.message));
 
@@ -378,31 +357,20 @@ export class MessageCompiler {
             return;
         }
 
-        return tracer.startActiveSpan("tenex.message.apply_compression", async (span) => {
-            try {
-                span.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
-
-                // Reactive blocking compression - use configured budget or CompressionService default
-                const tokenBudget = compressionConfig.tokenBudget;
-                await compressionService.ensureUnderLimit(
-                    context.conversation.id,
-                    tokenBudget
-                );
-
-                span.setAttribute("compression.budget", tokenBudget);
-                span.setStatus({ code: SpanStatusCode.OK });
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
-                // Non-critical - log and continue without compression
-                logger.warn("Reactive compression failed", {
-                    conversationId: context.conversation.id,
-                    ralNumber: context.ralNumber,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            } finally {
-                span.end();
-            }
-        });
+        // Apply reactive compression (sub-span removed - CompressionService has its own span when work is done)
+        try {
+            const tokenBudget = compressionConfig.tokenBudget;
+            await compressionService.ensureUnderLimit(
+                context.conversation.id,
+                tokenBudget
+            );
+        } catch (error) {
+            // Non-critical - log and continue without compression
+            logger.warn("Reactive compression failed", {
+                conversationId: context.conversation.id,
+                ralNumber: context.ralNumber,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
     }
 }

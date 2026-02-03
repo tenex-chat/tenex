@@ -6,6 +6,8 @@ import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.pubkey-service");
+// Note: get_name and fetch_profile spans removed as they are trivial O(1) lookups
+// that add noise without debugging value. The warmUserProfiles span is kept for batch operations.
 
 interface UserProfile {
     name?: string;
@@ -47,28 +49,15 @@ export class PubkeyService {
      * Get a display name for any pubkey (agent or user)
      */
     async getName(pubkey: Hexpubkey): Promise<string> {
-        return tracer.startActiveSpan("tenex.pubkey.get_name", async (span) => {
-            try {
-                span.setAttribute("pubkey", pubkey.substring(0, 8));
+        // First, check if it's an agent (O(1) lookup)
+        const agentSlug = this.getAgentSlug(pubkey);
+        if (agentSlug) {
+            return agentSlug;
+        }
 
-                // First, check if it's an agent
-                const agentSlug = this.getAgentSlug(pubkey);
-                if (agentSlug) {
-                    span.setAttribute("resolved_from", "agent_registry");
-                    span.setAttribute("display_name", agentSlug);
-                    return agentSlug;
-                }
-
-                // It's a user - fetch their profile
-                const profile = await this.getUserProfile(pubkey);
-                const displayName = this.extractDisplayName(profile, pubkey);
-                span.setAttribute("resolved_from", "user_profile");
-                span.setAttribute("display_name", displayName);
-                return displayName;
-            } finally {
-                span.end();
-            }
-        });
+        // It's a user - fetch their profile
+        const profile = await this.getUserProfile(pubkey);
+        return this.extractDisplayName(profile, pubkey);
     }
 
     /**
@@ -115,73 +104,56 @@ export class PubkeyService {
      * Fetch user profile from kind:0 event
      */
     private async getUserProfile(pubkey: Hexpubkey): Promise<UserProfile> {
-        return tracer.startActiveSpan("tenex.pubkey.fetch_profile", async (span) => {
-            try {
-                span.setAttribute("pubkey", pubkey.substring(0, 8));
+        // Check cache first (no span needed for cache hits - trivial operation)
+        const cached = this.userProfileCache.get(pubkey);
+        if (cached && Date.now() < cached.ttl) {
+            return cached.profile;
+        }
 
-                // Check cache first
-                const cached = this.userProfileCache.get(pubkey);
-                if (cached && Date.now() < cached.ttl) {
-                    span.setAttribute("cache.status", "hit");
-                    span.setAttribute("profile.name", cached.profile.name ?? "");
-                    span.setAttribute("profile.display_name", cached.profile.display_name ?? "");
-                    return cached.profile;
-                }
+        // Cache miss - fetch from network
+        try {
+            const ndk = getNDK();
 
-                span.setAttribute("cache.status", "miss");
+            // Fetch kind:0 (metadata) event for this pubkey
+            const profileEvent = await ndk.fetchEvent({
+                kinds: [0],
+                authors: [pubkey],
+            });
 
-                try {
-                    const ndk = getNDK();
+            if (profileEvent) {
+                const profile = this.parseProfileEvent(profileEvent);
 
-                    // Fetch kind:0 (metadata) event for this pubkey
-                    const profileEvent = await ndk.fetchEvent({
-                        kinds: [0],
-                        authors: [pubkey],
-                    });
-
-                    if (profileEvent) {
-                        const profile = this.parseProfileEvent(profileEvent);
-
-                        // Cache the result
-                        this.userProfileCache.set(pubkey, {
-                            profile,
-                            ttl: Date.now() + this.CACHE_TTL_MS,
-                        });
-
-                        logger.debug("[PUBKEY_NAME_REPO] Fetched user profile", {
-                            pubkey,
-                            name: profile.name,
-                            display_name: profile.display_name,
-                        });
-
-                        span.setAttribute("profile.name", profile.name ?? "");
-                        span.setAttribute("profile.display_name", profile.display_name ?? "");
-                        span.setAttribute("profile.empty", false);
-                        return profile;
-                    }
-                } catch (error) {
-                    logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
-                        pubkey,
-                        error,
-                    });
-                    span.setAttribute("profile.fetch_error", error instanceof Error ? error.message : String(error));
-                }
-
-                // Return empty profile if fetch failed
-                const emptyProfile: UserProfile = { fetchedAt: Date.now() };
-
-                // Cache even empty results to avoid repeated failed fetches
+                // Cache the result
                 this.userProfileCache.set(pubkey, {
-                    profile: emptyProfile,
+                    profile,
                     ttl: Date.now() + this.CACHE_TTL_MS,
                 });
 
-                span.setAttribute("profile.empty", true);
-                return emptyProfile;
-            } finally {
-                span.end();
+                logger.debug("[PUBKEY_NAME_REPO] Fetched user profile", {
+                    pubkey,
+                    name: profile.name,
+                    display_name: profile.display_name,
+                });
+
+                return profile;
             }
+        } catch (error) {
+            logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
+                pubkey,
+                error,
+            });
+        }
+
+        // Return empty profile if fetch failed
+        const emptyProfile: UserProfile = { fetchedAt: Date.now() };
+
+        // Cache even empty results to avoid repeated failed fetches
+        this.userProfileCache.set(pubkey, {
+            profile: emptyProfile,
+            ttl: Date.now() + this.CACHE_TTL_MS,
         });
+
+        return emptyProfile;
     }
 
     /**
