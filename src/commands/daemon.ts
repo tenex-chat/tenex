@@ -1,5 +1,5 @@
 import { getDaemon } from "@/daemon";
-import { getNDK } from "@/nostr/ndkClient";
+import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SchedulerService } from "@/services/scheduling";
@@ -64,6 +64,9 @@ export const daemonCommand = new Command("daemon")
         console.log(chalk.cyan("║       TENEX Daemon Starting            ║"));
         console.log(chalk.cyan("╚════════════════════════════════════════╝"));
         console.log();
+
+        // Initialize NDK for Nostr communication
+        await initNDK();
 
         // Initialize services that the daemon needs
         const schedulerService = SchedulerService.getInstance();

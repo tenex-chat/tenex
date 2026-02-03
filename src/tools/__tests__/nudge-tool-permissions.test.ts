@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { createMockExecutionEnvironment } from "@/test-utils";
 import type { NudgeToolPermissions } from "@/services/nudge";
 import { getToolsObject } from "../registry";
+import { CORE_AGENT_TOOLS } from "@/agents/constants";
 
 describe("Nudge Tool Permissions", () => {
     const mockContext = createMockExecutionEnvironment();
@@ -99,9 +100,12 @@ describe("Nudge Tool Permissions", () => {
 
                 expect(toolNames).toContain("fs_read");
                 expect(toolNames).toContain("shell");
-                // Core tools (kill) are auto-injected when conversation context is present
+                // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
-                expect(toolNames.length).toBe(3); // Should not have duplicates (fs_read, shell, kill)
+                expect(toolNames).toContain("lesson_get");
+                expect(toolNames).toContain("todo_write");
+                // Base tools (2) + all core tools = total
+                expect(toolNames.length).toBe(2 + CORE_AGENT_TOOLS.length);
             });
         });
 
@@ -352,9 +356,11 @@ describe("Nudge Tool Permissions", () => {
                 const tools = getToolsObject(baseTools, mockContext, undefined);
                 const toolNames = Object.keys(tools);
 
-                // Core tools (kill) are auto-injected when conversation context is present
+                // Core tools are auto-injected when conversation context is present
                 expect(toolNames).toContain("kill");
-                expect(toolNames.length).toBe(1); // Only core tools (kill)
+                expect(toolNames).toContain("lesson_get");
+                expect(toolNames).toContain("todo_write");
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length); // All core tools
             });
         });
     });

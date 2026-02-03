@@ -24,6 +24,7 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
     return tool as CoreTool<unknown, unknown>;
 }
 import { logger } from "@/utils/logger";
+import { CORE_AGENT_TOOLS } from "@/agents/constants";
 import { createAgentConfigureTool } from "./implementations/agent_configure";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
@@ -277,9 +278,6 @@ export function getAllTools(context: ToolExecutionContext): AISdkTool<unknown, u
 export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
-
-/** Core agent tools - auto-injected for all agents (critical system capabilities) */
-const CORE_AGENT_TOOLS: ToolName[] = ["kill"];
 
 /** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
 const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];

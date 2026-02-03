@@ -19,6 +19,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations
+    // Process control
+    "kill", // All agents should be able to terminate processes
 ] as const;
 
 /**
