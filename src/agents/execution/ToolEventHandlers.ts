@@ -199,12 +199,6 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                     ralNumber,
                     violations
                 );
-
-                trace.getActiveSpan()?.addEvent("heuristic.violations_queued", {
-                    "ral.number": ralNumber,
-                    "tool.name": event.toolName,
-                    "violation.count": violations.length,
-                });
             }
 
             // Clean up stored tool args to prevent memory leak

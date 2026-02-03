@@ -6,10 +6,7 @@
  */
 
 import { logger } from "@/utils/logger";
-import { shortenConversationId } from "@/utils/conversation-id";
-import { SpanStatusCode } from "@opentelemetry/api";
 import { formatViolations } from "./formatters";
-import { heuristicsTracer, recordViolation, recordEvaluation } from "./HeuristicsTelemetry";
 import type {
   Heuristic,
   HeuristicContext,
@@ -34,13 +31,11 @@ export class HeuristicEngine {
     this.config = {
       maxWarningsPerStep: config.maxWarningsPerStep ?? 3,
       debug: config.debug ?? false,
-      telemetry: config.telemetry ?? true,
     };
 
     if (this.config.debug) {
       logger.info("[HeuristicEngine] Initialized", {
         maxWarningsPerStep: this.config.maxWarningsPerStep,
-        telemetry: this.config.telemetry,
       });
     }
   }
@@ -89,64 +84,6 @@ export class HeuristicEngine {
   evaluate(context: HeuristicContext): HeuristicViolation[] {
     const violations: HeuristicViolation[] = [];
 
-    if (!this.config.telemetry) {
-      // Fast path: no telemetry
-      return this.evaluateWithoutTelemetry(context);
-    }
-
-    return heuristicsTracer.startActiveSpan(
-      "heuristics.evaluate_all",
-      {
-        attributes: {
-          "agent.pubkey": context.agentPubkey.substring(0, 8),
-          "conversation.id": shortenConversationId(context.conversationId),
-          "ral.number": context.ralNumber,
-          "tool.name": context.tool.name,
-          "heuristic.count": this.heuristics.size,
-        },
-      },
-      (span) => {
-        try {
-          for (const heuristic of this.heuristics.values()) {
-            const violation = this.evaluateSingle(heuristic, context);
-            if (violation) {
-              violations.push(violation);
-              recordViolation(span, violation);
-            }
-          }
-
-          span.setAttribute("heuristic.violation_count", violations.length);
-
-          if (violations.length > 0) {
-            span.addEvent("heuristic.violations_detected", {
-              "violation.count": violations.length,
-              "violation.ids": violations.map((v) => v.id).join(","),
-            });
-          }
-
-          return violations;
-        } catch (error) {
-          // This should never happen (all heuristics are wrapped),
-          // but if it does, log and return empty to avoid crashing
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          logger.error("[HeuristicEngine] Unexpected error in evaluate", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return [];
-        } finally {
-          span.end();
-        }
-      }
-    );
-  }
-
-  /**
-   * Evaluate without telemetry (faster)
-   */
-  private evaluateWithoutTelemetry(context: HeuristicContext): HeuristicViolation[] {
-    const violations: HeuristicViolation[] = [];
-
     for (const heuristic of this.heuristics.values()) {
       const violation = this.evaluateSingle(heuristic, context);
       if (violation) {
@@ -157,19 +94,25 @@ export class HeuristicEngine {
     return violations;
   }
 
+
   /**
    * Evaluate a single heuristic with error boundary.
    * CRITICAL: This method MUST NOT throw - it catches all errors.
    */
   private evaluateSingle(heuristic: Heuristic, context: HeuristicContext): HeuristicViolation | null {
-    const startTime = Date.now();
-
     try {
-      const result = this.config.telemetry
-        ? this.evaluateSingleWithTelemetry(heuristic, context, startTime)
-        : this.evaluateSingleWithoutTelemetry(heuristic, context, startTime);
+      const violation = heuristic.evaluate(context);
 
-      return result;
+      if (violation && this.config.debug) {
+        logger.info("[HeuristicEngine] Violation detected", {
+          heuristicId: heuristic.id,
+          violationId: violation.id,
+          severity: violation.severity,
+          title: violation.title,
+        });
+      }
+
+      return violation;
     } catch (error) {
       // HARD ERROR BOUNDARY: Log but never throw
       logger.error("[HeuristicEngine] Heuristic evaluation failed - skipping", {
@@ -182,78 +125,6 @@ export class HeuristicEngine {
     }
   }
 
-  /**
-   * Evaluate single heuristic with telemetry
-   */
-  private evaluateSingleWithTelemetry(
-    heuristic: Heuristic,
-    context: HeuristicContext,
-    startTime: number
-  ): HeuristicViolation | null {
-    return heuristicsTracer.startActiveSpan(
-      `heuristics.evaluate.${heuristic.id}`,
-      {
-        attributes: {
-          "heuristic.id": heuristic.id,
-          "heuristic.name": heuristic.name,
-          "tool.name": context.tool.name,
-          "ral.number": context.ralNumber,
-        },
-      },
-      (span) => {
-        try {
-          const violation = heuristic.evaluate(context);
-          const duration = Date.now() - startTime;
-
-          span.setAttribute("heuristic.violated", violation !== null);
-          span.setAttribute("heuristic.duration_ms", duration);
-
-          recordEvaluation(span, heuristic.id, duration, violation !== null);
-
-          if (violation && this.config.debug) {
-            logger.info("[HeuristicEngine] Violation detected", {
-              heuristicId: heuristic.id,
-              violationId: violation.id,
-              severity: violation.severity,
-              title: violation.title,
-            });
-          }
-
-          return violation;
-        } catch (error) {
-          span.recordException(error as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          throw error; // Re-throw to be caught by outer boundary
-        } finally {
-          span.end();
-        }
-      }
-    );
-  }
-
-  /**
-   * Evaluate single heuristic without telemetry (faster)
-   */
-  private evaluateSingleWithoutTelemetry(
-    heuristic: Heuristic,
-    context: HeuristicContext,
-    startTime: number
-  ): HeuristicViolation | null {
-    const violation = heuristic.evaluate(context);
-
-    if (violation && this.config.debug) {
-      const duration = Date.now() - startTime;
-      logger.info("[HeuristicEngine] Violation detected", {
-        heuristicId: heuristic.id,
-        violationId: violation.id,
-        severity: violation.severity,
-        title: violation.title,
-        durationMs: duration,
-      });
-    }
-
-    return violation;
-  }
 
   /**
    * Format violations for LLM injection.
