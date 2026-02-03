@@ -338,13 +338,20 @@ export class AgentProfilePublisher {
             await profileEvent.sign(signer, { pTags: false });
 
             try {
-                await profileEvent.publish();
+                // Publish with timeout - don't block daemon startup if relays are slow
+                const publishTimeout = 5000;
+                await Promise.race([
+                    profileEvent.publish(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Publish timeout")), publishTimeout)
+                    ),
+                ]);
                 logger.info("Published TENEX backend profile", {
                     pubkey: signer.pubkey.substring(0, 8),
                     name: backendName,
                 });
             } catch (publishError) {
-                logger.warn("Failed to publish backend profile (may already exist)", {
+                logger.warn("Failed to publish backend profile (relay timeout or error)", {
                     error: publishError,
                     pubkey: signer.pubkey.substring(0, 8),
                 });

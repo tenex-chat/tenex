@@ -89,15 +89,19 @@ export class Daemon {
 
         try {
             // 1. Initialize base directories
+            logger.debug("Initializing base directories");
             await this.initializeDirectories();
 
             // 2. Acquire lockfile to prevent multiple daemon instances
+            logger.debug("Acquiring daemon lock");
             await this.acquireDaemonLock();
 
             // 3. Initialize routing logger
+            logger.debug("Initializing routing logger");
             this.routingLogger.initialize(this.daemonDir);
 
             // 4. Load configuration
+            logger.debug("Loading configuration");
             const { config: loadedConfig } = await config.loadConfig();
             const whitelistedPubkeys = loadedConfig.whitelistedPubkeys;
             if (!whitelistedPubkeys) {
@@ -115,18 +119,22 @@ export class Daemon {
             }
 
             // 5. Initialize NDK
+            logger.debug("Initializing NDK (again)");
             await initNDK();
             this.ndk = getNDK();
 
             // 6. Publish backend profile (kind:0)
+            logger.debug("Publishing backend profile");
             const backendSigner = await config.getBackendSigner();
             const backendName = loadedConfig.backendName || "tenex backend";
             await AgentProfilePublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
 
             // 7. Initialize runtime lifecycle manager
+            logger.debug("Initializing runtime lifecycle manager");
             this.runtimeLifecycle = new RuntimeLifecycle(this.projectsBase);
 
             // 8. Initialize subscription manager (before discovery)
+            logger.debug("Initializing subscription manager");
             this.subscriptionManager = new SubscriptionManager(
                 this.ndk,
                 this.handleIncomingEvent.bind(this), // Pass event handler
@@ -136,9 +144,12 @@ export class Daemon {
 
             // 9. Start subscription immediately
             // Projects will be discovered naturally as events arrive
+            logger.debug("Starting subscription manager");
             await this.subscriptionManager.start();
+            logger.debug("Subscription manager started");
 
             // 10. Start local streaming socket
+            logger.debug("Starting local streaming socket");
             this.streamTransport = new UnixSocketTransport();
             await this.streamTransport.start();
             streamPublisher.setTransport(this.streamTransport);
