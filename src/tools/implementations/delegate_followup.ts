@@ -2,7 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { getNDK } from "@/nostr";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
-import { truncateConversationId } from "@/utils/delegation-chain";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/utils/event-context";
@@ -116,7 +116,7 @@ async function executeDelegateFollowup(
   return {
     success: true,
     message: "Follow-up sent. The agent will respond when ready.",
-    delegationConversationId: truncateConversationId(delegation_conversation_id),
+    delegationConversationId: shortenConversationId(delegation_conversation_id),
     followupEventId, // Keep full event ID - this is a Nostr event ID, not a conversation ID
   };
 }

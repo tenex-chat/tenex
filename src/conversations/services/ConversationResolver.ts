@@ -1,6 +1,7 @@
 import { ConversationStore } from "../ConversationStore";
 import type { ConversationMetadata } from "../types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
@@ -101,7 +102,7 @@ export class ConversationResolver {
             if (conversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "found_existing",
-                    "conversation.id": conversation.id,
+                    "conversation.id": shortenConversationId(conversation.id),
                     "conversation.message_count": conversation.getAllMessages().length,
                 });
                 return { conversation };
@@ -113,7 +114,7 @@ export class ConversationResolver {
             if (newConversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "created_from_orphan",
-                    "conversation.id": newConversation.id,
+                    "conversation.id": shortenConversationId(newConversation.id),
                     "conversation.message_count": newConversation.getAllMessages().length,
                 });
                 return { conversation: newConversation, isNew: true };
@@ -191,7 +192,7 @@ export class ConversationResolver {
             logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
             activeSpan?.addEvent("conversation.resolved", {
                 "resolution.type": "created_new",
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
             return { conversation, isNew: true };
         }

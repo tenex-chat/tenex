@@ -1,5 +1,6 @@
 import { trace } from "@opentelemetry/api";
 import type { TelemetrySettings } from "ai";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 /**
  * Get trace correlation ID for OpenRouter.
@@ -10,6 +11,14 @@ export function getTraceCorrelationId(): string | undefined {
     if (!span) return undefined;
     const ctx = span.spanContext();
     return `tenex-${ctx.traceId}-${ctx.spanId}`;
+}
+
+/**
+ * @deprecated Use shortenConversationId from @/utils/conversation-id instead.
+ * This function is kept for backward compatibility but will be removed in a future version.
+ */
+export function shortenConversationIdForSpan(conversationId: string): string {
+    return shortenConversationId(conversationId);
 }
 
 /**

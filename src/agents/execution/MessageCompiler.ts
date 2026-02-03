@@ -3,6 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { providerRegistry } from "@/llm/providers";
 import type { ProviderCapabilities } from "@/llm/providers/types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getPubkeyService } from "@/services/PubkeyService";
@@ -104,7 +105,7 @@ export class MessageCompiler {
                 }
 
                 span.setAttribute("agent.slug", context.agent.slug);
-                span.setAttribute("conversation.id", context.conversation.id.substring(0, 12));
+                span.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
                 span.setAttribute("ral.number", context.ralNumber);
                 span.setAttribute("compilation.mode", this.plan.mode);
 
@@ -377,7 +378,7 @@ export class MessageCompiler {
 
         return tracer.startActiveSpan("tenex.message.apply_compression", async (span) => {
             try {
-                span.setAttribute("conversation.id", context.conversation.id.substring(0, 12));
+                span.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
 
                 // Reactive blocking compression - use configured budget or CompressionService default
                 const tokenBudget = compressionConfig.tokenBudget;
