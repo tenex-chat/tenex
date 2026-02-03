@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain, truncateConversationId } from "../delegation-chain";
+import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain } from "../delegation-chain";
+import { shortenConversationId } from "../conversation-id";
 import type { DelegationChainEntry } from "@/conversations/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -47,17 +48,17 @@ vi.mock("@/utils/logger", () => ({
 }));
 
 describe("delegation-chain utilities", () => {
-    describe("truncateConversationId", () => {
+    describe("shortenConversationId", () => {
         it("should truncate to 12 characters", () => {
-            expect(truncateConversationId("4f69d3302cf2abcdef123456")).toBe("4f69d3302cf2");
+            expect(shortenConversationId("4f69d3302cf2abcdef123456")).toBe("4f69d3302cf2");
         });
 
         it("should handle short IDs gracefully", () => {
-            expect(truncateConversationId("abc")).toBe("abc");
+            expect(shortenConversationId("abc")).toBe("abc");
         });
 
         it("should handle exactly 12 characters", () => {
-            expect(truncateConversationId("4f69d3302cf2")).toBe("4f69d3302cf2");
+            expect(shortenConversationId("4f69d3302cf2")).toBe("4f69d3302cf2");
         });
     });
 

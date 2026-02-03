@@ -8,6 +8,7 @@
 import { formatAnyError } from "@/lib/error-formatter";
 import { LLMService } from "@/llm/service";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
 import { RALRegistry, extractPendingDelegations } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
@@ -109,7 +110,7 @@ export function createPrepareStep(
             try {
                 span.setAttribute("ral.number", ralNumber);
                 span.setAttribute("agent.pubkey", context.agent.pubkey.substring(0, 8));
-                span.setAttribute("conversation.id", context.conversationId.substring(0, 12));
+                span.setAttribute("conversation.id", shortenConversationId(context.conversationId));
                 span.setAttribute("step.number", step.stepNumber);
 
                 // Pass steps to LLM service for usage tracking

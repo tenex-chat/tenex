@@ -14,6 +14,7 @@ import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
 import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
@@ -400,7 +401,7 @@ export class EventHandler {
                                 "event.author": event.pubkey.substring(0, 8),
                                 "stop.agent_slug": agent.slug,
                                 "stop.agent_pubkey": agentPubkey.substring(0, 8),
-                                "stop.conversation_id": conversationId.substring(0, 8),
+                                "stop.conversation_id": shortenConversationId(conversationId),
                                 "stop.active_rals": activeRals.length,
                             },
                         },

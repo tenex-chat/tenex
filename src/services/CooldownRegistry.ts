@@ -13,6 +13,7 @@
  */
 
 import { logger } from "@/utils/logger";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { trace } from "@opentelemetry/api";
 
 /** Cooldown duration in milliseconds (15 seconds) */
@@ -110,7 +111,7 @@ export class CooldownRegistry {
 
         trace.getActiveSpan()?.addEvent("cooldown.added", {
             "cooldown.project_id": projectId.substring(0, 12),
-            "cooldown.conversation_id": conversationId.substring(0, 12),
+            "cooldown.conversation_id": shortenConversationId(conversationId),
             "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
             "cooldown.reason": reason ?? "unknown",
             "cooldown.total_count": this.cooldowns.size,
@@ -118,7 +119,7 @@ export class CooldownRegistry {
 
         logger.debug("[CooldownRegistry] Added cooldown entry", {
             projectId: projectId.substring(0, 12),
-            conversationId: conversationId.substring(0, 12),
+            conversationId: shortenConversationId(conversationId),
             agentPubkey: agentPubkey.substring(0, 12),
             reason,
         });
@@ -153,7 +154,7 @@ export class CooldownRegistry {
         // Still in cooldown
         trace.getActiveSpan()?.addEvent("cooldown.check_blocked", {
             "cooldown.project_id": projectId.substring(0, 12),
-            "cooldown.conversation_id": conversationId.substring(0, 12),
+            "cooldown.conversation_id": shortenConversationId(conversationId),
             "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
             "cooldown.elapsed_ms": elapsed,
             "cooldown.remaining_ms": COOLDOWN_DURATION_MS - elapsed,

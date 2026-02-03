@@ -2,6 +2,7 @@ import { trace } from "@opentelemetry/api";
 import { EventEmitter, type DefaultEventMap } from "tseep";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -323,7 +324,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       "ral.id": id,
       "ral.number": ralNumber,
       "agent.pubkey": agentPubkey,
-      "conversation.id": conversationId,
+      "conversation.id": shortenConversationId(conversationId),
     });
 
     // DEBUG: Log RAL creation
@@ -748,7 +749,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       trace.getActiveSpan()?.addEvent("ral.followup_response_appended", {
         "ral.id": ral?.id,
         "ral.number": location.ralNumber,
-        "delegation.completed_conversation_id": completion.delegationConversationId,
+        "delegation.completed_conversation_id": shortenConversationId(completion.delegationConversationId),
         "delegation.transcript_length": existingCompletion.transcript.length,
       });
     } else {
@@ -783,7 +784,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       trace.getActiveSpan()?.addEvent("ral.completion_recorded", {
         "ral.id": ral?.id,
         "ral.number": location.ralNumber,
-        "delegation.completed_conversation_id": completion.delegationConversationId,
+        "delegation.completed_conversation_id": shortenConversationId(completion.delegationConversationId),
         "delegation.remaining_pending": remainingPending,
       });
     }
@@ -1541,7 +1542,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         trace.getActiveSpan()?.addEvent("ral.aborted_by_stop_signal", {
           "ral.number": ralNumber,
           "agent.pubkey": agentPubkey.substring(0, 8),
-          "conversation.id": conversationId.substring(0, 8),
+          "conversation.id": shortenConversationId(conversationId),
         });
       }
     }
@@ -1604,7 +1605,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     }
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
-      "cascade.root_conversation_id": conversationId.substring(0, 12),
+      "cascade.root_conversation_id": shortenConversationId(conversationId),
       "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
       "cascade.pending_delegations": pendingDelegations.length,
       "cascade.reason": reason ?? "unknown",
@@ -1620,7 +1621,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       const descendantProjectId = descendantConversation?.getProjectId() ?? projectId;
 
       logger.info("[RALRegistry] Cascading abort to nested delegation", {
-        parentConversation: conversationId.substring(0, 12),
+        parentConversation: shortenConversationId(conversationId),
         parentAgent: agentPubkey.substring(0, 12),
         childConversation: descendantConvId.substring(0, 12),
         childAgent: descendantAgentPubkey.substring(0, 12),
@@ -1632,7 +1633,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         descendantAgentPubkey,
         descendantConvId,
         descendantProjectId,
-        `cascaded from ${conversationId.substring(0, 12)}`,
+        `cascaded from ${shortenConversationId(conversationId)}`,
         cooldownRegistry
       );
 
@@ -1673,11 +1674,11 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
             transcript: partialTranscript,
             completedAt: Date.now(),
             status: "aborted",
-            abortReason: `cascaded from ${conversationId.substring(0, 12)}`,
+            abortReason: `cascaded from ${shortenConversationId(conversationId)}`,
           });
 
           trace.getActiveSpan()?.addEvent("ral.delegation_marked_aborted", {
-            "delegation.conversation_id": descendantConvId.substring(0, 12),
+            "delegation.conversation_id": shortenConversationId(descendantConvId),
             "delegation.transcript_length": partialTranscript.length,
           });
         }
@@ -1692,7 +1693,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     }
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_completed", {
-      "cascade.root_conversation_id": conversationId.substring(0, 12),
+      "cascade.root_conversation_id": shortenConversationId(conversationId),
       "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
       "cascade.total_aborted": abortedTuples.length,
     });

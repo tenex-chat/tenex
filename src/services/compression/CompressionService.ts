@@ -1,4 +1,5 @@
 import type { LLMService } from "@/llm/service";
+import { shortenConversationId } from "@/utils/conversation-id";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationEntry } from "@/conversations/types";
 import { trace, SpanStatusCode, type Span } from "@opentelemetry/api";
@@ -93,7 +94,7 @@ export class CompressionService {
   ): Promise<void> {
     return tracer.startActiveSpan("compression.perform", async (span) => {
       try {
-        span.setAttribute("conversation.id", conversationId.substring(0, 12));
+        span.setAttribute("conversation.id", shortenConversationId(conversationId));
         span.setAttribute("blocking", blocking);
 
         // Get all entries

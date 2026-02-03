@@ -8,6 +8,7 @@ import {
     type Span,
     type SpanContext,
 } from "@opentelemetry/api";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
@@ -119,7 +120,7 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.tag_count": event.tags.length,
                 "event.has_trace_context": !!traceContextTag,
                 "event.reply_to": replyToEventId || "",
-                "conversation.id": conversationId || "unknown",
+                "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
                 "conversation.is_root": !AgentEventDecoder.getReplyTarget(event),
                 "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,
             },

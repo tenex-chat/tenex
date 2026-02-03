@@ -6,6 +6,7 @@ import { ConversationResolver } from "@/conversations/services/ConversationResol
 import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
 import { formatAnyError } from "@/lib/error-formatter";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config } from "@/services/ConfigService";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -135,10 +136,10 @@ export class AgentDispatchService {
             if (result.conversation) {
                 await ConversationStore.addEvent(result.conversation.id, event);
                 getSafeActiveSpan()?.addEvent("reply.added_to_history", {
-                    "conversation.id": result.conversation.id,
+                    "conversation.id": shortenConversationId(result.conversation.id),
                 });
                 span.addEvent("dispatch.agent_event_added_to_history", {
-                    "conversation.id": result.conversation.id,
+                    "conversation.id": shortenConversationId(result.conversation.id),
                 });
             } else {
                 getSafeActiveSpan()?.addEvent("reply.no_conversation_found", {
@@ -164,7 +165,7 @@ export class AgentDispatchService {
         if (delegationTarget) {
             span.addEvent("dispatch.delegation_completion_routed", {
                 "delegation.agent_slug": delegationTarget.agent.slug,
-                "delegation.conversation_id": delegationTarget.conversationId,
+                "delegation.conversation_id": shortenConversationId(delegationTarget.conversationId),
             });
             await this.handleDelegationResponse(event, delegationTarget, agentExecutor, projectCtx, span);
             return;
@@ -203,17 +204,17 @@ export class AgentDispatchService {
         }
 
         span.setAttributes({
-            "conversation.id": conversation.id,
+            "conversation.id": shortenConversationId(conversation.id),
             "conversation.is_new": isNew,
         });
 
         if (!isNew && event.id && conversation.hasEventId(event.id)) {
             getSafeActiveSpan()?.addEvent("reply.skipped_duplicate_event", {
                 "event.id": event.id,
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
             span.addEvent("dispatch.duplicate_event_skipped", {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
 
             if (!AgentEventDecoder.isAgentInternalMessage(event)) {
@@ -237,10 +238,10 @@ export class AgentDispatchService {
                 });
             });
             getSafeActiveSpan()?.addEvent("reply.initial_metadata_scheduled", {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
             span.addEvent("dispatch.initial_metadata_scheduled", {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
         }
 
@@ -308,11 +309,11 @@ export class AgentDispatchService {
                 }
             );
             getSafeActiveSpan()?.addEvent("reply.summarization_scheduled", {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
                 "debounced": true,
             });
             span.addEvent("dispatch.summarization_scheduled", {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             });
         }
     }
@@ -329,7 +330,7 @@ export class AgentDispatchService {
             {
                 attributes: {
                     "delegation.agent_slug": delegationTarget.agent.slug,
-                    "delegation.conversation_id": delegationTarget.conversationId,
+                    "delegation.conversation_id": shortenConversationId(delegationTarget.conversationId),
                 },
             },
             trace.setSpan(getSafeContext(), parentSpan)
@@ -444,7 +445,7 @@ export class AgentDispatchService {
 
             getSafeActiveSpan()?.addEvent("reply.delegation_routing_to_original", {
                 "delegation.agent_slug": delegationTarget.agent.slug,
-                "delegation.original_conversation_id": delegationTarget.conversationId,
+                "delegation.original_conversation_id": shortenConversationId(delegationTarget.conversationId),
             });
 
             const pendingDelegations = ralRegistry.getConversationPendingDelegations(
@@ -586,7 +587,7 @@ export class AgentDispatchService {
                     attributes: {
                         "agent.slug": targetAgent.slug,
                         "agent.pubkey": targetAgent.pubkey,
-                        "conversation.id": conversationId,
+                        "conversation.id": shortenConversationId(conversationId),
                     },
                 },
                 dispatchContext
@@ -734,7 +735,7 @@ export class AgentDispatchService {
 
             span.addEvent(`dispatch.${eventType}_blocked_cooldown`, {
                 "cooldown.project_id": projectId.substring(0, 12),
-                "cooldown.conversation_id": conversationId.substring(0, 12),
+                "cooldown.conversation_id": shortenConversationId(conversationId),
                 "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
                 "cooldown.agent_slug": agentSlug,
             });

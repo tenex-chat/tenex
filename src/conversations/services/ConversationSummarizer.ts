@@ -2,6 +2,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import { CategoryManager } from "@/conversations/services";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
@@ -26,7 +27,7 @@ export class ConversationSummarizer {
         // This is necessary because summarization runs debounced/async after the main processing span ends
         const span = tracer.startSpan("tenex.summarize", {
             attributes: {
-                "conversation.id": conversation.id,
+                "conversation.id": shortenConversationId(conversation.id),
             },
         }, ROOT_CONTEXT);
 

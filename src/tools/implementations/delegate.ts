@@ -19,7 +19,8 @@ import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
-import { wouldCreateCircularDelegation, truncateConversationId } from "@/utils/delegation-chain";
+import { shortenConversationId } from "@/utils/conversation-id";
+import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
@@ -154,7 +155,7 @@ async function executeDelegate(
     );
   }
 
-  const delegationConversationIds = pendingDelegations.map(d => truncateConversationId(d.delegationConversationId));
+  const delegationConversationIds = pendingDelegations.map(d => shortenConversationId(d.delegationConversationId));
   const delegationConversationIdsFull = pendingDelegations.map(d => d.delegationConversationId);
   const unforcedWarnings = circularWarnings.filter(w => !w.forced);
 
