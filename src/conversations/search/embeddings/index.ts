@@ -14,5 +14,5 @@ export {
 
 export {
     ConversationIndexingJob,
-    conversationIndexingJob,
+    getConversationIndexingJob,
 } from "./ConversationIndexingJob";

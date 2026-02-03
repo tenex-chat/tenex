@@ -298,5 +298,7 @@ export class ConversationIndexingJob {
     }
 }
 
-// Export singleton getter for convenience
-export const conversationIndexingJob = ConversationIndexingJob.getInstance();
+// Export lazy getter to avoid eagerly initializing at module load time
+export function getConversationIndexingJob(): ConversationIndexingJob {
+    return ConversationIndexingJob.getInstance();
+}
