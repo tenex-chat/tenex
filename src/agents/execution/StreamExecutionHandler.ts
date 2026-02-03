@@ -38,6 +38,7 @@ import { setupToolEventHandlers } from "./ToolEventHandlers";
 import type { FullRuntimeContext, RALExecutionContext, StreamExecutionResult } from "./types";
 import { extractLastUserMessage } from "./utils";
 import { CompressionService } from "@/services/compression/CompressionService.js";
+import { getProjectContext } from "@/services/projects";
 
 /**
  * Configuration for stream execution
@@ -55,6 +56,8 @@ export interface StreamExecutionConfig {
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
+    /** Optional: AgentRegistry for compression. Falls back to getProjectContext() if not provided. */
+    agentRegistry?: import("@/agents/AgentRegistry").AgentRegistry;
 }
 
 /**
@@ -475,12 +478,16 @@ export class StreamExecutionHandler {
      * Non-blocking - runs async without blocking the completion flow.
      */
     private triggerProactiveCompression(): void {
-        const { context, llmService } = this.config;
+        const { context, llmService, agentRegistry } = this.config;
 
         try {
+            // Use agentRegistry from config if available, otherwise get from global context
+            const registry = agentRegistry ?? getProjectContext().agentRegistry;
+
             const compressionService = new CompressionService(
                 context.conversationStore,
-                llmService
+                llmService,
+                registry
             );
 
             // Fire and forget - non-blocking
