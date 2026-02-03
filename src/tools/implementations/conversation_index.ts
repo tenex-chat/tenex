@@ -3,7 +3,7 @@ import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
-import { conversationEmbeddingService } from "@/conversations/search/embeddings";
+import { getConversationEmbeddingService } from "@/conversations/search/embeddings";
 import { ConversationStore } from "@/conversations/ConversationStore";
 
 const conversationIndexSchema = z.object({
@@ -48,6 +48,8 @@ async function executeConversationIndex(
         projectId,
         agent: context.agent.name,
     });
+
+    const conversationEmbeddingService = getConversationEmbeddingService();
 
     try {
         switch (action) {

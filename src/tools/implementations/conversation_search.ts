@@ -7,7 +7,7 @@ import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 import {
-    conversationEmbeddingService,
+    getConversationEmbeddingService,
     type SemanticSearchResult,
 } from "@/conversations/search/embeddings";
 
@@ -125,6 +125,7 @@ async function semanticSearch(
     minScore: number,
     projectId?: string
 ): Promise<ConversationSearchResult[]> {
+    const conversationEmbeddingService = getConversationEmbeddingService();
     try {
         const results = await conversationEmbeddingService.semanticSearch(query, {
             limit,
@@ -244,6 +245,7 @@ async function fullTextSearch(
  */
 async function isSemanticSearchAvailable(): Promise<boolean> {
     try {
+        const conversationEmbeddingService = getConversationEmbeddingService();
         return await conversationEmbeddingService.hasIndexedConversations();
     } catch {
         return false;

@@ -6,7 +6,7 @@
 
 export {
     ConversationEmbeddingService,
-    conversationEmbeddingService,
+    getConversationEmbeddingService,
     type ConversationEmbeddingDocument,
     type SemanticSearchResult,
     type SemanticSearchOptions,

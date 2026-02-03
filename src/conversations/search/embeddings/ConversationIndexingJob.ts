@@ -19,7 +19,7 @@
 import { logger } from "@/utils/logger";
 import { getTenexBasePath } from "@/constants";
 import { join } from "path";
-import { conversationEmbeddingService } from "./ConversationEmbeddingService";
+import { getConversationEmbeddingService } from "./ConversationEmbeddingService";
 import { IndexingStateManager } from "./IndexingStateManager";
 import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
 
@@ -129,6 +129,8 @@ export class ConversationIndexingJob {
         this.isBatchRunning = true;
         logger.debug("Running conversation indexing batch");
 
+        const conversationEmbeddingService = getConversationEmbeddingService();
+
         try {
             // Ensure the embedding service is initialized
             await conversationEmbeddingService.initialize();
@@ -181,6 +183,8 @@ export class ConversationIndexingJob {
         skipped: number;
         failed: number;
     }> {
+        const conversationEmbeddingService = getConversationEmbeddingService();
+
         let indexed = 0;
         let checked = 0;
         let skipped = 0;

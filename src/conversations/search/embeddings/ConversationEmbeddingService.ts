@@ -421,5 +421,7 @@ export class ConversationEmbeddingService {
     }
 }
 
-// Export singleton for convenience
-export const conversationEmbeddingService = ConversationEmbeddingService.getInstance();
+// Export lazy getter to avoid eagerly initializing at module load time
+export function getConversationEmbeddingService(): ConversationEmbeddingService {
+    return ConversationEmbeddingService.getInstance();
+}
