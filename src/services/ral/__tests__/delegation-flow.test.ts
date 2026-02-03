@@ -353,6 +353,97 @@ describe("RAL Delegation Flow", () => {
             expect(completed).toHaveLength(0);
         });
 
+        it("should ignore completion for killed delegations", async () => {
+            // Setup: Create RAL with pending delegation
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
+                {
+                    type: "delegate",
+                    delegationConversationId: "killed-delegation-id",
+                    recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
+                    prompt: "Task that will be killed",
+                    ralNumber,
+                },
+            ]);
+
+            // Verify delegation is pending
+            expect(registry.getConversationPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber)).toHaveLength(1);
+            expect(registry.isDelegationKilled("killed-delegation-id")).toBe(false);
+
+            // Kill the delegation (simulates what happens when kill tool is called)
+            const wasKilled = registry.markDelegationKilled("killed-delegation-id");
+            expect(wasKilled).toBe(true);
+            expect(registry.isDelegationKilled("killed-delegation-id")).toBe(true);
+
+            // Create completion event from the delegated agent
+            const completionEvent = {
+                id: "late-completion-event",
+                pubkey: mockAgent2.pubkey,
+                kind: 1,
+                content: "I finished the task!",
+                tags: [
+                    ["e", "killed-delegation-id"],
+                    ["p", mockAgent.pubkey],
+                ],
+                getMatchingTags: (tag: string) => {
+                    if (tag === "e") return [["e", "killed-delegation-id"]];
+                    if (tag === "p") return [["p", mockAgent.pubkey]];
+                    return [];
+                },
+                tagValue: (tag: string) => {
+                    if (tag === "e") return "killed-delegation-id";
+                    return undefined;
+                },
+            } as unknown as NDKEvent;
+
+            // Attempt to record completion - should be ignored
+            const result = await handleDelegationCompletion(completionEvent);
+
+            // Verify completion was NOT recorded
+            expect(result.recorded).toBe(false);
+
+            // Verify delegation is still pending (not moved to completed)
+            const pending = registry.getConversationPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
+            const completed = registry.getConversationCompletedDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber);
+            expect(pending).toHaveLength(1); // Still pending
+            expect(completed).toHaveLength(0); // Not completed
+        });
+
+        it("should preserve original kill time on idempotent kill calls", () => {
+            // Setup: Create RAL with pending delegation
+            const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);
+            registry.setPendingDelegations(mockAgent.pubkey, CONVERSATION_ID, ralNumber, [
+                {
+                    type: "delegate",
+                    delegationConversationId: "idempotent-kill-test",
+                    recipientPubkey: mockAgent2.pubkey,
+                    senderPubkey: mockAgent.pubkey,
+                    prompt: "Task",
+                    ralNumber,
+                },
+            ]);
+
+            // First kill
+            const firstKillTime = Date.now();
+            const firstKill = registry.markDelegationKilled("idempotent-kill-test");
+            expect(firstKill).toBe(true);
+
+            // Get the kill time
+            const delegation = registry.findDelegation("idempotent-kill-test");
+            const originalKilledAt = delegation?.pending?.killedAt;
+            expect(originalKilledAt).toBeDefined();
+            expect(originalKilledAt).toBeGreaterThanOrEqual(firstKillTime);
+
+            // Wait a bit and try to kill again
+            const secondKill = registry.markDelegationKilled("idempotent-kill-test");
+            expect(secondKill).toBe(true); // Still returns true (delegation is killed)
+
+            // Verify original kill time is preserved
+            const delegationAfter = registry.findDelegation("idempotent-kill-test");
+            expect(delegationAfter?.pending?.killedAt).toBe(originalKilledAt);
+        });
+
         it("should record each completion independently (routing via p-tags)", async () => {
             // Setup: Create RAL with multiple pending delegations
             const ralNumber = registry.create(mockAgent.pubkey, CONVERSATION_ID, PROJECT_ID);

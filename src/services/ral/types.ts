@@ -41,6 +41,15 @@ interface BasePendingDelegation {
   prompt: string;
   /** Which RAL created this delegation (for provenance tracking) */
   ralNumber: number;
+  /**
+   * If true, this delegation has been killed via the kill tool.
+   * Completion events for killed delegations should be ignored.
+   * This prevents the race condition where a delegation completes
+   * after being killed but before the abort fully propagates.
+   */
+  killed?: boolean;
+  /** Timestamp when delegation was killed (for debugging) */
+  killedAt?: number;
 }
 
 interface StandardDelegation extends BasePendingDelegation {
