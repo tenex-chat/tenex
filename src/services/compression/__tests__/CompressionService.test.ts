@@ -5,7 +5,6 @@ import type { LLMService } from "@/llm/service";
 import type { ConversationEntry } from "@/conversations/types";
 import type { CompressionSegment } from "../compression-types";
 import { config } from "@/services/ConfigService";
-import type { AgentRegistry } from "@/agents/AgentRegistry";
 
 // Mock implementations
 const createMockConversationStore = (): ConversationStore => {
@@ -28,20 +27,6 @@ const createMockLLMService = (): LLMService => {
   return mockService as unknown as LLMService;
 };
 
-const createMockAgentRegistry = (): AgentRegistry => {
-  const mockRegistry = {
-    getAgentByPubkey: mock((pubkey: string) => {
-      if (pubkey === "system") return undefined;
-      // Return a mock agent with slug based on pubkey
-      return {
-        slug: pubkey === "user" ? "user-agent" : "assistant-agent",
-        pubkey,
-      };
-    }),
-  };
-  return mockRegistry as unknown as AgentRegistry;
-};
-
 const createEntries = (count: number, withEventIds = true): ConversationEntry[] => {
   return Array.from({ length: count }, (_, i) => ({
     pubkey: i % 2 === 0 ? "user" : "assistant",
@@ -55,7 +40,6 @@ const createEntries = (count: number, withEventIds = true): ConversationEntry[] 
 describe("CompressionService", () => {
   let conversationStore: ConversationStore;
   let llmService: LLMService;
-  let agentRegistry: AgentRegistry;
   let service: CompressionService;
   let originalGetConfig: typeof config.getConfig;
 
@@ -73,8 +57,7 @@ describe("CompressionService", () => {
 
     conversationStore = createMockConversationStore();
     llmService = createMockLLMService();
-    agentRegistry = createMockAgentRegistry();
-    service = new CompressionService(conversationStore, llmService, agentRegistry);
+    service = new CompressionService(conversationStore, llmService);
   });
 
   afterEach(() => {
@@ -263,8 +246,7 @@ describe("CompressionService - fallback utility integration", () => {
   it("should use createFallbackSegmentForEntries utility correctly", async () => {
     const conversationStore = createMockConversationStore();
     const llmService = createMockLLMService();
-    const agentRegistry = createMockAgentRegistry();
-    const service = new CompressionService(conversationStore, llmService, agentRegistry);
+    const service = new CompressionService(conversationStore, llmService);
 
     // Setup: 60 entries (will trigger fallback)
     const entries = createEntries(60);

@@ -12,7 +12,6 @@ import { AgentMetadataStore } from "@/services/agents";
 import { CompressionService } from "../CompressionService";
 import type { LLMService } from "@/llm/service";
 import { config } from "@/services/ConfigService";
-import type { AgentRegistry } from "@/agents/AgentRegistry";
 
 // Mock LLMService for testing
 class MockLLMService {
@@ -38,17 +37,6 @@ class MockLLMService {
 
     getModelContextWindow(): number | undefined {
         return 200000;
-    }
-}
-
-// Mock AgentRegistry for testing
-class MockAgentRegistry {
-    getAgentByPubkey(pubkey: string) {
-        if (pubkey === "system") return undefined;
-        return {
-            slug: pubkey === "agent-pubkey" ? "test-agent" : "user",
-            pubkey,
-        };
     }
 }
 
@@ -81,8 +69,7 @@ describe("Compression Integration", () => {
         conversationStore.load(projectId, conversationId);
 
         const mockLLMService = new MockLLMService() as unknown as LLMService;
-        const mockAgentRegistry = new MockAgentRegistry() as unknown as AgentRegistry;
-        compressionService = new CompressionService(conversationStore, mockLLMService, mockAgentRegistry);
+        compressionService = new CompressionService(conversationStore, mockLLMService);
     });
 
     afterAll(() => {
