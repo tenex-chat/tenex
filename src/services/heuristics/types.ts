@@ -130,9 +130,6 @@ export interface HeuristicEngineConfig {
 
   /** Enable debug logging */
   debug?: boolean;
-
-  /** Enable telemetry spans */
-  telemetry?: boolean;
 }
 
 /**

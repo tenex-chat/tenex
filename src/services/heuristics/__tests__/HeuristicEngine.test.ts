@@ -340,7 +340,6 @@ describe("HeuristicEngine", () => {
       expect(info.heuristics[0].id).toBe("test");
       expect(info.config.maxWarningsPerStep).toBe(5);
       expect(info.config.debug).toBe(true);
-      expect(info.config.telemetry).toBe(true);
     });
   });
 });

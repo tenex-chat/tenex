@@ -49,7 +49,6 @@ initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName, teleme
 // Initialize heuristics system with default rules
 import { getHeuristicEngine, getDefaultHeuristics } from "@/services/heuristics";
 const heuristicEngine = getHeuristicEngine({
-    telemetry: telemetryConfig.enabled,
     debug: process.env.DEBUG_HEURISTICS === "true",
 });
 for (const heuristic of getDefaultHeuristics()) {

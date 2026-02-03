@@ -8,6 +8,5 @@
 
 export { HeuristicEngine, getHeuristicEngine, resetHeuristicEngine } from "./HeuristicEngine";
 export { formatViolation, formatViolations, formatViolationForLog } from "./formatters";
-export { heuristicsTracer, HeuristicSpanProcessor } from "./HeuristicsTelemetry";
 export * from "./types";
 export * from "./rules";
