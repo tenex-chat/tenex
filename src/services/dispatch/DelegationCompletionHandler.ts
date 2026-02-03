@@ -65,8 +65,7 @@ export async function handleDelegationCompletion(
                 "etag.index": i,
             });
 
-            // CRITICAL: Look up the pending delegation to get context
-            // We need this to perform BOTH validation checks
+            // Look up the pending delegation to get context for validation
             const pendingInfo = ralRegistry.findDelegation(eTag);
 
             if (!pendingInfo?.pending) {
@@ -77,28 +76,7 @@ export async function handleDelegationCompletion(
                 continue;
             }
 
-            // CRITICAL CHECK #1: Skip if this is the agent's own message
-            // When an agent sends a message (e.g., planning-coordinator publishing delegation status),
-            // that message might e-tag a delegation conversation where the agent is the RECIPIENT.
-            // pendingInfo.agentPubkey is the agent WAITING for the delegation (the coordinator).
-            // event.pubkey is the sender of this message.
-            // If they're the same, this is the coordinator's own status message, not a completion.
-            if (pendingInfo.agentPubkey === event.pubkey) {
-                span.addEvent("completion_self_message_skipped", {
-                    "delegation.event_id": eTag,
-                    "waiting_agent.pubkey": pendingInfo.agentPubkey.substring(0, 12),
-                    "event.sender_pubkey": event.pubkey.substring(0, 12),
-                    "reason": "agent's own message, not completing delegation",
-                });
-                logger.debug("[handleDelegationCompletion] Skipping self-message", {
-                    delegationEventId: eTag.substring(0, 8),
-                    agentPubkey: pendingInfo.agentPubkey.substring(0, 12),
-                    eventSenderPubkey: event.pubkey.substring(0, 12),
-                });
-                continue;
-            }
-
-            // CRITICAL CHECK #2: Validate that the event author is the delegated agent
+            // Validate that the event author is the delegated agent
             // This prevents OTHER agents from falsely completing delegations
             if (event.pubkey !== pendingInfo.pending.recipientPubkey) {
                 span.addEvent("completion_sender_mismatch", {
