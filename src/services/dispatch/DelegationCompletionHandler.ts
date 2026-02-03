@@ -100,6 +100,23 @@ export async function handleDelegationCompletion(
                 "validation.matched": true,
             });
 
+            // DEFENSE-IN-DEPTH: Early exit for killed delegations.
+            // The authoritative check is in RALRegistry.recordCompletion(), but we check
+            // here too using the isDelegationKilled() helper to avoid unnecessary work
+            // (e.g., loading conversation transcripts for delegations we'll reject anyway).
+            if (ralRegistry.isDelegationKilled(eTag)) {
+                span.addEvent("completion_skipped_delegation_killed", {
+                    "delegation.event_id": eTag,
+                    "delegation.killed_at": pendingInfo.pending.killedAt,
+                });
+                logger.info("[handleDelegationCompletion] Ignoring completion - delegation was killed", {
+                    delegationEventId: eTag.substring(0, 8),
+                    killedAt: pendingInfo.pending.killedAt,
+                    completionEventId: event.id?.substring(0, 8),
+                });
+                continue; // Skip to next e-tag - this delegation was killed
+            }
+
             // Attempt to build a real transcript from the conversation history
             // This captures user interventions and multi-turn exchanges
             let fullTranscript: DelegationMessage[] | undefined;

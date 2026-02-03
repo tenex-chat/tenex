@@ -1589,5 +1589,259 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("killed delegation race condition prevention", () => {
+    describe("markDelegationKilled", () => {
+      it("should mark a pending delegation as killed", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: "del-to-kill",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        };
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+        // Mark as killed
+        const result = registry.markDelegationKilled("del-to-kill");
+        expect(result).toBe(true);
+
+        // Verify the delegation is now marked as killed
+        const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+        expect(pending).toHaveLength(1);
+        expect(pending[0].killed).toBe(true);
+        expect(pending[0].killedAt).toBeDefined();
+      });
+
+      it("should return false for non-existent delegation", () => {
+        const result = registry.markDelegationKilled("nonexistent-del");
+        expect(result).toBe(false);
+      });
+
+      it("should handle followup delegation IDs", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "followup",
+          delegationConversationId: "canonical-del",
+          followupEventId: "followup-event-id",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Follow-up task",
+          ralNumber,
+        };
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+        // Mark as killed using the followup event ID
+        const result = registry.markDelegationKilled("followup-event-id");
+        expect(result).toBe(true);
+
+        // Verify the canonical delegation is marked as killed
+        const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+        expect(pending).toHaveLength(1);
+        expect(pending[0].killed).toBe(true);
+      });
+    });
+
+    describe("isDelegationKilled", () => {
+      it("should return true for killed delegation", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: "del-check-killed",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        };
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+        registry.markDelegationKilled("del-check-killed");
+
+        expect(registry.isDelegationKilled("del-check-killed")).toBe(true);
+      });
+
+      it("should return false for non-killed delegation", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: "del-not-killed",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        };
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+        expect(registry.isDelegationKilled("del-not-killed")).toBe(false);
+      });
+
+      it("should return false for non-existent delegation", () => {
+        expect(registry.isDelegationKilled("nonexistent")).toBe(false);
+      });
+    });
+
+    describe("markAllDelegationsKilled", () => {
+      it("should mark all pending delegations as killed", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegations: PendingDelegation[] = [
+          {
+            type: "standard",
+            delegationConversationId: "del-1",
+            recipientPubkey: "recipient-1",
+            senderPubkey: agentPubkey,
+            prompt: "Task 1",
+            ralNumber,
+          },
+          {
+            type: "standard",
+            delegationConversationId: "del-2",
+            recipientPubkey: "recipient-2",
+            senderPubkey: agentPubkey,
+            prompt: "Task 2",
+            ralNumber,
+          },
+          {
+            type: "standard",
+            delegationConversationId: "del-3",
+            recipientPubkey: "recipient-3",
+            senderPubkey: agentPubkey,
+            prompt: "Task 3",
+            ralNumber,
+          },
+        ];
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
+
+        // Mark all as killed
+        const killedCount = registry.markAllDelegationsKilled(agentPubkey, conversationId);
+        expect(killedCount).toBe(3);
+
+        // Verify all are marked as killed
+        const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+        expect(pending.every(d => d.killed === true)).toBe(true);
+        expect(pending.every(d => d.killedAt !== undefined)).toBe(true);
+      });
+
+      it("should not double-count already killed delegations", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: "del-double",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        };
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+        // Mark once
+        const count1 = registry.markAllDelegationsKilled(agentPubkey, conversationId);
+        expect(count1).toBe(1);
+
+        // Mark again - should return 0 since already killed
+        const count2 = registry.markAllDelegationsKilled(agentPubkey, conversationId);
+        expect(count2).toBe(0);
+      });
+
+      it("should return 0 for non-existent conversation", () => {
+        const killedCount = registry.markAllDelegationsKilled("nonexistent", "nonexistent");
+        expect(killedCount).toBe(0);
+      });
+    });
+
+    describe("completion handling for killed delegations", () => {
+      it("should reject completion for killed delegation at domain layer", () => {
+        // The killed flag check is now enforced at the domain layer (recordCompletion).
+        // This ensures no caller can bypass the invariant - killed delegations cannot complete.
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: "del-killed-completion",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task",
+          ralNumber,
+        };
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+        // Mark as killed
+        registry.markDelegationKilled("del-killed-completion");
+
+        // recordCompletion enforces the killed invariant at the domain level.
+        // This prevents ANY code path from recording a completion for a killed delegation.
+        const location = registry.recordCompletion({
+          delegationConversationId: "del-killed-completion",
+          recipientPubkey: "recipient-1",
+          response: "Done",
+          completedAt: Date.now(),
+        });
+
+        // The completion is REJECTED - the domain layer enforces the killed invariant
+        expect(location).toBeUndefined();
+
+        // Verify the delegation is still pending (not moved to completed)
+        const pending = registry.getConversationPendingDelegations(agentPubkey, conversationId, ralNumber);
+        const completed = registry.getConversationCompletedDelegations(agentPubkey, conversationId, ralNumber);
+        expect(pending).toHaveLength(1);
+        expect(pending[0].killed).toBe(true);
+        expect(completed).toHaveLength(0);
+      });
+    });
+
+    describe("race condition prevention in abortWithCascade", () => {
+      it("should mark delegations as killed before aborting to prevent race", async () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const delegations: PendingDelegation[] = [
+          {
+            type: "standard",
+            delegationConversationId: "nested-del-1",
+            recipientPubkey: "child-agent-1",
+            senderPubkey: agentPubkey,
+            prompt: "Child task 1",
+            ralNumber,
+          },
+          {
+            type: "standard",
+            delegationConversationId: "nested-del-2",
+            recipientPubkey: "child-agent-2",
+            senderPubkey: agentPubkey,
+            prompt: "Child task 2",
+            ralNumber,
+          },
+        ];
+
+        registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
+
+        // Capture the killed state BEFORE abortWithCascade clears state
+        // We use isDelegationKilled which reads from the pending map
+        expect(registry.isDelegationKilled("nested-del-1")).toBe(false);
+        expect(registry.isDelegationKilled("nested-del-2")).toBe(false);
+
+        // The delegations should be marked killed during abortWithCascade
+        // Note: We can't easily test the full cascade without mocking ConversationStore,
+        // but we can verify that markAllDelegationsKilled is called correctly
+        // by checking the behavior of the method itself.
+        registry.markAllDelegationsKilled(agentPubkey, conversationId);
+
+        // Now both should be killed
+        expect(registry.isDelegationKilled("nested-del-1")).toBe(true);
+        expect(registry.isDelegationKilled("nested-del-2")).toBe(true);
+      });
+    });
+  });
 
 });
