@@ -99,6 +99,8 @@ export interface PostCompletionContext {
     hasBeenNudgedAboutTodos: boolean;
     /** The agent's todo items (for detailed inspection by heuristics) */
     todos: Array<{ id: string; title: string; status: TodoStatus; description?: string }>;
+    /** Number of pending delegations the agent is waiting for (0 if none) */
+    pendingDelegationCount: number;
 }
 
 /**

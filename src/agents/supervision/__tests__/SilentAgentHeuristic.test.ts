@@ -17,6 +17,7 @@ describe("SilentAgentHeuristic", () => {
         availableTools: {},
         hasBeenNudgedAboutTodos: false,
         todos: [],
+        pendingDelegationCount: 0,
         ...overrides,
     });
 

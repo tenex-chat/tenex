@@ -22,6 +22,7 @@ describe("DelegationClaimHeuristic", () => {
         availableTools: {},
         hasBeenNudgedAboutTodos: false,
         todos: [],
+        pendingDelegationCount: 0,
         ...overrides,
     });
 

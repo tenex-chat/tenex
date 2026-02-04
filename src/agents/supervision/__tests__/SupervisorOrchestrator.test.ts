@@ -49,6 +49,7 @@ describe("SupervisorOrchestrator", () => {
         availableTools: {},
         hasBeenNudgedAboutTodos: false,
         todos: [],
+        pendingDelegationCount: 0,
         ...overrides,
     });
 
