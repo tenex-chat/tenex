@@ -28,6 +28,15 @@ export class PendingTodosHeuristic implements Heuristic<PostCompletionContext> {
             return { triggered: false };
         }
 
+        // Skip if agent has pending delegations - they're legitimately waiting for delegated work
+        // to complete. Nagging about incomplete todos while waiting on delegations is confusing.
+        if (context.pendingDelegationCount > 0) {
+            return {
+                triggered: false,
+                reason: `Agent has ${context.pendingDelegationCount} pending delegation(s) - skipping todo check`,
+            };
+        }
+
         // Find todos that are incomplete (pending or in_progress)
         const incompleteTodos = context.todos.filter(
             (t) => t.status === "pending" || t.status === "in_progress"

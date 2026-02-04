@@ -129,6 +129,16 @@ export async function checkPostCompletion(
         ? conversationStore.hasBeenNudgedAboutTodos(agent.pubkey)
         : false;
 
+    // Get pending delegation count from RALRegistry (conversation-wide, not RAL-scoped)
+    // We check ALL pending delegations for this conversation because a delegation from
+    // an earlier RAL that hasn't completed yet should still suppress the pending-todos heuristic
+    const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+        agent.pubkey,
+        context.conversationId
+        // Note: ralNumber is intentionally omitted to get conversation-wide scope
+    );
+    const pendingDelegationCount = pendingDelegations.length;
+
     const supervisionContext: PostCompletionContext = {
         agentSlug: agent.slug,
         agentPubkey: agent.pubkey,
@@ -144,6 +154,7 @@ export async function checkPostCompletion(
             status: t.status,
             description: t.description,
         })),
+        pendingDelegationCount,
     };
 
     const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext, executionId);

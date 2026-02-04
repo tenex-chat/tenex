@@ -21,6 +21,7 @@ describe("PendingTodosHeuristic", () => {
         availableTools: {},
         hasBeenNudgedAboutTodos: false,
         todos: [],
+        pendingDelegationCount: 0,
         ...overrides,
     });
 
@@ -92,6 +93,50 @@ describe("PendingTodosHeuristic", () => {
                     { id: "2", title: "Task 2", status: "pending" },
                 ],
             });
+        });
+
+        it("should NOT trigger when agent has pending delegations (even with incomplete todos)", async () => {
+            const context = createContext({
+                todos: [
+                    { id: "1", title: "Task 1", status: "done" },
+                    { id: "2", title: "Task 2", status: "pending" },
+                    { id: "3", title: "Task 3", status: "in_progress" },
+                ],
+                pendingDelegationCount: 1,
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(false);
+            expect(result.reason).toContain("pending delegation");
+        });
+
+        it("should NOT trigger when agent has multiple pending delegations", async () => {
+            const context = createContext({
+                todos: [
+                    { id: "1", title: "Task 1", status: "pending" },
+                ],
+                pendingDelegationCount: 3,
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(false);
+            expect(result.reason).toContain("3 pending delegation(s)");
+        });
+
+        it("should trigger when delegations are complete (pendingDelegationCount = 0) and todos remain", async () => {
+            const context = createContext({
+                todos: [
+                    { id: "1", title: "Task 1", status: "pending" },
+                ],
+                pendingDelegationCount: 0,
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(true);
+            expect(result.reason).toContain("1 incomplete todo");
         });
 
         it("should trigger when agent has in_progress todos", async () => {
