@@ -20,7 +20,9 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
+import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { trace } from "@opentelemetry/api";
 
 export interface PostCompletionCheckResult {
@@ -138,6 +140,32 @@ export async function checkPostCompletion(
         // Note: ralNumber is intentionally omitted to get conversation-wide scope
     );
     const pendingDelegationCount = pendingDelegations.length;
+
+    // Emit telemetry only when pending delegations exist (avoids noisy zero-count events)
+    if (pendingDelegationCount > 0) {
+        // Cap delegation IDs to first 5 to prevent unbounded output
+        const maxDelegationsToLog = 5;
+        const delegationIds = pendingDelegations
+            .slice(0, maxDelegationsToLog)
+            .map(d => d.delegationConversationId.substring(0, PREFIX_LENGTH));
+        const truncatedIndicator = pendingDelegationCount > maxDelegationsToLog
+            ? ` (+${pendingDelegationCount - maxDelegationsToLog} more)`
+            : "";
+
+        logger.debug("[PostCompletionChecker] Pending delegations detected; pending-todos heuristic may be suppressed", {
+            agent: agent.slug,
+            pendingDelegationCount,
+            delegationIds: `[${delegationIds.join(", ")}]${truncatedIndicator}`,
+        });
+
+        trace.getActiveSpan()?.addEvent("executor.supervision_pending_delegations", {
+            "agent.slug": agent.slug,
+            "agent.pubkey": agent.pubkey.substring(0, PREFIX_LENGTH),
+            "conversation.id": shortenConversationId(context.conversationId),
+            "ral.number": ralNumber,
+            "delegation.pending_count": pendingDelegationCount,
+        });
+    }
 
     const supervisionContext: PostCompletionContext = {
         agentSlug: agent.slug,
