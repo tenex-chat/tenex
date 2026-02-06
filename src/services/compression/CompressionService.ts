@@ -36,10 +36,16 @@ const tracer = trace.getTracer("tenex.compression");
  * - Recommended: Use OpenAI, Anthropic, or other providers with native JSON support
  */
 export class CompressionService {
+  private effectiveLlmService: LLMService;
+
   constructor(
     private conversationStore: ConversationStore,
-    private llmService: LLMService
-  ) {}
+    llmService: LLMService,
+    compressionLlmService?: LLMService
+  ) {
+    // Use dedicated compression LLM if provided, otherwise fall back to agent's LLM
+    this.effectiveLlmService = compressionLlmService ?? llmService;
+  }
 
   /**
    * Non-blocking proactive compression.
@@ -159,7 +165,7 @@ export class CompressionService {
           // Emit telemetry for successful summary generation
           span.addEvent("compression.summary_generated", {
             "segments.count": newSegments.length,
-            "model": this.llmService.model,
+            "model": this.effectiveLlmService.model,
           });
 
           // Validate segments
@@ -310,7 +316,7 @@ export class CompressionService {
           }
 
           // Call LLM to compress
-          const result = await this.llmService.generateObject(
+          const result = await this.effectiveLlmService.generateObject(
             [
               {
                 role: "user",
@@ -339,7 +345,7 @@ Create segments that group related topics together. Preserve important decisions
               toEventId: seg.toEventId,
               compressed: seg.compressed,
               createdAt: Date.now(),
-              model: this.llmService.model,
+              model: this.effectiveLlmService.model,
             })
           );
 
@@ -423,10 +429,14 @@ Create segments that group related topics together. Preserve important decisions
 
 /**
  * Factory method to create CompressionService.
+ * @param conversationStore - The conversation store instance
+ * @param llmService - The agent's default LLM service (fallback)
+ * @param compressionLlmService - Optional dedicated LLM service for compression operations
  */
 export function createCompressionService(
   conversationStore: ConversationStore,
-  llmService: LLMService
+  llmService: LLMService,
+  compressionLlmService?: LLMService
 ): CompressionService {
-  return new CompressionService(conversationStore, llmService);
+  return new CompressionService(conversationStore, llmService, compressionLlmService);
 }

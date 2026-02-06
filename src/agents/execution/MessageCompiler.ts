@@ -87,7 +87,8 @@ export class MessageCompiler {
         private providerId: string,
         private sessionManager: SessionManager,
         private conversationStore: ConversationStore,
-        private llmService?: LLMService
+        private llmService?: LLMService,
+        private compressionLlmService?: LLMService
     ) {
         this.plan = this.buildPlan();
         this.currentCursor = this.plan.cursor ?? -1;
@@ -344,7 +345,8 @@ export class MessageCompiler {
 
         const compressionService = createCompressionService(
             this.conversationStore,
-            this.llmService!
+            this.llmService!,
+            this.compressionLlmService
         );
 
         // Get compression config with proper defaults (enabled: true by default)

@@ -55,6 +55,8 @@ export interface StreamExecutionConfig {
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
+    /** Optional dedicated LLM service for compression operations */
+    compressionLlmService?: LLMService;
 }
 
 /**
@@ -475,12 +477,13 @@ export class StreamExecutionHandler {
      * Non-blocking - runs async without blocking the completion flow.
      */
     private triggerProactiveCompression(): void {
-        const { context, llmService } = this.config;
+        const { context, llmService, compressionLlmService } = this.config;
 
         try {
             const compressionService = new CompressionService(
                 context.conversationStore,
-                llmService
+                llmService,
+                compressionLlmService
             );
 
             // Fire and forget - non-blocking
