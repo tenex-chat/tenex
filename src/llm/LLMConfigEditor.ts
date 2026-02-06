@@ -59,6 +59,10 @@ export class LLMConfigEditor {
                         name: `Prompt compilation model: ${llmsConfig.promptCompilation || "none"}`,
                         value: "promptCompilation",
                     },
+                    {
+                        name: `Compression model: ${llmsConfig.compression || "none"}`,
+                        value: "compression",
+                    },
                     { name: "Test configuration", value: "test" },
                     { name: "Exit", value: "exit" },
                 ],
@@ -82,6 +86,7 @@ export class LLMConfigEditor {
             if (action === "supervision") await ConfigurationManager.setSupervisionModel(llmsConfig);
             if (action === "search") await ConfigurationManager.setSearchModel(llmsConfig);
             if (action === "promptCompilation") await ConfigurationManager.setPromptCompilationModel(llmsConfig);
+            if (action === "compression") await ConfigurationManager.setCompressionModel(llmsConfig);
             await this.saveConfig(llmsConfig);
         }
 
