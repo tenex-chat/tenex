@@ -195,6 +195,7 @@ export interface TenexLLMs {
     supervision?: string; // Named config to use for agent supervision
     search?: string; // Named config to use for search operations
     promptCompilation?: string; // Named config to use for prompt compilation (compiling lessons into system prompts)
+    compression?: string; // Named config to use for conversation history compression
 }
 
 /**
@@ -247,6 +248,7 @@ export const TenexLLMsSchema = z.object({
     supervision: z.string().optional(),
     search: z.string().optional(),
     promptCompilation: z.string().optional(),
+    compression: z.string().optional(),
 });
 
 // =====================================================================================

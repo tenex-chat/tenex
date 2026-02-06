@@ -17,6 +17,7 @@ import { logger } from "@/utils/logger";
 import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
+import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MessageCompiler } from "./MessageCompiler";
 import { SessionManager } from "./SessionManager";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -42,6 +43,8 @@ export interface StreamSetupResult {
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
+    /** Optional dedicated LLM service for compression operations */
+    compressionLlmService?: LLMService;
 }
 
 /**
@@ -198,11 +201,23 @@ export async function setupStreamExecution(
         },
     });
 
+    // Resolve optional dedicated compression LLM service
+    let compressionLlmService: LLMService | undefined;
+    const { llms } = await configService.loadConfig();
+    if (llms.compression) {
+        const compressionConfig = configService.getLLMConfig(llms.compression);
+        compressionLlmService = llmServiceFactory.createService(compressionConfig, {
+            agentName: `${context.agent.slug}-compression`,
+            sessionId: `compression-${context.conversationId.substring(0, 8)}`,
+        });
+    }
+
     const messageCompiler = new MessageCompiler(
         llmService.provider,
         sessionManager,
         conversationStore,
-        llmService
+        llmService,
+        compressionLlmService
     );
 
     const pendingDelegations = ralRegistry.getConversationPendingDelegations(
@@ -259,5 +274,6 @@ export async function setupStreamExecution(
         abortSignal,
         metaModelSystemPrompt,
         variantSystemPrompt,
+        compressionLlmService,
     };
 }
