@@ -547,6 +547,31 @@ export class ConfigurationManager {
         console.log(chalk.gray("   This model is used to compile lessons into agent system prompts."));
     }
 
+    static async setCompressionModel(llmsConfig: TenexLLMsWithProviders): Promise<void> {
+        const configNames = Object.keys(llmsConfig.configurations);
+
+        if (configNames.length === 0) {
+            console.log(chalk.yellow("⚠️  No configurations available"));
+            return;
+        }
+
+        const { name } = await inquirer.prompt([
+            {
+                type: "list",
+                name: "name",
+                message: "Select compression model:",
+                choices: configNames.map((n) => ({
+                    name: n === llmsConfig.compression ? `${n} (current)` : n,
+                    value: n,
+                })),
+            },
+        ]);
+
+        llmsConfig.compression = name;
+        console.log(chalk.green(`✅ Compression model set to "${name}"`));
+        console.log(chalk.gray("   This model is used for conversation history compression."));
+    }
+
     /**
      * Select a Codex model and reasoning effort interactively
      */
