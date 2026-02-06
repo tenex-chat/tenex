@@ -14,11 +14,6 @@ commands/
 │   ├── remove.ts
 │   └── configure.ts
 │
-├── mcp/                   # MCP server commands
-│   ├── serve.ts           # Spawns stdio MCP server
-│   ├── install.ts
-│   └── list.ts
-│
 ├── setup/                 # Onboarding flows
 │   ├── interactive.ts     # Guided setup wizard
 │   ├── llm.ts             # LLM provider setup
@@ -69,24 +64,6 @@ export async function listAgents(): Promise<void> {
 
   // Thin: just format and output
   console.log(formatAgentList(agents));
-}
-```
-
-### MCP Serve Command
-Spawns stdio-based MCP server for external providers:
-
-```typescript
-// src/commands/mcp/serve.ts
-export async function serveMcp(options: ServeMcpOptions): Promise<void> {
-  // Load tool registry
-  const tools = await loadToolRegistry();
-
-  // Convert Zod schemas to JSON Schema
-  const jsonSchemaTools = convertToJsonSchema(tools);
-
-  // Start stdio transport
-  const server = createMcpServer(jsonSchemaTools);
-  await server.start();
 }
 ```
 
@@ -213,29 +190,6 @@ export async function loadConfig(): Promise<void> {
 // REJECT: Hardcoded paths
 const CONFIG_PATH = "/Users/me/.tenex";  // Use ConfigService.getConfigPath()
 ```
-
-## MCP Server (`mcp/serve.ts`)
-
-Special command that exposes TENEX tools to external providers:
-
-```
-External Provider (Codex CLI)
-    ↓
-stdio transport
-    ↓
-MCP Server (serve.ts)
-    ↓
-Tool Registry → Service
-    ↓
-Response via stdio
-```
-
-**Environment variables for context:**
-- `TENEX_PROJECT_ID`
-- `TENEX_AGENT_ID`
-- `TENEX_CONVERSATION_ID`
-- `TENEX_WORKING_DIRECTORY`
-- `TENEX_CURRENT_BRANCH`
 
 ## Testing
 

@@ -16,8 +16,9 @@ llm/
 │   ├── standard/          # Standard providers (OpenAI, Claude, etc.)
 │   ├── agent/             # Agent-specific adapters
 │   │   ├── ClaudeCodeToolsAdapter.ts
-│   │   ├── TenexStdioMcpServer.ts
-│   │   └── CodexCliProvider.ts
+│   │   ├── ClaudeCodeProvider.ts
+│   │   ├── CodexAppServerToolsAdapter.ts
+│   │   └── CodexAppServerProvider.ts
 │   └── registry/          # Provider registration
 │
 ├── middleware/
@@ -69,8 +70,9 @@ const provider = await LLMServiceFactory.create({
 
 **Agent-Specific Providers** (`providers/agent/`):
 - **ClaudeCodeToolsAdapter**: Converts TENEX tools to SDK MCP format for Claude Code (in-process)
-- **TenexStdioMcpServer**: Generates stdio MCP server config for Codex CLI
-- **CodexCliProvider**: Spawns Codex CLI with TENEX tools via MCP
+- **ClaudeCodeProvider**: Claude Code agent provider with built-in tools and MCP support
+- **CodexAppServerToolsAdapter**: Converts TENEX tools to SDK MCP format for Codex App Server (in-process)
+- **CodexAppServerProvider**: Codex App Server agent provider with mid-execution injection support
 
 ### Model Selection
 ```typescript
@@ -112,17 +114,10 @@ class MyProvider implements LLMProvider {
 const mcpTools = adapter.convertTools(tenexTools);
 ```
 
-**For Codex CLI** (subprocess):
+**For Codex App Server** (in-process):
 ```typescript
-// TenexStdioMcpServer generates launch config with env vars
-const serverConfig = TenexStdioMcpServer.generateConfig({
-  projectId,
-  agentId,
-  conversationId,
-  workingDirectory,
-  currentBranch
-});
-// CodexCliProvider spawns subprocess with this config
+// CodexAppServerToolsAdapter converts TENEX tools to MCP format
+const mcpTools = CodexAppServerToolsAdapter.createSdkMcpServer(tenexTools, options);
 ```
 
 ### Adding New Providers
