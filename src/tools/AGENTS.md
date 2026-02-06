@@ -13,7 +13,6 @@ tools/
 │   ├── delegation_*.ts    # Delegation tools
 │   ├── rag_*.ts           # RAG tools
 │   ├── schedule_*.ts      # Scheduling tools
-│   ├── mcp_*.ts           # MCP discovery
 │   ├── file_*.ts          # File access
 │   ├── shell_*.ts         # Shell execution
 │   └── ...
@@ -70,7 +69,6 @@ Files follow `<domain>_<action>.ts` pattern:
 | `rag_` | `rag_query.ts`, `rag_ingest.ts` |
 | `delegation_` | `delegation_create.ts`, `delegation_complete.ts` |
 | `schedule_` | `schedule_create.ts`, `schedule_list.ts` |
-| `mcp_` | `mcp_discover.ts`, `mcp_install.ts` |
 | `file_` | `file_read.ts`, `file_write.ts` |
 | `shell_` | `shell_execute.ts` |
 
@@ -173,11 +171,6 @@ parameters: z.object({
 - `schedule_list` - List scheduled tasks
 - `schedule_cancel` - Cancel scheduled task
 
-### MCP (`mcp_*`)
-- `mcp_discover` - Discover MCP servers
-- `mcp_install` - Install MCP server
-- `mcp_tools` - List MCP tools
-
 ### File Operations (`file_*`)
 - `file_read` - Read file contents
 - `file_write` - Write file contents
@@ -262,7 +255,7 @@ describe("rag_query", () => {
 
 **Imported by:**
 - `agents/` - Tool execution via registry
-- `llm/providers/agent/` - MCP tool adapters
+- `llm/providers/agent/` - Agent provider tool adapters
 
 ## Related
 - [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md) - Architecture reference
