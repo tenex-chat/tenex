@@ -5,14 +5,27 @@ import type { StreamTransport } from "@/llm";
 import type { LocalStreamChunk } from "@/llm";
 import { logger } from "@/utils/logger";
 
-/** Extract a brief caller context from stack trace for debugging */
-function getCallerContext(): string {
+const LOG_PREFIX = "[UnixSocketTransport]";
+
+/** Extract a brief caller context from stack trace for debugging (only computed when debug logging enabled) */
+function getCallerContext(): string | undefined {
+    // Only compute stack trace if debug logging is actually enabled
+    // This avoids the expensive stack capture in production
+    if (!logger.isLevelEnabled?.("debug")) {
+        return undefined;
+    }
     const stack = new Error().stack;
-    if (!stack) return "unknown";
+    if (!stack) return undefined;
     // Skip first 3 lines: Error, getCallerContext, cleanup/caller
     const lines = stack.split("\n").slice(3, 6);
     return lines.map((l) => l.trim()).join(" <- ");
 }
+
+/** Result of checking socket file info */
+type SocketFileInfoResult =
+    | { status: "ok"; exists: true; isSocket: boolean; isFile: boolean; mode: string; mtime: string; age: string }
+    | { status: "ok"; exists: false }
+    | { status: "error"; error: string };
 
 /**
  * Unix domain socket transport for local streaming
@@ -36,31 +49,37 @@ export class UnixSocketTransport implements StreamTransport {
     }
 
     async start(): Promise<void> {
-        logger.info("[UnixSocketTransport] start() called", {
+        logger.info(`${LOG_PREFIX} start() called`, {
             socketPath: this.socketPath,
         });
 
         // Check for existing socket and log details
         const existingSocketInfo = this.getSocketFileInfo();
-        if (existingSocketInfo.exists) {
-            logger.warn("[UnixSocketTransport] Stale socket found before start", {
+        if (existingSocketInfo.status === "ok" && existingSocketInfo.exists) {
+            logger.warn(`${LOG_PREFIX} Stale socket found before start`, {
                 socketPath: this.socketPath,
-                ...existingSocketInfo,
+                isSocket: existingSocketInfo.isSocket,
+                age: existingSocketInfo.age,
+            });
+        } else if (existingSocketInfo.status === "error") {
+            logger.error(`${LOG_PREFIX} Failed to check socket file before start`, {
+                socketPath: this.socketPath,
+                error: existingSocketInfo.error,
             });
         }
 
-        // Clean up stale socket
-        this.cleanup("start() - cleaning stale socket before creating new one");
+        // Clean up stale socket, passing the file info we already have
+        this.cleanup("start() - cleaning stale socket before creating new one", existingSocketInfo);
 
         return new Promise((resolve, reject) => {
             this.server = net.createServer((socket) => {
-                logger.info("[UnixSocketTransport] Client connected to streaming socket", {
+                logger.info(`${LOG_PREFIX} Client connected to streaming socket`, {
                     socketPath: this.socketPath,
                 });
 
                 // Only one client at a time
                 if (this.client) {
-                    logger.warn("[UnixSocketTransport] Replacing existing client connection", {
+                    logger.warn(`${LOG_PREFIX} Replacing existing client connection`, {
                         socketPath: this.socketPath,
                     });
                     this.client.destroy();
@@ -69,7 +88,7 @@ export class UnixSocketTransport implements StreamTransport {
                 this.client = socket;
 
                 socket.on("close", () => {
-                    logger.info("[UnixSocketTransport] Client disconnected from streaming socket", {
+                    logger.info(`${LOG_PREFIX} Client disconnected from streaming socket`, {
                         socketPath: this.socketPath,
                     });
                     if (this.client === socket) {
@@ -78,7 +97,7 @@ export class UnixSocketTransport implements StreamTransport {
                 });
 
                 socket.on("error", (err) => {
-                    logger.error("[UnixSocketTransport] Socket client error", {
+                    logger.error(`${LOG_PREFIX} Socket client error`, {
                         error: err.message,
                         socketPath: this.socketPath,
                     });
@@ -89,7 +108,7 @@ export class UnixSocketTransport implements StreamTransport {
             });
 
             this.server.on("error", (err) => {
-                logger.error("[UnixSocketTransport] Socket server error", {
+                logger.error(`${LOG_PREFIX} Socket server error`, {
                     error: err.message,
                     socketPath: this.socketPath,
                 });
@@ -97,7 +116,7 @@ export class UnixSocketTransport implements StreamTransport {
             });
 
             this.server.listen(this.socketPath, () => {
-                logger.info("[UnixSocketTransport] Streaming socket started and listening", {
+                logger.info(`${LOG_PREFIX} Streaming socket started and listening`, {
                     socketPath: this.socketPath,
                 });
                 resolve();
@@ -112,7 +131,10 @@ export class UnixSocketTransport implements StreamTransport {
             const line = JSON.stringify(chunk) + "\n";
             this.client.write(line);
         } catch (err) {
-            logger.error("Failed to write chunk", { error: err });
+            logger.error(`${LOG_PREFIX} Failed to write chunk`, {
+                error: err instanceof Error ? err.message : String(err),
+                socketPath: this.socketPath,
+            });
         }
     }
 
@@ -122,15 +144,15 @@ export class UnixSocketTransport implements StreamTransport {
 
     async stop(): Promise<void> {
         const callerContext = getCallerContext();
-        logger.info("[UnixSocketTransport] stop() called", {
+        logger.info(`${LOG_PREFIX} stop() called`, {
             socketPath: this.socketPath,
             hasClient: !!this.client,
             hasServer: !!this.server,
-            callerContext,
+            ...(callerContext && { callerContext }),
         });
 
         if (this.client) {
-            logger.info("[UnixSocketTransport] Destroying client connection in stop()", {
+            logger.info(`${LOG_PREFIX} Destroying client connection in stop()`, {
                 socketPath: this.socketPath,
             });
             this.client.destroy();
@@ -139,21 +161,21 @@ export class UnixSocketTransport implements StreamTransport {
 
         return new Promise((resolve) => {
             if (this.server) {
-                logger.info("[UnixSocketTransport] Closing server in stop()", {
+                logger.info(`${LOG_PREFIX} Closing server in stop()`, {
                     socketPath: this.socketPath,
                 });
                 this.server.close(() => {
-                    logger.info("[UnixSocketTransport] Server closed, now calling cleanup()", {
+                    logger.info(`${LOG_PREFIX} Server closed, now calling cleanup()`, {
                         socketPath: this.socketPath,
                     });
                     this.cleanup("stop() - server closed callback");
-                    logger.info("[UnixSocketTransport] stop() completed", {
+                    logger.info(`${LOG_PREFIX} stop() completed`, {
                         socketPath: this.socketPath,
                     });
                     resolve();
                 });
             } else {
-                logger.info("[UnixSocketTransport] stop() called but no server to close", {
+                logger.info(`${LOG_PREFIX} stop() called but no server to close`, {
                     socketPath: this.socketPath,
                 });
                 resolve();
@@ -163,23 +185,14 @@ export class UnixSocketTransport implements StreamTransport {
 
     /**
      * Get file info for the socket path (for debugging)
+     * Returns discriminated result: ok (exists/not), or error
      */
-    private getSocketFileInfo(): {
-        exists: boolean;
-        isSocket?: boolean;
-        isFile?: boolean;
-        mode?: string;
-        mtime?: string;
-        age?: string;
-        error?: string;
-    } {
+    private getSocketFileInfo(): SocketFileInfoResult {
         try {
-            if (!fs.existsSync(this.socketPath)) {
-                return { exists: false };
-            }
-            const stats = fs.statSync(this.socketPath);
+            const stats = fs.lstatSync(this.socketPath);
             const ageMs = Date.now() - stats.mtime.getTime();
             return {
+                status: "ok",
                 exists: true,
                 isSocket: stats.isSocket(),
                 isFile: stats.isFile(),
@@ -188,8 +201,13 @@ export class UnixSocketTransport implements StreamTransport {
                 age: `${Math.floor(ageMs / 1000)}s`,
             };
         } catch (err) {
+            // ENOENT means file doesn't exist - that's a valid "missing" result
+            if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+                return { status: "ok", exists: false };
+            }
+            // Any other error (permission, IO, etc.) is an actual error
             return {
-                exists: false,
+                status: "error",
                 error: err instanceof Error ? err.message : String(err),
             };
         }
@@ -205,68 +223,91 @@ export class UnixSocketTransport implements StreamTransport {
         clientConnected: boolean;
     } {
         const info = this.getSocketFileInfo();
+        const exists = info.status === "ok" && info.exists;
+        const isSocket = info.status === "ok" && info.exists && info.isSocket;
         const result = {
-            exists: info.exists,
-            isSocket: info.isSocket ?? false,
+            exists,
+            isSocket,
             serverRunning: this.server !== null && this.server.listening,
             clientConnected: this.isConnected(),
         };
-        logger.debug("[UnixSocketTransport] Health check", {
+        logger.debug(`${LOG_PREFIX} Health check`, {
             socketPath: this.socketPath,
             ...result,
         });
         return result;
     }
 
-    private cleanup(reason: string): void {
+    /**
+     * Clean up socket file if it exists and is safe to remove
+     * @param reason - Why cleanup is being called (for logging)
+     * @param fileInfo - Optional pre-fetched file info to avoid redundant FS calls
+     */
+    private cleanup(reason: string, fileInfo?: SocketFileInfoResult): void {
         const callerContext = getCallerContext();
-        const timestamp = new Date().toISOString();
 
-        logger.info("[UnixSocketTransport] cleanup() called", {
+        logger.info(`${LOG_PREFIX} cleanup() called`, {
             socketPath: this.socketPath,
             reason,
-            callerContext,
-            timestamp,
+            ...(callerContext && { callerContext }),
         });
 
+        // Use provided file info or fetch it
+        const info = fileInfo ?? this.getSocketFileInfo();
+
+        // Handle error case
+        if (info.status === "error") {
+            logger.error(`${LOG_PREFIX} cleanup() cannot proceed - failed to check socket file`, {
+                socketPath: this.socketPath,
+                reason,
+                error: info.error,
+            });
+            return;
+        }
+
+        // Nothing to clean up
+        if (!info.exists) {
+            logger.debug(`${LOG_PREFIX} cleanup() - socket does not exist, nothing to unlink`, {
+                socketPath: this.socketPath,
+                reason,
+            });
+            return;
+        }
+
+        // CRITICAL SAFETY CHECK: Only unlink if it's actually a socket
+        if (!info.isSocket) {
+            logger.error(`${LOG_PREFIX} cleanup() REFUSED to unlink - path is not a socket`, {
+                socketPath: this.socketPath,
+                reason,
+                isFile: info.isFile,
+                mode: info.mode,
+            });
+            return;
+        }
+
+        // Safe to unlink - it's a socket
         try {
-            const existsBefore = fs.existsSync(this.socketPath);
+            logger.info(`${LOG_PREFIX} About to unlink socket`, {
+                socketPath: this.socketPath,
+                reason,
+                age: info.age,
+            });
 
-            if (existsBefore) {
-                // Get file info before unlinking
-                const fileInfo = this.getSocketFileInfo();
-                logger.info("[UnixSocketTransport] About to unlink socket", {
-                    socketPath: this.socketPath,
-                    reason,
-                    fileInfo,
-                    timestamp,
-                });
+            fs.unlinkSync(this.socketPath);
 
-                fs.unlinkSync(this.socketPath);
-
-                logger.info("[UnixSocketTransport] Socket unlinked successfully", {
-                    socketPath: this.socketPath,
-                    reason,
-                    timestamp,
-                });
-            } else {
-                logger.debug("[UnixSocketTransport] cleanup() - socket does not exist, nothing to unlink", {
-                    socketPath: this.socketPath,
-                    reason,
-                    timestamp,
-                });
-            }
+            logger.info(`${LOG_PREFIX} Socket unlinked successfully`, {
+                socketPath: this.socketPath,
+                reason,
+            });
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             const errorCode = err instanceof Error && "code" in err ? (err as NodeJS.ErrnoException).code : undefined;
 
-            logger.error("[UnixSocketTransport] cleanup() failed to unlink socket", {
+            logger.error(`${LOG_PREFIX} cleanup() failed to unlink socket`, {
                 socketPath: this.socketPath,
                 reason,
                 error: errorMessage,
                 errorCode,
-                callerContext,
-                timestamp,
             });
         }
     }
