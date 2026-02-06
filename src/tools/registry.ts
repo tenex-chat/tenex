@@ -11,7 +11,6 @@ import { isOnlyToolMode } from "@/services/nudge";
 import type { Tool as CoreTool } from "ai";
 import type {
     AISdkTool,
-    MCPToolContext,
     ToolExecutionContext,
     ToolFactory,
     ToolName,
@@ -294,19 +293,18 @@ const META_MODEL_TOOLS: ToolName[] = ["change_model"];
 /**
  * Get tools as a keyed object (for AI SDK usage)
  * @param names - Tool names to include (can include MCP tool names)
- * @param context - Registry context (full or MCP partial)
+ * @param context - Registry context
  * @param nudgePermissions - Optional tool permissions from nudge events
  * @returns Object with tools keyed by name (returns the underlying CoreTool)
  */
 export function getToolsObject(
     names: string[],
-    context: ToolRegistryContext | MCPToolContext,
+    context: ToolRegistryContext,
     nudgePermissions?: NudgeToolPermissions
 ): Record<string, CoreTool<unknown, unknown>> {
     const tools: Record<string, CoreTool<unknown, unknown>> = {};
 
     // Check if conversation is available
-    // Use getConversation() check to properly exclude MCPToolContext (which returns undefined)
     const hasConversation = context.getConversation?.() !== undefined;
 
     // === ONLY-TOOL MODE: STRICT EXCLUSIVITY ===
@@ -424,8 +422,8 @@ export function getToolsObject(
     }
 
     // Auto-inject core agent tools for all agents (critical system capabilities)
-    // GATING: Only inject when conversation context is present to prevent leakage into MCP-only contexts
-    // MCPToolContext has getConversation: () => undefined, so this check properly excludes MCP contexts
+    // GATING: Only inject when conversation context is present to prevent leakage into non-agent contexts
+    // Contexts without conversations (e.g., isolated tool execution) are excluded from core tool injection
     if (hasConversation) {
         for (const coreToolName of CORE_AGENT_TOOLS) {
             if (!regularTools.includes(coreToolName)) {
