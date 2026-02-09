@@ -413,12 +413,41 @@ export class StreamExecutionHandler {
      */
     private async flushReasoningBuffer(): Promise<void> {
         if (this.reasoningBuffer.trim().length > 0) {
+            const { context } = this.config;
             const eventContext = this.createEventContext();
-            await this.config.context.agentPublisher.conversation(
-                { content: this.reasoningBuffer, isReasoning: true },
-                eventContext
-            );
+            const contentToFlush = this.reasoningBuffer;
+
+            // Add to conversation store BEFORE publishing - capture index for eventId reconciliation
+            const messageIndex = context.conversationStore.addMessage({
+                pubkey: context.agent.pubkey,
+                ral: this.config.ralNumber,
+                content: contentToFlush,
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            // Clear buffer BEFORE async publish to prevent re-adding on retry
             this.reasoningBuffer = "";
+
+            try {
+                const event = await context.agentPublisher.conversation(
+                    { content: contentToFlush, isReasoning: true },
+                    eventContext
+                );
+
+                // Link the published eventId to the message for loopback deduplication
+                if (event.id && messageIndex >= 0) {
+                    context.conversationStore.setEventId(messageIndex, event.id);
+                }
+            } catch (publishError) {
+                // Log but don't throw - message is already in store, just unlinked
+                // The loopback dedup will handle this gracefully (worst case: duplicate display)
+                logger.warn("[StreamExecutionHandler] Failed to publish reasoning buffer", {
+                    error: publishError instanceof Error ? publishError.message : String(publishError),
+                    ralNumber: this.config.ralNumber,
+                    agent: context.agent.slug,
+                });
+            }
         }
     }
 
@@ -427,12 +456,41 @@ export class StreamExecutionHandler {
      */
     private async flushContentBuffer(): Promise<void> {
         if (this.contentBuffer.trim().length > 0) {
+            const { context } = this.config;
             const eventContext = this.createEventContext();
-            await this.config.context.agentPublisher.conversation(
-                { content: this.contentBuffer },
-                eventContext
-            );
+            const contentToFlush = this.contentBuffer;
+
+            // Add to conversation store BEFORE publishing - capture index for eventId reconciliation
+            const messageIndex = context.conversationStore.addMessage({
+                pubkey: context.agent.pubkey,
+                ral: this.config.ralNumber,
+                content: contentToFlush,
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            // Clear buffer BEFORE async publish to prevent re-adding on retry
             this.contentBuffer = "";
+
+            try {
+                const event = await context.agentPublisher.conversation(
+                    { content: contentToFlush },
+                    eventContext
+                );
+
+                // Link the published eventId to the message for loopback deduplication
+                if (event.id && messageIndex >= 0) {
+                    context.conversationStore.setEventId(messageIndex, event.id);
+                }
+            } catch (publishError) {
+                // Log but don't throw - message is already in store, just unlinked
+                // The loopback dedup will handle this gracefully (worst case: duplicate display)
+                logger.warn("[StreamExecutionHandler] Failed to publish content buffer", {
+                    error: publishError instanceof Error ? publishError.message : String(publishError),
+                    ralNumber: this.config.ralNumber,
+                    agent: context.agent.slug,
+                });
+            }
         }
     }
 

@@ -228,6 +228,90 @@ describe("ConversationStore Agent Execution Integration", () => {
             expect(store.hasEventId(publishedEventId)).toBe(true);
             expect(store.hasEventId("different-event")).toBe(false);
         });
+
+        it("should dedupe loopback events after flush + setEventId pattern", () => {
+            // This test simulates the StreamExecutionHandler flush pattern:
+            // 1. addMessage() is called (without eventId) - message stored locally
+            // 2. Message is published to Nostr, returns eventId
+            // 3. setEventId() links the message to the eventId
+            // 4. Loopback event arrives from Nostr subscription (same eventId)
+            // 5. addMessage() with eventId should be deduped (return -1)
+
+            const ralNumber = store.createRal(AGENT_PUBKEY);
+
+            // Step 1: Flush pattern - add message without eventId (simulating buffer flush)
+            const messageIndex = store.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: ralNumber,
+                content: "Streamed content from buffer",
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            expect(messageIndex).toBeGreaterThanOrEqual(0);
+            expect(store.getAllMessages()).toHaveLength(1);
+
+            // Step 2 & 3: Simulate publish returning eventId, then linking it
+            const publishedEventId = "nostr-event-abc123";
+            store.setEventId(messageIndex, publishedEventId);
+
+            // Verify the eventId is now tracked
+            expect(store.hasEventId(publishedEventId)).toBe(true);
+
+            // Step 4 & 5: Loopback event arrives - same eventId should be rejected
+            const loopbackResult = store.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: ralNumber,
+                content: "Streamed content from buffer", // Same content
+                messageType: "text",
+                eventId: publishedEventId, // Same eventId from Nostr
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            // Should return -1 indicating duplicate was rejected
+            expect(loopbackResult).toBe(-1);
+
+            // Store should still have exactly 1 message (no duplicate)
+            const allMessages = store.getAllMessages();
+            expect(allMessages).toHaveLength(1);
+
+            // The single message should have the eventId linked
+            expect(allMessages[0].eventId).toBe(publishedEventId);
+            expect(allMessages[0].content).toBe("Streamed content from buffer");
+        });
+
+        it("should handle message without setEventId followed by loopback", () => {
+            // Edge case: What if setEventId fails or is skipped?
+            // The loopback event should still be added (creating a duplicate)
+            // This is the "worst case" mentioned in error handling comments
+
+            const ralNumber = store.createRal(AGENT_PUBKEY);
+
+            // Add message without eventId (simulating flush)
+            store.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: ralNumber,
+                content: "Unlinked message",
+                messageType: "text",
+            });
+
+            expect(store.getAllMessages()).toHaveLength(1);
+
+            // Loopback arrives but original message was never linked
+            const loopbackEventId = "nostr-event-xyz789";
+            const loopbackResult = store.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: ralNumber,
+                content: "Unlinked message",
+                messageType: "text",
+                eventId: loopbackEventId,
+            });
+
+            // Without setEventId, the loopback IS added (creating duplicate)
+            // This is expected behavior - the fix ensures setEventId is called
+            expect(loopbackResult).toBeGreaterThanOrEqual(0);
+            expect(store.getAllMessages()).toHaveLength(2);
+        });
     });
 
     describe("Multiple RALs", () => {
