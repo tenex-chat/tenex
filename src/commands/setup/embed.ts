@@ -100,7 +100,7 @@ export const embedCommand = new Command("embed")
             // Prompt for provider selection
             const { provider } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "provider",
                     message: "Select embedding provider:",
                     choices: providerChoices,
@@ -124,7 +124,7 @@ export const embedCommand = new Command("embed")
 
                 const providerAnswers = await inquirer.prompt([
                     {
-                        type: "list",
+                        type: "select",
                         name: "model",
                         message: `Select ${displayName} embedding model:`,
                         choices: modelChoices,
@@ -150,7 +150,7 @@ export const embedCommand = new Command("embed")
                 // Local transformer configuration
                 const localAnswers = await inquirer.prompt([
                     {
-                        type: "list",
+                        type: "select",
                         name: "model",
                         message: "Select local embedding model:",
                         choices: [

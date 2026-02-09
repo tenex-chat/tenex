@@ -52,7 +52,7 @@ export class ProviderConfigUI {
             const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";
             const { ollamaConfig } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "ollamaConfig",
                     message: "Ollama configuration:",
                     choices: [

@@ -28,7 +28,7 @@ export class ConfigurationTester {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select configuration to test:",
                 choices: configNames.map((n) => {
