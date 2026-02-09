@@ -82,6 +82,17 @@ async function initDaemonLogging(): Promise<void> {
 export const logger = {
     initDaemonLogging,
 
+    /**
+     * Check if a specific log level is enabled
+     * Useful for conditional expensive operations (e.g., stack traces)
+     */
+    isLevelEnabled: (level: "error" | "warn" | "info" | "debug"): boolean => {
+        if (level === "debug") {
+            return isDebugEnabled() && getCurrentLevel() >= levels.debug;
+        }
+        return getCurrentLevel() >= levels[level];
+    },
+
     error: (message: string, error?: unknown) => {
         if (getCurrentLevel() >= levels.error) {
             if (logFilePath) {
