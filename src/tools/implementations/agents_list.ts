@@ -87,7 +87,8 @@ export function createAgentsListTool(_context: ToolExecutionContext): AISdkTool 
             } catch (error) {
                 logger.error("Failed to list agents", { error });
                 throw new Error(
-                    `Failed to list agents: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to list agents: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

@@ -253,7 +253,8 @@ export function createAgentConfigureTool(context: ToolExecutionContext): AISdkTo
             } catch (error) {
                 logger.error("Failed to configure agent", { error });
                 throw new Error(
-                    `Failed to configure agent: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to configure agent: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

@@ -63,7 +63,8 @@ export class PromptBuilder {
                             `Error executing fragment "${config.fragmentId}":\n` +
                                 `${errorMessage}\n` +
                                 `Arguments provided: ${receivedArgs}\n` +
-                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`
+                                `Expected: ${fragment.expectedArgs || "Check fragment definition"}`,
+                            { cause: error }
                         );
                     }
                 })

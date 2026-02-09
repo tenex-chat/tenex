@@ -116,7 +116,7 @@ export class ConversationEmbeddingService {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger.error("Failed to initialize ConversationEmbeddingService", { error: message });
-            throw new Error(`ConversationEmbeddingService initialization failed: ${message}`);
+            throw new Error(`ConversationEmbeddingService initialization failed: ${message}`, { cause: error });
         }
     }
 

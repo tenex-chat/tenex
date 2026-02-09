@@ -279,7 +279,7 @@ async function executeConversationSearch(
     }
 
     let conversations: ConversationSearchResult[];
-    let searchType: "full-text" | "title-only" | "semantic" | "hybrid" = "full-text";
+    let searchType: "full-text" | "title-only" | "semantic" | "hybrid";
     let warning: string | undefined;
 
     switch (effectiveMode) {

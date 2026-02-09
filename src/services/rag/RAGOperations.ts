@@ -379,7 +379,7 @@ export class RAGOperations {
             return await operation();
         } catch (error) {
             logger.error(errorMessage, { error });
-            throw new Error(`${errorMessage}: ${error}`);
+            throw new Error(`${errorMessage}: ${error}`, { cause: error });
         }
     }
 

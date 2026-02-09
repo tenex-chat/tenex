@@ -56,7 +56,7 @@ export class RAGService {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger.error("RAGService initialization failed", { error: message });
-            throw new Error(`Failed to initialize RAGService: ${message}`);
+            throw new Error(`Failed to initialize RAGService: ${message}`, { cause: error });
         }
     }
 

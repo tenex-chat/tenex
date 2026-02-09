@@ -130,7 +130,8 @@ export function createNostrFetchTool(_context: ToolExecutionContext): AISdkTool 
 
                 logger.error("Failed to fetch nostr event", { eventId: input.eventId, error });
                 throw new Error(
-                    `Failed to fetch nostr event: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to fetch nostr event: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

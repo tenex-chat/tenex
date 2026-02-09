@@ -33,7 +33,7 @@ export const daemonCommand = new Command("daemon")
         await logger.initDaemonLogging();
 
         // Get whitelisted pubkeys
-        let whitelistedPubkeys = config.getWhitelistedPubkeys(
+        const whitelistedPubkeys = config.getWhitelistedPubkeys(
             options.whitelist,
             globalConfig
         );
@@ -57,7 +57,6 @@ export const daemonCommand = new Command("daemon")
 
             // Save the setup configuration and reload
             await config.saveGlobalConfig(setupConfig);
-            whitelistedPubkeys = setupConfig.whitelistedPubkeys || [];
         }
 
         console.log(chalk.cyan("╔════════════════════════════════════════╗"));

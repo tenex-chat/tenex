@@ -311,7 +311,7 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
                 }
 
                 // Unexpected errors still throw (they'll be caught by the SDK)
-                throw new Error(`Failed to read ${target}: ${formatAnyError(error)}`);
+                throw new Error(`Failed to read ${target}: ${formatAnyError(error)}`, { cause: error });
             }
         },
     });

@@ -656,7 +656,8 @@ export class ConfigService {
             });
             throw new Error(
                 `Failed to load config file "${filePath}": ${errorMessage}. ` +
-                    "Fix the file or delete it to use defaults."
+                    "Fix the file or delete it to use defaults.",
+                { cause: error }
             );
         }
     }

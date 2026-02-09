@@ -178,7 +178,8 @@ export function createAgentsWriteTool(context: ToolExecutionContext): AISdkTool 
             } catch (error) {
                 logger.error("Failed to write agent definition", { error });
                 throw new Error(
-                    `Failed to write agent definition: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to write agent definition: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

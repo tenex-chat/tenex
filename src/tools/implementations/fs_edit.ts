@@ -137,7 +137,7 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
                 }
 
                 // Unexpected errors still throw (they'll be caught by the SDK)
-                throw new Error(`Failed to edit ${path}: ${formatAnyError(error)}`);
+                throw new Error(`Failed to edit ${path}: ${formatAnyError(error)}`, { cause: error });
             }
         },
     });
