@@ -214,7 +214,8 @@ async function downloadFromURL(
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
             throw new Error(
-                `Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms while fetching ${url}`
+                `Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms while fetching ${url}`,
+                { cause: error }
             );
         }
         throw error;
@@ -307,7 +308,7 @@ async function uploadToBlossomServer(
         return result;
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS}ms`);
+            throw new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS}ms`, { cause: error });
         }
         throw error;
     } finally {

@@ -120,7 +120,7 @@ async function executeWebFetch(input: WebFetchInput): Promise<string | { type: "
         }
 
         // Unexpected errors still throw (they'll be caught by the SDK)
-        throw new Error(`Failed to fetch URL "${url}": ${formatAnyError(error)}`);
+        throw new Error(`Failed to fetch URL "${url}": ${formatAnyError(error)}`, { cause: error });
     }
 }
 

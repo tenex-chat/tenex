@@ -252,10 +252,10 @@ export class Daemon {
                 endSpanSuccess(span);
             } catch (error) {
                 if (!event.id) {
-                    throw new Error("Event ID not found");
+                    throw new Error("Event ID not found", { cause: error });
                 }
                 if (!event.id) {
-                    throw new Error("Event ID not found");
+                    throw new Error("Event ID not found", { cause: error });
                 }
                 logger.error("Error handling incoming event", {
                     error: error instanceof Error ? error.message : String(error),

@@ -120,7 +120,7 @@ export class EventHandler {
             }
         } catch {
             // Project context might not be available, continue with pubkey
-            let pTags: string[][] = [];
+            let pTags: string[][];
             try {
                 pTags = event.getMatchingTags("p");
             } catch (err) {

@@ -50,7 +50,8 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
             throw new Error(
                 `Failed to initialize embedding provider: ${
                     error instanceof Error ? error.message : String(error)
-                }`
+                }`,
+                { cause: error }
             );
         }
     }

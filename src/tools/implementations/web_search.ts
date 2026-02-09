@@ -228,11 +228,12 @@ export function createWebSearchTool(_context: ToolExecutionContext): AISdkTool {
                 // Provide a clearer message for rate limiting
                 if (errorMsg.includes("anomaly") || errorMsg.includes("too quickly")) {
                     throw new Error(
-                        "Search rate limited. Wait a moment and try again, or try a different query."
+                        "Search rate limited. Wait a moment and try again, or try a different query.",
+                        { cause: error }
                     );
                 }
 
-                throw new Error(`Web search failed: ${errorMsg}`);
+                throw new Error(`Web search failed: ${errorMsg}`, { cause: error });
             }
         },
     });

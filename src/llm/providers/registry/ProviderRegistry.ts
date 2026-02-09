@@ -181,7 +181,8 @@ export class ProviderRegistry {
             logger.error("[ProviderRegistry] Failed to load MockProvider:", error);
             throw new Error(
                 "Mock mode is enabled but MockProvider could not be loaded. " +
-                "Make sure test dependencies are installed."
+                "Make sure test dependencies are installed.",
+                { cause: error }
             );
         }
     }

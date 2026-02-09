@@ -95,13 +95,9 @@ export class AgentExecutor {
             getConversation: () => ({} as ConversationStore),
         };
 
-        let messages: ModelMessage[] = [];
-
-        if (conversationHistory.length > 0) {
-            messages = [...conversationHistory];
-        } else {
-            messages = [{ role: "user", content: initialPrompt }];
-        }
+        const messages: ModelMessage[] = conversationHistory.length > 0
+            ? [...conversationHistory]
+            : [{ role: "user", content: initialPrompt }];
 
         const toolNames = agent.tools || [];
         const tools = toolNames.length > 0 ? getToolsObject(toolNames, context) : {};

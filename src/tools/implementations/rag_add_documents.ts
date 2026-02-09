@@ -77,7 +77,8 @@ function validateURI(uri: string): URL {
         return new URL(uri);
     } catch (error) {
         throw new Error(
-            `Invalid URI format '${uri}': ${error instanceof Error ? error.message : "Unknown error"}`
+            `Invalid URI format '${uri}': ${error instanceof Error ? error.message : "Unknown error"}`,
+            { cause: error }
         );
     }
 }
@@ -327,7 +328,7 @@ async function extractDocumentContentFromSource(
     doc: DocumentInput,
     workingDirectory: string
 ): Promise<{ content: string; source: string | undefined }> {
-    let content = "";
+    let content: string;
     let resolvedPath: string | undefined;
 
     if ("uri" in doc && doc.uri) {
@@ -350,7 +351,8 @@ async function extractDocumentContentFromSource(
             } catch (error) {
                 if (!doc.content) {
                     throw new Error(
-                        `Cannot read file '${doc.file_path}': ${error instanceof Error ? error.message : "Unknown error"}`
+                        `Cannot read file '${doc.file_path}': ${error instanceof Error ? error.message : "Unknown error"}`,
+                        { cause: error }
                     );
                 }
                 // Fall back to provided content if file read fails but content exists
@@ -395,7 +397,8 @@ async function processDocuments(
             const identifier =
                 doc.id || ("uri" in doc ? doc.uri : doc.file_path) || "unknown document";
             throw new Error(
-                `Error processing document '${identifier}': ${error instanceof Error ? error.message : "Unknown error"}`
+                `Error processing document '${identifier}': ${error instanceof Error ? error.message : "Unknown error"}`,
+                { cause: error }
             );
         }
     }

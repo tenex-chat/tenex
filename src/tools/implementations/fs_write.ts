@@ -90,7 +90,7 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
                 }
 
                 // Unexpected errors still throw (they'll be caught by the SDK)
-                throw new Error(`Failed to write ${path}: ${formatAnyError(error)}`);
+                throw new Error(`Failed to write ${path}: ${formatAnyError(error)}`, { cause: error });
             }
         },
     });

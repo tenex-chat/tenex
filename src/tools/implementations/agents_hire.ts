@@ -118,7 +118,8 @@ export function createAgentsHireTool(context: ToolExecutionContext): AISdkTool {
             } catch (error) {
                 logger.error("Failed to hire agent", { error });
                 throw new Error(
-                    `Failed to hire agent: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to hire agent: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

@@ -5,6 +5,7 @@ import {
     propagation,
     trace,
     TraceFlags,
+    type Context,
     type Span,
     type SpanContext,
 } from "@opentelemetry/api";
@@ -83,10 +84,10 @@ export function createEventSpan(event: NDKEvent): Span {
     // First check for explicit trace_context tag (backwards compat with delegations)
     const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
 
-    let parentContext = ROOT_CONTEXT;
     let conversationId = AgentEventDecoder.getReplyTarget(event);
     let derivedTraceId: string | undefined;
 
+    let parentContext: Context;
     if (traceContextTag) {
         // Use explicit W3C trace context if provided (delegation events)
         const carrier = { traceparent: traceContextTag[1] };

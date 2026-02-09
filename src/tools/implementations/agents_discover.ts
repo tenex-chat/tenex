@@ -112,7 +112,8 @@ export function createAgentsDiscoverTool(_context: ToolExecutionContext): AISdkT
             } catch (error) {
                 logger.error("Failed to discover agents", { error });
                 throw new Error(
-                    `Failed to discover agents: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to discover agents: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

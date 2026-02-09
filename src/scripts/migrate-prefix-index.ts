@@ -47,7 +47,7 @@ async function migrateConversations(): Promise<void> {
             });
         } catch (error) {
             // Throw instead of process.exit to ensure finally block runs
-            throw new Error(`Failed to read projects directory: ${error}`);
+            throw new Error(`Failed to read projects directory: ${error}`, { cause: error });
         }
 
         console.log(`📁 Found ${projectDirs.length} projects`);

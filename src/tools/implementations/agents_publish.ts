@@ -79,7 +79,8 @@ export function createAgentsPublishTool(_context: ToolExecutionContext): AISdkTo
             } catch (error) {
                 logger.error("Failed to publish agent definition", { error });
                 throw new Error(
-                    `Failed to publish agent definition: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to publish agent definition: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },

@@ -90,7 +90,8 @@ export function createAgentsReadTool(context: ToolExecutionContext): AISdkTool {
             } catch (error) {
                 logger.error("Failed to read agent definition", { error });
                 throw new Error(
-                    `Failed to read agent definition: ${error instanceof Error ? error.message : String(error)}`
+                    `Failed to read agent definition: ${error instanceof Error ? error.message : String(error)}`,
+                    { cause: error }
                 );
             }
         },
