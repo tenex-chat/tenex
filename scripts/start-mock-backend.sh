@@ -165,7 +165,7 @@ echo ""
 # Start the daemon with mock provider
 if [ "$DEBUG" = "true" ]; then
     echo -e "${YELLOW}Starting in DEBUG mode...${NC}"
-    bun run src/tenex.ts daemon --project "$TEST_PROJECT_DIR" --verbose
+    bun run src/index.ts daemon --project "$TEST_PROJECT_DIR" --verbose
 else
-    bun run src/tenex.ts daemon --project "$TEST_PROJECT_DIR"
+    bun run src/index.ts daemon --project "$TEST_PROJECT_DIR"
 fi

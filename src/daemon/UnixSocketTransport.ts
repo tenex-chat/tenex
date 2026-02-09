@@ -85,18 +85,23 @@ export class UnixSocketTransport implements StreamTransport {
     }
 
     async stop(): Promise<void> {
+        console.log("stop() called");
         if (this.client) {
+            console.log("destroying client");
             this.client.destroy();
             this.client = null;
         }
 
         return new Promise((resolve) => {
             if (this.server) {
+                console.log("closing server");
                 this.server.close(() => {
+                    console.log("server closed");
                     this.cleanup();
                     resolve();
                 });
             } else {
+                console.log("no server to close");
                 resolve();
             }
         });
@@ -104,11 +109,13 @@ export class UnixSocketTransport implements StreamTransport {
 
     private cleanup(): void {
         try {
+            console.log("cleaning up socket path", this.socketPath);
             if (fs.existsSync(this.socketPath)) {
                 fs.unlinkSync(this.socketPath);
             }
-        } catch {
+        } catch (e) {
             // Ignore cleanup errors
+            console.log("cleanup error", e);
         }
     }
 
