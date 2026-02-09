@@ -16,10 +16,14 @@ import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager"
 
 /**
  * Convert a Nostr hex ID to OpenTelemetry traceID (32 hex chars)
- * Nostr event IDs are 64 hex chars, OTEL traceID is 32 hex chars
+ * Uses shortened 12-char conversation ID and pads to 32 chars for OTEL format.
+ * This makes Jaeger trace URLs readable: /trace/83f83677f9c7 instead of /trace/83f83677f9c7211e1dcbcbf934e3884f
  */
 function nostrIdToTraceId(nostrId: string): string {
-    return nostrId.substring(0, 32);
+    // Use shortened 12-char ID (consistent with span attributes)
+    const shortId = shortenConversationId(nostrId);
+    // Pad to 32 chars with zeros (OTEL requirement)
+    return shortId.padEnd(32, "0");
 }
 
 /**
