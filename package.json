@@ -29,7 +29,7 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "start": "bun run ./src/tenex.ts",
+    "start": "bun run ./src/index.ts",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
     "test": "bun test",
