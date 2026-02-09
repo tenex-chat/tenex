@@ -33,7 +33,7 @@ export class ConfigurationManager {
         // Select provider
         const { provider } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "provider",
                 message: "Select provider:",
                 choices: configuredProviders.map((p) => ({
@@ -231,7 +231,7 @@ export class ConfigurationManager {
             // Select underlying model
             const { model } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "model",
                     message: "Select underlying model for this variant:",
                     choices: standardConfigs.map((n) => ({
@@ -319,7 +319,7 @@ export class ConfigurationManager {
         const variantNames = Object.keys(variants);
         const { defaultVariant } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "defaultVariant",
                 message: "Select default variant (used when no keyword matches):",
                 choices: variantNames.map((n) => ({
@@ -375,7 +375,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select configuration to delete:",
                 choices: configNames.map((n) => ({
@@ -421,7 +421,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select default configuration:",
                 choices: configNames.map((n) => ({
@@ -445,7 +445,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select summarization model:",
                 choices: configNames.map((n) => ({
@@ -484,7 +484,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select supervision model:",
                 choices: configNames.map((n) => ({
@@ -508,7 +508,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select search model:",
                 choices: configNames.map((n) => ({
@@ -532,7 +532,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select prompt compilation model:",
                 choices: configNames.map((n) => ({
@@ -557,7 +557,7 @@ export class ConfigurationManager {
 
         const { name } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "name",
                 message: "Select compression model:",
                 choices: configNames.map((n) => ({
@@ -596,7 +596,7 @@ export class ConfigurationManager {
             // Select model
             const { model } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "model",
                     message: "Select model:",
                     choices: models.map((m) => ({
@@ -615,7 +615,7 @@ export class ConfigurationManager {
             // Select reasoning effort
             const { reasoningEffort } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "reasoningEffort",
                     message: "Select reasoning effort:",
                     choices: [

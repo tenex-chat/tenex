@@ -30,7 +30,7 @@ export class ModelSelector {
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "selectedModel",
                     message: "Select model:",
                     choices,
@@ -65,7 +65,7 @@ export class ModelSelector {
 
         const { selectedModel } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "selectedModel",
                 message: "Select model:",
                 default: currentModel,
@@ -130,7 +130,7 @@ export class ModelSelector {
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "selectedModel",
                     message: "Select model:",
                     choices,
@@ -153,7 +153,7 @@ export class ModelSelector {
 
         const { selectionMethod } = await inquirer.prompt([
             {
-                type: "list",
+                type: "select",
                 name: "selectionMethod",
                 message: "How would you like to select the model?",
                 choices: [
@@ -178,7 +178,7 @@ export class ModelSelector {
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "list",
+                    type: "select",
                     name: "selectedModel",
                     message: "Select model:",
                     default: currentModel,

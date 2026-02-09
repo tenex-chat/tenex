@@ -75,7 +75,7 @@ export const onboardingCommand = new Command("init")
 
                     const { action } = await inquirer.prompt([
                         {
-                            type: "list",
+                            type: "select",
                             name: "action",
                             message: "Whitelisted pubkeys (select to remove, or add new):",
                             choices,
@@ -206,7 +206,7 @@ export const onboardingCommand = new Command("init")
 
                     const { action } = await inquirer.prompt([
                         {
-                            type: "list",
+                            type: "select",
                             name: "action",
                             message: "Relay URLs (select to remove, or add new):",
                             choices,
