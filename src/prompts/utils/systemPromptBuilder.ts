@@ -308,6 +308,9 @@ function addAgentFragments(
         currentAgent: agent,
         projectManagerPubkey,
     });
+
+    // Add delegation best practices guidance (priority 16, after available-agents)
+    builder.add("stay-in-your-lane", {});
 }
 
 /**
