@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { getDaemon } from "@/daemon";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
@@ -9,6 +10,11 @@ import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { CronExpressionParser } from "cron-parser";
 import * as cron from "node-cron";
+
+/** Truncate a pubkey for logging (first 8 characters) */
+function truncatePubkey(pubkey: string): string {
+    return pubkey.substring(0, 8);
+}
 
 interface ScheduledTask {
     id: string;
@@ -136,8 +142,8 @@ export class SchedulerService {
 
         logger.info(`Created scheduled task ${taskId} with cron schedule: ${schedule}`, {
             projectId: resolvedProjectId,
-            fromPubkey: fromPubkey.substring(0, 8),
-            toPubkey: toPubkey.substring(0, 8),
+            fromPubkey: truncatePubkey(fromPubkey),
+            toPubkey: truncatePubkey(toPubkey),
         });
         return taskId;
     }
@@ -201,8 +207,8 @@ export class SchedulerService {
             `Created one-off scheduled task ${taskId} to execute at: ${executeAt.toISOString()}`,
             {
                 projectId: resolvedProjectId,
-                fromPubkey: fromPubkey.substring(0, 8),
-                toPubkey: toPubkey.substring(0, 8),
+                fromPubkey: truncatePubkey(fromPubkey),
+                toPubkey: truncatePubkey(toPubkey),
                 executeAt: executeAt.toISOString(),
             }
         );
@@ -668,6 +674,89 @@ export class SchedulerService {
         });
     }
 
+    /**
+     * Resolve the target pubkey for a scheduled task.
+     * If the original target agent is not in the task's project,
+     * route to the Project Manager (PM) of that project instead.
+     *
+     * @param task - The scheduled task to resolve target for
+     * @returns The pubkey to use as the target (either original or PM)
+     */
+    protected resolveTargetPubkey(task: ScheduledTask): string {
+        try {
+            const daemon = getDaemon();
+            const activeRuntimes = daemon.getActiveRuntimes();
+
+            // Find the runtime for this task's project
+            const runtime = activeRuntimes.get(task.projectId);
+            if (!runtime) {
+                // Project not running, use original target
+                // The event will be routed when project starts
+                logger.debug("Project not running, using original target pubkey", {
+                    taskId: task.id,
+                    projectId: task.projectId,
+                    toPubkey: truncatePubkey(task.toPubkey),
+                });
+                return task.toPubkey;
+            }
+
+            const context = runtime.getContext();
+            if (!context) {
+                // No context available, use original target
+                logger.warn("Project context not available, using original target pubkey", {
+                    taskId: task.id,
+                    projectId: task.projectId,
+                    toPubkey: truncatePubkey(task.toPubkey),
+                });
+                return task.toPubkey;
+            }
+
+            // Check if the target agent is in this project
+            const targetAgent = context.getAgentByPubkey(task.toPubkey);
+            if (targetAgent) {
+                // Target agent exists in project, use original target
+                return task.toPubkey;
+            }
+
+            // Target agent is NOT in this project - route to PM instead
+            const pm = context.projectManager;
+            if (!pm) {
+                logger.warn("Target agent not in project and no PM available, using original target", {
+                    taskId: task.id,
+                    projectId: task.projectId,
+                    toPubkey: truncatePubkey(task.toPubkey),
+                });
+                return task.toPubkey;
+            }
+
+            logger.info("Rerouting scheduled task to PM (target agent not in project)", {
+                taskId: task.id,
+                projectId: task.projectId,
+                originalTarget: truncatePubkey(task.toPubkey),
+                pmPubkey: truncatePubkey(pm.pubkey),
+                pmSlug: pm.slug,
+            });
+
+            trace.getActiveSpan()?.addEvent("scheduler.task_rerouted_to_pm", {
+                "task.id": task.id,
+                "task.original_target": truncatePubkey(task.toPubkey),
+                "task.pm_pubkey": truncatePubkey(pm.pubkey),
+                "task.pm_slug": pm.slug,
+                "project.id": task.projectId,
+            });
+
+            return pm.pubkey;
+        } catch (error) {
+            // If we can't access the daemon (e.g., during tests or standalone mode),
+            // fall back to original target
+            logger.warn("Failed to resolve target pubkey, using original", {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return task.toPubkey;
+        }
+    }
+
     private async publishAgentTriggerEvent(task: ScheduledTask): Promise<void> {
         if (!this.ndk) {
             throw new Error("NDK not initialized");
@@ -678,6 +767,10 @@ export class SchedulerService {
             throw new Error(`Scheduled task ${task.id} is missing projectId - cannot route event`);
         }
 
+        // Resolve the target pubkey - if the target agent is not in the project,
+        // route to the PM of that project instead
+        const targetPubkey = this.resolveTargetPubkey(task);
+
         const event = new NDKEvent(this.ndk);
         event.kind = 1; // Unified conversation format (kind:1)
         event.content = task.prompt;
@@ -686,7 +779,7 @@ export class SchedulerService {
         // The projectId is stored when the task is created (within project context)
         const tags: string[][] = [
             ["a", task.projectId], // Project reference (stored at task creation time)
-            ["p", task.toPubkey], // Target agent that should handle this task
+            ["p", targetPubkey], // Target agent that should handle this task (may be PM if original target not in project)
         ];
 
         // Add metadata about the scheduled task
@@ -713,19 +806,25 @@ export class SchedulerService {
         await event.sign(signer);
         await event.publish();
 
+        const wasRerouted = targetPubkey !== task.toPubkey;
+
         logger.info("Published scheduled task event", {
             taskId: task.id,
             projectId: task.projectId,
             eventId: event.id?.substring(0, 8),
-            from: signer.pubkey.substring(0, 8),
-            to: task.toPubkey.substring(0, 8),
+            from: truncatePubkey(signer.pubkey),
+            to: truncatePubkey(targetPubkey),
+            originalTarget: wasRerouted ? truncatePubkey(task.toPubkey) : undefined,
+            reroutedToPM: wasRerouted,
         });
 
         trace.getActiveSpan()?.addEvent("scheduler.event_published", {
             "task.id": task.id,
             "event.id": event.id || "unknown",
-            "event.from": signer.pubkey.substring(0, 8),
-            "event.to": task.toPubkey.substring(0, 8),
+            "event.from": truncatePubkey(signer.pubkey),
+            "event.to": truncatePubkey(targetPubkey),
+            "event.original_target": wasRerouted ? truncatePubkey(task.toPubkey) : undefined,
+            "event.rerouted_to_pm": wasRerouted,
             "project.id": task.projectId,
         });
     }
