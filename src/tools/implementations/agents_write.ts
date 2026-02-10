@@ -149,6 +149,9 @@ async function executeAgentsWrite(
     const agent = createAgentInstance(storedAgent, projectContext.agentRegistry);
     projectContext.agentRegistry.addAgent(agent);
 
+    // Notify context that a new agent was added (for Daemon routing synchronization)
+    projectContext.notifyAgentAdded(agent);
+
     logger.info(`Successfully created agent "${name}" (${slug})`);
     logger.info(`  Pubkey: ${agent.pubkey}`);
 

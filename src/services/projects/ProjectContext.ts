@@ -176,6 +176,14 @@ export class ProjectContext {
      */
     private readonly promptCompilers: Map<Hexpubkey, PromptCompilerService> = new Map();
 
+    /**
+     * Callback invoked when a new agent is added to this project's registry.
+     * Used by Daemon to synchronize its routing map (agentPubkeyToProjects).
+     *
+     * Set via setOnAgentAdded() - typically by the Daemon during runtime startup.
+     */
+    private onAgentAddedCallback?: (agent: AgentInstance) => void;
+
     constructor(project: NDKProject, agentRegistry: AgentRegistry) {
         this.project = project;
         this.agentRegistry = agentRegistry;
@@ -234,6 +242,28 @@ export class ProjectContext {
 
     hasAgent(slug: string): boolean {
         return this.agentRegistry.getAgent(slug) !== undefined;
+    }
+
+    /**
+     * Register a callback to be invoked when a new agent is added to this project.
+     * Used by the Daemon to keep its routing map (agentPubkeyToProjects) synchronized.
+     *
+     * @param callback - Function to invoke with the newly added agent
+     */
+    setOnAgentAdded(callback: (agent: AgentInstance) => void): void {
+        this.onAgentAddedCallback = callback;
+    }
+
+    /**
+     * Notify that a new agent has been added to the registry.
+     * This triggers the onAgentAdded callback if one is registered.
+     *
+     * Called by AgentRegistry.addAgent() when running within this context.
+     */
+    notifyAgentAdded(agent: AgentInstance): void {
+        if (this.onAgentAddedCallback) {
+            this.onAgentAddedCallback(agent);
+        }
     }
 
     // =====================================================================================
