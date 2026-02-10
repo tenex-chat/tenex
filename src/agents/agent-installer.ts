@@ -1,5 +1,6 @@
 import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
 import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
+import { installAgentScripts } from "@/agents/script-installer";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
 import { logger } from "@/utils/logger";
@@ -18,10 +19,12 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
  * - Validates event structure
  * - Parses event into StoredAgent format
  * - Generates private keys for agents
+ * - Installs bundled scripts from kind 1063 (NIP-94) events
  * - Saves to AgentStorage
  *
  * ## Architecture
  * - **agent-installer** (this): Pure Nostr operations only
+ * - **script-installer**: Handles downloading and installing bundled scripts
  * - **AgentStorage**: Handles persistence (uses this)
  * - **agent-loader**: Orchestrates the full loading flow (uses this)
  *
@@ -30,7 +33,7 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
  * - No registry logic
  * - No project logic
  * - No in-memory state
- * - Just: fetch → validate → parse → save
+ * - Just: fetch → validate → parse → install scripts → save
  *
  * ## Usage
  * Typically called by agent-loader when an agent is not found in storage.
@@ -43,6 +46,7 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
  *
  * @see agent-loader for the complete loading orchestration
  * @see AgentStorage for persistence operations
+ * @see script-installer for bundled script installation
  */
 
 /**
@@ -106,7 +110,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
 /**
  * Fetch an agent definition event from Nostr and save it to storage.
  *
- * Pure orchestration: fetch → validate → parse → generate keys → save → return
+ * Pure orchestration: fetch → validate → parse → generate keys → install scripts → save → return
  *
  * ## Flow
  * 1. Fetch agent definition event from Nostr relays (by eventId)
@@ -114,8 +118,9 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
  * 3. Parse event tags (tools, etc.)
  * 4. Check if agent already exists (by eventId) to preserve user config
  * 5. Generate new private key for this agent instance (if new)
- * 6. Save to AgentStorage
- * 7. Return StoredAgent
+ * 6. Install bundled scripts from kind 1063 events (if any e-tags with "script" marker)
+ * 7. Save to AgentStorage
+ * 8. Return StoredAgent
  *
  * ## Configuration Preservation
  * If an agent with the same eventId already exists, this function preserves:
@@ -126,6 +131,11 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
  *
  * This prevents re-adding an agent to a new project from resetting its
  * configuration across all projects that share the same agent definition.
+ *
+ * ## Script Installation
+ * Agent definitions can reference kind 1063 (NIP-94 file metadata) events via e-tags
+ * with the "script" marker. These files are downloaded from Blossom servers and
+ * installed to the agent's home directory at the path specified in the name tag.
  *
  * ## Note
  * This does NOT add the agent to any registry or project. That happens
@@ -176,14 +186,32 @@ export async function installAgentFromNostr(
         throw new AgentNotFoundError(cleanEventId);
     }
 
+    // Wrap in NDKAgentDefinition for proper accessors
+    const agentDef = NDKAgentDefinition.from(agentEvent);
+
     // Generate slug from name if not provided
-    const slug = customSlug || toKebabCase(agentEvent.tagValue("title") || "unnamed-agent");
+    const slug = customSlug || toKebabCase(agentDef.title || "unnamed-agent");
 
     // Parse the event into agent data
     const agentData = parseAgentEvent(agentEvent, slug);
 
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
+
+    // Install bundled scripts from kind 1063 events
+    const scriptETags = agentDef.getScriptETags();
+    if (scriptETags.length > 0) {
+        logger.info(`Agent "${agentData.name}" has ${scriptETags.length} bundled script(s)`);
+        const scriptResults = await installAgentScripts(scriptETags, signer.pubkey, ndkInstance);
+
+        // Log any script installation failures (but don't fail the agent installation)
+        const failures = scriptResults.filter((r) => !r.success);
+        if (failures.length > 0) {
+            logger.warn(`${failures.length} script(s) failed to install for agent "${agentData.name}"`, {
+                failures: failures.map((f) => ({ path: f.relativePath, error: f.error })),
+            });
+        }
+    }
 
     // Create StoredAgent using factory
     const storedAgent = createStoredAgent({

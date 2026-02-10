@@ -93,4 +93,27 @@ export class NDKAgentDefinition extends NDKEvent {
         if (value) this.tags.push(["use-criteria", value]);
     }
 
+    /**
+     * Get script e-tags from the agent definition.
+     * Script e-tags reference kind 1063 (NIP-94 file metadata) events
+     * that contain files bundled with the agent.
+     *
+     * @returns Array of objects with eventId and optional relayUrl
+     */
+    getScriptETags(): Array<{ eventId: string; relayUrl?: string }> {
+        const scriptTags = this.tags.filter((tag) => tag[0] === "e" && tag[3] === "script");
+        const result: Array<{ eventId: string; relayUrl?: string }> = [];
+
+        for (const tag of scriptTags) {
+            const eventId = tag[1];
+            if (eventId) {
+                result.push({
+                    eventId,
+                    relayUrl: tag[2] || undefined,
+                });
+            }
+        }
+
+        return result;
+    }
 }
