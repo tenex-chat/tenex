@@ -112,9 +112,20 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
  * 1. Fetch agent definition event from Nostr relays (by eventId)
  * 2. Validate event structure (has title, content, etc.)
  * 3. Parse event tags (tools, etc.)
- * 4. Generate new private key for this agent instance
- * 5. Save to AgentStorage
- * 6. Return StoredAgent
+ * 4. Check if agent already exists (by eventId) to preserve user config
+ * 5. Generate new private key for this agent instance (if new)
+ * 6. Save to AgentStorage
+ * 7. Return StoredAgent
+ *
+ * ## Configuration Preservation
+ * If an agent with the same eventId already exists, this function preserves:
+ * - llmConfig: User's custom LLM model assignment
+ * - pmOverrides: Project-scoped PM override settings
+ * - nsec: The agent's private key (identity)
+ * - projects: Existing project associations
+ *
+ * This prevents re-adding an agent to a new project from resetting its
+ * configuration across all projects that share the same agent definition.
  *
  * ## Note
  * This does NOT add the agent to any registry or project. That happens
@@ -145,6 +156,17 @@ export async function installAgentFromNostr(
 
     // Clean the event ID (remove nostr: prefix if present)
     const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
+
+    // Check if an agent with this eventId already exists
+    // This preserves user configuration (llmConfig, pmOverrides, etc.)
+    const existingAgent = await agentStorage.getAgentByEventId(cleanEventId);
+    if (existingAgent) {
+        logger.debug(
+            `Agent with eventId ${cleanEventId} already exists as "${existingAgent.slug}", ` +
+            `preserving existing configuration`
+        );
+        return existingAgent;
+    }
 
     // Fetch the event from Nostr
     logger.debug(`Fetching agent event ${cleanEventId} from Nostr relays`);
