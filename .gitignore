@@ -75,5 +75,12 @@ test-*.txt
 __snapshots__/.repomix-output.txt
 .repomix-output.txt
 
+# Accidental one-off files (dev artifacts)
+IMPLEMENTATION_SUMMARY.md
+LONG.md
+echo
+check-types.sh
+typecheck.cjs
+
 # Git worktrees
 .worktrees/
