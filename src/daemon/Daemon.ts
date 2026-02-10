@@ -467,11 +467,13 @@ export class Daemon {
     }
 
     /**
-     * Update subscription with agent pubkeys and definition IDs from all active runtimes
+     * Update subscription with agent pubkeys and definition IDs from all active runtimes.
+     * Also sets up the onAgentAdded callback to keep routing synchronized when
+     * agents are created dynamically via agents_write tool.
      */
     private async updateSubscriptionWithProjectAgents(
         projectId: string,
-        _runtime: ProjectRuntime
+        runtime: ProjectRuntime
     ): Promise<void> {
         if (!this.subscriptionManager) return;
 
@@ -507,12 +509,54 @@ export class Daemon {
 
             this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
             this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
+
+            // Set up callback for dynamic agent additions (e.g., via agents_write tool)
+            // This ensures new agents are immediately routable without requiring a restart
+            const context = runtime.getContext();
+            if (context) {
+                context.setOnAgentAdded((agent) => {
+                    this.handleDynamicAgentAdded(projectId, agent);
+                });
+            }
         } catch (error) {
             logger.error("Failed to update subscription with project agents", {
                 projectId,
                 error: error instanceof Error ? error.message : String(error),
             });
         }
+    }
+
+    /**
+     * Handle a dynamically added agent (e.g., created via agents_write tool).
+     * Updates the routing map and subscription to make the agent immediately routable.
+     */
+    private handleDynamicAgentAdded(projectId: string, agent: AgentInstance): void {
+        // Add to routing map
+        if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
+            this.agentPubkeyToProjects.set(agent.pubkey, new Set());
+        }
+        const projectSet = this.agentPubkeyToProjects.get(agent.pubkey);
+        if (projectSet) {
+            projectSet.add(projectId);
+        }
+
+        // Update subscription with the new pubkey
+        if (this.subscriptionManager) {
+            const allPubkeys = Array.from(this.agentPubkeyToProjects.keys());
+            this.subscriptionManager.updateAgentPubkeys(allPubkeys);
+
+            // Also update definition IDs if this agent has one
+            if (agent.eventId) {
+                const { definitionIds } = this.collectAgentData();
+                this.subscriptionManager.updateAgentDefinitionIds(Array.from(definitionIds));
+            }
+        }
+
+        logger.info("Dynamic agent added to routing", {
+            projectId,
+            agentSlug: agent.slug,
+            agentPubkey: agent.pubkey.slice(0, 8),
+        });
     }
 
     /**
