@@ -209,6 +209,290 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             }
         });
 
+        it("should NOT include e-tag for empty string agentDefinitionEventId", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                "", // Empty string
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+            }
+        });
+
+        it("should NOT include e-tag for whitespace-only agentDefinitionEventId", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                "   ", // Whitespace only
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+            }
+        });
+
+        it("should include metadata tags when agentDefinitionEventId is whitespace-only", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            const agentMetadata = {
+                description: "A test agent",
+                instructions: "Test instructions",
+                useCriteria: "When testing",
+            };
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                "   ", // Whitespace only - should fallback to metadata tags
+                agentMetadata,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+
+                // Should NOT have e-tag
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+
+                // SHOULD have metadata tags (this was the bug - they were being lost)
+                const descriptionTag = tags.find((tag) => tag[0] === "description");
+                expect(descriptionTag).toBeDefined();
+                expect(descriptionTag?.[1]).toBe("A test agent");
+
+                const instructionsTag = tags.find((tag) => tag[0] === "instructions");
+                expect(instructionsTag).toBeDefined();
+                expect(instructionsTag?.[1]).toBe("Test instructions");
+
+                const useCriteriaTag = tags.find((tag) => tag[0] === "use-criteria");
+                expect(useCriteriaTag).toBeDefined();
+                expect(useCriteriaTag?.[1]).toBe("When testing");
+            }
+        });
+
+        it("should NOT include e-tag for invalid hex event ID (too short)", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                "abc123", // Too short, not 64 characters
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+            }
+        });
+
+        it("should NOT include e-tag for invalid hex event ID (non-hex characters)", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            // 64 characters but contains invalid hex characters (g, h, etc.)
+            const invalidHexId = "ghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmn";
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                invalidHexId,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+            }
+        });
+
+        it("should include metadata tags when agentDefinitionEventId is invalid hex (too short)", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            const agentMetadata = {
+                description: "A test agent for invalid hex",
+                instructions: "Test instructions for fallback",
+                useCriteria: "When hex validation fails",
+            };
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                "abc123", // Too short - should fallback to metadata tags
+                agentMetadata,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+
+                // Should NOT have e-tag
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+
+                // SHOULD have metadata tags (fallback when ID is invalid)
+                const descriptionTag = tags.find((tag) => tag[0] === "description");
+                expect(descriptionTag).toBeDefined();
+                expect(descriptionTag?.[1]).toBe("A test agent for invalid hex");
+
+                const instructionsTag = tags.find((tag) => tag[0] === "instructions");
+                expect(instructionsTag).toBeDefined();
+                expect(instructionsTag?.[1]).toBe("Test instructions for fallback");
+
+                const useCriteriaTag = tags.find((tag) => tag[0] === "use-criteria");
+                expect(useCriteriaTag).toBeDefined();
+                expect(useCriteriaTag?.[1]).toBe("When hex validation fails");
+            }
+        });
+
+        it("should include metadata tags when agentDefinitionEventId has invalid characters", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            const agentMetadata = {
+                description: "Agent with invalid chars in ID",
+                instructions: "Should fallback gracefully",
+            };
+
+            // 64 characters but contains invalid hex characters
+            const invalidHexId = "ghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmn";
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                invalidHexId, // Invalid hex - should fallback to metadata tags
+                agentMetadata,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+
+                // Should NOT have e-tag
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeUndefined();
+
+                // SHOULD have metadata tags (fallback when ID has invalid chars)
+                const descriptionTag = tags.find((tag) => tag[0] === "description");
+                expect(descriptionTag).toBeDefined();
+                expect(descriptionTag?.[1]).toBe("Agent with invalid chars in ID");
+
+                const instructionsTag = tags.find((tag) => tag[0] === "instructions");
+                expect(instructionsTag).toBeDefined();
+                expect(instructionsTag?.[1]).toBe("Should fallback gracefully");
+            }
+        });
+
+        it("should trim whitespace from valid agentDefinitionEventId", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            const validEventId = "a".repeat(64);
+            const eventIdWithWhitespace = `  ${validEventId}  `;
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                eventIdWithWhitespace, // Valid ID with surrounding whitespace
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const tags = capturedEvent.tags;
+                const eTag = tags.find((tag) => tag[0] === "e");
+                expect(eTag).toBeDefined();
+                expect(eTag?.[1]).toBe(validEventId); // Should be trimmed
+            }
+        });
+
         it("should handle partial metadata gracefully", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const projectEvent = new NDKProject(getNDK());

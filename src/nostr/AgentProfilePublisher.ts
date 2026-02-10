@@ -105,21 +105,34 @@ export class AgentProfilePublisher {
             }
 
             // Add e-tag for the agent definition event if it exists and is valid
-            if (agentDefinitionEventId) {
-                // Validate that it's a proper hex event ID (64 characters)
-                profileEvent.tags.push(["e", agentDefinitionEventId]);
-            }
+            // OR add metadata tags as fallback for agents without a valid event ID
+            const trimmedEventId = agentDefinitionEventId?.trim() ?? "";
+            const isValidHexEventId = /^[a-f0-9]{64}$/i.test(trimmedEventId);
 
-            // Add metadata tags for agents without NDKAgentDefinition event ID
-            if (!agentDefinitionEventId && agentMetadata) {
-                if (agentMetadata.description) {
-                    profileEvent.tags.push(["description", agentMetadata.description]);
+            if (isValidHexEventId) {
+                profileEvent.tags.push(["e", trimmedEventId]);
+            } else {
+                // Log warning only if an event ID was provided but is invalid
+                if (trimmedEventId !== "") {
+                    logger.warn(
+                        "Invalid event ID format for agent definition in profile, using metadata tags instead",
+                        {
+                            eventId: agentDefinitionEventId,
+                        }
+                    );
                 }
-                if (agentMetadata.instructions) {
-                    profileEvent.tags.push(["instructions", agentMetadata.instructions]);
-                }
-                if (agentMetadata.useCriteria) {
-                    profileEvent.tags.push(["use-criteria", agentMetadata.useCriteria]);
+
+                // Add metadata tags for agents without a valid NDKAgentDefinition event ID
+                if (agentMetadata) {
+                    if (agentMetadata.description) {
+                        profileEvent.tags.push(["description", agentMetadata.description]);
+                    }
+                    if (agentMetadata.instructions) {
+                        profileEvent.tags.push(["instructions", agentMetadata.instructions]);
+                    }
+                    if (agentMetadata.useCriteria) {
+                        profileEvent.tags.push(["use-criteria", agentMetadata.useCriteria]);
+                    }
                 }
             }
 
