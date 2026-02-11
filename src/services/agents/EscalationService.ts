@@ -27,11 +27,11 @@
 
 import { agentStorage } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
+import { pubkeyFromNsec } from "@/nostr";
 import { resolveRecipientToPubkey } from "@/services/agents/AgentResolution";
 import { config as configService } from "@/services/ConfigService";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 export interface EscalationResolutionResult {
     /** The escalation agent's slug */
@@ -134,8 +134,7 @@ async function autoAddEscalationAgent(
     });
 
     // Get the agent's pubkey from its nsec
-    const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-    const agentPubkey = signer.pubkey;
+    const agentPubkey = pubkeyFromNsec(storedAgent.nsec);
 
     // Add agent to project in storage
     await agentStorage.addAgentToProject(agentPubkey, projectDTag);
