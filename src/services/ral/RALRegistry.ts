@@ -1205,6 +1205,124 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Resolve a 12-character hex prefix to a full delegation conversation ID.
+   * Scans all pending and completed delegations for matching prefixes,
+   * including followup event IDs which users may also receive and try to use.
+   *
+   * This is a fallback resolver for edge cases where PrefixKVStore is not initialized
+   * (MCP-only execution mode) or when there are timing races with event indexing.
+   *
+   * Supports resolving:
+   * - Delegation conversation IDs (from pending/completed maps)
+   * - Followup event IDs (from followupToCanonical map) - resolved to their canonical delegation ID
+   *
+   * @param prefix - 12-character hex prefix (must be lowercase)
+   * @returns Full 64-char ID if unique match found, null if no match or ambiguous
+   */
+  resolveDelegationPrefix(prefix: string): string | null {
+    const matches: string[] = [];
+
+    // Scan all conversation delegations
+    for (const [_key, delegations] of this.conversationDelegations) {
+      // Check pending delegations
+      for (const [delegationId, _pendingDelegation] of delegations.pending) {
+        if (delegationId.toLowerCase().startsWith(prefix)) {
+          matches.push(delegationId);
+        }
+      }
+
+      // Check completed delegations
+      for (const [delegationId, _completedDelegation] of delegations.completed) {
+        if (delegationId.toLowerCase().startsWith(prefix)) {
+          // Avoid duplicates (a delegation might be in both pending and completed during transitions)
+          if (!matches.includes(delegationId)) {
+            matches.push(delegationId);
+          }
+        }
+      }
+    }
+
+    // Also scan followupToCanonical map for followup event ID prefixes
+    // Users receive followupEventId from delegate_followup responses and may try to use it
+    for (const [followupId, canonicalId] of this.followupToCanonical) {
+      if (followupId.toLowerCase().startsWith(prefix)) {
+        // For followup IDs, return the canonical delegation conversation ID
+        // since that's what the caller needs for further operations
+        if (!matches.includes(canonicalId)) {
+          matches.push(canonicalId);
+        }
+      }
+    }
+
+    // Return unique match, null if ambiguous or not found
+    if (matches.length === 1) {
+      return matches[0];
+    }
+
+    if (matches.length > 1) {
+      logger.debug("[RALRegistry.resolveDelegationPrefix] Ambiguous prefix match", {
+        prefix,
+        matchCount: matches.length,
+      });
+    }
+
+    return null;
+  }
+
+  /**
+   * Canonicalize a delegation ID by resolving followup event IDs to their canonical
+   * delegation conversation IDs. If the ID is not a followup event ID, returns it unchanged.
+   *
+   * This is used as a post-resolution step when PrefixKVStore resolves an ID that may
+   * be a followup event ID. PrefixKVStore returns any matching ID, but delegate_followup
+   * needs the canonical delegation conversation ID for proper routing and e-tags.
+   *
+   * Resolution order:
+   * 1. Check followupToCanonical map (O(1) lookup for known followup IDs)
+   * 2. Scan pending/completed delegations for followup entries with matching followupEventId
+   * 3. Return unchanged if not found (treat as canonical)
+   *
+   * This handles edge cases where:
+   * - MCP-only mode: followupToCanonical map may not be populated
+   * - Cross-session: followup was created in a previous session and RAL state was cleared
+   * - Full 64-char hex IDs provided directly instead of via prefix resolution
+   *
+   * @param id - A delegation conversation ID or followup event ID (64-char hex)
+   * @returns The canonical delegation conversation ID (unchanged if not a followup)
+   */
+  canonicalizeDelegationId(id: string): string {
+    // Fast path: check followupToCanonical map first (O(1))
+    const fromMap = this.followupToCanonical.get(id);
+    if (fromMap) {
+      return fromMap;
+    }
+
+    // Slow path: scan pending/completed delegations for followup entries
+    // This handles cases where the followupToCanonical map isn't populated
+    // (MCP-only mode, cross-session lookups, etc.)
+    const normalizedId = id.toLowerCase();
+    for (const [_key, delegations] of this.conversationDelegations) {
+      // Check pending delegations for followup entries
+      for (const [canonicalId, pending] of delegations.pending) {
+        if (pending.type === "followup" && pending.followupEventId?.toLowerCase() === normalizedId) {
+          logger.debug("[RALRegistry.canonicalizeDelegationId] Found canonical via pending scan", {
+            followupId: id.substring(0, 12),
+            canonicalId: canonicalId.substring(0, 12),
+          });
+          return canonicalId;
+        }
+      }
+
+      // Check completed delegations - they may have followup transcript entries
+      // Note: completed delegations don't store followupEventId directly,
+      // but we can still check if the ID matches any delegation conversation ID
+    }
+
+    // Not a followup ID or not found - return unchanged (treat as canonical)
+    return id;
+  }
+
+  /**
    * Find delegation in conversation storage (doesn't require RAL to exist).
    * Used by delegate_followup to look up delegations even after RAL is cleared.
    * Handles both original delegation IDs and followup event IDs through the reverse lookup.

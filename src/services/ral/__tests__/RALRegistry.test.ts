@@ -1840,6 +1840,380 @@ describe("RALRegistry", () => {
       });
     });
 
+  describe("resolveDelegationPrefix", () => {
+    it("should resolve unique prefix match from pending delegations", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const delegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", // 64 chars
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Task",
+        ralNumber,
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+      // Resolve using 12-char prefix
+      const resolved = registry.resolveDelegationPrefix("a1b2c3d4e5f6");
+      expect(resolved).toBe("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+    });
+
+    it("should resolve unique prefix match from completed delegations", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const delegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: "f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2", // 64 chars
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Task",
+        ralNumber,
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+      // Complete the delegation
+      registry.recordCompletion({
+        delegationConversationId: "f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2",
+        recipientPubkey: "recipient-1",
+        response: "Done",
+        completedAt: Date.now(),
+      });
+
+      // Resolve using 12-char prefix (from completed)
+      const resolved = registry.resolveDelegationPrefix("f1e2d3c4b5a6");
+      expect(resolved).toBe("f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2");
+    });
+
+    it("should return null for ambiguous prefix with multiple matches", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      // Two delegations with the same 12-char prefix
+      const delegations: PendingDelegation[] = [
+        {
+          type: "standard",
+          delegationConversationId: "abcdef123456aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          recipientPubkey: "recipient-1",
+          senderPubkey: agentPubkey,
+          prompt: "Task 1",
+          ralNumber,
+        },
+        {
+          type: "standard",
+          delegationConversationId: "abcdef123456bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          recipientPubkey: "recipient-2",
+          senderPubkey: agentPubkey,
+          prompt: "Task 2",
+          ralNumber,
+        },
+      ];
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, delegations);
+
+      // Ambiguous prefix should return null
+      const resolved = registry.resolveDelegationPrefix("abcdef123456");
+      expect(resolved).toBeNull();
+    });
+
+    it("should return null for non-matching prefix", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const delegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: "111111222222333333444444555555666666777777888888999999000000111111",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Task",
+        ralNumber,
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+
+      // Non-matching prefix should return null
+      const resolved = registry.resolveDelegationPrefix("aaaaaaaaaaaa");
+      expect(resolved).toBeNull();
+    });
+
+    it("should return null when no delegations exist", () => {
+      const resolved = registry.resolveDelegationPrefix("123456789abc");
+      expect(resolved).toBeNull();
+    });
+
+    it("should not return duplicate matches when same delegation ID exists in both pending and completed maps", () => {
+      // This tests the dedupe branch in resolveDelegationPrefix
+      // Edge case: During state transitions, the same delegation ID might briefly exist in both maps
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const delegationId = "deadbeef1234deadbeef1234deadbeef1234deadbeef1234deadbeef12345678";
+
+      // Add delegation to pending
+      const pendingDelegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: delegationId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Task",
+        ralNumber,
+      };
+
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [pendingDelegation]);
+
+      // Now manually inject the same ID into the completed map to simulate the edge case
+      // Access private state via type assertion for test purposes
+      const key = `${agentPubkey}:${conversationId}`;
+      // @ts-expect-error - accessing private field for testing
+      const convDelegations = registry.conversationDelegations.get(key);
+      expect(convDelegations).toBeDefined();
+
+      // Manually add to completed (simulating the edge case)
+      convDelegations!.completed.set(delegationId, {
+        delegationConversationId: delegationId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber,
+        status: "completed",
+      });
+
+      // Now the same ID is in BOTH pending and completed maps
+      expect(convDelegations!.pending.has(delegationId)).toBe(true);
+      expect(convDelegations!.completed.has(delegationId)).toBe(true);
+
+      // resolveDelegationPrefix should dedupe and return a single match, not 2
+      const resolved = registry.resolveDelegationPrefix("deadbeef1234");
+      expect(resolved).toBe(delegationId);
+    });
+
+    it("should resolve followup event ID prefix to canonical delegation conversation ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      // Add a followup delegation with a followupEventId
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "canonical1234canonical1234canonical1234canonical1234canonical12345678",
+        followupEventId: "followupab12followupab12followupab12followupab12followupab12345678",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Resolve using the FOLLOWUP event ID prefix (users receive this from delegate_followup response)
+      const resolved = registry.resolveDelegationPrefix("followupab12");
+
+      // Should resolve to the CANONICAL delegation conversation ID, not the followup event ID
+      expect(resolved).toBe("canonical1234canonical1234canonical1234canonical1234canonical12345678");
+    });
+
+    it("should resolve both delegation ID prefix and followup ID prefix to the same canonical ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "aabbccdd1234aabbccdd1234aabbccdd1234aabbccdd1234aabbccdd12345678";
+      const followupId = "eeff00111234eeff00111234eeff00111234eeff00111234eeff001112345678";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Both prefixes should resolve to the same canonical ID
+      const resolvedFromCanonical = registry.resolveDelegationPrefix("aabbccdd1234");
+      const resolvedFromFollowup = registry.resolveDelegationPrefix("eeff00111234");
+
+      expect(resolvedFromCanonical).toBe(canonicalId);
+      expect(resolvedFromFollowup).toBe(canonicalId);
+    });
+
+    it("should not create ambiguous match when followup ID resolves to same canonical as direct match", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "samepref1234samepref1234samepref1234samepref1234samepref12345678";
+
+      // Create a followup delegation
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: "differentid12differentid12differentid12differentid12differentid123",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // The canonical ID is in pending. The followupToCanonical map points to the same canonical ID.
+      // Resolving the canonical prefix should NOT be ambiguous (dedupe should handle it)
+      const resolved = registry.resolveDelegationPrefix("samepref1234");
+      expect(resolved).toBe(canonicalId);
+    });
+  });
+
+  describe("canonicalizeDelegationId", () => {
+    it("should return the canonical delegation ID when given a followup event ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical1234canonical1234canonical1234canonical1234canonical12345678";
+      const followupId = "followupid12followupid12followupid12followupid12followupid12345678";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Canonicalize the followup ID - should return the canonical ID
+      const result = registry.canonicalizeDelegationId(followupId);
+      expect(result).toBe(canonicalId);
+    });
+
+    it("should return the ID unchanged when given a canonical delegation ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical5678canonical5678canonical5678canonical5678canonical56789012";
+
+      const standardDelegation: PendingDelegation = {
+        type: "standard",
+        delegationConversationId: canonicalId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Standard delegation",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [standardDelegation]);
+
+      // Canonicalize the canonical ID - should return unchanged
+      const result = registry.canonicalizeDelegationId(canonicalId);
+      expect(result).toBe(canonicalId);
+    });
+
+    it("should return the ID unchanged when given an unknown ID", () => {
+      // No delegations registered
+      const unknownId = "unknownid123unknownid123unknownid123unknownid123unknownid1234567";
+
+      // Canonicalize an unknown ID - should return unchanged
+      const result = registry.canonicalizeDelegationId(unknownId);
+      expect(result).toBe(unknownId);
+    });
+
+    it("should work for post-resolution canonicalization of PrefixKVStore results", () => {
+      // This tests the use case where PrefixKVStore resolves a followup ID prefix
+      // to the full followup ID, and we need to canonicalize it before using it
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "delegationid1delegationid1delegationid1delegationid1delegationid12";
+      const followupId = "followupevent1followupevent1followupevent1followupevent1followupev12";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up question",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Simulate PrefixKVStore returning the followup ID (not the canonical ID)
+      // This is what happens in daemon mode when user provides a followup ID prefix
+      const prefixKVStoreResult = followupId; // PrefixKVStore returns the exact ID that matched
+
+      // Post-resolution canonicalization step (what delegate_followup does)
+      const canonicalized = registry.canonicalizeDelegationId(prefixKVStoreResult);
+
+      // Result should be the canonical delegation conversation ID
+      expect(canonicalized).toBe(canonicalId);
+
+      // Verify we can find the delegation with the canonical ID
+      const delegation = registry.findDelegation(canonicalized);
+      expect(delegation).toBeDefined();
+      expect(delegation?.pending?.delegationConversationId).toBe(canonicalId);
+    });
+
+    it("should canonicalize full 64-char hex followup ID via fallback scan when not in followupToCanonical map", () => {
+      // This tests the case where a full 64-char followup ID is provided directly
+      // and the followupToCanonical map doesn't have it (e.g., MCP-only mode, cross-session)
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical9999canonical9999canonical9999canonical9999canonical99990000";
+      const followupId = "followup8888followup8888followup8888followup8888followup88880000";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-fallback",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up via fallback path",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Manually clear the followupToCanonical map to simulate MCP-only mode
+      // where the map might not be populated
+      // Access private member for testing purposes
+      // @ts-expect-error Accessing private member for testing
+      registry.followupToCanonical.delete(followupId);
+
+      // Now canonicalize the full followup ID - should still work via fallback scan
+      const canonicalized = registry.canonicalizeDelegationId(followupId);
+
+      // Result should be the canonical delegation conversation ID
+      expect(canonicalized).toBe(canonicalId);
+    });
+
+    it("should handle case-insensitive followup ID matching in fallback scan", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical7777canonical7777canonical7777canonical7777canonical77770000";
+      const followupId = "followup6666followup6666followup6666followup6666followup66660000";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-case",
+        senderPubkey: agentPubkey,
+        prompt: "Case-insensitive test",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Clear the followupToCanonical map to force fallback path
+      // @ts-expect-error Accessing private member for testing
+      registry.followupToCanonical.delete(followupId);
+
+      // Canonicalize with uppercase - should still work
+      const uppercaseFollowupId = followupId.toUpperCase();
+      const canonicalized = registry.canonicalizeDelegationId(uppercaseFollowupId);
+
+      expect(canonicalized).toBe(canonicalId);
+    });
+  });
+
     describe("race condition prevention in abortWithCascade", () => {
       it("should mark delegations as killed before aborting to prevent race", async () => {
         const ralNumber = registry.create(agentPubkey, conversationId, projectId);
