@@ -66,11 +66,36 @@ interface DelegateOutput {
   circularDelegationWarnings?: CircularDelegationWarning[];
 }
 
+/**
+ * Check if the agent has created a todo list.
+ * Returns { hasTodos: boolean, hasConversation: boolean } to distinguish
+ * between "no todos" and "no conversation context" cases.
+ */
+function checkTodoState(context: ToolExecutionContext): { hasTodos: boolean; hasConversation: boolean } {
+  const conversation = context.getConversation();
+  if (!conversation) {
+    // No conversation context available - skip enforcement
+    return { hasTodos: true, hasConversation: false };
+  }
+  const todos = conversation.getTodos(context.agent.pubkey);
+  return { hasTodos: todos.length > 0, hasConversation: true };
+}
+
 async function executeDelegate(
   input: DelegateInput,
   context: ToolExecutionContext
 ): Promise<DelegateOutput> {
   const { delegations } = input;
+
+  // ENFORCEMENT: Delegation requires a todo list
+  // Skip enforcement if no conversation context (e.g., MCP-only mode)
+  const todoState = checkTodoState(context);
+  if (todoState.hasConversation && !todoState.hasTodos) {
+    throw new Error(
+      "Delegation requires a todo list. Please use `todo_write()` to create a todo list before delegating tasks. " +
+      "This helps track work progress and ensures delegated tasks are properly documented."
+    );
+  }
 
   if (!Array.isArray(delegations) || delegations.length === 0) {
     throw new Error("At least one delegation is required");

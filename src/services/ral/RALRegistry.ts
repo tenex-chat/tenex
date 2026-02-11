@@ -2115,7 +2115,8 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     }
 
     // Update flags based on tool name
-    if (toolName === "TodoWrite" || toolName === "mcp__tenex__todo_write") {
+    // Include all variants: todo_write (actual ToolName), TodoWrite (legacy), mcp__tenex__todo_write (MCP)
+    if (toolName === "todo_write" || toolName === "TodoWrite" || toolName === "mcp__tenex__todo_write") {
       summary.flags.hasTodoWrite = true;
     }
 
