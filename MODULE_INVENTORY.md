@@ -37,6 +37,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Nostr Integration (`src/nostr`)
 - **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, and `kinds.ts` encapsulate event creation.
+- **Key Derivation** (`keys.ts`): Provides `pubkeyFromNsec()` helper to derive pubkeys from nsec strings. Isolates NDK key operations so services don't import NDK directly.
 - **Utilities & Types**: Provide helper functions for relays, batching, and metadata so higher layers never manipulate `NDKEvent` directly.
 - **Guideline**: Any code that needs to publish Nostr events uses `AgentPublisher` or helper APIs; do not access NDK objects outside this module (tests can mock as needed).
 
