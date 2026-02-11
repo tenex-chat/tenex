@@ -21,6 +21,42 @@ function getCurrentTimestamp(): number {
 }
 
 /**
+ * Simple deterministic hash for generating fallback IDs.
+ * Returns a hex string based on the input.
+ */
+function simpleHash(str: string): string {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    // Convert to positive hex string
+    return Math.abs(hash).toString(16);
+}
+
+/**
+ * Generates a slug-style ID from a title.
+ * Converts to lowercase, replaces spaces/special chars with hyphens, and removes consecutive hyphens.
+ * Falls back to a deterministic hash if the title produces an empty slug (e.g., emoji-only or non-ASCII titles).
+ */
+function generateIdFromTitle(title: string): string {
+    const slug = title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "") // Remove special characters except spaces and hyphens
+        .replace(/\s+/g, "-") // Replace spaces with hyphens
+        .replace(/-+/g, "-") // Replace consecutive hyphens with single hyphen
+        .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
+
+    // Fall back to hash if slug is empty (non-ASCII/emoji-only titles)
+    if (slug === "") {
+        return `todo-${simpleHash(title)}`;
+    }
+
+    return slug;
+}
+
+/**
  * Validates and writes the complete todo list, replacing all existing items.
  * Implements safety check to prevent accidental deletions.
  */
@@ -30,7 +66,7 @@ function writeTodosToConversation(
     newItems: Array<{
         id: string;
         title: string;
-        description: string;
+        description?: string; // undefined means "preserve existing" for updates
         status: TodoStatus;
         skip_reason?: string;
     }>,
@@ -96,7 +132,8 @@ function writeTodosToConversation(
         return {
             id: item.id,
             title: item.title,
-            description: item.description,
+            // Preserve existing description if not provided in update (undefined means "keep existing")
+            description: item.description ?? existing?.description ?? "",
             status: item.status,
             skipReason: item.skip_reason,
             createdAt: existing?.createdAt ?? now,
@@ -118,9 +155,9 @@ function writeTodosToConversation(
 // ============================================================================
 
 const todoWriteItemSchema = z.object({
-    id: z.string().describe("Unique identifier for the todo item (e.g., 'implement-auth', 'fix-bug-123')"),
+    id: z.string().optional().describe("Optional unique identifier. Auto-generated from title if not provided."),
     title: z.string().describe("Short human-readable title for the todo item"),
-    description: z.string().describe("Detailed description of what needs to be done"),
+    description: z.string().optional().describe("Optional detailed description. When updating existing items, omitting preserves the current description. For new items, defaults to empty string."),
     status: z
         .enum(["pending", "in_progress", "done", "skipped"])
         .describe("Current status of the item"),
@@ -159,9 +196,9 @@ async function executeTodoWrite(
         conversation,
         context.agent.pubkey,
         input.todos.map((item) => ({
-            id: item.id,
+            id: item.id ?? generateIdFromTitle(item.title),
             title: item.title,
-            description: item.description,
+            description: item.description, // Pass undefined to preserve existing; handled in writeTodosToConversation
             status: item.status as TodoStatus,
             skip_reason: item.skip_reason,
         })),
@@ -194,8 +231,11 @@ export function createTodoWriteTool(context: ConversationToolContext): AISdkTool
         description:
             "Write the complete todo list, replacing all existing items. Provide ALL items you want to exist - " +
             "this is a full state replacement. By default, removing existing items is blocked (safety check). " +
-            "Set force=true to allow item removal. Each item requires: id (unique), title, description, and status. " +
-            "Use skip_reason when status='skipped'.",
+            "Set force=true to allow item removal. Each item requires: title and status. " +
+            "Optional: id (auto-generated from title if not provided), description (preserved on update if omitted, empty for new items). " +
+            "Use skip_reason when status='skipped'. " +
+            "NOTE: If an existing item used a custom ID and you omit the id field, the auto-generated ID won't match, " +
+            "which will trigger the safety check (or require force=true). Always include IDs for items with custom IDs.",
         inputSchema: todoWriteSchema,
         execute: async (input: TodoWriteInput) => {
             return await executeTodoWrite(input, context);
