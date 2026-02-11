@@ -1801,6 +1801,45 @@ describe("RALRegistry", () => {
       });
     });
 
+    describe("updateHeuristicSummary hasTodoWrite", () => {
+      it("should set hasTodoWrite for 'todo_write' tool name", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        // Call updateHeuristicSummary with the actual tool name "todo_write"
+        registry.updateHeuristicSummary(agentPubkey, conversationId, ralNumber, "todo_write", {});
+
+        const summary = registry.getHeuristicSummary(agentPubkey, conversationId, ralNumber);
+        expect(summary?.flags.hasTodoWrite).toBe(true);
+      });
+
+      it("should set hasTodoWrite for 'TodoWrite' (legacy) tool name", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        registry.updateHeuristicSummary(agentPubkey, conversationId, ralNumber, "TodoWrite", {});
+
+        const summary = registry.getHeuristicSummary(agentPubkey, conversationId, ralNumber);
+        expect(summary?.flags.hasTodoWrite).toBe(true);
+      });
+
+      it("should set hasTodoWrite for 'mcp__tenex__todo_write' (MCP) tool name", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        registry.updateHeuristicSummary(agentPubkey, conversationId, ralNumber, "mcp__tenex__todo_write", {});
+
+        const summary = registry.getHeuristicSummary(agentPubkey, conversationId, ralNumber);
+        expect(summary?.flags.hasTodoWrite).toBe(true);
+      });
+
+      it("should NOT set hasTodoWrite for unrelated tools", () => {
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        registry.updateHeuristicSummary(agentPubkey, conversationId, ralNumber, "Bash", { command: "ls" });
+
+        const summary = registry.getHeuristicSummary(agentPubkey, conversationId, ralNumber);
+        expect(summary?.flags.hasTodoWrite).toBe(false);
+      });
+    });
+
     describe("race condition prevention in abortWithCascade", () => {
       it("should mark delegations as killed before aborting to prevent race", async () => {
         const ralNumber = registry.create(agentPubkey, conversationId, projectId);

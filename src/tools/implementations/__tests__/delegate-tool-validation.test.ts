@@ -38,7 +38,10 @@ describe("Delegation tools - Self-delegation validation", () => {
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
+    // Default todo item to satisfy delegation requirement
+    const defaultTodo = { id: "test-todo", title: "Test Todo", description: "Test", status: "pending" as const, createdAt: Date.now(), updatedAt: Date.now() };
+
+    const createMockContext = (ralNumber: number, hasTodos = true): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -55,8 +58,30 @@ describe("Delegation tools - Self-delegation validation", () => {
         currentBranch: "main",
         getConversation: () => ({
             getRootEventId: () => conversationId,
-            getTodos: () => [],
+            getTodos: () => hasTodos ? [defaultTodo] : [],
         }) as any,
+    });
+
+    /**
+     * Creates a context with getConversation() returning null,
+     * simulating MCP-only mode where no conversation context is available.
+     */
+    const createMockContextWithNoConversation = (ralNumber: number): ToolExecutionContext => ({
+        agent: {
+            slug: "self-agent",
+            name: "Self Agent",
+            pubkey: "agent-pubkey-123",
+        } as AgentInstance,
+        conversationId,
+        triggeringEvent: {
+            tags: [],
+        } as any,
+        agentPublisher: {} as any,
+        ralNumber,
+        projectBasePath: "/tmp/test",
+        workingDirectory: "/tmp/test",
+        currentBranch: "main",
+        getConversation: () => null,
     });
 
     beforeEach(() => {
@@ -91,7 +116,7 @@ describe("Delegation tools - Self-delegation validation", () => {
 
         it("should reject pubkeys (only slugs accepted)", async () => {
             const context = {
-                ...createMockContext(1), // Provide ralNumber
+                ...createMockContext(1, true), // Provide ralNumber, with todos
                 agentPublisher: {
                     delegate: async () => "mock-delegation-id",
                 } as any,
@@ -113,6 +138,57 @@ describe("Delegation tools - Self-delegation validation", () => {
                 expect(error.message).toContain("agent-pubkey-123");
                 expect(error.message).toContain("Available agent slugs");
             }
+        });
+
+        it("should block delegation when no todos exist", async () => {
+            const context = {
+                ...createMockContext(1, false), // No todos
+                agentPublisher: {
+                    delegate: async () => "mock-delegation-id",
+                } as any,
+            };
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "self-agent", prompt: "Do something" }
+                ],
+            };
+
+            // Should throw error requiring todos
+            try {
+                await delegateTool.execute(input);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error: any) {
+                expect(error.message).toContain("Delegation requires a todo list");
+                expect(error.message).toContain("todo_write()");
+            }
+        });
+
+        it("should skip enforcement and allow delegation when no conversation context (MCP-only mode)", async () => {
+            const agentPubkey = "agent-pubkey-123";
+            const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+            // Context with getConversation() returning null - simulates MCP-only mode
+            const context = {
+                ...createMockContextWithNoConversation(ralNumber),
+                agentPublisher: {
+                    delegate: async () => "mock-delegation-id",
+                } as any,
+            };
+            const delegateTool = createDelegateTool(context);
+
+            const input = {
+                delegations: [
+                    { recipient: "other-agent", prompt: "Task to delegate" }
+                ],
+            };
+
+            // Should succeed despite no todos - enforcement is skipped when no conversation context
+            const result = await delegateTool.execute(input);
+            expect(result).toBeDefined();
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
         });
 
         it("should allow self in multiple recipients", async () => {
@@ -174,7 +250,10 @@ describe("Delegation tools - RAL isolation", () => {
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
+    // Default todo item to satisfy delegation requirement
+    const defaultTodo = { id: "test-todo", title: "Test Todo", description: "Test", status: "pending" as const, createdAt: Date.now(), updatedAt: Date.now() };
+
+    const createMockContext = (ralNumber: number, hasTodos = true): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -193,7 +272,7 @@ describe("Delegation tools - RAL isolation", () => {
         currentBranch: "main",
         getConversation: () => ({
             getRootEventId: () => conversationId,
-            getTodos: () => [],
+            getTodos: () => hasTodos ? [defaultTodo] : [],
         }) as any,
     });
 
@@ -292,7 +371,10 @@ describe("Delegation tools - RALRegistry state verification", () => {
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
 
-    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
+    // Default todo item to satisfy delegation requirement
+    const defaultTodo = { id: "test-todo", title: "Test Todo", description: "Test", status: "pending" as const, createdAt: Date.now(), updatedAt: Date.now() };
+
+    const createMockContext = (ralNumber: number, hasTodos = true): ToolExecutionContext => ({
         agent: {
             slug: "self-agent",
             name: "Self Agent",
@@ -311,7 +393,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
         currentBranch: "main",
         getConversation: () => ({
             getRootEventId: () => conversationId,
-            getTodos: () => [],
+            getTodos: () => hasTodos ? [defaultTodo] : [],
         }) as any,
     });
 
@@ -472,11 +554,14 @@ describe("Delegation tools - Circular delegation soft warning", () => {
     let registry: RALRegistry;
     let conversationStoreSpy: Mock<typeof ConversationStore.get>;
 
-    const createMockContextWithChain = (ralNumber: number, delegationChain: any[] = []): ToolExecutionContext => {
+    // Default todo item to satisfy delegation requirement
+    const defaultTodo = { id: "test-todo", title: "Test Todo", description: "Test", status: "pending" as const, createdAt: Date.now(), updatedAt: Date.now() };
+
+    const createMockContextWithChain = (ralNumber: number, delegationChain: any[] = [], hasTodos = true): ToolExecutionContext => {
         // Mock the ConversationStore.get to return our chain
         const mockConversation = {
             getRootEventId: () => conversationId,
-            getTodos: () => [],
+            getTodos: () => hasTodos ? [defaultTodo] : [],
             metadata: {
                 delegationChain,
             },
