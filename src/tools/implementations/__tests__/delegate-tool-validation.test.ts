@@ -783,6 +783,227 @@ describe("Delegation tools - Circular delegation soft warning", () => {
     });
 });
 
+describe("delegate_followup - Full ID canonicalization", () => {
+    const conversationId = "test-conversation-id";
+    const projectId = "31933:pubkey:test-project";
+    let registry: RALRegistry;
+
+    const createMockContext = (ralNumber: number): ToolExecutionContext => ({
+        agent: {
+            slug: "self-agent",
+            name: "Self Agent",
+            pubkey: "agent-pubkey-123",
+        } as AgentInstance,
+        conversationId,
+        triggeringEvent: {
+            tags: [],
+        } as any,
+        agentPublisher: {
+            delegateFollowup: async () => "mock-followup-event-id",
+        } as any,
+        ralNumber,
+        projectBasePath: "/tmp/test",
+        workingDirectory: "/tmp/test",
+        currentBranch: "main",
+        getConversation: () => ({
+            getRootEventId: () => conversationId,
+            getTodos: () => [],
+        }) as any,
+    });
+
+    beforeEach(() => {
+        // Reset singleton for testing
+        // @ts-expect-error - accessing private static for testing
+        RALRegistry.instance = undefined;
+        registry = RALRegistry.getInstance();
+    });
+
+    it("should canonicalize full 64-char hex followup event ID to canonical delegation ID", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        // Register a followup delegation with known IDs (must be exactly 64 hex chars)
+        const canonicalId = "1111111111111111111111111111111111111111111111111111111111111111";
+        const followupId = "2222222222222222222222222222222222222222222222222222222222222222";
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
+            type: "followup",
+            delegationConversationId: canonicalId,
+            followupEventId: followupId,
+            recipientPubkey: "recipient-agent-pubkey",
+            senderPubkey: agentPubkey,
+            prompt: "Original prompt",
+            ralNumber,
+        }]);
+
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        // User provides full followup event ID (not the canonical delegation ID)
+        const input = {
+            delegation_conversation_id: followupId, // Full 64-char hex followup ID
+            message: "Follow-up question",
+        };
+
+        // This should canonicalize the followup ID to the canonical delegation ID
+        // and successfully find the delegation
+        const result = await followupTool.execute(input);
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12)); // Shortened canonical ID
+    });
+
+    it("should canonicalize nostr:nevent1 NIP-19 format to canonical delegation ID", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        // Use a real-ish 64-char hex ID that we can encode
+        const canonicalId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const followupId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
+            type: "followup",
+            delegationConversationId: canonicalId,
+            followupEventId: followupId,
+            recipientPubkey: "recipient-agent-pubkey",
+            senderPubkey: agentPubkey,
+            prompt: "Original prompt",
+            ralNumber,
+        }]);
+
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        // Import nip19 to encode the followup ID as nevent
+        const { nip19 } = await import("nostr-tools");
+        const neventEncoded = nip19.neventEncode({ id: followupId });
+
+        const input = {
+            delegation_conversation_id: `nostr:${neventEncoded}`, // NIP-19 nevent format with nostr: prefix
+            message: "Follow-up via NIP-19",
+        };
+
+        const result = await followupTool.execute(input);
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+    });
+
+    it("should canonicalize note1 NIP-19 format to canonical delegation ID", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const canonicalId = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        const followupId = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
+            type: "followup",
+            delegationConversationId: canonicalId,
+            followupEventId: followupId,
+            recipientPubkey: "recipient-agent-pubkey",
+            senderPubkey: agentPubkey,
+            prompt: "Original prompt",
+            ralNumber,
+        }]);
+
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        // Import nip19 to encode the followup ID as note
+        const { nip19 } = await import("nostr-tools");
+        const noteEncoded = nip19.noteEncode(followupId);
+
+        const input = {
+            delegation_conversation_id: noteEncoded, // NIP-19 note format (no nostr: prefix)
+            message: "Follow-up via note1",
+        };
+
+        const result = await followupTool.execute(input);
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+    });
+
+    it("should handle invalid NIP-19 format gracefully", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        const input = {
+            delegation_conversation_id: "nostr:note1invalid_bech32_characters!!!", // Invalid NIP-19
+            message: "This should fail gracefully",
+        };
+
+        // Should fall through to unknown format handling and eventually fail
+        // because no delegation matches the malformed input
+        try {
+            await followupTool.execute(input);
+            expect(true).toBe(false); // Should not reach here
+        } catch (error: any) {
+            // With NDK mocked to return null, should get "Could not fetch" error
+            expect(error.message).toContain("Could not fetch delegation conversation");
+        }
+    });
+
+    it("should pass through canonical delegation IDs unchanged", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        // Register a standard delegation (not a followup)
+        const canonicalId = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
+            type: "standard",
+            delegationConversationId: canonicalId,
+            recipientPubkey: "recipient-agent-pubkey",
+            senderPubkey: agentPubkey,
+            prompt: "Original prompt",
+            ralNumber,
+        }]);
+
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        // User provides the canonical delegation ID directly
+        const input = {
+            delegation_conversation_id: canonicalId,
+            message: "Follow-up using canonical ID",
+        };
+
+        const result = await followupTool.execute(input);
+        expect(result.success).toBe(true);
+        // Should use the same canonical ID (canonicalization returns it unchanged)
+        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+    });
+
+    it("should canonicalize uppercase hex IDs to lowercase", async () => {
+        const agentPubkey = "agent-pubkey-123";
+        const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+        const canonicalId = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+        registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [{
+            type: "standard",
+            delegationConversationId: canonicalId,
+            recipientPubkey: "recipient-agent-pubkey",
+            senderPubkey: agentPubkey,
+            prompt: "Original prompt",
+            ralNumber,
+        }]);
+
+        const context = createMockContext(ralNumber);
+        const followupTool = createDelegateFollowupTool(context);
+
+        // User provides uppercase version
+        const input = {
+            delegation_conversation_id: canonicalId.toUpperCase(),
+            message: "Follow-up with uppercase ID",
+        };
+
+        const result = await followupTool.execute(input);
+        expect(result.success).toBe(true);
+        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+    });
+});
+
 // Restore mocks
 afterAll(() => {
     mockResolve.mockRestore();

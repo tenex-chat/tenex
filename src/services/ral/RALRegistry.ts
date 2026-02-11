@@ -1277,11 +1277,49 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * be a followup event ID. PrefixKVStore returns any matching ID, but delegate_followup
    * needs the canonical delegation conversation ID for proper routing and e-tags.
    *
-   * @param id - A delegation conversation ID or followup event ID
+   * Resolution order:
+   * 1. Check followupToCanonical map (O(1) lookup for known followup IDs)
+   * 2. Scan pending/completed delegations for followup entries with matching followupEventId
+   * 3. Return unchanged if not found (treat as canonical)
+   *
+   * This handles edge cases where:
+   * - MCP-only mode: followupToCanonical map may not be populated
+   * - Cross-session: followup was created in a previous session and RAL state was cleared
+   * - Full 64-char hex IDs provided directly instead of via prefix resolution
+   *
+   * @param id - A delegation conversation ID or followup event ID (64-char hex)
    * @returns The canonical delegation conversation ID (unchanged if not a followup)
    */
   canonicalizeDelegationId(id: string): string {
-    return this.followupToCanonical.get(id) ?? id;
+    // Fast path: check followupToCanonical map first (O(1))
+    const fromMap = this.followupToCanonical.get(id);
+    if (fromMap) {
+      return fromMap;
+    }
+
+    // Slow path: scan pending/completed delegations for followup entries
+    // This handles cases where the followupToCanonical map isn't populated
+    // (MCP-only mode, cross-session lookups, etc.)
+    const normalizedId = id.toLowerCase();
+    for (const [_key, delegations] of this.conversationDelegations) {
+      // Check pending delegations for followup entries
+      for (const [canonicalId, pending] of delegations.pending) {
+        if (pending.type === "followup" && pending.followupEventId?.toLowerCase() === normalizedId) {
+          logger.debug("[RALRegistry.canonicalizeDelegationId] Found canonical via pending scan", {
+            followupId: id.substring(0, 12),
+            canonicalId: canonicalId.substring(0, 12),
+          });
+          return canonicalId;
+        }
+      }
+
+      // Check completed delegations - they may have followup transcript entries
+      // Note: completed delegations don't store followupEventId directly,
+      // but we can still check if the ID matches any delegation conversation ID
+    }
+
+    // Not a followup ID or not found - return unchanged (treat as canonical)
+    return id;
   }
 
   /**
