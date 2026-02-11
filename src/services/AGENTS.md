@@ -165,7 +165,7 @@ import { RALRegistry, MCPManager } from "@/services";
 
 ```typescript
 // REJECT: Service importing from commands/
-import { agentCommand } from "@/commands/agent";
+import { daemonCommand } from "@/commands/daemon";  // Layer violation!
 
 // REJECT: Services without "Service" suffix
 class ProjectManager { }  // Should be ProjectManagerService

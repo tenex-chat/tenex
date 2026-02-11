@@ -73,22 +73,22 @@ Commands should be thin - parse input, delegate, format output:
 
 ```typescript
 // CORRECT: Thin command handler
-export async function removeAgent(agentId: string): Promise<void> {
+export async function startDaemon(options: DaemonOptions): Promise<void> {
   // 1. Validate input
-  if (!agentId) throw new Error("Agent ID required");
+  if (!options.port) throw new Error("Port required");
 
   // 2. Delegate to service
-  const storage = new AgentStorage();
-  await storage.remove(agentId);
+  const daemon = new Daemon();
+  await daemon.start(options);
 
   // 3. Format output
-  console.log(`Agent ${agentId} removed`);
+  console.log(`Daemon started on port ${options.port}`);
 }
 
 // WRONG: Business logic in command
-export async function removeAgent(agentId: string): Promise<void> {
-  // 200 lines of cleanup logic
-  // Should be in AgentStorage
+export async function startDaemon(options: DaemonOptions): Promise<void> {
+  // 200 lines of initialization logic
+  // Should be in Daemon class
 }
 ```
 
@@ -97,16 +97,16 @@ Commands don't hold state - services do:
 
 ```typescript
 // WRONG: Command holding state
-let cachedAgents: Agent[];
-export async function listAgents(): Promise<void> {
-  if (!cachedAgents) cachedAgents = await load();
+let cachedConfig: Config;
+export async function showConfig(): Promise<void> {
+  if (!cachedConfig) cachedConfig = await load();
   // ...
 }
 
 // CORRECT: Service manages state
-export async function listAgents(): Promise<void> {
-  const registry = new AgentRegistry();  // Service handles caching
-  const agents = registry.getAll();
+export async function showConfig(): Promise<void> {
+  const configService = new ConfigService();  // Service handles caching
+  const config = configService.loadConfig();
   // ...
 }
 ```
@@ -150,9 +150,9 @@ export async function processAgent(): Promise<void> {
 }
 
 // REJECT: Commands importing other commands
-import { listAgents } from "./agent/list";
-export async function removeAgent(): Promise<void> {
-  await listAgents();  // Should use shared service
+import { showStatus } from "./status";
+export async function startDaemon(): Promise<void> {
+  await showStatus();  // Should use shared service
 }
 
 // REJECT: Direct file access
@@ -199,11 +199,9 @@ describe("daemon start", () => {
 - `utils/` - Formatting utilities
 
 **Imported by:**
-- `cli.ts` - Commander wiring
-- `tenex.ts` - Runtime entry
+- `../index.ts` - Commander wiring and runtime entry
 
 ## Related
 - [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md) - Architecture reference
-- `../cli.ts` - Commander setup
-- `../tenex.ts` - Runtime entry
+- `../index.ts` - Commander setup
 - `../services/` - Business logic
