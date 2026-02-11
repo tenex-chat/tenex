@@ -37,6 +37,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Nostr Integration (`src/nostr`)
 - **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, and `kinds.ts` encapsulate event creation.
+- **Key Derivation** (`keys.ts`): Provides `pubkeyFromNsec()` helper to derive pubkeys from nsec strings. Isolates NDK key operations so services don't import NDK directly.
 - **Utilities & Types**: Provide helper functions for relays, batching, and metadata so higher layers never manipulate `NDKEvent` directly.
 - **Guideline**: Any code that needs to publish Nostr events uses `AgentPublisher` or helper APIs; do not access NDK objects outside this module (tests can mock as needed).
 
@@ -69,6 +70,7 @@ Use this section to understand each service’s scope and dependencies:
 | `EmbeddingProvider` | `src/services/embedding/` | High-level wrapper over embedding vendors for RAG. Works with `services/rag/*.ts`. |
 | `LLMOperationsRegistry` | `src/services/LLMOperationsRegistry.ts` | Tracks active LLM requests per project for throttling and telemetry; referenced by scheduler/status publishers. |
 | `NDKAgentDiscovery` + agent metadata | `src/services/agents/` | Subscribes to relays to discover external agents, resolves agent metadata, and caches pubkey lookups via `PubkeyService`. |
+| `EscalationService` | `src/services/agents/EscalationService.ts` | Resolves escalation targets for `ask` tool with auto-add capability. Determines whether to use a configured escalation agent (auto-adding to project if needed) or fall back to project owner. Exports `resolveEscalationTarget()`, `getConfiguredEscalationAgent()`. |
 | `NudgeService` | `src/services/nudge/` | Emits reminders/prompts to stalled agents or phases; depends on scheduler + conversations. |
 | `OperationsStatusService` & `status/` | `src/services/status/` | Broadcasts progress events to daemon/status consumers. Depends on scheduler and Nostr publisher provided by daemon. |
 | `ProjectContext` + `ProjectContextStore` | `src/services/projects/` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
