@@ -1941,30 +1941,123 @@ describe("RALRegistry", () => {
       expect(resolved).toBeNull();
     });
 
-    it("should not return duplicate matches when delegation is in both pending and completed", () => {
-      // This is a rare edge case during state transitions, but the method should handle it
+    it("should not return duplicate matches when same delegation ID exists in both pending and completed maps", () => {
+      // This tests the dedupe branch in resolveDelegationPrefix
+      // Edge case: During state transitions, the same delegation ID might briefly exist in both maps
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
-      const delegation: PendingDelegation = {
+      const delegationId = "deadbeef1234deadbeef1234deadbeef1234deadbeef1234deadbeef12345678";
+
+      // Add delegation to pending
+      const pendingDelegation: PendingDelegation = {
         type: "standard",
-        delegationConversationId: "deadbeef1234deadbeef1234deadbeef1234deadbeef1234deadbeef12345678",
+        delegationConversationId: delegationId,
         recipientPubkey: "recipient-1",
         senderPubkey: agentPubkey,
         prompt: "Task",
         ralNumber,
       };
 
-      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [delegation]);
+      registry.setPendingDelegations(agentPubkey, conversationId, ralNumber, [pendingDelegation]);
 
-      // Manually add the same delegation to completed (simulating edge case)
-      // We'll use recordCompletion which removes from pending, so let's use a different approach
-      // Create a scenario where we have the same prefix in both
+      // Now manually inject the same ID into the completed map to simulate the edge case
+      // Access private state via type assertion for test purposes
+      const key = `${agentPubkey}:${conversationId}`;
+      // @ts-expect-error - accessing private field for testing
+      const convDelegations = registry.conversationDelegations.get(key);
+      expect(convDelegations).toBeDefined();
 
-      // Actually, with the current implementation, recordCompletion removes from pending
-      // So let's just verify the method works correctly with normal state
+      // Manually add to completed (simulating the edge case)
+      convDelegations!.completed.set(delegationId, {
+        delegationConversationId: delegationId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        transcript: [],
+        completedAt: Date.now(),
+        ralNumber,
+        status: "completed",
+      });
 
+      // Now the same ID is in BOTH pending and completed maps
+      expect(convDelegations!.pending.has(delegationId)).toBe(true);
+      expect(convDelegations!.completed.has(delegationId)).toBe(true);
+
+      // resolveDelegationPrefix should dedupe and return a single match, not 2
       const resolved = registry.resolveDelegationPrefix("deadbeef1234");
-      expect(resolved).toBe("deadbeef1234deadbeef1234deadbeef1234deadbeef1234deadbeef12345678");
+      expect(resolved).toBe(delegationId);
+    });
+
+    it("should resolve followup event ID prefix to canonical delegation conversation ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      // Add a followup delegation with a followupEventId
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: "canonical1234canonical1234canonical1234canonical1234canonical12345678",
+        followupEventId: "followupab12followupab12followupab12followupab12followupab12345678",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Resolve using the FOLLOWUP event ID prefix (users receive this from delegate_followup response)
+      const resolved = registry.resolveDelegationPrefix("followupab12");
+
+      // Should resolve to the CANONICAL delegation conversation ID, not the followup event ID
+      expect(resolved).toBe("canonical1234canonical1234canonical1234canonical1234canonical12345678");
+    });
+
+    it("should resolve both delegation ID prefix and followup ID prefix to the same canonical ID", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "aabbccdd1234aabbccdd1234aabbccdd1234aabbccdd1234aabbccdd12345678";
+      const followupId = "eeff00111234eeff00111234eeff00111234eeff00111234eeff001112345678";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Both prefixes should resolve to the same canonical ID
+      const resolvedFromCanonical = registry.resolveDelegationPrefix("aabbccdd1234");
+      const resolvedFromFollowup = registry.resolveDelegationPrefix("eeff00111234");
+
+      expect(resolvedFromCanonical).toBe(canonicalId);
+      expect(resolvedFromFollowup).toBe(canonicalId);
+    });
+
+    it("should not create ambiguous match when followup ID resolves to same canonical as direct match", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "samepref1234samepref1234samepref1234samepref1234samepref12345678";
+
+      // Create a followup delegation
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: "differentid12differentid12differentid12differentid12differentid123",
+        recipientPubkey: "recipient-1",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // The canonical ID is in pending. The followupToCanonical map points to the same canonical ID.
+      // Resolving the canonical prefix should NOT be ambiguous (dedupe should handle it)
+      const resolved = registry.resolveDelegationPrefix("samepref1234");
+      expect(resolved).toBe(canonicalId);
     });
   });
 

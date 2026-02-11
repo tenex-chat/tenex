@@ -48,7 +48,9 @@ function resolveDelegationPrefix(prefix: string): string | null {
   const fallbackResolved = resolveFromRALFallback(prefix, ralRegistry);
 
   if (fallbackResolved) {
-    logger.warn("[delegate_followup] Resolved prefix via RAL fallback - PrefixKVStore may not be initialized or event not yet indexed", {
+    // Use info level - MCP-only execution is an expected deployment mode, not a warning condition.
+    // PrefixKVStore may intentionally not be initialized in pure MCP contexts.
+    logger.info("[delegate_followup] Resolved prefix via RAL fallback", {
       prefix: prefix.substring(0, PREFIX_LENGTH),
       resolvedId: fallbackResolved.substring(0, PREFIX_LENGTH),
     });
@@ -88,7 +90,7 @@ async function executeDelegateFollowup(
     const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
       throw new Error(
-        `Could not resolve prefix "${inputConversationId}" to a delegation conversation ID. The prefix may be ambiguous or no matching delegation was found.`
+        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include delegationConversationId (from delegate response) or followupEventId (from delegate_followup response). The prefix may be ambiguous or no matching delegation was found.`
       );
     }
     delegation_conversation_id = resolved;
