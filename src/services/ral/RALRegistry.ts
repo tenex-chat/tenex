@@ -1206,10 +1206,15 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   /**
    * Resolve a 12-character hex prefix to a full delegation conversation ID.
-   * Scans all pending and completed delegations for matching prefixes.
+   * Scans all pending and completed delegations for matching prefixes,
+   * including followup event IDs which users may also receive and try to use.
    *
    * This is a fallback resolver for edge cases where PrefixKVStore is not initialized
    * (MCP-only execution mode) or when there are timing races with event indexing.
+   *
+   * Supports resolving:
+   * - Delegation conversation IDs (from pending/completed maps)
+   * - Followup event IDs (from followupToCanonical map) - resolved to their canonical delegation ID
    *
    * @param prefix - 12-character hex prefix (must be lowercase)
    * @returns Full 64-char ID if unique match found, null if no match or ambiguous
@@ -1233,6 +1238,18 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
           if (!matches.includes(delegationId)) {
             matches.push(delegationId);
           }
+        }
+      }
+    }
+
+    // Also scan followupToCanonical map for followup event ID prefixes
+    // Users receive followupEventId from delegate_followup responses and may try to use it
+    for (const [followupId, canonicalId] of this.followupToCanonical) {
+      if (followupId.toLowerCase().startsWith(prefix)) {
+        // For followup IDs, return the canonical delegation conversation ID
+        // since that's what the caller needs for further operations
+        if (!matches.includes(canonicalId)) {
+          matches.push(canonicalId);
         }
       }
     }
