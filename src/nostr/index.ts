@@ -15,3 +15,4 @@ export {
     isEventFromAgent,
     isEventFromUser,
 } from "./utils";
+export { pubkeyFromNsec } from "./keys";
