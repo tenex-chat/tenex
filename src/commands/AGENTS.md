@@ -9,11 +9,6 @@ CLI entry points and user-facing commands. Handlers should be **thin wrappers** 
 commands/
 ├── daemon.ts              # Daemon start/stop commands
 │
-├── agent/                 # Agent management commands
-│   ├── list.ts
-│   ├── remove.ts
-│   └── configure.ts
-│
 ├── setup/                 # Onboarding flows
 │   ├── interactive.ts     # Guided setup wizard
 │   ├── llm.ts             # LLM provider setup
@@ -29,7 +24,6 @@ commands/
 bun test src/commands/
 
 # Run a command (from CLI)
-bun run start agent list
 bun run start daemon
 bun run start setup
 ```
@@ -47,23 +41,6 @@ export async function startDaemon(options: DaemonOptions): Promise<void> {
   const daemon = new Daemon();
   await daemon.start();
   // UI loop handled by daemon
-}
-```
-
-### Agent Commands
-User-facing agent management:
-
-```typescript
-// src/commands/agent/list.ts
-import { AgentRegistry } from "@/agents/AgentRegistry";
-import { formatAgentList } from "@/utils/formatting";
-
-export async function listAgents(): Promise<void> {
-  const registry = new AgentRegistry();
-  const agents = registry.getAll();
-
-  // Thin: just format and output
-  console.log(formatAgentList(agents));
 }
 ```
 
@@ -135,19 +112,17 @@ export async function listAgents(): Promise<void> {
 ```
 
 ### Commander Integration
-Commands are wired via Commander in `cli.ts`:
+Commands are wired via Commander in `index.ts`:
 
 ```typescript
-// src/cli.ts
+// src/index.ts
 import { Command } from "commander";
-import { listAgents } from "@/commands/agent/list";
 
 const program = new Command();
 
 program
-  .command("agent list")
-  .description("List registered agents")
-  .action(listAgents);
+  .addCommand(daemonCommand)
+  .addCommand(setupCommand);
 ```
 
 ### Error Handling
@@ -196,23 +171,19 @@ const CONFIG_PATH = "/Users/me/.tenex";  // Use ConfigService.getConfigPath()
 Test commands with mocked services:
 
 ```typescript
-import { listAgents } from "@/commands/agent/list";
+import { startDaemon } from "@/commands/daemon";
 
-describe("agent list", () => {
-  it("should list agents", async () => {
-    const mockRegistry = {
-      getAll: vi.fn().mockReturnValue([{ id: "agent-1" }])
+describe("daemon start", () => {
+  it("should start the daemon", async () => {
+    const mockDaemon = {
+      start: vi.fn()
     };
-    vi.mock("@/agents/AgentRegistry", () => ({
-      AgentRegistry: vi.fn().mockImplementation(() => mockRegistry)
+    vi.mock("@/daemon/Daemon", () => ({
+      Daemon: vi.fn().mockImplementation(() => mockDaemon)
     }));
 
-    const consoleSpy = vi.spyOn(console, "log");
-    await listAgents();
-
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("agent-1")
-    );
+    await startDaemon();
+    expect(mockDaemon.start).toHaveBeenCalled();
   });
 });
 ```
