@@ -11,7 +11,7 @@ const lessonsListSchema = z.object({
         .string()
         .optional()
         .describe(
-            "Optional agent pubkey to filter lessons by. If not provided, returns lessons from all agents."
+            "Optional agent pubkey to filter lessons by. If not provided, returns only your own lessons."
         ),
 });
 
@@ -38,20 +38,25 @@ type LessonsListOutput = {
 type LessonsListResult = LessonsListOutput | { type: "error-text"; text: string };
 
 /**
- * Validates that a string is a valid hex pubkey (64 lowercase hex characters).
- * Returns null if valid, error message if invalid.
+ * Normalizes a pubkey string: trims whitespace and lowercases.
+ * Returns the normalized value, or undefined if input is empty/whitespace.
  */
-function validateAgentPubkey(pubkey: string | undefined): string | null {
-    // Empty or whitespace-only strings are invalid
-    if (!pubkey || pubkey.trim() === "") {
-        return "Agent pubkey cannot be empty";
-    }
-
+function normalizePubkey(pubkey: string | undefined): string | undefined {
+    if (!pubkey) return undefined;
     const trimmed = pubkey.trim();
+    if (trimmed === "") return undefined;
+    return trimmed.toLowerCase();
+}
 
-    // Must be exactly 64 hex characters (lowercase or uppercase)
-    if (!/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-        return `Invalid agent pubkey format: "${pubkey}". Expected 64-character hex string`;
+/**
+ * Validates that a string is a valid hex pubkey (64 hex characters).
+ * Returns null if valid, error message if invalid.
+ * Expects pre-normalized input (trimmed, lowercased).
+ */
+function validateAgentPubkey(pubkey: string, originalInput: string): string | null {
+    // Must be exactly 64 hex characters (already lowercased)
+    if (!/^[0-9a-f]{64}$/.test(pubkey)) {
+        return `Invalid agent pubkey format: "${originalInput}". Expected 64-character hex string`;
     }
 
     return null;
@@ -66,26 +71,34 @@ async function executeLessonsList(
 ): Promise<LessonsListResult> {
     const { agentPubkey } = input;
 
-    // Validate agentPubkey if provided
+    // Normalize the input pubkey once - trim whitespace and lowercase
+    const normalizedInputPubkey = normalizePubkey(agentPubkey);
+
+    // Validate agentPubkey if provided (after normalization)
     if (agentPubkey !== undefined) {
-        const validationError = validateAgentPubkey(agentPubkey);
+        // Check if normalization resulted in empty (whitespace-only input)
+        if (normalizedInputPubkey === undefined) {
+            return createExpectedError("Agent pubkey cannot be empty");
+        }
+        const validationError = validateAgentPubkey(normalizedInputPubkey, agentPubkey);
         if (validationError) {
             return createExpectedError(validationError);
         }
     }
 
+    // Determine effective pubkey: use normalized input or default to calling agent
+    const effectivePubkey = normalizedInputPubkey ?? context.agent.pubkey;
+
     logger.info("📚 Listing lessons", {
         agent: context.agent.name,
-        agentFilter: agentPubkey,
+        agentFilter: effectivePubkey,
         conversationId: context.conversationId,
     });
 
     const projectContext = getProjectContext();
 
     // Get lessons based on filter
-    const rawLessons = agentPubkey
-        ? projectContext.getLessonsForAgent(agentPubkey)
-        : projectContext.getAllLessons();
+    const rawLessons = projectContext.getLessonsForAgent(effectivePubkey);
 
     // Transform lessons to summary format
     const lessons: LessonSummary[] = rawLessons.map((lesson) => {
@@ -109,7 +122,7 @@ async function executeLessonsList(
     logger.info("✅ Lessons listed successfully", {
         total: lessons.length,
         agent: context.agent.name,
-        agentFilter: agentPubkey,
+        agentFilter: effectivePubkey,
         conversationId: context.conversationId,
     });
 
@@ -117,7 +130,7 @@ async function executeLessonsList(
         success: true,
         lessons,
         totalCount: lessons.length,
-        agentFilter: agentPubkey,
+        agentFilter: effectivePubkey,
     };
 }
 
@@ -127,8 +140,9 @@ async function executeLessonsList(
 export function createLessonsListTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "List lessons learned by agents in the project. Returns all lessons including title, full lesson content, " +
-            "category, hashtags, and author (agent slug). Optionally filter by agent pubkey to see lessons from a specific agent. " +
+            "List lessons learned by agents in the project. Returns only your own lessons by default, " +
+            "including title, full lesson content, category, hashtags, and author (agent slug). " +
+            "Optionally filter by agent pubkey to see lessons from a specific agent. " +
             "Results are sorted by creation date (most recent first). Use this to discover what lessons are available. " +
             "For lessons with detailed explanations, use lesson_get to retrieve the full detailed content.",
         inputSchema: lessonsListSchema,
