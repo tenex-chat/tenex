@@ -4,10 +4,59 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/utils/event-context";
 import { tool } from "ai";
 import { z } from "zod";
+
+/**
+ * Fallback resolver for 12-char hex prefixes when PrefixKVStore is not initialized.
+ *
+ * This handles edge cases where:
+ * 1. MCP-only execution mode - PrefixKVStore may not be initialized in pure MCP contexts
+ * 2. Timing races with event indexing - the event may exist in RAL but not yet indexed in KV store
+ *
+ * Scans RALRegistry.pending and RALRegistry.completed for matching delegation conversation IDs.
+ * Returns the full 64-char ID if a unique match is found, null otherwise.
+ *
+ * @param prefix - 12-character hex prefix to resolve
+ * @param ralRegistry - RALRegistry instance to scan
+ * @returns Full 64-char ID if unique match found, null otherwise
+ */
+function resolveFromRALFallback(prefix: string, ralRegistry: RALRegistry): string | null {
+  const normalizedPrefix = prefix.toLowerCase();
+  return ralRegistry.resolveDelegationPrefix(normalizedPrefix);
+}
+
+/**
+ * Attempts to resolve a 12-char hex prefix to a full delegation conversation ID.
+ * Uses PrefixKVStore first, falls back to RALRegistry scan if needed.
+ *
+ * @param prefix - 12-character hex prefix to resolve
+ * @returns Full 64-char ID or null if not found
+ */
+function resolveDelegationPrefix(prefix: string): string | null {
+  // Try PrefixKVStore first (primary resolution path)
+  const resolved = resolvePrefixToId(prefix);
+  if (resolved) {
+    return resolved;
+  }
+
+  // Fallback: scan RALRegistry for matching delegation conversation IDs
+  // This handles MCP-only execution mode and timing races with event indexing
+  const ralRegistry = RALRegistry.getInstance();
+  const fallbackResolved = resolveFromRALFallback(prefix, ralRegistry);
+
+  if (fallbackResolved) {
+    logger.warn("[delegate_followup] Resolved prefix via RAL fallback - PrefixKVStore may not be initialized or event not yet indexed", {
+      prefix: prefix.substring(0, PREFIX_LENGTH),
+      resolvedId: fallbackResolved.substring(0, PREFIX_LENGTH),
+    });
+    return fallbackResolved;
+  }
+
+  return null;
+}
 
 const delegateFollowupSchema = z.object({
   delegation_conversation_id: z
@@ -36,7 +85,7 @@ async function executeDelegateFollowup(
   // Resolve prefix to full delegation conversation ID if needed
   let delegation_conversation_id = inputConversationId;
   if (isHexPrefix(inputConversationId)) {
-    const resolved = await resolvePrefixToId(inputConversationId);
+    const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
       throw new Error(
         `Could not resolve prefix "${inputConversationId}" to a delegation conversation ID. The prefix may be ambiguous or no matching delegation was found.`

@@ -1205,6 +1205,54 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Resolve a 12-character hex prefix to a full delegation conversation ID.
+   * Scans all pending and completed delegations for matching prefixes.
+   *
+   * This is a fallback resolver for edge cases where PrefixKVStore is not initialized
+   * (MCP-only execution mode) or when there are timing races with event indexing.
+   *
+   * @param prefix - 12-character hex prefix (must be lowercase)
+   * @returns Full 64-char ID if unique match found, null if no match or ambiguous
+   */
+  resolveDelegationPrefix(prefix: string): string | null {
+    const matches: string[] = [];
+
+    // Scan all conversation delegations
+    for (const [_key, delegations] of this.conversationDelegations) {
+      // Check pending delegations
+      for (const [delegationId, _pendingDelegation] of delegations.pending) {
+        if (delegationId.toLowerCase().startsWith(prefix)) {
+          matches.push(delegationId);
+        }
+      }
+
+      // Check completed delegations
+      for (const [delegationId, _completedDelegation] of delegations.completed) {
+        if (delegationId.toLowerCase().startsWith(prefix)) {
+          // Avoid duplicates (a delegation might be in both pending and completed during transitions)
+          if (!matches.includes(delegationId)) {
+            matches.push(delegationId);
+          }
+        }
+      }
+    }
+
+    // Return unique match, null if ambiguous or not found
+    if (matches.length === 1) {
+      return matches[0];
+    }
+
+    if (matches.length > 1) {
+      logger.debug("[RALRegistry.resolveDelegationPrefix] Ambiguous prefix match", {
+        prefix,
+        matchCount: matches.length,
+      });
+    }
+
+    return null;
+  }
+
+  /**
    * Find delegation in conversation storage (doesn't require RAL to exist).
    * Used by delegate_followup to look up delegations even after RAL is cleared.
    * Handles both original delegation IDs and followup event IDs through the reverse lookup.
