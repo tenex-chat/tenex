@@ -18,7 +18,7 @@ export interface InjectionResult {
 export type TodoStatus = "pending" | "in_progress" | "done" | "skipped";
 
 export interface TodoItem {
-  /** Unique slug derived from title */
+  /** Unique identifier - can be custom or auto-generated from title */
   id: string;
   /** Human-readable title */
   title: string;
