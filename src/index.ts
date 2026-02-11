@@ -59,14 +59,12 @@ async function main(): Promise<void> {
     const [
         { Command },
         { getHeuristicEngine, getDefaultHeuristics },
-        { agentCommand },
         { daemonCommand },
         { setupCommand },
         { handleCliError },
     ] = await Promise.all([
         import("commander"),
         import("@/services/heuristics"),
-        import("@/commands/agent/index"),
         import("@/commands/daemon"),
         import("@/commands/setup/index"),
         import("@/utils/cli-error"),
@@ -90,7 +88,6 @@ async function main(): Promise<void> {
         .version(process.env.npm_package_version || "0.8.0");
 
     // Register subcommands
-    program.addCommand(agentCommand);
     program.addCommand(daemonCommand);
     program.addCommand(setupCommand);
 
