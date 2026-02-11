@@ -310,42 +310,80 @@ export class AgentExecutor {
         const completionEvent = result.event;
         const ralRegistry = RALRegistry.getInstance();
 
-        const currentPendingDelegations = ralRegistry.getConversationPendingDelegations(
+        // =====================================================================
+        // RACE CONDITION FIX: Check for ANY outstanding work, not just pending delegations
+        // =====================================================================
+        // This is the key guard against the race condition where delegation results arrive
+        // (via debounce in AgentDispatchService) after the last prepareStep but before
+        // the executor finalizes. The debounce state queues injections that would be
+        // invisible if we only checked pendingDelegations.
+        //
+        // hasOutstandingWork() consolidates checking for:
+        // 1. Queued injections (messages/delegation results waiting for next LLM step)
+        // 2. Pending delegations (delegations that haven't completed yet)
+        // =====================================================================
+        const outstandingWork = ralRegistry.hasOutstandingWork(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
         // NOTE: startedWithPendingDelegations is a snapshot from dispatch time, used ONLY for
-        // conservative RAL lifetime management (line ~380). It should NOT be used for the publish
+        // conservative RAL lifetime management (line ~395). It should NOT be used for the publish
         // mode decision because delegations may have completed during execution.
-        // See: https://github.com/TENEX/TENEX-ff3ssq/issues/XXX (stale delegation state bug)
         const startedWithPendingDelegations = Boolean(
             context.isDelegationCompletion && context.hasPendingDelegations
         );
-        // FIX: Only use current state for publish decision, not stale snapshot
-        const hasPendingDelegations = currentPendingDelegations.length > 0;
 
-        // DIAGNOSTIC: Trace the exact values used in hasPendingDelegations decision
-        trace.getActiveSpan()?.addEvent("executor.pending_delegations_decision", {
+        // DIAGNOSTIC: Trace the exact values used in outstanding work decision
+        trace.getActiveSpan()?.addEvent("executor.outstanding_work_decision", {
             "context.isDelegationCompletion": context.isDelegationCompletion ?? false,
             "context.hasPendingDelegations_snapshot": context.hasPendingDelegations ?? false,
             "startedWithPendingDelegations_for_ral_cleanup": startedWithPendingDelegations,
-            "currentPendingDelegations.length": currentPendingDelegations.length,
-            "hasPendingDelegations_final": hasPendingDelegations,
-            "fix_applied": "uses only currentPendingDelegations, not stale snapshot",
+            "outstanding.has_work": outstandingWork.hasWork,
+            "outstanding.queued_injections": outstandingWork.details.queuedInjections,
+            "outstanding.pending_delegations": outstandingWork.details.pendingDelegations,
+            "fix_applied": "uses hasOutstandingWork() to check both injections and delegations",
         });
 
+        // INVARIANT GUARD: If there's outstanding work (queued injections OR pending delegations),
+        // we should NOT finalize. The executor should continue to allow the work to be processed.
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
-        if (!hasMessageContent && hasPendingDelegations) {
-            trace.getActiveSpan()?.addEvent("executor.awaiting_delegations", {
+        if (!hasMessageContent && outstandingWork.hasWork) {
+            // This is the expected path when delegation results arrive via debounce.
+            // The executor returns undefined to allow the dispatch loop to continue
+            // and process the queued injections in the next iteration.
+            trace.getActiveSpan()?.addEvent("executor.awaiting_outstanding_work", {
                 "ral.number": ralNumber,
-                "delegation.pending_count": currentPendingDelegations.length,
+                "outstanding.queued_injections": outstandingWork.details.queuedInjections,
+                "outstanding.pending_delegations": outstandingWork.details.pendingDelegations,
+                "completion_event_exists": Boolean(completionEvent),
+                "scenario": "injection_debounce_await",
+            });
+            logger.debug("[AgentExecutor] Deferring finalization due to outstanding work", {
+                agent: context.agent.slug,
+                ralNumber,
+                queuedInjections: outstandingWork.details.queuedInjections,
+                pendingDelegations: outstandingWork.details.pendingDelegations,
             });
             return undefined;
         }
 
         if (!completionEvent) {
+            // This is an unexpected state: no completion event AND no outstanding work.
+            // The LLM stream should always produce a completion event if it completes normally.
+            // Log extensively before throwing to aid debugging.
+            logger.error("[AgentExecutor] Missing completion event with no outstanding work", {
+                agent: context.agent.slug,
+                ralNumber,
+                conversationId: context.conversationId.substring(0, 12),
+                hasOutstandingWork: outstandingWork.hasWork,
+            });
+            trace.getActiveSpan()?.addEvent("executor.missing_completion_event_error", {
+                "ral.number": ralNumber,
+                "outstanding.has_work": outstandingWork.hasWork,
+                "scenario": "unexpected_missing_completion",
+            });
             throw new Error("LLM execution completed without producing a completion event");
         }
 
@@ -362,15 +400,15 @@ export class AgentExecutor {
             return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
         }
 
-        // RAL cleanup
+        // RAL cleanup - use hasOutstandingWork for comprehensive check
         const conversationStore = context.conversationStore;
-        const finalPendingDelegationsForCleanup = ralRegistry.getConversationPendingDelegations(
+        const cleanupOutstandingWork = ralRegistry.hasOutstandingWork(
             context.agent.pubkey,
             context.conversationId,
             ralNumber
         );
 
-        if (finalPendingDelegationsForCleanup.length === 0 && !startedWithPendingDelegations) {
+        if (!cleanupOutstandingWork.hasWork && !startedWithPendingDelegations) {
             ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
             conversationStore.completeRal(context.agent.pubkey, ralNumber);
             await conversationStore.save();
@@ -380,7 +418,7 @@ export class AgentExecutor {
                 "supervision.executed": true,
                 "supervision.had_violation": supervisionCheckResult.shouldReEngage,
             });
-        } else if (finalPendingDelegationsForCleanup.length === 0 && startedWithPendingDelegations) {
+        } else if (!cleanupOutstandingWork.hasWork && startedWithPendingDelegations) {
             trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
                 "ral.number": ralNumber,
                 "supervision.executed": true,
@@ -391,14 +429,24 @@ export class AgentExecutor {
             model: completionEvent?.usage?.model,
         });
 
+        // Re-check outstanding work for final publish decision (state may have changed after supervision)
+        const finalOutstandingWork = ralRegistry.hasOutstandingWork(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
         trace.getActiveSpan()?.addEvent("executor.publish", {
             "message.length": completionEvent?.message?.length || 0,
-            has_pending_delegations: hasPendingDelegations,
+            "outstanding.has_work": finalOutstandingWork.hasWork,
+            "outstanding.queued_injections": finalOutstandingWork.details.queuedInjections,
+            "outstanding.pending_delegations": finalOutstandingWork.details.pendingDelegations,
         });
 
         let responseEvent: NDKEvent | undefined;
 
-        if (hasPendingDelegations) {
+        if (finalOutstandingWork.hasWork) {
+            // If there's outstanding work, publish as conversation (not completion)
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
                     { content: completionEvent.message, usage: completionEvent.usage },
@@ -406,6 +454,7 @@ export class AgentExecutor {
                 );
             }
         } else {
+            // No outstanding work - safe to publish as complete
             responseEvent = await agentPublisher.complete(
                 { content: completionEvent.message, usage: completionEvent.usage },
                 eventContext
@@ -417,7 +466,7 @@ export class AgentExecutor {
 
             trace.getActiveSpan()?.addEvent("executor.published", {
                 "event.id": responseEvent.id || "",
-                is_completion: !hasPendingDelegations,
+                is_completion: !finalOutstandingWork.hasWork,
             });
 
             result.messageCompiler.advanceCursor();
