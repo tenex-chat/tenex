@@ -329,9 +329,8 @@ export class AgentExecutor {
         );
 
         // NOTE: startedWithPendingDelegations is a snapshot from dispatch time, used ONLY for
-        // conservative RAL lifetime management (line ~380). It should NOT be used for the publish
+        // conservative RAL lifetime management (line ~395). It should NOT be used for the publish
         // mode decision because delegations may have completed during execution.
-        // See: https://github.com/TENEX/TENEX-ff3ssq/issues/XXX (stale delegation state bug)
         const startedWithPendingDelegations = Boolean(
             context.isDelegationCompletion && context.hasPendingDelegations
         );
@@ -351,15 +350,40 @@ export class AgentExecutor {
         // we should NOT finalize. The executor should continue to allow the work to be processed.
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
         if (!hasMessageContent && outstandingWork.hasWork) {
+            // This is the expected path when delegation results arrive via debounce.
+            // The executor returns undefined to allow the dispatch loop to continue
+            // and process the queued injections in the next iteration.
             trace.getActiveSpan()?.addEvent("executor.awaiting_outstanding_work", {
                 "ral.number": ralNumber,
                 "outstanding.queued_injections": outstandingWork.details.queuedInjections,
                 "outstanding.pending_delegations": outstandingWork.details.pendingDelegations,
+                "completion_event_exists": Boolean(completionEvent),
+                "scenario": "injection_debounce_await",
+            });
+            logger.debug("[AgentExecutor] Deferring finalization due to outstanding work", {
+                agent: context.agent.slug,
+                ralNumber,
+                queuedInjections: outstandingWork.details.queuedInjections,
+                pendingDelegations: outstandingWork.details.pendingDelegations,
             });
             return undefined;
         }
 
         if (!completionEvent) {
+            // This is an unexpected state: no completion event AND no outstanding work.
+            // The LLM stream should always produce a completion event if it completes normally.
+            // Log extensively before throwing to aid debugging.
+            logger.error("[AgentExecutor] Missing completion event with no outstanding work", {
+                agent: context.agent.slug,
+                ralNumber,
+                conversationId: context.conversationId.substring(0, 12),
+                hasOutstandingWork: outstandingWork.hasWork,
+            });
+            trace.getActiveSpan()?.addEvent("executor.missing_completion_event_error", {
+                "ral.number": ralNumber,
+                "outstanding.has_work": outstandingWork.hasWork,
+                "scenario": "unexpected_missing_completion",
+            });
             throw new Error("LLM execution completed without producing a completion event");
         }
 

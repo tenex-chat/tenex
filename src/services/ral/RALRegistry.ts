@@ -2254,26 +2254,36 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   } {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
 
-    // If RAL doesn't exist, there's no outstanding work (conservative: allow finalization)
+    // Count pending delegations from conversation storage (independent of RAL existence)
+    // Pending delegations persist in conversationDelegations map which is separate from RAL state
+    const pendingDelegations = this.getConversationPendingDelegations(
+      agentPubkey,
+      conversationId,
+      ralNumber
+    ).length;
+
+    // If RAL doesn't exist, we can't have queued injections but may still have pending delegations
     if (!ral) {
+      const hasWork = pendingDelegations > 0;
+      if (hasWork) {
+        trace.getActiveSpan()?.addEvent("ral.outstanding_work_no_ral", {
+          "ral.number": ralNumber,
+          "outstanding.pending_delegations": pendingDelegations,
+          "agent.pubkey": agentPubkey.substring(0, 12),
+          "conversation.id": shortenConversationId(conversationId),
+        });
+      }
       return {
-        hasWork: false,
+        hasWork,
         details: {
           queuedInjections: 0,
-          pendingDelegations: 0,
+          pendingDelegations,
         },
       };
     }
 
     // Count queued injections from the RAL entry
     const queuedInjections = ral.queuedInjections.length;
-
-    // Count pending delegations from conversation storage
-    const pendingDelegations = this.getConversationPendingDelegations(
-      agentPubkey,
-      conversationId,
-      ralNumber
-    ).length;
 
     const hasWork = queuedInjections > 0 || pendingDelegations > 0;
 
