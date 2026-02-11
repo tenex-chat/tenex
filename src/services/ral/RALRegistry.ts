@@ -2220,4 +2220,80 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     return ral?.heuristics?.summary;
   }
+
+  // ============================================================================
+  // Outstanding Work Detection (Race Condition Prevention)
+  // ============================================================================
+
+  /**
+   * Check if there's any outstanding work for a conversation that would prevent finalization.
+   *
+   * This method consolidates checking for both:
+   * 1. Queued injections (messages waiting to be processed in the next LLM step)
+   * 2. Pending delegations (delegations that haven't completed yet)
+   *
+   * This is the key guard against the race condition where delegation results arrive
+   * (via debounce) after the last prepareStep but before the executor finalizes.
+   * By checking this before publishing status:completed, we ensure no work is orphaned.
+   *
+   * @param agentPubkey - The agent's pubkey
+   * @param conversationId - The conversation ID
+   * @param ralNumber - The RAL number to check
+   * @returns Object indicating if there's outstanding work and details about it
+   */
+  hasOutstandingWork(
+    agentPubkey: string,
+    conversationId: string,
+    ralNumber: number
+  ): {
+    hasWork: boolean;
+    details: {
+      queuedInjections: number;
+      pendingDelegations: number;
+    };
+  } {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+
+    // If RAL doesn't exist, there's no outstanding work (conservative: allow finalization)
+    if (!ral) {
+      return {
+        hasWork: false,
+        details: {
+          queuedInjections: 0,
+          pendingDelegations: 0,
+        },
+      };
+    }
+
+    // Count queued injections from the RAL entry
+    const queuedInjections = ral.queuedInjections.length;
+
+    // Count pending delegations from conversation storage
+    const pendingDelegations = this.getConversationPendingDelegations(
+      agentPubkey,
+      conversationId,
+      ralNumber
+    ).length;
+
+    const hasWork = queuedInjections > 0 || pendingDelegations > 0;
+
+    // Add telemetry for debugging race conditions
+    if (hasWork) {
+      trace.getActiveSpan()?.addEvent("ral.outstanding_work_detected", {
+        "ral.number": ralNumber,
+        "outstanding.queued_injections": queuedInjections,
+        "outstanding.pending_delegations": pendingDelegations,
+        "agent.pubkey": agentPubkey.substring(0, 12),
+        "conversation.id": shortenConversationId(conversationId),
+      });
+    }
+
+    return {
+      hasWork,
+      details: {
+        queuedInjections,
+        pendingDelegations,
+      },
+    };
+  }
 }
