@@ -77,7 +77,7 @@ const configPath = path.join(process.env.HOME, ".tenex", "agents");
 ### Import Restrictions
 ```typescript
 // FORBIDDEN: Never import from commands/
-import { something } from "@/commands/agent";  // Layer violation!
+import { something } from "@/commands/daemon";  // Layer violation!
 
 // ALLOWED: Import from lower layers
 import { RALRegistry } from "@/services/ral";
@@ -152,7 +152,6 @@ Use mock providers from `src/test-utils/mock-llm/` for execution tests.
 - `llm/` - Provider adapters
 
 **Imported by:**
-- `commands/` - CLI agent commands
 - `daemon/` - Background agent orchestration
 - `event-handler/` - Event-triggered execution
 
