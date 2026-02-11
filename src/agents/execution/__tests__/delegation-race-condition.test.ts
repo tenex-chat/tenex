@@ -595,5 +595,297 @@ describe("Delegation Race Condition Fix", () => {
       );
       expect(result2.hasWork).toBe(false);
     });
+
+    test("detects pending delegations even when RAL is missing", () => {
+      // This tests Issue 1 from the code review: pending delegations persist
+      // independently of the RAL state, so we must check them even when RAL is gone.
+
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      // Set up a pending delegation
+      const pendingDelegations: PendingDelegation[] = [
+        {
+          delegationConversationId: "del-conv-orphan",
+          recipientPubkey: "recipient-orphan",
+          senderPubkey: AGENT_PUBKEY,
+          prompt: "Orphaned task",
+          ralNumber,
+        },
+      ];
+
+      ralRegistry.setPendingDelegations(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        pendingDelegations
+      );
+
+      // Verify delegation is detected with RAL present
+      let result = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+      expect(result.hasWork).toBe(true);
+      expect(result.details.pendingDelegations).toBe(1);
+
+      // Clear the RAL (simulates early RAL cleanup)
+      ralRegistry.clearRAL(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+
+      // CRITICAL: Even though RAL is gone, pending delegation should still be detected
+      // because delegations persist in conversationDelegations map independently
+      result = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+      expect(result.hasWork).toBe(true);
+      expect(result.details.pendingDelegations).toBe(1);
+      expect(result.details.queuedInjections).toBe(0); // RAL gone, so no injections
+    });
+  });
+});
+
+/**
+ * Executor Finalization Guard Tests
+ *
+ * These tests verify that the AgentExecutor correctly uses hasOutstandingWork()
+ * to guard against premature finalization. The key behavior being tested:
+ *
+ * When queued injections exist (e.g., delegation results arrived via debounce),
+ * the executor should return undefined instead of publishing a completion event.
+ * This allows the dispatch loop to continue processing the queued work.
+ */
+describe("Executor Finalization Guard", () => {
+  /**
+   * This test simulates the executor's finalization decision logic.
+   * We extract the key logic from AgentExecutor.executeOnce() to verify
+   * that the guard correctly prevents finalization when outstanding work exists.
+   *
+   * The actual executeOnce() method:
+   * 1. Calls hasOutstandingWork()
+   * 2. If (!hasMessageContent && outstandingWork.hasWork) returns undefined
+   * 3. Otherwise proceeds to publish completion
+   */
+  describe("finalization decision logic", () => {
+    const AGENT_PUBKEY = "test-agent-finalization";
+    const CONVERSATION_ID = "test-conv-finalization";
+    const PROJECT_ID = "31933:test:finalization-project";
+
+    let ralRegistry: RALRegistry;
+
+    beforeEach(() => {
+      // @ts-expect-error - accessing private static for testing
+      RALRegistry.instance = undefined;
+      ralRegistry = RALRegistry.getInstance();
+    });
+
+    afterEach(() => {
+      ralRegistry.clearAll();
+    });
+
+    /**
+     * Simulates the executor's finalization guard logic.
+     * Returns true if executor SHOULD finalize (publish completion).
+     * Returns false if executor should defer (return undefined).
+     */
+    function shouldFinalize(
+      hasMessageContent: boolean,
+      outstandingWork: { hasWork: boolean; details: { queuedInjections: number; pendingDelegations: number } }
+    ): boolean {
+      // From AgentExecutor.executeOnce():
+      // if (!hasMessageContent && outstandingWork.hasWork) {
+      //   return undefined; // Don't finalize
+      // }
+      if (!hasMessageContent && outstandingWork.hasWork) {
+        return false; // Don't finalize
+      }
+      return true; // Proceed to finalization
+    }
+
+    test("defers finalization when queued injections exist and no message content", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      // Queue an injection (delegation result via debounce)
+      ralRegistry.queueUserMessage(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        "Delegation result arrived"
+      );
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      // Executor receives empty completion (no message content)
+      const hasMessageContent = false;
+
+      // CRITICAL: Should NOT finalize because there's queued work
+      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(false);
+    });
+
+    test("defers finalization when pending delegations exist and no message content", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      // Set up pending delegation
+      ralRegistry.setPendingDelegations(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        [{
+          delegationConversationId: "del-waiting",
+          recipientPubkey: "recipient-waiting",
+          senderPubkey: AGENT_PUBKEY,
+          prompt: "Still in progress",
+          ralNumber,
+        }]
+      );
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      const hasMessageContent = false;
+
+      // Should NOT finalize because delegation is still pending
+      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(false);
+    });
+
+    test("allows finalization when message content exists (even with outstanding work)", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      // Queue an injection
+      ralRegistry.queueUserMessage(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        "Delegation result"
+      );
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      // Executor has actual message content to publish
+      const hasMessageContent = true;
+
+      // Should finalize because there's content to publish
+      // (the outstanding work will be processed in next iteration)
+      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+    });
+
+    test("allows finalization when no outstanding work and no message content", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      const hasMessageContent = false;
+
+      // Should finalize (though will throw error for missing completion event)
+      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+      expect(outstandingWork.hasWork).toBe(false);
+    });
+
+    test("allows finalization when no outstanding work and has message content", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      const hasMessageContent = true;
+
+      // Normal finalization path - has content, no outstanding work
+      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+    });
+
+    /**
+     * This test verifies the complete race condition scenario:
+     * 1. Delegation starts (pending)
+     * 2. Delegation completes, result queued via debounce
+     * 3. Executor checks hasOutstandingWork() before finalizing
+     * 4. Guard correctly detects queued injection and defers
+     */
+    test("prevents premature finalization in race condition scenario", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      // Step 1: Delegation is pending
+      ralRegistry.setPendingDelegations(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        [{
+          delegationConversationId: "del-race",
+          recipientPubkey: "recipient-race",
+          senderPubkey: AGENT_PUBKEY,
+          prompt: "Critical task",
+          ralNumber,
+        }]
+      );
+
+      // At this point, executor should not finalize
+      let outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+
+      // Step 2: Delegation completes, moves from pending to completed
+      ralRegistry.recordCompletion({
+        delegationConversationId: "del-race",
+        recipientPubkey: "recipient-race",
+        response: "Task done!",
+        completedAt: Date.now(),
+      });
+
+      // Step 3: Result is queued via debounce (simulating AgentDispatchService)
+      ralRegistry.queueUserMessage(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        "# DELEGATION COMPLETED\n\nTask done!"
+      );
+
+      // Step 4: Executor checks before finalizing
+      // OLD BUG: Would only check pendingDelegations (now 0) and finalize prematurely
+      // FIX: hasOutstandingWork() also checks queuedInjections
+      outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      expect(outstandingWork.hasWork).toBe(true);
+      expect(outstandingWork.details.pendingDelegations).toBe(0); // Completed
+      expect(outstandingWork.details.queuedInjections).toBe(1);   // Result queued!
+
+      // Executor should NOT finalize - the queued result needs processing
+      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+
+      // Step 5: After injection is consumed, finalization is allowed
+      ralRegistry.getAndConsumeInjections(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+      outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      expect(outstandingWork.hasWork).toBe(false);
+      expect(shouldFinalize(false, outstandingWork)).toBe(true);
+    });
   });
 });
