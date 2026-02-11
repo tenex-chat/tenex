@@ -5,15 +5,11 @@ import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
-import { resolveRecipientToPubkey } from "@/services/agents";
-import { config as configService } from "@/services/ConfigService";
+import { resolveRecipientToPubkey, resolveEscalationTarget } from "@/services/agents";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
-import { agentStorage } from "@/agents/AgentStorage";
-import { createAgentInstance } from "@/agents/agent-loader";
 import { tool } from "ai";
 import { z } from "zod";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
  * Schema for a single-select question.
@@ -145,83 +141,16 @@ function buildPromptSummary(input: AskInput): string {
 /**
  * Helper: Get escalation target (agent slug) from config, with validation and auto-add
  *
- * If the escalation agent exists in global storage but is not part of the current project,
- * it will be automatically added to the project.
+ * Delegates to EscalationService which handles:
+ * - Config reading
+ * - Project membership checks
+ * - Auto-adding from global storage if needed
  *
  * Returns null if no escalation agent configured, config not loaded, or agent doesn't exist
  */
 async function getEscalationTarget(): Promise<string | null> {
-  try {
-    const config = configService.getConfig();
-    const escalationAgentSlug = config.escalation?.agent;
-
-    if (!escalationAgentSlug) {
-      return null;
-    }
-
-    // First check if agent is already in the current project
-    const pubkey = resolveRecipientToPubkey(escalationAgentSlug);
-    if (pubkey) {
-      // Agent is already in the project, nothing to do
-      return escalationAgentSlug;
-    }
-
-    // Agent not in project - check if it exists in global storage
-    const storedAgent = await agentStorage.getAgentBySlug(escalationAgentSlug);
-    if (!storedAgent) {
-      logger.warn("[ask] Escalation agent configured but not found in system", {
-        escalationAgentSlug,
-      });
-      return null;
-    }
-
-    // Agent exists in storage but not in project - auto-add it
-    logger.info("[ask] Auto-adding escalation agent to project", {
-      escalationAgentSlug,
-      agentName: storedAgent.name,
-    });
-
-    const projectCtx = getProjectContext();
-    const projectDTag = projectCtx.agentRegistry.getProjectDTag();
-
-    if (!projectDTag) {
-      logger.warn("[ask] Cannot auto-add escalation agent: no project dTag available");
-      return null;
-    }
-
-    // Get the agent's pubkey from its nsec
-    const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-    const agentPubkey = signer.pubkey;
-
-    // Add agent to project in storage
-    await agentStorage.addAgentToProject(agentPubkey, projectDTag);
-
-    // Reload the agent to get fresh state with the project association
-    const freshAgent = await agentStorage.loadAgent(agentPubkey);
-    if (!freshAgent) {
-      logger.error("[ask] Failed to reload escalation agent after adding to project");
-      return null;
-    }
-
-    // Create agent instance and add to registry
-    const agentInstance = createAgentInstance(freshAgent, projectCtx.agentRegistry);
-    projectCtx.agentRegistry.addAgent(agentInstance);
-
-    // Notify the Daemon about the new agent for routing
-    projectCtx.notifyAgentAdded(agentInstance);
-
-    logger.info("[ask] Successfully auto-added escalation agent to project", {
-      escalationAgentSlug,
-      agentPubkey: agentPubkey.substring(0, 8),
-      projectDTag,
-    });
-
-    return escalationAgentSlug;
-  } catch (error) {
-    // Config not loaded or other error - this is fine, just means no escalation agent configured
-    logger.debug("[ask] Error getting escalation target, no escalation routing", { error });
-    return null;
-  }
+  const result = await resolveEscalationTarget();
+  return result?.slug ?? null;
 }
 
 async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
