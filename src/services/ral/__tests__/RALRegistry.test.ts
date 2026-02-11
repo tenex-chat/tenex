@@ -2150,6 +2150,68 @@ describe("RALRegistry", () => {
       expect(delegation).toBeDefined();
       expect(delegation?.pending?.delegationConversationId).toBe(canonicalId);
     });
+
+    it("should canonicalize full 64-char hex followup ID via fallback scan when not in followupToCanonical map", () => {
+      // This tests the case where a full 64-char followup ID is provided directly
+      // and the followupToCanonical map doesn't have it (e.g., MCP-only mode, cross-session)
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical9999canonical9999canonical9999canonical9999canonical99990000";
+      const followupId = "followup8888followup8888followup8888followup8888followup88880000";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-fallback",
+        senderPubkey: agentPubkey,
+        prompt: "Follow-up via fallback path",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Manually clear the followupToCanonical map to simulate MCP-only mode
+      // where the map might not be populated
+      // Access private member for testing purposes
+      // @ts-expect-error Accessing private member for testing
+      registry.followupToCanonical.delete(followupId);
+
+      // Now canonicalize the full followup ID - should still work via fallback scan
+      const canonicalized = registry.canonicalizeDelegationId(followupId);
+
+      // Result should be the canonical delegation conversation ID
+      expect(canonicalized).toBe(canonicalId);
+    });
+
+    it("should handle case-insensitive followup ID matching in fallback scan", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const canonicalId = "canonical7777canonical7777canonical7777canonical7777canonical77770000";
+      const followupId = "followup6666followup6666followup6666followup6666followup66660000";
+
+      const followupDelegation: PendingDelegation = {
+        type: "followup",
+        delegationConversationId: canonicalId,
+        followupEventId: followupId,
+        recipientPubkey: "recipient-case",
+        senderPubkey: agentPubkey,
+        prompt: "Case-insensitive test",
+        ralNumber,
+      };
+
+      registry.mergePendingDelegations(agentPubkey, conversationId, ralNumber, [followupDelegation]);
+
+      // Clear the followupToCanonical map to force fallback path
+      // @ts-expect-error Accessing private member for testing
+      registry.followupToCanonical.delete(followupId);
+
+      // Canonicalize with uppercase - should still work
+      const uppercaseFollowupId = followupId.toUpperCase();
+      const canonicalized = registry.canonicalizeDelegationId(uppercaseFollowupId);
+
+      expect(canonicalized).toBe(canonicalId);
+    });
   });
 
     describe("race condition prevention in abortWithCascade", () => {

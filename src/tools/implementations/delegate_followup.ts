@@ -7,7 +7,53 @@ import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { createEventContext } from "@/utils/event-context";
 import { tool } from "ai";
+import { nip19 } from "nostr-tools";
 import { z } from "zod";
+
+/**
+ * Attempts to decode a NIP-19 event ID format to a hex event ID.
+ * Supports: note1..., nevent1..., with or without 'nostr:' prefix.
+ *
+ * @param input - A potential NIP-19 event ID
+ * @returns The decoded 64-char hex event ID, or null if not a valid NIP-19 event format
+ */
+function decodeNip19EventId(input: string): string | null {
+  try {
+    // Strip nostr: prefix if present
+    let cleaned = input.trim();
+    if (cleaned.toLowerCase().startsWith("nostr:")) {
+      cleaned = cleaned.substring(6);
+    }
+
+    // Only attempt decode for note1 or nevent1 prefixes
+    if (!cleaned.startsWith("note1") && !cleaned.startsWith("nevent1")) {
+      return null;
+    }
+
+    const decoded = nip19.decode(cleaned);
+
+    if (decoded.type === "note") {
+      return (decoded.data as string).toLowerCase();
+    }
+
+    if (decoded.type === "nevent") {
+      return (decoded.data as { id: string }).id.toLowerCase();
+    }
+
+    // Other NIP-19 types (npub, nprofile, naddr) are not valid event IDs
+    return null;
+  } catch {
+    // Not a valid NIP-19 format
+    return null;
+  }
+}
+
+/**
+ * Checks if a string is a 64-character hex ID.
+ */
+function isFullHexId(input: string): boolean {
+  return /^[0-9a-fA-F]{64}$/.test(input.trim());
+}
 
 /**
  * Fallback resolver for 12-char hex prefixes when PrefixKVStore is not initialized.
@@ -105,10 +151,13 @@ async function executeDelegateFollowup(
 ): Promise<DelegateFollowupOutput> {
   const { delegation_conversation_id: inputConversationId, message } = input;
 
-  // Resolve prefix to full canonical delegation conversation ID if needed.
-  // Supports: delegationConversationId, followupEventId, 12-char prefixes, NIP-19 formats.
-  // Followup IDs are automatically canonicalized to the original delegation conversation ID.
+  // Resolve input to full canonical delegation conversation ID.
+  // Handles all input formats: 12-char prefixes, full 64-char hex, NIP-19 formats.
+  // All formats are canonicalized to the original delegation conversation ID.
+  const ralRegistry = RALRegistry.getInstance();
   let delegation_conversation_id = inputConversationId;
+
+  // Step 1: Handle 12-char hex prefix resolution
   if (isHexPrefix(inputConversationId)) {
     const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
@@ -121,9 +170,42 @@ async function executeDelegateFollowup(
     }
     delegation_conversation_id = resolved;
   }
+  // Step 2: Handle NIP-19 formats (nostr:nevent1..., note1..., etc.)
+  else {
+    const decodedNip19 = decodeNip19EventId(inputConversationId);
+    if (decodedNip19) {
+      // Successfully decoded NIP-19 to hex, now canonicalize
+      const canonicalized = ralRegistry.canonicalizeDelegationId(decodedNip19);
+      if (canonicalized !== decodedNip19) {
+        logger.info("[delegate_followup] Canonicalized NIP-19 followup ID", {
+          inputFormat: inputConversationId.substring(0, 20) + "...",
+          decodedHex: decodedNip19.substring(0, PREFIX_LENGTH),
+          canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
+        });
+      }
+      delegation_conversation_id = canonicalized;
+    }
+    // Step 3: Handle full 64-char hex IDs that might be followup event IDs
+    else if (isFullHexId(inputConversationId)) {
+      const normalized = inputConversationId.toLowerCase();
+      const canonicalized = ralRegistry.canonicalizeDelegationId(normalized);
+      if (canonicalized !== normalized) {
+        logger.info("[delegate_followup] Canonicalized full hex followup ID", {
+          followupId: normalized.substring(0, PREFIX_LENGTH),
+          canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
+        });
+      }
+      delegation_conversation_id = canonicalized;
+    }
+    // Step 4: Unknown format - pass through unchanged with debug hint
+    else {
+      logger.debug("[delegate_followup] Unknown input format, using as-is", {
+        input: inputConversationId.substring(0, 20),
+      });
+    }
+  }
 
   // Find the delegation in conversation storage (persists even after RAL is cleared)
-  const ralRegistry = RALRegistry.getInstance();
   const delegationInfo = ralRegistry.findDelegation(delegation_conversation_id);
 
   let recipientPubkey = delegationInfo?.pending?.recipientPubkey ?? delegationInfo?.completed?.recipientPubkey;
