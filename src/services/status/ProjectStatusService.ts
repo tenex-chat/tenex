@@ -346,17 +346,22 @@ export class ProjectStatusService {
                 }
             }
 
-            // Add all MCP tools (with empty agent sets initially)
+            // Add all MCP tools from running servers (with empty agent sets initially)
             // Agents will be added to their MCP tools in the loop below
             // Note: mcp__tenex__* tools are filtered out - these are internal TENEX tools
             // wrapped through MCP and should not be announced in status events
+            // We also track valid MCP tools to filter agent definitions later
+            const validMcpToolNames = new Set<string>();
             if (projectCtx.mcpManager) {
                 try {
                     const mcpTools = projectCtx.mcpManager.getCachedTools();
                     for (const toolName of Object.keys(mcpTools)) {
                         // Filter out mcp__tenex__* tools - internal TENEX MCP wrapper tools
-                        if (toolName && !toolAgentMap.has(toolName) && !toolName.startsWith("mcp__tenex__")) {
-                            toolAgentMap.set(toolName, new Set());
+                        if (toolName && !toolName.startsWith("mcp__tenex__")) {
+                            validMcpToolNames.add(toolName);
+                            if (!toolAgentMap.has(toolName)) {
+                                toolAgentMap.set(toolName, new Set());
+                            }
                         }
                     }
                 } catch {
@@ -384,25 +389,15 @@ export class ProjectStatusService {
                     ) {
                         continue;
                     }
+                    // For MCP tools, only include if they exist in running MCP servers
+                    // This prevents announcing MCP tools in agent definitions that aren't actually available
+                    // Note: mcp__tenex__* tools are already excluded from validMcpToolNames
+                    if (toolName.startsWith("mcp__") && !validMcpToolNames.has(toolName)) {
+                        continue;
+                    }
                     const toolAgents = toolAgentMap.get(toolName);
                     if (toolAgents) {
                         toolAgents.add(agentSlug);
-                    }
-                }
-
-                // Add MCP tools that this agent has
-                // MCP tools aren't in the initial toolAgentMap (built from static tools),
-                // so we need to add them here based on what's in agentTools
-                // Note: mcp__tenex__* tools are filtered out - these are internal TENEX tools
-                for (const toolName of agentTools) {
-                    // Include mcp__ tools but exclude mcp__tenex__* (internal TENEX MCP wrapper tools)
-                    if (toolName.startsWith("mcp__") && !toolName.startsWith("mcp__tenex__")) {
-                        let agentSet = toolAgentMap.get(toolName);
-                        if (!agentSet) {
-                            agentSet = new Set();
-                            toolAgentMap.set(toolName, agentSet);
-                        }
-                        agentSet.add(agentSlug);
                     }
                 }
             }
