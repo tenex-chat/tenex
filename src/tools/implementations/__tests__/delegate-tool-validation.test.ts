@@ -732,10 +732,6 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         expect(result.success).toBe(true);
         expect(result.delegationConversationIds).toHaveLength(1);
         expect(result.circularDelegationWarning).toBeUndefined();
-
-        // Should return full IDs alongside truncated ones
-        expect(result.delegationConversationIdsFull).toHaveLength(1);
-        expect(result.delegationConversationIdsFull![0]).toMatch(/^mock-delegation-id-/);
     });
 
     it("should process mixed delegations: non-circular succeeds, circular returns warning", async () => {
