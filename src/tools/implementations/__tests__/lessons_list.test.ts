@@ -79,22 +79,16 @@ describe("Lessons List Tool", () => {
         projectContextMocks.getAgentByPubkey.mockReset();
     });
 
-    describe("listing all lessons", () => {
-        it("should return all lessons from all agents", async () => {
+    describe("listing lessons (default: calling agent only)", () => {
+        it("should return only calling agent's lessons by default", async () => {
             const mockLessons = [
-                createMockLesson("lesson-1", "Lesson One", "MOCK_PUBKEY_1"),
-                createMockLesson("lesson-2", "Lesson Two", "MOCK_PUBKEY_2"),
+                createMockLesson("lesson-1", "Lesson One", MOCK_PUBKEY_1),
             ];
 
-            projectContextMocks.getAllLessons.mockReturnValue(mockLessons);
-            projectContextMocks.getAgentByPubkey.mockImplementation((pubkey: string) => {
-                if (pubkey === "MOCK_PUBKEY_1") {
-                    return { name: "agent-one", slug: "agent-one" };
-                }
-                if (pubkey === "MOCK_PUBKEY_2") {
-                    return { name: "agent-two", slug: "agent-two" };
-                }
-                return null;
+            projectContextMocks.getLessonsForAgent.mockReturnValue(mockLessons);
+            projectContextMocks.getAgentByPubkey.mockReturnValue({
+                name: "test-agent",
+                slug: "test-agent",
             });
 
             const context = createMockContext();
@@ -104,21 +98,24 @@ describe("Lessons List Tool", () => {
 
             expect(result).toMatchObject({
                 success: true,
-                totalCount: 2,
+                totalCount: 1,
+                agentFilter: MOCK_PUBKEY_1, // Should default to calling agent's pubkey
             });
-            expect(result.lessons).toHaveLength(2);
+            expect(result.lessons).toHaveLength(1);
             expect(result.lessons[0]).toMatchObject({
                 eventId: "lesson-1",
                 title: "Lesson One",
-                author: "agent-one",
+                author: "test-agent",
                 category: "testing",
                 hasDetailed: false,
             });
-            expect(projectContextMocks.getAllLessons).toHaveBeenCalled();
+            // Should call getLessonsForAgent with calling agent's pubkey, NOT getAllLessons
+            expect(projectContextMocks.getLessonsForAgent).toHaveBeenCalledWith(MOCK_PUBKEY_1);
+            expect(projectContextMocks.getAllLessons).not.toHaveBeenCalled();
         });
 
         it("should handle empty lesson list", async () => {
-            projectContextMocks.getAllLessons.mockReturnValue([]);
+            projectContextMocks.getLessonsForAgent.mockReturnValue([]);
 
             const context = createMockContext();
             const tool = createLessonsListTool(context);
@@ -129,7 +126,9 @@ describe("Lessons List Tool", () => {
                 success: true,
                 totalCount: 0,
                 lessons: [],
+                agentFilter: MOCK_PUBKEY_1,
             });
+            expect(projectContextMocks.getLessonsForAgent).toHaveBeenCalledWith(MOCK_PUBKEY_1);
         });
     });
 
@@ -165,11 +164,11 @@ describe("Lessons List Tool", () => {
     describe("lesson details", () => {
         it("should include detailed flag when lesson has detailed content", async () => {
             const mockLesson = {
-                ...createMockLesson("lesson-1", "Lesson One", "MOCK_PUBKEY_1"),
+                ...createMockLesson("lesson-1", "Lesson One", MOCK_PUBKEY_1),
                 detailed: "This is a detailed explanation",
             };
 
-            projectContextMocks.getAllLessons.mockReturnValue([mockLesson]);
+            projectContextMocks.getLessonsForAgent.mockReturnValue([mockLesson]);
             projectContextMocks.getAgentByPubkey.mockReturnValue({
                 name: "agent-one",
                 slug: "agent-one",
@@ -189,10 +188,10 @@ describe("Lessons List Tool", () => {
             const mockLesson = createMockLesson(
                 "lesson-1",
                 "Lesson One",
-                "MOCK_PUBKEY_UNKNOWN"
+                MOCK_PUBKEY_UNKNOWN
             );
 
-            projectContextMocks.getAllLessons.mockReturnValue([mockLesson]);
+            projectContextMocks.getLessonsForAgent.mockReturnValue([mockLesson]);
             projectContextMocks.getAgentByPubkey.mockReturnValue(null);
 
             const context = createMockContext();
@@ -201,17 +200,17 @@ describe("Lessons List Tool", () => {
             const result = await tool.execute({});
 
             expect(result.lessons[0]).toMatchObject({
-                author: "MOCK_PUBKEY_UNKNOWN",
+                author: MOCK_PUBKEY_UNKNOWN,
             });
         });
 
         it("should handle lessons without title", async () => {
             const mockLesson = {
-                ...createMockLesson("lesson-1", "", "MOCK_PUBKEY_1"),
+                ...createMockLesson("lesson-1", "", MOCK_PUBKEY_1),
                 title: undefined as any,
             };
 
-            projectContextMocks.getAllLessons.mockReturnValue([mockLesson]);
+            projectContextMocks.getLessonsForAgent.mockReturnValue([mockLesson]);
             projectContextMocks.getAgentByPubkey.mockReturnValue({
                 name: "agent-one",
                 slug: "agent-one",
@@ -230,12 +229,12 @@ describe("Lessons List Tool", () => {
         it("should sort lessons by creation date, most recent first", async () => {
             const now = Date.now() / 1000;
             const mockLessons = [
-                { ...createMockLesson("lesson-1", "Old", "MOCK_PUBKEY_1"), created_at: now - 100 },
-                { ...createMockLesson("lesson-2", "New", "MOCK_PUBKEY_1"), created_at: now },
-                { ...createMockLesson("lesson-3", "Middle", "MOCK_PUBKEY_1"), created_at: now - 50 },
+                { ...createMockLesson("lesson-1", "Old", MOCK_PUBKEY_1), created_at: now - 100 },
+                { ...createMockLesson("lesson-2", "New", MOCK_PUBKEY_1), created_at: now },
+                { ...createMockLesson("lesson-3", "Middle", MOCK_PUBKEY_1), created_at: now - 50 },
             ];
 
-            projectContextMocks.getAllLessons.mockReturnValue(mockLessons);
+            projectContextMocks.getLessonsForAgent.mockReturnValue(mockLessons);
             projectContextMocks.getAgentByPubkey.mockReturnValue({
                 name: "agent-one",
                 slug: "agent-one",
@@ -378,6 +377,84 @@ describe("Lessons List Tool", () => {
                 success: true,
                 totalCount: 1,
             });
+        });
+    });
+
+    describe("normalization", () => {
+        it("should trim whitespace from pubkey and use normalized value for lookup", async () => {
+            const validPubkey = "a".repeat(64);
+            const pubkeyWithWhitespace = `  ${validPubkey}  `;
+            const mockLessons = [createMockLesson("lesson-1", "Test", validPubkey)];
+
+            projectContextMocks.getLessonsForAgent.mockReturnValue(mockLessons);
+            projectContextMocks.getAgentByPubkey.mockReturnValue({
+                name: "test-agent",
+                slug: "test-agent",
+            });
+
+            const context = createMockContext();
+            const tool = createLessonsListTool(context);
+
+            const result = await tool.execute({ agentPubkey: pubkeyWithWhitespace });
+
+            expect(result).toMatchObject({
+                success: true,
+                totalCount: 1,
+                agentFilter: validPubkey, // Should be trimmed in response
+            });
+            // Should call getLessonsForAgent with trimmed pubkey
+            expect(projectContextMocks.getLessonsForAgent).toHaveBeenCalledWith(validPubkey);
+        });
+
+        it("should lowercase pubkey for lookup", async () => {
+            const uppercasePubkey = "A".repeat(64);
+            const expectedLowercasePubkey = "a".repeat(64);
+            const mockLessons = [createMockLesson("lesson-1", "Test", expectedLowercasePubkey)];
+
+            projectContextMocks.getLessonsForAgent.mockReturnValue(mockLessons);
+            projectContextMocks.getAgentByPubkey.mockReturnValue({
+                name: "test-agent",
+                slug: "test-agent",
+            });
+
+            const context = createMockContext();
+            const tool = createLessonsListTool(context);
+
+            const result = await tool.execute({ agentPubkey: uppercasePubkey });
+
+            expect(result).toMatchObject({
+                success: true,
+                totalCount: 1,
+                agentFilter: expectedLowercasePubkey, // Should be lowercased in response
+            });
+            // Should call getLessonsForAgent with lowercased pubkey
+            expect(projectContextMocks.getLessonsForAgent).toHaveBeenCalledWith(expectedLowercasePubkey);
+        });
+
+        it("should normalize mixed-case pubkey with whitespace", async () => {
+            const mixedCasePubkey = "a1B2c3D4".repeat(8); // 64 chars mixed case
+            const pubkeyWithWhitespace = `  ${mixedCasePubkey}  `;
+            const expectedNormalizedPubkey = mixedCasePubkey.toLowerCase();
+            const mockLessons = [createMockLesson("lesson-1", "Test", expectedNormalizedPubkey)];
+
+            projectContextMocks.getLessonsForAgent.mockReturnValue(mockLessons);
+            projectContextMocks.getAgentByPubkey.mockReturnValue({
+                name: "test-agent",
+                slug: "test-agent",
+            });
+
+            const context = createMockContext();
+            const tool = createLessonsListTool(context);
+
+            const result = await tool.execute({ agentPubkey: pubkeyWithWhitespace });
+
+            expect(result).toMatchObject({
+                success: true,
+                totalCount: 1,
+                agentFilter: expectedNormalizedPubkey, // Should be trimmed and lowercased
+            });
+            // Should call getLessonsForAgent with normalized pubkey
+            expect(projectContextMocks.getLessonsForAgent).toHaveBeenCalledWith(expectedNormalizedPubkey);
         });
     });
 });
