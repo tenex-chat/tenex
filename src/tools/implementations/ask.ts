@@ -5,8 +5,7 @@ import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
-import { resolveRecipientToPubkey } from "@/services/agents";
-import { config as configService } from "@/services/ConfigService";
+import { resolveRecipientToPubkey, resolveEscalationTarget } from "@/services/agents";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { tool } from "ai";
@@ -140,31 +139,18 @@ function buildPromptSummary(input: AskInput): string {
 }
 
 /**
- * Helper: Get escalation target (agent slug) from config, with validation
- * Returns null if no escalation agent configured or config not loaded
+ * Helper: Get escalation target (agent slug) from config, with validation and auto-add
+ *
+ * Delegates to EscalationService which handles:
+ * - Config reading
+ * - Project membership checks
+ * - Auto-adding from global storage if needed
+ *
+ * Returns null if no escalation agent configured, config not loaded, or agent doesn't exist
  */
-function getEscalationTarget(): string | null {
-  try {
-    const config = configService.getConfig();
-    const escalationAgentSlug = config.escalation?.agent;
-
-    // Validate that if escalation agent is configured, it resolves to a valid pubkey
-    if (escalationAgentSlug) {
-      const pubkey = resolveRecipientToPubkey(escalationAgentSlug);
-      if (!pubkey) {
-        logger.warn("[ask] Escalation agent configured but not found", {
-          escalationAgentSlug,
-        });
-        return null;
-      }
-    }
-
-    return escalationAgentSlug || null;
-  } catch (error) {
-    // Config not loaded - this is fine, just means no escalation agent configured
-    logger.debug("[ask] Config not loaded, no escalation routing", { error });
-    return null;
-  }
+async function getEscalationTarget(): Promise<string | null> {
+  const result = await resolveEscalationTarget();
+  return result?.slug ?? null;
 }
 
 async function executeAsk(input: AskInput, context: ToolExecutionContext): Promise<AskOutput> {
@@ -178,7 +164,8 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   }
 
   // Check for escalation agent configuration using helper
-  const escalationAgentSlug = getEscalationTarget();
+  // This will auto-add the agent to the project if it exists in storage but not in project
+  const escalationAgentSlug = await getEscalationTarget();
 
   // If escalation agent is configured AND current agent is not the escalation agent,
   // route through escalation agent instead of directly to user
