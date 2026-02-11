@@ -400,6 +400,297 @@ describe("todo_write tool", () => {
         });
     });
 
+    describe("auto-generated id and optional description", () => {
+        it("should auto-generate id from title when not provided", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "My First Task", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].id).toBe("my-first-task");
+            expect(todos[0].title).toBe("My First Task");
+        });
+
+        it("should use provided id when specified", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { id: "custom-id", title: "My Task", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].id).toBe("custom-id");
+        });
+
+        it("should default description to empty string when not provided", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Task without description", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe("");
+        });
+
+        it("should use provided description when specified", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Task with description", description: "This is the description", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe("This is the description");
+        });
+
+        it("should handle special characters in title when generating id", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Fix Bug #123: Auth Issue!", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].id).toBe("fix-bug-123-auth-issue");
+        });
+
+        it("should handle multiple spaces and special chars in title", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "  Multiple   Spaces   Here  ", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            // Should handle leading/trailing spaces and collapse multiple hyphens
+            expect(todos[0].id).toBe("multiple-spaces-here");
+        });
+
+        it("should allow minimal todo with only title and status", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Task 1", status: "pending" },
+                    { title: "Task 2", status: "in_progress" },
+                    { title: "Task 3", status: "done" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            expect(result.totalItems).toBe(3);
+
+            const todos = context.getTodosRaw();
+            expect(todos[0].id).toBe("task-1");
+            expect(todos[1].id).toBe("task-2");
+            expect(todos[2].id).toBe("task-3");
+        });
+
+        it("should detect duplicates from auto-generated ids", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Same Task", status: "pending" },
+                    { title: "Same Task", status: "in_progress" }, // Same title = same generated ID
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("Duplicate IDs");
+            expect(result.error).toContain("same-task");
+        });
+
+        it("should generate deterministic hash-based id for emoji-only titles", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "🚀🎉", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            // Should have a hash-based ID since emoji produces empty slug
+            expect(todos[0].id).toMatch(/^todo-[0-9a-f]+$/);
+        });
+
+        it("should generate deterministic hash-based id for non-ASCII titles", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "日本語タイトル", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            // Should have a hash-based ID since non-ASCII produces empty slug
+            expect(todos[0].id).toMatch(/^todo-[0-9a-f]+$/);
+        });
+
+        it("should generate same hash for same title (deterministic)", async () => {
+            await tool.execute({
+                todos: [
+                    { title: "🔥", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            const firstId = context.getTodosRaw()[0].id;
+
+            // Clear and add the same title again
+            await tool.execute({
+                todos: [],
+                force: true,
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            await tool.execute({
+                todos: [
+                    { title: "🔥", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            const secondId = context.getTodosRaw()[0].id;
+
+            expect(firstId).toBe(secondId);
+        });
+
+        it("should generate different hashes for different emoji titles", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "🚀", status: "pending" },
+                    { title: "🎉", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].id).not.toBe(todos[1].id);
+        });
+
+        it("should handle mixed ASCII and emoji (partial slug)", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "Task 🚀 Launch", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            // Should extract ASCII parts: "task-launch"
+            expect(todos[0].id).toBe("task-launch");
+        });
+
+        it("should handle punctuation-only titles with hash fallback", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { title: "...", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            // Should have a hash-based ID since punctuation produces empty slug
+            expect(todos[0].id).toMatch(/^todo-[0-9a-f]+$/);
+        });
+    });
+
+    describe("description preservation on update", () => {
+        it("should preserve existing description when omitting description on update", async () => {
+            // First write with description
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task One", description: "Original description", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            // Update without description field
+            const result = await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task One Updated", status: "in_progress" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe("Original description"); // Preserved!
+            expect(todos[0].title).toBe("Task One Updated");
+            expect(todos[0].status).toBe("in_progress");
+        });
+
+        it("should allow explicitly setting description to empty string", async () => {
+            // First write with description
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task One", description: "Original description", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            // Update with explicit empty description
+            const result = await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task One", description: "", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe(""); // Explicitly cleared
+        });
+
+        it("should use empty string for new items without description", async () => {
+            const result = await tool.execute({
+                todos: [
+                    { id: "new-task", title: "New Task", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            expect(result.success).toBe(true);
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe(""); // Empty for new items
+        });
+
+        it("should preserve description when only status changes", async () => {
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task", description: "Important details here", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            // Update only status
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task", status: "done" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe("Important details here");
+            expect(todos[0].status).toBe("done");
+        });
+
+        it("should allow updating description explicitly", async () => {
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task", description: "Original", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            // Update with new description
+            await tool.execute({
+                todos: [
+                    { id: "task-1", title: "Task", description: "Updated description", status: "pending" },
+                ],
+            }, { toolCallId: "test", messages: [], abortSignal: new AbortController().signal });
+
+            const todos = context.getTodosRaw();
+            expect(todos[0].description).toBe("Updated description");
+        });
+    });
+
     describe("success messages", () => {
         it("should return appropriate message for single item", async () => {
             const result = await tool.execute({
