@@ -17,11 +17,12 @@ import { z } from "zod";
  * 2. Timing races with event indexing - the event may exist in RAL but not yet indexed in KV store
  *
  * Scans RALRegistry.pending and RALRegistry.completed for matching delegation conversation IDs.
- * Returns the full 64-char ID if a unique match is found, null otherwise.
+ * Returns the full 64-char canonical delegation ID if a unique match is found, null otherwise.
+ * Note: Unlike PrefixKVStore, this fallback already canonicalizes followup IDs.
  *
  * @param prefix - 12-character hex prefix to resolve
  * @param ralRegistry - RALRegistry instance to scan
- * @returns Full 64-char ID if unique match found, null otherwise
+ * @returns Full 64-char canonical delegation ID if unique match found, null otherwise
  */
 function resolveFromRALFallback(prefix: string, ralRegistry: RALRegistry): string | null {
   const normalizedPrefix = prefix.toLowerCase();
@@ -32,19 +33,36 @@ function resolveFromRALFallback(prefix: string, ralRegistry: RALRegistry): strin
  * Attempts to resolve a 12-char hex prefix to a full delegation conversation ID.
  * Uses PrefixKVStore first, falls back to RALRegistry scan if needed.
  *
+ * IMPORTANT: This function always returns the canonical delegation conversation ID.
+ * When PrefixKVStore resolves a followup event ID prefix, the result is canonicalized
+ * to the original delegation conversation ID. This ensures consistent behavior across
+ * daemon mode (PrefixKVStore available) and MCP-only mode (RAL fallback only).
+ *
  * @param prefix - 12-character hex prefix to resolve
- * @returns Full 64-char ID or null if not found
+ * @returns Full 64-char canonical delegation ID or null if not found
  */
 function resolveDelegationPrefix(prefix: string): string | null {
+  const ralRegistry = RALRegistry.getInstance();
+
   // Try PrefixKVStore first (primary resolution path)
   const resolved = resolvePrefixToId(prefix);
   if (resolved) {
-    return resolved;
+    // Post-resolution canonicalization: PrefixKVStore may return a followup event ID
+    // when the user provides a followup ID prefix. Canonicalize to the original
+    // delegation conversation ID for consistent e-tag and routing behavior.
+    const canonicalized = ralRegistry.canonicalizeDelegationId(resolved);
+    if (canonicalized !== resolved) {
+      logger.info("[delegate_followup] Canonicalized followup ID from PrefixKVStore", {
+        followupId: resolved.substring(0, PREFIX_LENGTH),
+        canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
+      });
+    }
+    return canonicalized;
   }
 
   // Fallback: scan RALRegistry for matching delegation conversation IDs
   // This handles MCP-only execution mode and timing races with event indexing
-  const ralRegistry = RALRegistry.getInstance();
+  // Note: RAL fallback already canonicalizes followup IDs internally
   const fallbackResolved = resolveFromRALFallback(prefix, ralRegistry);
 
   if (fallbackResolved) {
@@ -64,7 +82,10 @@ const delegateFollowupSchema = z.object({
   delegation_conversation_id: z
     .string()
     .describe(
-      "The conversation ID of the delegation you want to follow up on (returned in delegationConversationIds from the delegate tool)"
+      "The ID of the delegation to follow up on. Accepts: delegationConversationId (from delegate response), " +
+        "followupEventId (from delegate_followup response), full 64-char hex, 12-char prefix, or NIP-19 formats " +
+        "(note1..., nevent1...) with or without 'nostr:' prefix. Followup IDs are automatically canonicalized " +
+        "to the original delegation conversation ID."
     ),
   message: z.string().describe("Your follow-up question or clarification request"),
 });
@@ -84,13 +105,18 @@ async function executeDelegateFollowup(
 ): Promise<DelegateFollowupOutput> {
   const { delegation_conversation_id: inputConversationId, message } = input;
 
-  // Resolve prefix to full delegation conversation ID if needed
+  // Resolve prefix to full canonical delegation conversation ID if needed.
+  // Supports: delegationConversationId, followupEventId, 12-char prefixes, NIP-19 formats.
+  // Followup IDs are automatically canonicalized to the original delegation conversation ID.
   let delegation_conversation_id = inputConversationId;
   if (isHexPrefix(inputConversationId)) {
     const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
       throw new Error(
-        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include delegationConversationId (from delegate response) or followupEventId (from delegate_followup response). The prefix may be ambiguous or no matching delegation was found.`
+        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include: ` +
+          "delegationConversationId (from delegate response), followupEventId (from delegate_followup response), " +
+          "full 64-char hex IDs, 12-char prefixes, or NIP-19 formats (note1..., nevent1...) with or without 'nostr:' prefix. " +
+          "The prefix may be ambiguous or no matching delegation was found."
       );
     }
     delegation_conversation_id = resolved;

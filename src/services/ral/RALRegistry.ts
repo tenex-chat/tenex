@@ -1270,6 +1270,21 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Canonicalize a delegation ID by resolving followup event IDs to their canonical
+   * delegation conversation IDs. If the ID is not a followup event ID, returns it unchanged.
+   *
+   * This is used as a post-resolution step when PrefixKVStore resolves an ID that may
+   * be a followup event ID. PrefixKVStore returns any matching ID, but delegate_followup
+   * needs the canonical delegation conversation ID for proper routing and e-tags.
+   *
+   * @param id - A delegation conversation ID or followup event ID
+   * @returns The canonical delegation conversation ID (unchanged if not a followup)
+   */
+  canonicalizeDelegationId(id: string): string {
+    return this.followupToCanonical.get(id) ?? id;
+  }
+
+  /**
    * Find delegation in conversation storage (doesn't require RAL to exist).
    * Used by delegate_followup to look up delegations even after RAL is cleared.
    * Handles both original delegation IDs and followup event IDs through the reverse lookup.
