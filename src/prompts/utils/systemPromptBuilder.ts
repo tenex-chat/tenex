@@ -423,6 +423,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});
 
+    // Add relay configuration context
+    systemPromptBuilder.add("relay-configuration", {});
+
     // Add recent conversations context (short-term memory)
     systemPromptBuilder.add("recent-conversations", {
         agent: agentForFragments,
@@ -545,6 +548,9 @@ async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions):
 
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});
+
+    // Add relay configuration context
+    systemPromptBuilder.add("relay-configuration", {});
 
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
