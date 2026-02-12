@@ -303,7 +303,10 @@ export class AgentExecutor {
                 { content: "Manually stopped by user" },
                 eventContext
             );
-            await ConversationStore.addEvent(context.conversationId, responseEvent);
+            // Handle case where completion was skipped (conversation was killed)
+            if (responseEvent) {
+                await ConversationStore.addEvent(context.conversationId, responseEvent);
+            }
             return responseEvent;
         }
 
