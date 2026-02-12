@@ -1,6 +1,7 @@
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
+import { ProjectAlreadyRunningError } from "@/services/scheduling/errors";
 import { ProjectRuntime } from "./ProjectRuntime";
 
 /**
@@ -52,7 +53,7 @@ export class RuntimeLifecycle {
         if (existingRuntime) {
             const status = existingRuntime.getStatus();
             if (status.isRunning) {
-                throw new Error(`Runtime already running: ${projectId}`);
+                throw new ProjectAlreadyRunningError(projectId);
             }
             // Runtime exists but is not running - remove it and allow restart
             trace.getActiveSpan()?.addEvent("runtime_lifecycle.removing_stale", {
