@@ -243,13 +243,24 @@ export async function checkPostCompletion(
             };
         } else if (supervisionResult.correctionAction.type === "inject-message" &&
             supervisionResult.correctionAction.message) {
-            // Queue message for agent's next execution (no re-engage)
-            ralRegistry.queueSystemMessage(
-                agent.pubkey,
-                context.conversationId,
-                ralNumber,
-                supervisionResult.correctionAction.message
-            );
+            // Store message for agent's NEXT turn (not current RAL).
+            // Using deferredInjections instead of ralRegistry.queueSystemMessage() ensures
+            // this does NOT count as "outstanding work" and allows the agent to complete()
+            // properly. The message will be picked up at the start of the agent's next turn.
+            conversationStore.addDeferredInjection({
+                targetPubkey: agent.pubkey,
+                role: "system",
+                content: supervisionResult.correctionAction.message,
+                queuedAt: Date.now(),
+                source: `supervision:${supervisionResult.heuristicId || "unknown"}`,
+            });
+            await conversationStore.save();
+
+            trace.getActiveSpan()?.addEvent("executor.supervision_deferred_injection", {
+                "ral.number": ralNumber,
+                "heuristic.id": supervisionResult.heuristicId || "unknown",
+                "message_length": supervisionResult.correctionAction.message.length,
+            });
 
             return {
                 shouldReEngage: false,
