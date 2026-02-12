@@ -46,6 +46,10 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "bug_report_add",
     // Meta model tool (injected when agent uses a meta model configuration)
     "change_model",
+    // Home-scoped filesystem tools (injected when agent lacks fs_* tools)
+    "home_fs_read",
+    "home_fs_write",
+    "home_fs_grep",
 ];
 
 /**
