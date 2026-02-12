@@ -191,19 +191,47 @@ export class InterventionService {
             await this.flushWriteQueue();
         }
 
-        this.currentProjectId = projectId;
+        if (this.currentProjectId === projectId) {
+            if (this.stateLoadPromise) {
+                await this.stateLoadPromise;
+            }
 
-        // Load persisted state for this project
-        // Store promise so onAgentCompletion can await if needed
-        this.stateLoadPromise = this.loadState(projectId);
-        await this.stateLoadPromise;
-        this.stateLoadPromise = null;
-        this.setupCatchUpTimers();
+            logger.debug("InterventionService project set", {
+                projectId: projectId.substring(0, 12),
+                pendingCount: this.pendingInterventions.size,
+            });
+            return;
+        }
+
+        this.currentProjectId = projectId;
+        this.beginStateLoad(projectId);
+        if (this.stateLoadPromise) {
+            await this.stateLoadPromise;
+        }
 
         logger.debug("InterventionService project set", {
             projectId: projectId.substring(0, 12),
             pendingCount: this.pendingInterventions.size,
         });
+    }
+
+    /**
+     * Begin loading project state if no load is already in progress.
+     * Ensures queued completion operations are flushed after load completes.
+     */
+    private beginStateLoad(projectId: string): void {
+        if (this.stateLoadPromise) {
+            return;
+        }
+
+        this.stateLoadPromise = this.loadState(projectId)
+            .then(() => {
+                this.setupCatchUpTimers();
+                this.flushPendingCompletionOps();
+            })
+            .finally(() => {
+                this.stateLoadPromise = null;
+            });
     }
 
     /**
@@ -304,12 +332,7 @@ export class InterventionService {
             this.currentProjectId = projectId;
             // Note: setProject() should have been called first in normal operation.
             // If we reach here, load state and queue this completion to run after.
-            this.stateLoadPromise = this.loadState(projectId).then(() => {
-                this.stateLoadPromise = null;
-                this.setupCatchUpTimers();
-                // Process any queued completion operations
-                this.flushPendingCompletionOps();
-            });
+            this.beginStateLoad(projectId);
         } else if (this.currentProjectId !== projectId) {
             // Different project - this shouldn't happen in normal operation
             logger.warn("InterventionService: completion from different project", {
