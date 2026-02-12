@@ -1,5 +1,15 @@
-import { describe, expect, it, mock } from "bun:test";
-import { getAgentHomeDirectory, isPathWithinDirectory, isWithinAgentHome, normalizePath } from "../agent-home";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+    getAgentHomeDirectory,
+    getAgentHomeInjectedFiles,
+    HomeScopeViolationError,
+    isPathWithinDirectory,
+    isWithinAgentHome,
+    normalizePath,
+    resolveHomeScopedPath,
+} from "../agent-home";
 
 // Mock the constants to use a temp path that doesn't affect other tests
 const TEST_BASE_PATH = "/tmp/tenex-test";
@@ -110,6 +120,158 @@ describe("agent-home utilities", () => {
             const homeDir1 = getAgentHomeDirectory("test1234abcd");
             const homeDir2 = getAgentHomeDirectory("test1234abcd");
             expect(homeDir1).toBe(homeDir2);
+        });
+    });
+
+    describe("getAgentHomeInjectedFiles", () => {
+        const testPubkey = "injtest1234567890";
+
+        beforeEach(() => {
+            // Create test home directory
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            mkdirSync(homeDir, { recursive: true });
+        });
+
+        afterEach(() => {
+            // Cleanup test home directory
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            try {
+                rmSync(homeDir, { recursive: true, force: true });
+            } catch {
+                // Ignore cleanup errors
+            }
+        });
+
+        it("should return empty array when no +prefixed files exist", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            writeFileSync(join(homeDir, "regular-file.txt"), "content");
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result).toEqual([]);
+        });
+
+        it("should return +prefixed files with content", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            writeFileSync(join(homeDir, "+NOTES.md"), "My notes");
+            writeFileSync(join(homeDir, "+REMINDERS.txt"), "Remember this");
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result.length).toBe(2);
+            expect(result[0].filename).toBe("+NOTES.md");
+            expect(result[0].content).toBe("My notes");
+            expect(result[0].truncated).toBe(false);
+            expect(result[1].filename).toBe("+REMINDERS.txt");
+            expect(result[1].content).toBe("Remember this");
+        });
+
+        it("should truncate files over 1500 characters", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            const longContent = "x".repeat(2000);
+            writeFileSync(join(homeDir, "+LONG.txt"), longContent);
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result.length).toBe(1);
+            expect(result[0].truncated).toBe(true);
+            expect(result[0].content.length).toBe(1500);
+        });
+
+        it("should limit to 10 files maximum", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            for (let i = 0; i < 15; i++) {
+                writeFileSync(join(homeDir, `+FILE-${String(i).padStart(2, "0")}.txt`), `Content ${i}`);
+            }
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result.length).toBe(10);
+        });
+
+        it("should skip directories starting with +", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            mkdirSync(join(homeDir, "+DIRECTORY"));
+            writeFileSync(join(homeDir, "+FILE.txt"), "content");
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result.length).toBe(1);
+            expect(result[0].filename).toBe("+FILE.txt");
+        });
+
+        it("should sort files alphabetically", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            writeFileSync(join(homeDir, "+ZEBRA.txt"), "z");
+            writeFileSync(join(homeDir, "+ALPHA.txt"), "a");
+            writeFileSync(join(homeDir, "+BETA.txt"), "b");
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+            expect(result[0].filename).toBe("+ALPHA.txt");
+            expect(result[1].filename).toBe("+BETA.txt");
+            expect(result[2].filename).toBe("+ZEBRA.txt");
+        });
+    });
+
+    describe("resolveHomeScopedPath", () => {
+        const testPubkey = "scopetest12345678";
+
+        beforeEach(() => {
+            // Ensure home directory exists
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            mkdirSync(homeDir, { recursive: true });
+        });
+
+        afterEach(() => {
+            // Cleanup
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            try {
+                rmSync(homeDir, { recursive: true, force: true });
+            } catch {
+                // Ignore cleanup errors
+            }
+        });
+
+        it("should resolve relative paths against home directory", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            const result = resolveHomeScopedPath("notes.txt", testPubkey);
+            expect(result).toBe(join(homeDir, "notes.txt"));
+        });
+
+        it("should accept absolute paths within home", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            const absolutePath = join(homeDir, "subdir", "file.txt");
+            const result = resolveHomeScopedPath(absolutePath, testPubkey);
+            expect(result).toBe(absolutePath);
+        });
+
+        it("should throw HomeScopeViolationError for paths escaping home with ..", () => {
+            expect(() => {
+                resolveHomeScopedPath("../other-agent/file.txt", testPubkey);
+            }).toThrow(HomeScopeViolationError);
+        });
+
+        it("should throw HomeScopeViolationError for absolute paths outside home", () => {
+            expect(() => {
+                resolveHomeScopedPath("/etc/passwd", testPubkey);
+            }).toThrow(HomeScopeViolationError);
+        });
+
+        it("should handle nested relative paths correctly", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+            const result = resolveHomeScopedPath("subdir/nested/file.txt", testPubkey);
+            expect(result).toBe(join(homeDir, "subdir/nested/file.txt"));
+        });
+
+        it("should prevent complex traversal attacks", () => {
+            expect(() => {
+                resolveHomeScopedPath("subdir/../../other/file.txt", testPubkey);
+            }).toThrow(HomeScopeViolationError);
+        });
+
+        it("should include helpful error message on violation", () => {
+            try {
+                resolveHomeScopedPath("/etc/passwd", testPubkey);
+                expect(true).toBe(false); // Should not reach here
+            } catch (error) {
+                expect(error).toBeInstanceOf(HomeScopeViolationError);
+                expect((error as Error).message).toContain("outside your home directory");
+            }
         });
     });
 });

@@ -88,6 +88,13 @@ import { createNostrFetchTool } from "./implementations/nostr_fetch";
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
+// Home-scoped filesystem tools
+import {
+    createHomeFsGrepTool,
+    createHomeFsReadTool,
+    createHomeFsWriteTool,
+} from "./implementations/home_fs";
+
 /**
  * Metadata about tools that doesn't require instantiation.
  * Tools declare hasSideEffects: false if they are read-only operations.
@@ -98,6 +105,8 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     fs_read: { hasSideEffects: false },
     fs_glob: { hasSideEffects: false },
     fs_grep: { hasSideEffects: false },
+    home_fs_read: { hasSideEffects: false },
+    home_fs_grep: { hasSideEffects: false },
     conversation_get: { hasSideEffects: false },
     conversation_list: { hasSideEffects: false },
     conversation_search: { hasSideEffects: false },
@@ -226,6 +235,11 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
     change_model: createChangeModelTool as ToolFactory,
+
+    // Home-scoped filesystem tools (for agents without fs_* tools)
+    home_fs_read: createHomeFsReadTool,
+    home_fs_write: createHomeFsWriteTool,
+    home_fs_grep: createHomeFsGrepTool,
 };
 
 /**
@@ -289,6 +303,12 @@ const TODO_TOOLS: ToolName[] = ["todo_write"];
 
 /** Meta model tools - auto-injected when agent uses a meta model configuration */
 const META_MODEL_TOOLS: ToolName[] = ["change_model"];
+
+/** Home-scoped filesystem tools - auto-injected when agent lacks fs_* tools */
+const HOME_FS_TOOLS: ToolName[] = ["home_fs_read", "home_fs_write", "home_fs_grep"];
+
+/** Full filesystem tool names - used to check if agent has fs access */
+const FS_TOOL_NAMES: ToolName[] = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"];
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -464,6 +484,17 @@ export function getToolsObject(
             }
         } catch {
             // Config not loaded or not available - skip meta model tool injection
+        }
+    }
+
+    // Auto-inject home_fs_* tools when agent lacks any fs_* tools
+    // This gives restricted agents filesystem access limited to their home directory
+    const hasAnyFsTool = FS_TOOL_NAMES.some((fsToolName) => regularTools.includes(fsToolName));
+    if (!hasAnyFsTool) {
+        for (const homeFsToolName of HOME_FS_TOOLS) {
+            if (!regularTools.includes(homeFsToolName)) {
+                regularTools.push(homeFsToolName);
+            }
         }
     }
 
