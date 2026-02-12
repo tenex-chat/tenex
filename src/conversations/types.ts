@@ -1,7 +1,27 @@
 import type { ToolCallPart, ToolResultPart } from "ai";
 import type { TodoItem } from "@/services/ral/types";
 
-export type MessageType = "text" | "tool-call" | "tool-result";
+export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
+
+/**
+ * Marker stored in conversation history when a delegation completes.
+ * Instead of embedding the full transcript inline, we store a reference
+ * and lazily expand it when building messages.
+ */
+export interface DelegationMarker {
+    /** The delegation conversation ID (used to retrieve transcript) */
+    delegationConversationId: string;
+    /** The agent pubkey that received the delegation */
+    recipientPubkey: string;
+    /** The conversation ID of the parent (delegator) - for direct-child validation */
+    parentConversationId: string;
+    /** When the delegation completed */
+    completedAt: number;
+    /** Whether the delegation completed successfully or was aborted */
+    status: "completed" | "aborted";
+    /** If aborted, the reason for the abort */
+    abortReason?: string;
+}
 
 export interface ConversationEntry {
     pubkey: string;
@@ -20,6 +40,11 @@ export interface ConversationEntry {
      * Used to ensure compressed summaries are rendered as "system" role, not "user".
      */
     role?: "user" | "assistant" | "tool" | "system";
+    /**
+     * For delegation-marker messageType: contains the marker data.
+     * This allows lazy expansion of delegation transcripts when building messages.
+     */
+    delegationMarker?: DelegationMarker;
 }
 
 export interface Injection {

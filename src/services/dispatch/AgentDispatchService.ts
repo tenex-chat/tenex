@@ -5,6 +5,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
 import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
+import type { DelegationMarker } from "@/conversations/types";
 import { formatAnyError } from "@/lib/error-formatter";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
@@ -390,7 +391,8 @@ export class AgentDispatchService {
                 delegationTarget.conversationId
             );
             if (currentRal?.isStreaming) {
-                // Queue delegation results for the active stream to pick up
+                // Insert delegation markers directly into ConversationStore
+                // The active stream will pick up markers when it rebuilds messages
                 const completedDelegations = ralRegistry.getConversationCompletedDelegations(
                     delegationTarget.agent.pubkey,
                     delegationTarget.conversationId,
@@ -401,19 +403,36 @@ export class AgentDispatchService {
                     delegationTarget.conversationId,
                     currentRal.ralNumber
                 );
-                const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
-                    completedDelegations,
-                    pendingDelegations
-                );
-                if (resultsMessage) {
-                    ralRegistry.queueUserMessage(
+
+                // Insert markers into the parent conversation
+                const parentStore = ConversationStore.get(delegationTarget.conversationId);
+                if (parentStore && completedDelegations.length > 0) {
+                    for (const completion of completedDelegations) {
+                        const marker: DelegationMarker = {
+                            delegationConversationId: completion.delegationConversationId,
+                            recipientPubkey: completion.recipientPubkey,
+                            parentConversationId: delegationTarget.conversationId,
+                            completedAt: completion.completedAt,
+                            status: completion.status,
+                            abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                        };
+                        parentStore.addDelegationMarker(
+                            marker,
+                            delegationTarget.agent.pubkey,
+                            currentRal.ralNumber
+                        );
+                    }
+                    await parentStore.save();
+
+                    // Clear completed delegations after inserting markers
+                    ralRegistry.clearCompletedDelegations(
                         delegationTarget.agent.pubkey,
                         delegationTarget.conversationId,
-                        currentRal.ralNumber,
-                        resultsMessage
+                        currentRal.ralNumber
                     );
                 }
-                span.addEvent("dispatch.delegation_queued_for_active_stream", {
+
+                span.addEvent("dispatch.delegation_markers_inserted_for_active_stream", {
                     "ral.number": currentRal.ralNumber,
                     "delegation.completed_count": completedDelegations.length,
                     "delegation.pending_count": pendingDelegations.length,
