@@ -63,6 +63,14 @@ export interface TenexConfig {
         slidingWindowSize?: number; // Number of recent messages to keep in fallback mode (default: 50)
     };
 
+    // Intervention configuration
+    // Monitors agent work completions and triggers human-replica review if user doesn't respond
+    intervention?: {
+        enabled?: boolean; // Enable intervention monitoring (default: false)
+        agent?: string; // Agent slug to notify when user doesn't respond (required if enabled)
+        timeout?: number; // Milliseconds to wait for user response (default: 300000 = 5 minutes)
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -116,6 +124,13 @@ export const TenexConfigSchema = z.object({
             tokenThreshold: z.number().optional(),
             tokenBudget: z.number().optional(),
             slidingWindowSize: z.number().optional(),
+        })
+        .optional(),
+    intervention: z
+        .object({
+            enabled: z.boolean().optional(),
+            agent: z.string().optional(),
+            timeout: z.number().optional(),
         })
         .optional(),
     description: z.string().optional(),

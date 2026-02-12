@@ -36,7 +36,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`src/event-handler`**: Domain orchestrators triggered by incoming Nostr events. `newConversation` and `reply` decode events using `nostr/AgentEventDecoder`, resolve participants via `agents/` + `conversations/services`, then delegate routing/execution to `services/dispatch`.
 
 ### Nostr Integration (`src/nostr`)
-- **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, and `kinds.ts` encapsulate event creation.
+- **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, `InterventionPublisher`, and `kinds.ts` encapsulate event creation.
 - **Key Derivation** (`keys.ts`): Provides `pubkeyFromNsec()` helper to derive pubkeys from nsec strings. Isolates NDK key operations so services don't import NDK directly.
 - **Utilities & Types**: Provide helper functions for relays, batching, and metadata so higher layers never manipulate `NDKEvent` directly.
 - **Guideline**: Any code that needs to publish Nostr events uses `AgentPublisher` or helper APIs; do not access NDK objects outside this module (tests can mock as needed).
@@ -80,6 +80,7 @@ Use this section to understand each service’s scope and dependencies:
 | `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
 | `PromptCompilerService` | `src/services/prompt-compiler/` | Compiles agent lessons with user comments into Effective Agent Instructions (TIN-10). Takes Base Agent Instructions (from `agent.instructions` in Kind 4199 event) and synthesizes them with Lessons + NIP-22 comments to produce the final instructions the agent uses. Disk caching at `~/.tenex/agents/prompts/`. One instance per agent, registered during `ProjectRuntime.start()`. Handles subscription to kind 1111 comment events filtered by `#K: [4129]`. |
+| `InterventionService` | `src/services/intervention/InterventionService.ts` | Monitors agent work completions and triggers human-replica review if user doesn't respond within timeout. Uses lazy agent resolution (deferred until ProjectContext is available), serialized atomic state writes, and retry/backoff for failed publishes. State is project-scoped (`~/.tenex/intervention_state_<projectId>.json`). |
 
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.
 
