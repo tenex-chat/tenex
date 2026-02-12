@@ -148,13 +148,40 @@ export class AgentPublisher {
      * Publish a completion event.
      * Creates and publishes a properly tagged completion event with p-tag.
      * Includes both incremental runtime (llm-runtime) and total runtime (llm-runtime-total).
+     *
+     * RACE CONDITION GUARD: If this conversation was killed via the kill tool,
+     * this method returns undefined instead of publishing. This prevents the scenario
+     * where an agent continues running (e.g., in a long tool execution) after being
+     * killed and then publishes a completion that triggers the parent to process it.
      */
-    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent> {
+    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
+        const ralRegistry = RALRegistry.getInstance();
+
+        // RACE CONDITION GUARD: Check if this agent+conversation was killed
+        // ISSUE 3 FIX: Using agent-scoped check ensures killing one agent
+        // doesn't suppress completions for other agents in the same conversation.
+        if (ralRegistry.isAgentConversationKilled(this.agent.pubkey, context.conversationId)) {
+            logger.warn("[AgentPublisher.complete] Skipping completion - agent+conversation was killed", {
+                agent: this.agent.slug,
+                agentPubkey: this.agent.pubkey.substring(0, 12),
+                conversationId: context.conversationId.substring(0, 12),
+                ralNumber: context.ralNumber,
+            });
+
+            trace.getActiveSpan()?.addEvent("publisher.completion_skipped_killed", {
+                "agent.slug": this.agent.slug,
+                "agent.pubkey": this.agent.pubkey.substring(0, 12),
+                "conversation.id": context.conversationId.substring(0, 12),
+                "ral.number": context.ralNumber,
+            });
+
+            return undefined;
+        }
+
         const enhancedContext = this.consumeAndEnhanceContext(context);
 
         // For completion events, include the total accumulated runtime for the entire RAL
         // This allows delegation aggregation to get the correct total runtime
-        const ralRegistry = RALRegistry.getInstance();
         const totalRuntime = ralRegistry.getAccumulatedRuntime(
             this.agent.pubkey,
             context.conversationId,

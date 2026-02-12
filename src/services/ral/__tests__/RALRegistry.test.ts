@@ -2257,4 +2257,242 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("killed agent+conversations tracking", () => {
+    describe("markAgentConversationKilled and isAgentConversationKilled", () => {
+      it("should mark an agent+conversation as killed", () => {
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(false);
+
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+      });
+
+      it("should return false for non-killed agent+conversations", () => {
+        expect(registry.isAgentConversationKilled("never-killed-agent", "never-killed-conv")).toBe(false);
+      });
+
+      it("should handle multiple killed agent+conversations", () => {
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        registry.markAgentConversationKilled(agentPubkey2, conversationId2);
+
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+        expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+        expect(registry.isAgentConversationKilled("other-agent", "other-conv")).toBe(false);
+      });
+
+      it("should be idempotent when marking same agent+conversation multiple times", () => {
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+      });
+
+      it("should be cleared by clearAll", () => {
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+
+        registry.clearAll();
+
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(false);
+      });
+
+      it("should be cleared by clear() for specific agent+conversation", () => {
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        registry.markAgentConversationKilled(agentPubkey2, conversationId2);
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+        expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+
+        // Clear only the first agent+conversation
+        registry.clear(agentPubkey, conversationId);
+
+        // First should be cleared, second should remain
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(false);
+        expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+      });
+
+      it("ISSUE 3 FIX: should scope kills to agent+conversation, not just conversation", () => {
+        // Two agents in the same conversation
+        const agent1 = "agent-1";
+        const agent2 = "agent-2";
+        const sharedConvId = "shared-conversation";
+
+        // Kill only agent1 in the shared conversation
+        registry.markAgentConversationKilled(agent1, sharedConvId);
+
+        // Agent1 should be killed, but agent2 should NOT be affected
+        expect(registry.isAgentConversationKilled(agent1, sharedConvId)).toBe(true);
+        expect(registry.isAgentConversationKilled(agent2, sharedConvId)).toBe(false);
+      });
+    });
+
+    describe("markParentDelegationKilled", () => {
+      it("should mark parent delegation as killed and move to completed", () => {
+        // Setup: Parent agent creates a delegation to child
+        const parentAgent = "parent-agent-pubkey";
+        const parentConv = "parent-conv-id";
+        const childConv = "child-conv-id";
+        const childAgent = "child-agent-pubkey";
+
+        const ralNumber = registry.create(parentAgent, parentConv, projectId);
+
+        // Register the delegation (parent -> child)
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: childConv,
+          recipientPubkey: childAgent,
+          senderPubkey: parentAgent,
+          prompt: "Do something",
+          ralNumber,
+        };
+        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [delegation]);
+
+        // Verify delegation is pending
+        const pendingBefore = registry.getConversationPendingDelegations(parentAgent, parentConv);
+        expect(pendingBefore.length).toBe(1);
+        expect(pendingBefore[0].delegationConversationId).toBe(childConv);
+
+        // Mark the parent's delegation as killed (this simulates what happens when killing the child)
+        const result = registry.markParentDelegationKilled(childConv);
+
+        expect(result).toBe(true);
+
+        // Verify delegation moved from pending to completed
+        const pendingAfter = registry.getConversationPendingDelegations(parentAgent, parentConv);
+        expect(pendingAfter.length).toBe(0);
+
+        const completed = registry.getConversationCompletedDelegations(parentAgent, parentConv);
+        expect(completed.length).toBe(1);
+        expect(completed[0].delegationConversationId).toBe(childConv);
+        expect(completed[0].status).toBe("aborted");
+        expect((completed[0] as { abortReason?: string }).abortReason).toBe("killed via kill tool");
+      });
+
+      it("should return false for unknown delegation", () => {
+        const result = registry.markParentDelegationKilled("unknown-delegation-id");
+        expect(result).toBe(false);
+      });
+
+      it("should decrement delegation counter when marking killed", () => {
+        const parentAgent = "parent-agent-2";
+        const parentConv = "parent-conv-2";
+        const childConv = "child-conv-2";
+
+        const ralNumber = registry.create(parentAgent, parentConv, projectId);
+
+        // Register two delegations
+        const delegations: PendingDelegation[] = [
+          {
+            type: "standard",
+            delegationConversationId: childConv,
+            recipientPubkey: "child-1",
+            senderPubkey: parentAgent,
+            prompt: "Task 1",
+            ralNumber,
+          },
+          {
+            type: "standard",
+            delegationConversationId: "child-conv-3",
+            recipientPubkey: "child-2",
+            senderPubkey: parentAgent,
+            prompt: "Task 2",
+            ralNumber,
+          },
+        ];
+        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, delegations);
+
+        // Verify initial count
+        const workBefore = registry.hasOutstandingWork(parentAgent, parentConv, ralNumber);
+        expect(workBefore.details.pendingDelegations).toBe(2);
+
+        // Kill one delegation
+        registry.markParentDelegationKilled(childConv);
+
+        // Verify count decreased
+        const workAfter = registry.hasOutstandingWork(parentAgent, parentConv, ralNumber);
+        expect(workAfter.details.pendingDelegations).toBe(1);
+      });
+
+      it("ISSUE 2 FIX: should preserve existing transcript when killing delegation with prior completion", () => {
+        // Setup: Parent agent creates a delegation, gets a completion, then followup is in progress
+        const parentAgent = "parent-followup-agent";
+        const parentConv = "parent-followup-conv";
+        const childConv = "child-followup-conv";
+        const childAgent = "child-followup-agent";
+
+        const ralNumber = registry.create(parentAgent, parentConv, projectId);
+
+        // Register the initial delegation
+        const delegation: PendingDelegation = {
+          type: "standard",
+          delegationConversationId: childConv,
+          recipientPubkey: childAgent,
+          senderPubkey: parentAgent,
+          prompt: "Initial task",
+          ralNumber,
+        };
+        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [delegation]);
+
+        // Record a completion (first round finished)
+        registry.recordCompletion({
+          delegationConversationId: childConv,
+          recipientPubkey: childAgent,
+          response: "Initial response",
+          completedAt: Date.now(),
+        });
+
+        // Verify completion exists with transcript
+        const completedBefore = registry.getConversationCompletedDelegations(parentAgent, parentConv);
+        expect(completedBefore.length).toBe(1);
+        expect(completedBefore[0].transcript.length).toBe(2); // Prompt + response
+
+        // Now register a followup (second round in progress)
+        const followupDelegation: PendingDelegation = {
+          type: "followup",
+          delegationConversationId: childConv,
+          recipientPubkey: childAgent,
+          senderPubkey: parentAgent,
+          prompt: "Followup question",
+          ralNumber,
+          followupEventId: "followup-event-123",
+        };
+        registry.mergePendingDelegations(parentAgent, parentConv, ralNumber, [followupDelegation]);
+
+        // Kill during followup
+        const result = registry.markParentDelegationKilled(childConv);
+        expect(result).toBe(true);
+
+        // Verify the existing transcript is PRESERVED (not overwritten with empty array)
+        const completedAfter = registry.getConversationCompletedDelegations(parentAgent, parentConv);
+        expect(completedAfter.length).toBe(1);
+        expect(completedAfter[0].transcript.length).toBe(2); // Original transcript preserved!
+        expect(completedAfter[0].status).toBe("aborted");
+        expect((completedAfter[0] as { abortReason?: string }).abortReason).toContain("killed via kill tool");
+      });
+    });
+
+    describe("ISSUE 1 FIX: cleanup of killed markers", () => {
+      it("should prune stale killed entries during cleanup", () => {
+        // Mark agent+conversations as killed
+        registry.markAgentConversationKilled(agentPubkey, conversationId);
+        registry.markAgentConversationKilled(agentPubkey2, conversationId2);
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
+        expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+
+        // Create a RAL for one of them (agentPubkey2 will have state)
+        registry.create(agentPubkey2, conversationId2, projectId);
+
+        // Access the private cleanupExpiredStates method
+        // @ts-expect-error - accessing private method for testing
+        registry.cleanupExpiredStates();
+
+        // The one without RAL state should be pruned, the one with state should remain
+        // Note: agentPubkey:conversationId has no RAL, so its killed marker should be pruned
+        expect(registry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(false);
+        // agentPubkey2:conversationId2 has RAL state, so killed marker remains
+        expect(registry.isAgentConversationKilled(agentPubkey2, conversationId2)).toBe(true);
+      });
+    });
+  });
+
 });
