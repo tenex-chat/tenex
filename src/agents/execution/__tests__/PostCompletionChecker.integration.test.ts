@@ -338,6 +338,86 @@ describe("PostCompletionChecker - True Integration Test", () => {
         });
 
         /**
+         * Validates that inject-message with reEngage=false uses deferred injections
+         * instead of blocking the completion.
+         *
+         * BUG FIX TEST: When ConsecutiveToolsWithoutTodoHeuristic fires with reEngage=false,
+         * it should store the nudge as a deferred injection (for the next turn) rather than
+         * queueing it in RALRegistry (which would block the current completion).
+         *
+         * Before fix: ralRegistry.queueSystemMessage() → hasOutstandingWork() = true → conversation()
+         * After fix: conversationStore.addDeferredInjection() → hasOutstandingWork() = false → complete()
+         */
+        it("should use deferred injection for inject-message with reEngage=false (not block completion)", async () => {
+            const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+            conversationStore.ensureRalActive(AGENT_PUBKEY, ralNumber);
+
+            // Set up scenario for ConsecutiveToolsWithoutTodoHeuristic:
+            // - No todos
+            // - Many tool calls (exceeds threshold of 5)
+            // - Not nudged before
+            conversationStore.setTodos(AGENT_PUBKEY, []); // No todos
+
+            // Add multiple tool calls to exceed threshold
+            for (let i = 0; i < 6; i++) {
+                conversationStore.addMessage({
+                    pubkey: AGENT_PUBKEY,
+                    ral: ralNumber,
+                    content: "",
+                    messageType: "tool-call",
+                    toolData: [{
+                        type: "tool-call",
+                        toolName: `test_tool_${i}`,
+                        toolCallId: `call-${i}`,
+                        args: {},
+                    }],
+                });
+                conversationStore.addMessage({
+                    pubkey: AGENT_PUBKEY,
+                    ral: ralNumber,
+                    content: "",
+                    messageType: "tool-result",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: `call-${i}`,
+                        toolName: `test_tool_${i}`,
+                        result: "ok",
+                    }],
+                });
+            }
+
+            // Create config for the completion
+            const config = createConfig(ralNumber);
+
+            // Verify NO outstanding work before the check
+            const outstandingBefore = registry.hasOutstandingWork(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+            expect(outstandingBefore.hasWork).toBe(false);
+            expect(outstandingBefore.details.queuedInjections).toBe(0);
+
+            // Run the post-completion check
+            const result = await checkPostCompletion(config);
+
+            // KEY ASSERTIONS for the bug fix:
+            // 1. shouldReEngage should be FALSE (inject-message with reEngage=false)
+            expect(result.shouldReEngage).toBe(false);
+
+            // 2. injectedMessage should be TRUE (a message was queued for next turn)
+            expect(result.injectedMessage).toBe(true);
+
+            // 3. RALRegistry should still have NO outstanding work
+            //    (This was the bug - before fix, queueSystemMessage would add to queuedInjections)
+            const outstandingAfter = registry.hasOutstandingWork(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+            expect(outstandingAfter.hasWork).toBe(false);
+            expect(outstandingAfter.details.queuedInjections).toBe(0);
+
+            // 4. The deferred injection should be in ConversationStore
+            const deferredInjections = conversationStore.getPendingDeferredInjections(AGENT_PUBKEY);
+            expect(deferredInjections).toHaveLength(1);
+            expect(deferredInjections[0].content).toContain("Task Tracking Suggestion");
+            expect(deferredInjections[0].source).toBe("supervision:consecutive-tools-without-todo");
+        });
+
+        /**
          * Validates behavior after delegations complete.
          */
         it("should trigger heuristic after all delegations complete", async () => {

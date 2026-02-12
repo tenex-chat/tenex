@@ -17,6 +17,7 @@ import type { ToolCallPart, ToolResultPart } from "ai";
 import {
     ConversationStore,
     type ConversationEntry,
+    type DeferredInjection,
     type Injection,
 } from "../ConversationStore";
 
@@ -732,6 +733,97 @@ describe("ConversationStore", () => {
             // RAL 2 injection should still be pending
             const remaining = store.getPendingInjections(AGENT1_PUBKEY, 2);
             expect(remaining).toHaveLength(1);
+        });
+    });
+
+    describe("Deferred Injections", () => {
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+        });
+
+        it("should add deferred injection to queue", () => {
+            store.addDeferredInjection({
+                targetPubkey: AGENT1_PUBKEY,
+                role: "system",
+                content: "supervision nudge message",
+                queuedAt: Date.now(),
+                source: "supervision:consecutive-tools-without-todo",
+            });
+
+            const deferred = store.getPendingDeferredInjections(AGENT1_PUBKEY);
+            expect(deferred).toHaveLength(1);
+            expect(deferred[0].content).toBe("supervision nudge message");
+            expect(deferred[0].source).toBe("supervision:consecutive-tools-without-todo");
+        });
+
+        it("should consume deferred injections and remove from queue", () => {
+            store.addDeferredInjection({
+                targetPubkey: AGENT1_PUBKEY,
+                role: "system",
+                content: "deferred message",
+                queuedAt: Date.now(),
+            });
+
+            const consumed = store.consumeDeferredInjections(AGENT1_PUBKEY);
+            expect(consumed).toHaveLength(1);
+            expect(consumed[0].content).toBe("deferred message");
+
+            // Should not be in queue anymore
+            const remaining = store.getPendingDeferredInjections(AGENT1_PUBKEY);
+            expect(remaining).toHaveLength(0);
+        });
+
+        it("should only consume deferred injections for target agent", () => {
+            store.addDeferredInjection({
+                targetPubkey: AGENT1_PUBKEY,
+                role: "system",
+                content: "for agent1",
+                queuedAt: Date.now(),
+            });
+            store.addDeferredInjection({
+                targetPubkey: AGENT2_PUBKEY,
+                role: "system",
+                content: "for agent2",
+                queuedAt: Date.now(),
+            });
+
+            const consumed = store.consumeDeferredInjections(AGENT1_PUBKEY);
+            expect(consumed).toHaveLength(1);
+            expect(consumed[0].content).toBe("for agent1");
+
+            // Agent2 injection should still be pending
+            const remaining = store.getPendingDeferredInjections(AGENT2_PUBKEY);
+            expect(remaining).toHaveLength(1);
+            expect(remaining[0].content).toBe("for agent2");
+        });
+
+        it("should return empty array when no deferred injections exist", () => {
+            const deferred = store.getPendingDeferredInjections(AGENT1_PUBKEY);
+            expect(deferred).toHaveLength(0);
+
+            const consumed = store.consumeDeferredInjections(AGENT1_PUBKEY);
+            expect(consumed).toHaveLength(0);
+        });
+
+        it("should persist deferred injections across save/load", async () => {
+            store.addDeferredInjection({
+                targetPubkey: AGENT1_PUBKEY,
+                role: "system",
+                content: "persistent deferred message",
+                queuedAt: Date.now(),
+                source: "supervision:test",
+            });
+
+            await store.save();
+
+            // Create new store and load
+            const store2 = new ConversationStore(TEST_DIR);
+            store2.load(PROJECT_ID, CONVERSATION_ID);
+
+            const deferred = store2.getPendingDeferredInjections(AGENT1_PUBKEY);
+            expect(deferred).toHaveLength(1);
+            expect(deferred[0].content).toBe("persistent deferred message");
+            expect(deferred[0].source).toBe("supervision:test");
         });
     });
 
