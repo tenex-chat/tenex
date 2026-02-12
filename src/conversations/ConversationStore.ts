@@ -23,6 +23,7 @@ import type {
     ConversationEntry,
     ConversationMetadata,
     ConversationState,
+    DelegationMarker,
     ExecutionTime,
     Injection,
 } from "./types";
@@ -443,6 +444,33 @@ export class ConversationStore {
         );
     }
 
+    /**
+     * Add a delegation marker to the conversation.
+     * Markers are lazily expanded when building messages - only direct child
+     * delegations are expanded, preventing exponential transcript bloat.
+     *
+     * @param marker - The delegation marker data
+     * @param agentPubkey - The pubkey of the agent this marker is for
+     * @param ralNumber - The RAL number for targeting
+     * @returns The index of the added message
+     */
+    addDelegationMarker(
+        marker: DelegationMarker,
+        agentPubkey: string,
+        ralNumber?: number
+    ): number {
+        const entry: ConversationEntry = {
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "", // Markers have no text content
+            messageType: "delegation-marker",
+            timestamp: Math.floor(marker.completedAt / 1000), // Convert ms to seconds
+            targetedPubkeys: [agentPubkey], // Target the delegator
+            delegationMarker: marker,
+        };
+        return this.addMessage(entry);
+    }
+
     // Injection Operations
 
     addInjection(injection: Injection): void {
@@ -479,6 +507,12 @@ export class ConversationStore {
         ralNumber: number,
         projectRoot?: string
     ): Promise<ModelMessage[]> {
+        // INVARIANT: conversationId should always be set after load()
+        // If missing, delegation markers won't expand - log a warning for debugging
+        if (!this.conversationId) {
+            logger.warn("[ConversationStore.buildMessagesForRal] conversationId is null - delegation markers will not expand");
+        }
+
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const rootAuthorPubkey = this.state.messages[0]?.pubkey;
 
@@ -488,6 +522,12 @@ export class ConversationStore {
             ? applySegmentsToEntries(this.state.messages, segments)
             : this.state.messages;
 
+        // Callback to get delegation messages for marker expansion
+        const getDelegationMessages = (delegationConversationId: string) => {
+            const store = conversationRegistry.get(delegationConversationId);
+            return store?.getAllMessages();
+        };
+
         return buildMessagesFromEntries(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
@@ -495,6 +535,8 @@ export class ConversationStore {
             totalMessages: entries.length,
             rootAuthorPubkey,
             projectRoot,
+            conversationId: this.conversationId ?? undefined,
+            getDelegationMessages,
         });
     }
 
@@ -504,6 +546,12 @@ export class ConversationStore {
         afterIndex: number,
         projectRoot?: string
     ): Promise<ModelMessage[]> {
+        // INVARIANT: conversationId should always be set after load()
+        // If missing, delegation markers won't expand - log a warning for debugging
+        if (!this.conversationId) {
+            logger.warn("[ConversationStore.buildMessagesForRalAfterIndex] conversationId is null - delegation markers will not expand");
+        }
+
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const startIndex = Math.max(afterIndex + 1, 0);
 
@@ -517,6 +565,12 @@ export class ConversationStore {
         const entries = allEntries.slice(startIndex);
         const rootAuthorPubkey = allEntries[0]?.pubkey;
 
+        // Callback to get delegation messages for marker expansion
+        const getDelegationMessages = (delegationConversationId: string) => {
+            const store = conversationRegistry.get(delegationConversationId);
+            return store?.getAllMessages();
+        };
+
         return buildMessagesFromEntries(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
@@ -525,6 +579,8 @@ export class ConversationStore {
             totalMessages: allEntries.length,
             rootAuthorPubkey,
             projectRoot,
+            conversationId: this.conversationId ?? undefined,
+            getDelegationMessages,
         });
     }
 

@@ -8,6 +8,8 @@
  */
 import type { Span } from "@opentelemetry/api";
 import { RALRegistry } from "@/services/ral";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import type { DelegationMarker } from "@/conversations/types";
 
 export interface RALResolutionContext {
     agentPubkey: string;
@@ -59,52 +61,42 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             agentPubkey, conversationId, resumableRal.ralNumber
         );
 
-        // Separate aborted and completed delegations
-        const abortedDelegations = completedDelegations.filter(d => d.status === "aborted");
-        const successfulDelegations = completedDelegations.filter(d => d.status !== "aborted");
+        // Get the parent conversation store to insert markers
+        const parentStore = ConversationStore.get(conversationId);
 
-        // Build messages for aborted delegations
-        // Only include pending list if there are NO successful delegations (to avoid duplication)
-        if (abortedDelegations.length > 0) {
-            const includePendingInAbort = successfulDelegations.length === 0;
-            const abortMessage = await ralRegistry.buildDelegationAbortMessage(
-                abortedDelegations,
-                includePendingInAbort ? pendingDelegations : []
-            );
-            if (abortMessage) {
-                ralRegistry.queueUserMessage(
-                    agentPubkey,
-                    conversationId,
-                    ralNumber,
-                    abortMessage
-                );
+        // Insert delegation markers for each completed delegation
+        // Markers are expanded lazily when building messages
+        if (parentStore) {
+            for (const completion of completedDelegations) {
+                const marker: DelegationMarker = {
+                    delegationConversationId: completion.delegationConversationId,
+                    recipientPubkey: completion.recipientPubkey,
+                    parentConversationId: conversationId,
+                    completedAt: completion.completedAt,
+                    status: completion.status,
+                    abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                };
+                parentStore.addDelegationMarker(marker, agentPubkey, ralNumber);
             }
+
+            // Save the store after adding markers
+            await parentStore.save();
         }
 
-        // Build messages for successfully completed delegations (always include pending list)
-        if (successfulDelegations.length > 0) {
-            const resultsMessage = await ralRegistry.buildDelegationResultsMessage(
-                successfulDelegations,
-                pendingDelegations
-            );
-            if (resultsMessage) {
-                ralRegistry.queueUserMessage(
-                    agentPubkey,
-                    conversationId,
-                    ralNumber,
-                    resultsMessage
-                );
-            }
-        }
+        // Separate counts for telemetry
+        const abortedCount = completedDelegations.filter(d => d.status === "aborted").length;
+        const successfulCount = completedDelegations.filter(d => d.status !== "aborted").length;
 
-        // Don't clear completedDelegations here - they'll be cleared when the RAL ends.
-        // This allows subsequent executions to see all completions, not just new ones.
+        // Clear completed delegations after inserting markers
+        // This prevents re-processing on subsequent executions
+        ralRegistry.clearCompletedDelegations(agentPubkey, conversationId, ralNumber);
 
         span.addEvent("executor.ral_resumed", {
             "ral.number": ralNumber,
-            "delegation.completed_count": successfulDelegations.length,
-            "delegation.aborted_count": abortedDelegations.length,
+            "delegation.completed_count": successfulCount,
+            "delegation.aborted_count": abortedCount,
             "delegation.pending_count": pendingDelegations.length,
+            "delegation.markers_inserted": completedDelegations.length,
         });
     } else if (injectionRal) {
         // Resume RAL with queued injections

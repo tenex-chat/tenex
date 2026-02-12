@@ -5,9 +5,6 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
-import { ConversationStore } from "@/conversations/ConversationStore";
-import type { ConversationEntry } from "@/conversations/types";
-import type { DelegationMessage } from "@/services/ral/types";
 
 const tracer = trace.getTracer("tenex.delegation");
 
@@ -102,8 +99,7 @@ export async function handleDelegationCompletion(
 
             // DEFENSE-IN-DEPTH: Early exit for killed delegations.
             // The authoritative check is in RALRegistry.recordCompletion(), but we check
-            // here too using the isDelegationKilled() helper to avoid unnecessary work
-            // (e.g., loading conversation transcripts for delegations we'll reject anyway).
+            // here too using the isDelegationKilled() helper to avoid unnecessary work.
             if (ralRegistry.isDelegationKilled(eTag)) {
                 span.addEvent("completion_skipped_delegation_killed", {
                     "delegation.event_id": eTag,
@@ -117,72 +113,16 @@ export async function handleDelegationCompletion(
                 continue; // Skip to next e-tag - this delegation was killed
             }
 
-            // Attempt to build a real transcript from the conversation history
-            // This captures user interventions and multi-turn exchanges
-            let fullTranscript: DelegationMessage[] | undefined;
-            try {
-                const store = ConversationStore.get(eTag);
-                if (store) {
-                    const allMessages = store.getAllMessages();
-                    // Filter for meaningful communication (not internal noise):
-                    // - Must be text messages
-                    // - Must have p-tags (targeted to specific recipients)
-                    const hasTargetedRecipient = (
-                        msg: ConversationEntry
-                    ): msg is ConversationEntry & { targetedPubkeys: string[] } =>
-                        msg.messageType === "text" &&
-                        Array.isArray(msg.targetedPubkeys) &&
-                        msg.targetedPubkeys.length > 0;
-
-                    fullTranscript = allMessages
-                        .filter(hasTargetedRecipient)
-                        .map((msg) => ({
-                            senderPubkey: msg.pubkey,
-                            recipientPubkey: msg.targetedPubkeys[0], // Primary recipient
-                            content: msg.content,
-                            timestamp: msg.timestamp ?? Date.now(),
-                        }));
-
-                    span.addEvent("loaded_delegation_transcript", {
-                        "delegation.event_id": eTag,
-                        "transcript.message_count": fullTranscript.length,
-                    });
-
-                    // Include the current completion event in the transcript
-                    // since it hasn't been stored yet when this handler runs
-                    const pTags = TagExtractor.getPTags(event);
-                    if (event.content && pTags.length > 0) {
-                        fullTranscript.push({
-                            senderPubkey: event.pubkey,
-                            recipientPubkey: pTags[0],
-                            content: event.content,
-                            timestamp: event.created_at ? event.created_at * 1000 : Date.now(),
-                        });
-                        span.addEvent("appended_current_event_to_transcript", {
-                            "event.content_length": event.content.length,
-                            "transcript.final_count": fullTranscript.length,
-                        });
-                    }
-                }
-            } catch (err) {
-                // If we fail to load the conversation history, fall back to default behavior
-                logger.warn("[handleDelegationCompletion] Failed to load conversation history for transcript", {
-                    delegationEventId: eTag.substring(0, 8),
-                    error: err instanceof Error ? err.message : String(err),
-                });
-                span.addEvent("transcript_load_failed", {
-                    "delegation.event_id": eTag,
-                    error: err instanceof Error ? err.message : String(err),
-                });
-            }
-
             // Record the completion (looks up RAL internally via delegation conversation ID)
+            // NOTE: We no longer build/pass fullTranscript here. The marker-based system
+            // (RALResolver + MessageBuilder) reads the conversation transcript directly from
+            // ConversationStore when expanding delegation markers. Storing redundant transcripts
+            // in CompletedDelegation was causing unnecessary memory/disk bloat.
             const result = ralRegistry.recordCompletion({
                 delegationConversationId: eTag,
                 recipientPubkey: event.pubkey,
                 response: event.content,
                 completedAt: Date.now(),
-                fullTranscript: fullTranscript && fullTranscript.length > 0 ? fullTranscript : undefined,
             });
 
             if (result) {

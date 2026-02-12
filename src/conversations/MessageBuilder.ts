@@ -12,7 +12,7 @@
  */
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
-import type { ConversationEntry } from "./types";
+import type { ConversationEntry, DelegationMarker } from "./types";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent } from "./utils/multimodal-content";
 import { processToolResult, shouldTruncateToolResult, type TruncationContext } from "./utils/tool-result-truncator";
@@ -72,6 +72,18 @@ export interface MessageBuilderContext {
      * If provided, enables system reminder injection after file-read tool results.
      */
     projectRoot?: string;
+    /**
+     * The conversation ID being built.
+     * Required for delegation marker expansion - markers are only expanded
+     * if their parentConversationId matches this conversationId (direct children only).
+     */
+    conversationId?: string;
+    /**
+     * Callback to get messages from a delegation conversation.
+     * Used for lazy expansion of delegation markers.
+     * Returns the messages array or undefined if conversation not found.
+     */
+    getDelegationMessages?: (delegationConversationId: string) => ConversationEntry[] | undefined;
 }
 
 /**
@@ -261,6 +273,95 @@ async function entryToMessage(
 }
 
 /**
+ * Expand a delegation marker into a formatted transcript message.
+ *
+ * This function formats messages from a delegation conversation into a flat
+ * transcript. The transcript includes:
+ * - Text messages only (not tool calls/results)
+ * - Messages with p-tags (targeted to specific recipients)
+ * - No nested delegation markers (flat expansion only)
+ *
+ * Format: [@sender -> @recipient]: message content
+ *
+ * @param marker - The delegation marker to expand
+ * @param delegationMessages - Messages from the delegation conversation, or undefined if not found
+ * @returns Formatted transcript as a ModelMessage
+ */
+async function expandDelegationMarker(
+    marker: DelegationMarker,
+    delegationMessages: ConversationEntry[] | undefined
+): Promise<ModelMessage> {
+    const pubkeyService = getPubkeyService();
+
+    if (!delegationMessages) {
+        // Delegation conversation not found - return placeholder
+        try {
+            const recipientName = await pubkeyService.getName(marker.recipientPubkey);
+            const statusText = marker.status === "aborted"
+                ? `was aborted: ${marker.abortReason || "unknown reason"}`
+                : "completed (transcript unavailable)";
+            return {
+                role: "user",
+                content: `# DELEGATION ${marker.status.toUpperCase()}\n\n@${recipientName} ${statusText}`,
+            };
+        } catch {
+            return {
+                role: "user",
+                content: `# DELEGATION ${marker.status.toUpperCase()}\n\nAgent ${marker.recipientPubkey.substring(0, 12)} ${marker.status === "aborted" ? "was aborted" : "completed"} (transcript unavailable)`,
+            };
+        }
+    }
+
+    // Build flat transcript from delegation conversation
+    const lines: string[] = [];
+
+    // Header based on status
+    if (marker.status === "aborted") {
+        lines.push("# DELEGATION ABORTED");
+        lines.push("");
+        if (marker.abortReason) {
+            lines.push(`**Reason:** ${marker.abortReason}`);
+            lines.push("");
+        }
+    } else {
+        lines.push("# DELEGATION COMPLETED");
+        lines.push("");
+    }
+
+    // Filter for targeted text messages only (no tool calls, no nested markers)
+    const transcriptMessages = delegationMessages.filter(msg =>
+        msg.messageType === "text" &&
+        msg.targetedPubkeys &&
+        msg.targetedPubkeys.length > 0
+    );
+
+    if (transcriptMessages.length === 0) {
+        lines.push("(No messages in delegation transcript)");
+    } else {
+        lines.push("### Transcript:");
+        for (const msg of transcriptMessages) {
+            try {
+                const senderName = await pubkeyService.getName(msg.pubkey);
+                const recipientName = msg.targetedPubkeys?.[0]
+                    ? await pubkeyService.getName(msg.targetedPubkeys[0])
+                    : "unknown";
+                lines.push(`[@${senderName} -> @${recipientName}]: ${msg.content}`);
+            } catch {
+                // Fallback to shortened pubkeys
+                const senderFallback = msg.pubkey.substring(0, 12);
+                const recipientFallback = msg.targetedPubkeys?.[0]?.substring(0, 12) || "unknown";
+                lines.push(`[@${senderFallback} -> @${recipientFallback}]: ${msg.content}`);
+            }
+        }
+    }
+
+    return {
+        role: "user",
+        content: lines.join("\n"),
+    };
+}
+
+/**
  * Build ModelMessages from conversation entries.
  *
  * This function handles the complex logic of:
@@ -437,6 +538,53 @@ export async function buildMessagesFromEntries(
                     result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
                 }
                 deferredMessages.length = 0;
+            }
+            continue;
+        }
+
+        // DELEGATION-MARKER: Expand only if direct child of current conversation
+        if (entry.messageType === "delegation-marker" && entry.delegationMarker) {
+            const marker = entry.delegationMarker;
+
+            // Guard: conversationId must be present for marker expansion
+            // If missing, log a warning and skip - this indicates a bug in the caller
+            if (!ctx.conversationId) {
+                trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_skipped", {
+                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
+                    "delegation.parent_conversation_id": marker.parentConversationId.substring(0, 12),
+                    "skip.reason": "missing_conversation_id",
+                    "skip.severity": "warning",
+                });
+                continue;
+            }
+
+            // Only expand direct children - skip nested delegations
+            // This prevents exponential transcript bloat
+            if (marker.parentConversationId === ctx.conversationId) {
+                // Get delegation messages using the provided callback
+                const delegationMessages = ctx.getDelegationMessages?.(marker.delegationConversationId);
+                const expandedMessage = await expandDelegationMarker(marker, delegationMessages);
+                if (pendingToolCalls.size > 0) {
+                    // Can't add to deferred since it's already a ModelMessage
+                    // But markers shouldn't typically appear mid-tool-call
+                    result.push(expandedMessage);
+                } else {
+                    result.push(expandedMessage);
+                }
+
+                trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_expanded", {
+                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
+                    "delegation.status": marker.status,
+                    "delegation.transcript_found": !!delegationMessages,
+                });
+            } else {
+                // Skip nested delegation markers
+                trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_skipped", {
+                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
+                    "delegation.parent_conversation_id": marker.parentConversationId.substring(0, 12),
+                    "current.conversation_id": ctx.conversationId.substring(0, 12),
+                    "skip.reason": "not_direct_child",
+                });
             }
             continue;
         }
