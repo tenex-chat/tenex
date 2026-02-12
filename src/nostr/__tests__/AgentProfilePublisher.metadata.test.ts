@@ -591,4 +591,207 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
         }
     });
 
+    describe("a-tag handling", () => {
+        it("should tag current project via tagReference", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            const ownerPubkey = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
+            const currentDTag = "CurrentProject-abc123";
+
+            projectEvent.tagValue = mock((key: string) => {
+                if (key === "title") return "Test Project";
+                if (key === "d") return currentDTag;
+                return undefined;
+            });
+            projectEvent.dTag = currentDTag;
+            projectEvent.pubkey = ownerPubkey;
+            projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:${currentDTag}`]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                undefined,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const aTags = capturedEvent.tags.filter((tag) => tag[0] === "a");
+
+                // Should have exactly 1 a-tag (current project only)
+                // Note: We only tag the CURRENT project. Multi-project agents
+                // get their a-tags when profiles are republished in each project context.
+                expect(aTags.length).toBe(1);
+
+                // Verify proper NIP-01 addressable coordinate format
+                const currentProjectTag = aTags[0];
+                expect(currentProjectTag[1]).toBe(`31933:${ownerPubkey}:${currentDTag}`);
+
+                // Verify NO invalid a-tags with just slug
+                const invalidATags = aTags.filter((tag) =>
+                    !tag[1].includes(":") // Valid a-tag values must contain colons
+                );
+                expect(invalidATags.length).toBe(0);
+            }
+        });
+
+        it("should skip a-tag when projectEvent.pubkey is missing", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            const currentDTag = "TestProject";
+
+            projectEvent.tagValue = mock((key: string) => {
+                if (key === "title") return "Test Project";
+                if (key === "d") return currentDTag;
+                return undefined;
+            });
+            projectEvent.dTag = currentDTag;
+            // Intentionally NOT setting projectEvent.pubkey
+            projectEvent.pubkey = undefined as unknown as string;
+            projectEvent.tagReference = mock(() => ["a", `31933:undefined:${currentDTag}`]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                undefined,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const aTags = capturedEvent.tags.filter((tag) => tag[0] === "a");
+
+                // Should have NO a-tags when pubkey is missing
+                expect(aTags.length).toBe(0);
+            }
+        });
+
+        it("should skip a-tag when projectEvent.dTag is missing", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            const ownerPubkey = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
+
+            projectEvent.tagValue = mock((key: string) => {
+                if (key === "title") return "Test Project";
+                return undefined; // No d-tag
+            });
+            // Intentionally NOT setting projectEvent.dTag
+            projectEvent.dTag = undefined as unknown as string;
+            projectEvent.pubkey = ownerPubkey;
+            // tagReference would produce invalid a-tag like "31933:pubkey:" (empty d-tag)
+            projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:`]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                undefined,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const aTags = capturedEvent.tags.filter((tag) => tag[0] === "a");
+
+                // Should have NO a-tags when d-tag is missing
+                expect(aTags.length).toBe(0);
+            }
+        });
+
+        it("should skip a-tag when projectEvent.dTag is empty string", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            const ownerPubkey = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
+
+            projectEvent.tagValue = mock((key: string) => {
+                if (key === "title") return "Test Project";
+                if (key === "d") return "";
+                return undefined;
+            });
+            // Empty string d-tag (falsy but different from undefined)
+            projectEvent.dTag = "";
+            projectEvent.pubkey = ownerPubkey;
+            projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:`]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                undefined,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const aTags = capturedEvent.tags.filter((tag) => tag[0] === "a");
+
+                // Should have NO a-tags when d-tag is empty
+                expect(aTags.length).toBe(0);
+            }
+        });
+
+        it("should produce valid a-tag format with proper NIP-01 addressable coordinate", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            const ownerPubkey = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+            const currentDTag = "my-project-slug";
+
+            projectEvent.tagValue = mock((key: string) => {
+                if (key === "title") return "My Project";
+                if (key === "d") return currentDTag;
+                return undefined;
+            });
+            projectEvent.dTag = currentDTag;
+            projectEvent.pubkey = ownerPubkey;
+            // Simulate what NDKProject.tagReference would return
+            projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:${currentDTag}`]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "My Project",
+                projectEvent,
+                undefined,
+                undefined,
+                []
+            );
+
+            const capturedEvent = getKind0Event();
+            expect(capturedEvent).toBeDefined();
+
+            if (capturedEvent) {
+                const aTags = capturedEvent.tags.filter((tag) => tag[0] === "a");
+                expect(aTags.length).toBe(1);
+
+                const aTag = aTags[0];
+                // Verify format: ["a", "31933:<pubkey>:<d-tag>"]
+                expect(aTag[0]).toBe("a");
+                expect(aTag[1]).toMatch(/^31933:[a-f0-9]+:[a-z0-9-]+$/);
+                expect(aTag[1]).toBe(`31933:${ownerPubkey}:${currentDTag}`);
+            }
+        });
+    });
 });
