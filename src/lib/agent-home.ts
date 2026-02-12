@@ -1,6 +1,37 @@
-import { mkdirSync, realpathSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, existsSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, dirname } from "node:path";
 import { getTenexBasePath } from "@/constants";
+import { logger } from "@/utils/logger";
+
+/**
+ * Error thrown when a path escapes the agent's home directory scope.
+ */
+export class HomeScopeViolationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "HomeScopeViolationError";
+    }
+}
+
+/**
+ * Maximum number of +prefixed files to inject into system prompt.
+ * Prevents prompt bloat if an agent creates many files.
+ */
+const MAX_INJECTED_FILES = 10;
+
+/**
+ * Maximum content length for injected files before truncation.
+ */
+const MAX_INJECTED_FILE_LENGTH = 1500;
+
+/**
+ * Represents a file to be injected into the agent's system prompt.
+ */
+export interface InjectedFile {
+    filename: string;
+    content: string;
+    truncated: boolean;
+}
 
 /**
  * Get the short pubkey (first 8 characters) for an agent.
@@ -123,4 +154,93 @@ export function ensureAgentHomeDirectory(agentPubkey: string): boolean {
         console.error("Failed to create agent home dir:", error);
         return false;
     }
+}
+
+/**
+ * Get files in the agent's home directory that start with '+' prefix.
+ * These files are auto-injected into the agent's system prompt.
+ *
+ * Security: Only reads regular files (skips symlinks and directories).
+ * Limits: Max 10 files, max 1500 chars per file (truncated if longer).
+ *
+ * @param agentPubkey - The agent's pubkey
+ * @returns Array of injected file objects with filename, content, and truncated flag
+ */
+export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
+    const homeDir = getAgentHomeDirectory(agentPubkey);
+
+    // Ensure directory exists
+    if (!ensureAgentHomeDirectory(agentPubkey)) {
+        return [];
+    }
+
+    try {
+        const entries = readdirSync(homeDir, { withFileTypes: true });
+
+        // Filter for +prefixed regular files only (skip symlinks and directories for security)
+        const plusFiles = entries
+            .filter((entry) => entry.name.startsWith("+") && entry.isFile())
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .slice(0, MAX_INJECTED_FILES);
+
+        const injectedFiles: InjectedFile[] = [];
+
+        for (const entry of plusFiles) {
+            try {
+                const filePath = join(homeDir, entry.name);
+                const rawContent = readFileSync(filePath, "utf-8");
+                const truncated = rawContent.length > MAX_INJECTED_FILE_LENGTH;
+                const content = truncated
+                    ? rawContent.slice(0, MAX_INJECTED_FILE_LENGTH)
+                    : rawContent;
+
+                injectedFiles.push({
+                    filename: entry.name,
+                    content,
+                    truncated,
+                });
+            } catch (error) {
+                // Skip files that can't be read (permission issues, etc.)
+                logger.warn(`Failed to read injected file ${entry.name}:`, error);
+            }
+        }
+
+        return injectedFiles;
+    } catch (error) {
+        logger.warn("Failed to scan agent home for injected files:", error);
+        return [];
+    }
+}
+
+/**
+ * Resolve a path that must be within the agent's home directory.
+ * Accepts both relative paths (resolved against home) and absolute paths.
+ *
+ * Security: Uses isPathWithinDirectory() which handles symlinks and path traversal.
+ *
+ * @param inputPath - Relative or absolute path
+ * @param agentPubkey - The agent's pubkey
+ * @returns The resolved absolute path within the agent's home
+ * @throws HomeScopeViolationError if path escapes home directory
+ */
+export function resolveHomeScopedPath(inputPath: string, agentPubkey: string): string {
+    const homeDir = getAgentHomeDirectory(agentPubkey);
+
+    // Ensure home directory exists
+    ensureAgentHomeDirectory(agentPubkey);
+
+    // Resolve path: treat relative paths as relative to home directory
+    const resolvedPath = isAbsolute(inputPath)
+        ? inputPath
+        : join(homeDir, inputPath);
+
+    // Validate the resolved path is within home directory
+    if (!isPathWithinDirectory(resolvedPath, homeDir)) {
+        throw new HomeScopeViolationError(
+            `Path "${inputPath}" is outside your home directory. ` +
+            `You can only access files within your home directory.`
+        );
+    }
+
+    return resolvedPath;
 }

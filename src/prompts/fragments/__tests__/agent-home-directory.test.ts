@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as agentHome from "@/lib/agent-home";
+import type { InjectedFile } from "@/lib/agent-home";
 import { agentHomeDirectoryFragment, getAgentHomeDirectory } from "../02-agent-home-directory";
 
 // Mock the logger to avoid console output during tests
@@ -37,16 +38,21 @@ describe("agent-home-directory fragment", () => {
     describe("agentHomeDirectoryFragment.template", () => {
         let ensureAgentHomeSpy: ReturnType<typeof spyOn>;
         let readdirSyncSpy: ReturnType<typeof spyOn>;
+        let getInjectedFilesSpy: ReturnType<typeof spyOn>;
 
         beforeEach(() => {
             // Reset spies before each test
             ensureAgentHomeSpy = spyOn(agentHome, "ensureAgentHomeDirectory");
             readdirSyncSpy = spyOn(fs, "readdirSync");
+            getInjectedFilesSpy = spyOn(agentHome, "getAgentHomeInjectedFiles");
+            // Default to no injected files
+            getInjectedFilesSpy.mockImplementation(() => []);
         });
 
         afterEach(() => {
             ensureAgentHomeSpy.mockRestore();
             readdirSyncSpy.mockRestore();
+            getInjectedFilesSpy.mockRestore();
         });
 
         it("should show empty directory message when no files exist", async () => {
@@ -145,6 +151,77 @@ describe("agent-home-directory fragment", () => {
 
             expect(alphaIndex).toBeLessThan(betaIndex);
             expect(betaIndex).toBeLessThan(zebraIndex);
+        });
+
+        it("should include documentation about auto-injected files", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => []);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).toContain("Auto-injected files:");
+            expect(result).toContain("Files starting with `+`");
+            expect(result).toContain("critical reminders");
+        });
+
+        it("should inject +prefixed file contents when present", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => [
+                { name: "+NOTES.md", isDirectory: () => false, isFile: () => true },
+            ]);
+            const injectedFiles: InjectedFile[] = [
+                { filename: "+NOTES.md", content: "Remember to test everything!", truncated: false },
+            ];
+            getInjectedFilesSpy.mockImplementation(() => injectedFiles);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).toContain("### Injected File Contents");
+            expect(result).toContain("**+NOTES.md:**");
+            expect(result).toContain("Remember to test everything!");
+        });
+
+        it("should show truncation warning for truncated files", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => []);
+            const injectedFiles: InjectedFile[] = [
+                { filename: "+LONG.txt", content: "x".repeat(1500), truncated: true },
+            ];
+            getInjectedFilesSpy.mockImplementation(() => injectedFiles);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).toContain("**+LONG.txt:**");
+            expect(result).toContain("truncated to 1500 characters");
+        });
+
+        it("should inject multiple +prefixed files", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => []);
+            const injectedFiles: InjectedFile[] = [
+                { filename: "+ALPHA.txt", content: "First file", truncated: false },
+                { filename: "+BETA.txt", content: "Second file", truncated: false },
+            ];
+            getInjectedFilesSpy.mockImplementation(() => injectedFiles);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).toContain("**+ALPHA.txt:**");
+            expect(result).toContain("First file");
+            expect(result).toContain("**+BETA.txt:**");
+            expect(result).toContain("Second file");
+        });
+
+        it("should not show injected files section when no +prefixed files exist", async () => {
+            ensureAgentHomeSpy.mockImplementation(() => true);
+            readdirSyncSpy.mockImplementation(() => [
+                { name: "regular.txt", isDirectory: () => false },
+            ]);
+            getInjectedFilesSpy.mockImplementation(() => []);
+
+            const result = await agentHomeDirectoryFragment.template({ agent: mockAgent } as never);
+
+            expect(result).not.toContain("### Injected File Contents");
         });
     });
 
