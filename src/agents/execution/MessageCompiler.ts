@@ -110,6 +110,32 @@ export class MessageCompiler {
                 span.setAttribute("ral.number", context.ralNumber);
                 span.setAttribute("compilation.mode", this.plan.mode);
 
+                // Consume any deferred injections from previous turns (e.g., supervision nudges).
+                // These are added to ephemeral messages so they appear in context but aren't persisted.
+                const deferredInjections = this.conversationStore.consumeDeferredInjections(context.agent.pubkey);
+                if (deferredInjections.length > 0) {
+                    span.setAttribute("deferred_injections.count", deferredInjections.length);
+                    logger.debug("[MessageCompiler] Consuming deferred injections", {
+                        agent: context.agent.slug,
+                        count: deferredInjections.length,
+                        sources: deferredInjections.map(d => d.source).filter(Boolean),
+                    });
+
+                    // Initialize ephemeralMessages if not present
+                    if (!context.ephemeralMessages) {
+                        context.ephemeralMessages = [];
+                    }
+                    // Add deferred injections as ephemeral system messages
+                    for (const injection of deferredInjections) {
+                        context.ephemeralMessages.push({
+                            role: injection.role,
+                            content: injection.content,
+                        });
+                    }
+                    // Save the store to persist the consumption
+                    await this.conversationStore.save();
+                }
+
                 const cursor = this.currentCursor;
                 const messages: ModelMessage[] = [];
                 let systemPromptCount = 0;

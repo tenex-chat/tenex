@@ -55,6 +55,27 @@ export interface Injection {
 }
 
 /**
+ * Deferred injection - a message to be injected on the agent's NEXT turn.
+ *
+ * Unlike Injection which targets a specific RAL, DeferredInjection is consumed
+ * at the START of any future RAL for the target agent. This is used for
+ * supervision messages that should NOT block the current completion but should
+ * appear in the agent's next conversation turn.
+ */
+export interface DeferredInjection {
+    /** The agent pubkey this injection is for */
+    targetPubkey: string;
+    /** The role of the injected message */
+    role: "system";
+    /** The message content */
+    content: string;
+    /** When this injection was queued (ms since epoch) */
+    queuedAt: number;
+    /** Optional source identifier for debugging (e.g., "supervision:consecutive-tools-without-todo") */
+    source?: string;
+}
+
+/**
  * Represents a participant in the delegation chain.
  * Can be either a human user or an agent.
  */
@@ -115,4 +136,9 @@ export interface ConversationState {
     executionTime: ExecutionTime;
     /** Meta model variant override per agent - when set, uses this variant instead of keyword detection */
     metaModelVariantOverride?: Record<string, string>; // agentPubkey -> variantName
+    /**
+     * Deferred injections - messages to be injected on an agent's NEXT turn.
+     * Used by supervision for non-blocking nudges that shouldn't prevent completion.
+     */
+    deferredInjections?: DeferredInjection[];
 }
