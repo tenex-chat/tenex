@@ -1,6 +1,13 @@
 import { readdirSync } from "node:fs";
 import type { AgentInstance } from "@/agents/types/runtime";
-import { ensureAgentHomeDirectory, getAgentHomeDirectory } from "@/lib/agent-home";
+import {
+    ensureAgentHomeDirectory,
+    getAgentHomeDirectory,
+    getAgentHomeInjectedFiles,
+} from "@/lib/agent-home";
+
+// Re-export for convenience (used by tests)
+export { getAgentHomeDirectory } from "@/lib/agent-home";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 
@@ -55,6 +62,7 @@ function buildHomeListing(homeDir: string, agentPubkey: string): string {
 /**
  * Agent home directory fragment.
  * Provides agents with a personal workspace directory for notes, scripts, and other files.
+ * Also auto-injects contents of files starting with '+' into the prompt.
  */
 export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> = {
     id: "agent-home-directory",
@@ -62,6 +70,7 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
     template: ({ agent }) => {
         const homeDir = getAgentHomeDirectory(agent.pubkey);
         const listing = buildHomeListing(homeDir, agent.pubkey);
+        const injectedFiles = getAgentHomeInjectedFiles(agent.pubkey);
 
         const parts: string[] = [];
 
@@ -77,6 +86,28 @@ export const agentHomeDirectoryFragment: PromptFragment<AgentHomeDirectoryArgs> 
             "Feel free to use this space for notes, helper scripts, temporary files, or any personal workspace needs. " +
                 "Use descriptive names for your files so you can easily find them later."
         );
+        parts.push("");
+        parts.push(
+            "**Auto-injected files:** Files starting with `+` (e.g., `+NOTES.md`) are automatically injected into your system prompt. " +
+                "Use these for: critical reminders, preferences, or frequently-referenced notes."
+        );
+
+        // Inject +prefixed file contents
+        if (injectedFiles.length > 0) {
+            parts.push("");
+            parts.push("### Injected File Contents\n");
+
+            for (const file of injectedFiles) {
+                parts.push(`**${file.filename}:**`);
+                if (file.truncated) {
+                    parts.push("*(truncated to 1500 characters)*");
+                }
+                parts.push("```");
+                parts.push(file.content);
+                parts.push("```");
+                parts.push("");
+            }
+        }
 
         return parts.join("\n");
     },
