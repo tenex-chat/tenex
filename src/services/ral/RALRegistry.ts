@@ -226,6 +226,34 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     return ralNumber !== undefined ? completed.filter(d => d.ralNumber === ralNumber) : completed;
   }
 
+  /**
+   * Clear completed delegations for a conversation, optionally filtered by RAL number.
+   * Called after delegation markers have been inserted into ConversationStore
+   * to prevent re-processing on subsequent executions.
+   */
+  clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber?: number): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const delegations = this.conversationDelegations.get(key);
+    if (!delegations) return;
+
+    if (ralNumber !== undefined) {
+      // Clear only completions for the specified RAL
+      for (const [id, completion] of delegations.completed) {
+        if (completion.ralNumber === ralNumber) {
+          delegations.completed.delete(id);
+        }
+      }
+    } else {
+      // Clear all completions
+      delegations.completed.clear();
+    }
+
+    trace.getActiveSpan()?.addEvent("ral.completed_delegations_cleared", {
+      "conversation.id": shortenConversationId(conversationId),
+      "ral.number": ralNumber ?? "all",
+    });
+  }
+
   private startCleanupInterval(): void {
     this.cleanupInterval = setInterval(() => {
       this.cleanupExpiredStates();
