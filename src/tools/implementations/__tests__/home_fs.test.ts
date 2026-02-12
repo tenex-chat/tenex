@@ -373,6 +373,41 @@ describe("home_fs tools", () => {
             const humanContentNoPath = getHumanReadable!({ pattern: "TODO" });
             expect(humanContentNoPath).toBe("Searching for 'TODO' in home");
         });
+
+        it("should safely handle patterns with shell metacharacters", async () => {
+            // Create a file with special content
+            writeFileSync(join(homeDir, "shell-test.txt"), "test'quote and $VAR content");
+
+            const tool = createHomeFsGrepTool(createMockContext());
+
+            // Pattern with single quotes (potential shell injection)
+            const result = await tool.execute({
+                pattern: "test'quote",
+                output_mode: "content",
+            });
+
+            // Should find the match without shell injection issues
+            expect(result).toContain("test'quote");
+        });
+
+        it("should safely handle paths with shell metacharacters", async () => {
+            // Create a subdirectory with quotes in the name
+            const specialDir = join(homeDir, "dir'with'quotes");
+            mkdirSync(specialDir, { recursive: true });
+            writeFileSync(join(specialDir, "file.txt"), "content in special dir");
+
+            const tool = createHomeFsGrepTool(createMockContext());
+
+            // Search in directory with shell metacharacters in path
+            const result = await tool.execute({
+                pattern: "content",
+                path: "dir'with'quotes",
+                output_mode: "files_with_matches",
+            });
+
+            // Should work without shell injection
+            expect(result).toContain("file.txt");
+        });
     });
 
     describe("tool descriptions", () => {

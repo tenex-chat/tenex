@@ -319,14 +319,72 @@ function buildHomeGrepCommand(
     // Pattern (escape for shell)
     parts.push(`'${pattern.replace(/'/g, "'\\''")}'`);
 
-    // Search path
-    parts.push(`'${searchPath}'`);
+    // Search path (escape single quotes to prevent shell injection)
+    parts.push(`'${searchPath.replace(/'/g, "'\\''")}'`);
 
     return parts.join(" ");
 }
 
 function applyPagination(lines: string[], limit: number): string[] {
     return limit > 0 ? lines.slice(0, limit) : lines;
+}
+
+async function runHomeGrepCommand(
+    input: HomeGrepInput,
+    homeDir: string,
+    searchPath: string
+): Promise<string[]> {
+    const useRipgrep = await isRipgrepAvailable();
+    const command = buildHomeGrepCommand(input, searchPath, useRipgrep);
+
+    try {
+        const { stdout } = await execAsync(command, {
+            cwd: homeDir,
+            timeout: 30000,
+            maxBuffer: 1024 * 1024 * 10, // 10MB
+        });
+
+        if (!stdout.trim()) {
+            return [];
+        }
+
+        return stdout.trim().split("\n").filter(Boolean);
+    } catch (error) {
+        // Exit code 1 from grep/rg means no matches - not an error
+        if (error && typeof error === "object" && "code" in error && error.code === 1) {
+            return [];
+        }
+        // maxBuffer error - rethrow to trigger fallback
+        if (error && typeof error === "object" && "message" in error &&
+            typeof error.message === "string" && error.message.includes("maxBuffer")) {
+            throw error;
+        }
+        throw error;
+    }
+}
+
+function processGrepLines(lines: string[], outputMode: string, homeDir: string): string[] {
+    return lines.map((line) => {
+        if (outputMode === "files_with_matches") {
+            return relative(homeDir, line);
+        } else if (outputMode === "count") {
+            const colonIdx = line.lastIndexOf(":");
+            if (colonIdx > 0) {
+                const filePath = line.substring(0, colonIdx);
+                const count = line.substring(colonIdx + 1);
+                return `${relative(homeDir, filePath)}:${count}`;
+            }
+        } else {
+            // Content mode: /path/to/file:line:content
+            const firstColon = line.indexOf(":");
+            if (firstColon > 0) {
+                const filePath = line.substring(0, firstColon);
+                const rest = line.substring(firstColon);
+                return `${relative(homeDir, filePath)}${rest}`;
+            }
+        }
+        return line;
+    });
 }
 
 async function executeHomeGrep(input: HomeGrepInput, agentPubkey: string): Promise<string> {
@@ -340,44 +398,38 @@ async function executeHomeGrep(input: HomeGrepInput, agentPubkey: string): Promi
     // Determine and validate search path
     const searchPath = inputPath ? resolveHomeScopedPath(inputPath, agentPubkey) : homeDir;
 
-    const useRipgrep = await isRipgrepAvailable();
-    const command = buildHomeGrepCommand(input, searchPath, useRipgrep);
-
     try {
-        const { stdout } = await execAsync(command, {
-            cwd: homeDir,
-            timeout: 30000,
-            maxBuffer: 1024 * 1024 * 10, // 10MB
-        });
+        let lines: string[];
 
-        if (!stdout.trim()) {
+        try {
+            lines = await runHomeGrepCommand(input, homeDir, searchPath);
+        } catch (error) {
+            // Handle maxBuffer error by falling back to files_with_matches mode
+            if (
+                output_mode === "content" &&
+                error &&
+                typeof error === "object" &&
+                "message" in error &&
+                typeof error.message === "string" &&
+                error.message.includes("maxBuffer")
+            ) {
+                // Retry with files_with_matches mode
+                const fallbackInput = { ...input, output_mode: "files_with_matches" as const };
+                const fallbackLines = await runHomeGrepCommand(fallbackInput, homeDir, searchPath);
+                const fallbackProcessed = processGrepLines(fallbackLines, "files_with_matches", homeDir);
+                const fallbackPaginated = applyPagination(fallbackProcessed, head_limit);
+
+                return `Output exceeded buffer limit. Showing ${fallbackPaginated.length} matching files instead:\n\n${fallbackPaginated.join("\n")}`;
+            }
+            throw error;
+        }
+
+        if (lines.length === 0) {
             return `No matches found for pattern: ${pattern}`;
         }
 
-        let lines = stdout.trim().split("\n").filter(Boolean);
-
         // Convert absolute paths to relative (to home)
-        lines = lines.map((line) => {
-            if (output_mode === "files_with_matches") {
-                return relative(homeDir, line);
-            } else if (output_mode === "count") {
-                const colonIdx = line.lastIndexOf(":");
-                if (colonIdx > 0) {
-                    const filePath = line.substring(0, colonIdx);
-                    const count = line.substring(colonIdx + 1);
-                    return `${relative(homeDir, filePath)}:${count}`;
-                }
-            } else {
-                // Content mode: /path/to/file:line:content
-                const firstColon = line.indexOf(":");
-                if (firstColon > 0) {
-                    const filePath = line.substring(0, firstColon);
-                    const rest = line.substring(firstColon);
-                    return `${relative(homeDir, filePath)}${rest}`;
-                }
-            }
-            return line;
-        });
+        lines = processGrepLines(lines, output_mode, homeDir);
 
         // Apply pagination
         const paginatedLines = applyPagination(lines, head_limit);
