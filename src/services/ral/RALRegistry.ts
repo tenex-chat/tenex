@@ -251,11 +251,15 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       // Clear only completions for the specified RAL
       for (const [id, completion] of delegations.completed) {
         if (completion.ralNumber === ralNumber) {
+          this.delegationToRal.delete(id);
           delegations.completed.delete(id);
         }
       }
     } else {
-      // Clear all completions
+      // Clear all completions and their RAL mappings
+      for (const id of delegations.completed.keys()) {
+        this.delegationToRal.delete(id);
+      }
       delegations.completed.clear();
     }
 
@@ -1434,22 +1438,6 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const convDelegations = this.conversationDelegations.get(location.key);
     const hasPending = convDelegations?.pending.has(canonicalId) ?? false;
     return hasPending ? ral : undefined;
-  }
-
-  /**
-   * Clear completed delegations for a specific RAL
-   */
-  clearCompletedDelegations(agentPubkey: string, conversationId: string, ralNumber: number): void {
-    const key = this.makeKey(agentPubkey, conversationId);
-    const convDelegations = this.conversationDelegations.get(key);
-    if (convDelegations) {
-      for (const [id, d] of convDelegations.completed) {
-        if (d.ralNumber === ralNumber) {
-          this.delegationToRal.delete(id);
-          convDelegations.completed.delete(id);
-        }
-      }
-    }
   }
 
   /**

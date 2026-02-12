@@ -23,6 +23,7 @@ import type {
     ConversationEntry,
     ConversationMetadata,
     ConversationState,
+    DeferredInjection,
     DelegationMarker,
     ExecutionTime,
     Injection,
@@ -30,6 +31,14 @@ import type {
 import type { CompressionSegment, CompressionLog } from "@/services/compression/compression-types.js";
 import { applySegmentsToEntries } from "@/services/compression/compression-utils.js";
 import { logger } from "@/utils/logger";
+
+// Re-export types for convenience
+export type {
+    ConversationEntry,
+    ConversationMetadata,
+    DeferredInjection,
+    Injection,
+} from "./types";
 
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
@@ -222,6 +231,7 @@ export class ConversationStore {
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
+                deferredInjections: loaded.deferredInjections ?? [],
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -497,6 +507,47 @@ export class ConversationStore {
                 targetedPubkeys: injection.role === "user" ? [agentPubkey] : undefined,
             });
         }
+        return toConsume;
+    }
+
+    // Deferred Injection Operations (for next-turn messages)
+
+    /**
+     * Add a deferred injection for an agent's next turn.
+     *
+     * Unlike regular injections that target a specific RAL, deferred injections
+     * are consumed at the START of any future RAL for the target agent.
+     * This is used for supervision messages that should NOT block the current
+     * completion but should appear in the agent's next conversation turn.
+     */
+    addDeferredInjection(injection: DeferredInjection): void {
+        if (!this.state.deferredInjections) {
+            this.state.deferredInjections = [];
+        }
+        this.state.deferredInjections.push(injection);
+    }
+
+    /**
+     * Get pending deferred injections for an agent.
+     */
+    getPendingDeferredInjections(agentPubkey: string): DeferredInjection[] {
+        return (this.state.deferredInjections ?? []).filter(
+            (i) => i.targetPubkey === agentPubkey
+        );
+    }
+
+    /**
+     * Consume deferred injections for an agent, returning them and removing from queue.
+     *
+     * Unlike consumeInjections which adds messages to store, this just returns
+     * the injections for the caller to handle (typically as ephemeral messages
+     * in MessageCompiler).
+     */
+    consumeDeferredInjections(agentPubkey: string): DeferredInjection[] {
+        const toConsume = this.getPendingDeferredInjections(agentPubkey);
+        this.state.deferredInjections = (this.state.deferredInjections ?? []).filter(
+            (i) => i.targetPubkey !== agentPubkey
+        );
         return toConsume;
     }
 
