@@ -362,6 +362,47 @@ async function expandDelegationMarker(
 }
 
 /**
+ * Format a nested delegation marker as a minimal reference.
+ *
+ * For nested delegations (delegations that occurred within another delegation),
+ * we don't expand the full transcript to avoid exponential bloat. Instead, we
+ * display a minimal marker showing:
+ * - The recipient agent
+ * - The delegation conversation ID (shortened)
+ * - The status (completed/aborted)
+ *
+ * This provides visibility that a delegation happened without including
+ * potentially large transcripts in the parent conversation context.
+ *
+ * @param marker - The delegation marker to format
+ * @returns Minimal reference message as a ModelMessage
+ */
+async function formatNestedDelegationMarker(
+    marker: DelegationMarker
+): Promise<ModelMessage> {
+    const pubkeyService = getPubkeyService();
+
+    let recipientName: string;
+    try {
+        recipientName = await pubkeyService.getName(marker.recipientPubkey);
+    } catch {
+        recipientName = marker.recipientPubkey.substring(0, 12);
+    }
+
+    const shortConversationId = marker.delegationConversationId.substring(0, 12);
+
+    // Simple one-line format: [Delegation to @recipient (conv: abc123...) - status]
+    const statusSuffix = marker.status === "aborted"
+        ? ` - aborted${marker.abortReason ? `: ${marker.abortReason}` : ""}`
+        : " - completed";
+
+    return {
+        role: "user",
+        content: `[Delegation to @${recipientName} (conv: ${shortConversationId}...)${statusSuffix}]`,
+    };
+}
+
+/**
  * Build ModelMessages from conversation entries.
  *
  * This function handles the complex logic of:
@@ -578,12 +619,17 @@ export async function buildMessagesFromEntries(
                     "delegation.transcript_found": !!delegationMessages,
                 });
             } else {
-                // Skip nested delegation markers
-                trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_skipped", {
+                // Nested delegation marker - show minimal reference only
+                // Don't expand transcript to avoid exponential bloat
+                const nestedMarkerMessage = await formatNestedDelegationMarker(marker);
+                result.push(nestedMarkerMessage);
+
+                trace.getActiveSpan?.()?.addEvent("conversation.nested_delegation_marker_displayed", {
                     "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
                     "delegation.parent_conversation_id": marker.parentConversationId.substring(0, 12),
                     "current.conversation_id": ctx.conversationId.substring(0, 12),
-                    "skip.reason": "not_direct_child",
+                    "delegation.status": marker.status,
+                    "delegation.recipient_pubkey": marker.recipientPubkey.substring(0, 12),
                 });
             }
             continue;
