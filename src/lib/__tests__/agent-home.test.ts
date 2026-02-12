@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
     getAgentHomeDirectory,
@@ -205,6 +205,75 @@ describe("agent-home utilities", () => {
             expect(result[0].filename).toBe("+ALPHA.txt");
             expect(result[1].filename).toBe("+BETA.txt");
             expect(result[2].filename).toBe("+ZEBRA.txt");
+        });
+
+        it("should skip symlinks starting with + (security: prevents symlink escape attacks)", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+
+            // Create a regular file
+            writeFileSync(join(homeDir, "+REGULAR.txt"), "regular content");
+
+            // Create a symlink to a file outside home (simulated escape attempt)
+            const outsideFile = "/tmp/tenex-test-outside-file.txt";
+            writeFileSync(outsideFile, "outside content - should not be read");
+            try {
+                symlinkSync(outsideFile, join(homeDir, "+SYMLINK.txt"));
+            } catch {
+                // Symlink creation might fail on some systems, skip test
+                rmSync(outsideFile, { force: true });
+                return;
+            }
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+
+            // Should only return the regular file, not the symlink
+            expect(result.length).toBe(1);
+            expect(result[0].filename).toBe("+REGULAR.txt");
+            expect(result[0].content).toBe("regular content");
+
+            // Cleanup
+            rmSync(outsideFile, { force: true });
+        });
+
+        it("should skip symlinks pointing within home (security: consistent symlink rejection)", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+
+            // Create a regular file
+            const targetFile = join(homeDir, "target.txt");
+            writeFileSync(targetFile, "target content");
+
+            // Create a +prefixed symlink pointing to a file within home
+            // Even internal symlinks are rejected for consistent security
+            try {
+                symlinkSync(targetFile, join(homeDir, "+INTERNAL_LINK.txt"));
+            } catch {
+                // Symlink creation might fail, skip test
+                return;
+            }
+
+            writeFileSync(join(homeDir, "+REGULAR.txt"), "regular");
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+
+            // Should only return the regular file, not the internal symlink
+            expect(result.length).toBe(1);
+            expect(result[0].filename).toBe("+REGULAR.txt");
+        });
+
+        it("should handle large files without memory spikes (bounded read)", () => {
+            const homeDir = getAgentHomeDirectory(testPubkey);
+
+            // Create a file larger than MAX_INJECTED_FILE_LENGTH (1500)
+            // but we're reading bounded, so memory usage should be limited
+            const largeContent = "x".repeat(5000);
+            writeFileSync(join(homeDir, "+LARGE.txt"), largeContent);
+
+            const result = getAgentHomeInjectedFiles(testPubkey);
+
+            expect(result.length).toBe(1);
+            expect(result[0].truncated).toBe(true);
+            // Content should be truncated to MAX_INJECTED_FILE_LENGTH
+            expect(result[0].content.length).toBe(1500);
         });
     });
 

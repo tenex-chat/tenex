@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, realpathSync, existsSync } from "node:fs";
+import { mkdirSync, readdirSync, realpathSync, existsSync, lstatSync, openSync, readSync, closeSync, constants as fsConstants } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, dirname } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import { logger } from "@/utils/logger";
@@ -63,9 +63,22 @@ export function normalizePath(inputPath: string): string {
 }
 
 /**
+ * Safely call realpathSync, returning null if it fails due to permissions or other errors.
+ */
+function safeRealpathSync(path: string): string | null {
+    try {
+        return realpathSync(path);
+    } catch {
+        // Permission denied, or other errors - fall back to normalized path
+        return null;
+    }
+}
+
+/**
  * Resolve the real path of a file or directory, following symlinks.
  * If the path doesn't exist, resolves the parent directory and appends the filename.
  * This ensures symlinks are resolved even for files that will be created.
+ * Falls back to normalized path if realpath resolution fails (e.g., permission denied).
  * @param inputPath - The path to resolve
  * @returns The resolved real path with symlinks followed
  */
@@ -74,7 +87,8 @@ function resolveRealPath(inputPath: string): string {
 
     // If the path exists, resolve it directly
     if (existsSync(normalized)) {
-        return realpathSync(normalized);
+        const realPath = safeRealpathSync(normalized);
+        return realPath ?? normalized;
     }
 
     // Path doesn't exist - resolve the parent directory instead
@@ -83,8 +97,8 @@ function resolveRealPath(inputPath: string): string {
     const filename = normalized.slice(parentDir.length + 1); // Get the filename portion
 
     if (existsSync(parentDir)) {
-        const realParent = realpathSync(parentDir);
-        return join(realParent, filename);
+        const realParent = safeRealpathSync(parentDir);
+        return realParent ? join(realParent, filename) : normalized;
     }
 
     // Neither path nor parent exists - walk up until we find an existing ancestor
@@ -97,8 +111,8 @@ function resolveRealPath(inputPath: string): string {
         currentPath = parent;
 
         if (existsSync(currentPath)) {
-            const realAncestor = realpathSync(currentPath);
-            return join(realAncestor, ...pathParts);
+            const realAncestor = safeRealpathSync(currentPath);
+            return realAncestor ? join(realAncestor, ...pathParts) : normalized;
         }
     }
 
@@ -157,10 +171,83 @@ export function ensureAgentHomeDirectory(agentPubkey: string): boolean {
 }
 
 /**
+ * Maximum file size to read for injected files (prevents memory spikes).
+ * We only need first MAX_INJECTED_FILE_LENGTH chars, so read slightly more to detect truncation.
+ */
+const MAX_INJECTED_FILE_READ_SIZE = MAX_INJECTED_FILE_LENGTH + 100;
+
+/**
+ * Read a bounded amount from a file safely, preventing symlink attacks and memory spikes.
+ * Uses lstat + realpath validation and bounded reads.
+ *
+ * @param filePath - Path to the file
+ * @param homeDir - The home directory (for containment validation)
+ * @param maxBytes - Maximum bytes to read
+ * @returns Object with content and whether it was truncated, or null if file should be skipped
+ */
+function safeReadBoundedFile(
+    filePath: string,
+    homeDir: string,
+    maxBytes: number
+): { content: string; truncated: boolean; fileSize: number } | null {
+    try {
+        // TOCTOU protection: Use lstat (not stat) to check actual file type without following symlinks
+        const lstats = lstatSync(filePath);
+
+        // Skip symlinks entirely (security: prevents symlink race attacks)
+        if (lstats.isSymbolicLink()) {
+            logger.warn(`Skipping symlink in agent home: ${filePath}`);
+            return null;
+        }
+
+        // Skip if not a regular file
+        if (!lstats.isFile()) {
+            return null;
+        }
+
+        // Additional safety: verify realpath is within home directory
+        // This catches any edge cases where the file might resolve outside home
+        const realPath = realpathSync(filePath);
+        const realHomeDir = realpathSync(homeDir);
+        const relativePath = relative(realHomeDir, realPath);
+        if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+            logger.warn(`Skipping file that resolves outside home: ${filePath} -> ${realPath}`);
+            return null;
+        }
+
+        const fileSize = lstats.size;
+
+        // Bounded read: Only read what we need to prevent memory spikes
+        const bytesToRead = Math.min(fileSize, maxBytes);
+        const buffer = Buffer.alloc(bytesToRead);
+
+        // Use low-level open/read for precise control
+        const fd = openSync(filePath, fsConstants.O_RDONLY);
+        try {
+            const bytesRead = readSync(fd, buffer, 0, bytesToRead, 0);
+            const content = buffer.slice(0, bytesRead).toString("utf-8");
+            const truncated = fileSize > maxBytes;
+
+            return { content, truncated, fileSize };
+        } finally {
+            closeSync(fd);
+        }
+    } catch (error) {
+        // File may have been deleted/changed between lstat and read - that's OK
+        logger.warn(`Failed to safely read file ${filePath}:`, error);
+        return null;
+    }
+}
+
+/**
  * Get files in the agent's home directory that start with '+' prefix.
  * These files are auto-injected into the agent's system prompt.
  *
- * Security: Only reads regular files (skips symlinks and directories).
+ * Security:
+ * - Only reads regular files (skips symlinks and directories)
+ * - Uses lstat + realpath validation to prevent TOCTOU/symlink race attacks
+ * - Bounded reads to prevent memory spikes from large files
+ *
  * Limits: Max 10 files, max 1500 chars per file (truncated if longer).
  *
  * @param agentPubkey - The agent's pubkey
@@ -177,32 +264,33 @@ export function getAgentHomeInjectedFiles(agentPubkey: string): InjectedFile[] {
     try {
         const entries = readdirSync(homeDir, { withFileTypes: true });
 
-        // Filter for +prefixed regular files only (skip symlinks and directories for security)
-        const plusFiles = entries
+        // Filter for +prefixed entries that appear to be files
+        // Note: We re-validate each file before reading due to TOCTOU concerns
+        const plusCandidates = entries
             .filter((entry) => entry.name.startsWith("+") && entry.isFile())
             .sort((a, b) => a.name.localeCompare(b.name))
             .slice(0, MAX_INJECTED_FILES);
 
         const injectedFiles: InjectedFile[] = [];
 
-        for (const entry of plusFiles) {
-            try {
-                const filePath = join(homeDir, entry.name);
-                const rawContent = readFileSync(filePath, "utf-8");
-                const truncated = rawContent.length > MAX_INJECTED_FILE_LENGTH;
-                const content = truncated
-                    ? rawContent.slice(0, MAX_INJECTED_FILE_LENGTH)
-                    : rawContent;
+        for (const entry of plusCandidates) {
+            const filePath = join(homeDir, entry.name);
 
-                injectedFiles.push({
-                    filename: entry.name,
-                    content,
-                    truncated,
-                });
-            } catch (error) {
-                // Skip files that can't be read (permission issues, etc.)
-                logger.warn(`Failed to read injected file ${entry.name}:`, error);
+            // Use safe bounded read with TOCTOU protection
+            const result = safeReadBoundedFile(filePath, homeDir, MAX_INJECTED_FILE_READ_SIZE);
+            if (!result) {
+                continue; // Skip files that couldn't be safely read
             }
+
+            // Apply the content length limit
+            const truncated = result.content.length > MAX_INJECTED_FILE_LENGTH || result.truncated;
+            const content = result.content.slice(0, MAX_INJECTED_FILE_LENGTH);
+
+            injectedFiles.push({
+                filename: entry.name,
+                content,
+                truncated,
+            });
         }
 
         return injectedFiles;
