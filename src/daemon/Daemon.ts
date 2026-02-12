@@ -28,6 +28,8 @@ import { logDropped, logRouted } from "./utils/routing-log";
 import { UnixSocketTransport } from "./UnixSocketTransport";
 import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { InterventionService } from "@/services/intervention";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -159,7 +161,12 @@ export class Daemon {
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
 
-            // 12. Setup graceful shutdown
+            // 12. Initialize InterventionService (after projects are loaded)
+            // This must happen after subscriptions start so agent slugs can be resolved
+            logger.debug("Initializing intervention service");
+            await InterventionService.getInstance().initialize();
+
+            // 13. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -424,10 +431,100 @@ export class Daemon {
                 throw new Error("Event ID not found");
             }
             await runtime.handleEvent(event);
+
+            // Check for intervention triggers (completion or user response)
+            this.checkInterventionTriggers(event, runtime, projectId);
         } catch (error) {
             logger.error("Project runtime crashed", { projectId, eventId: event.id });
             await this.runtimeLifecycle.handleRuntimeCrash(projectId, runtime);
             throw error; // Re-throw to mark span as error
+        }
+    }
+
+    /**
+     * Check if an event triggers intervention logic.
+     *
+     * Completion detection:
+     * - Event is kind:1
+     * - Event author is an agent (not whitelisted user)
+     * - Event p-tags a whitelisted pubkey
+     * - That whitelisted pubkey is the author of the root event for this conversation
+     *
+     * User response detection:
+     * - Event is kind:1
+     * - Event author is a whitelisted user
+     * - Event is a reply in an existing conversation
+     */
+    private checkInterventionTriggers(
+        event: NDKEvent,
+        runtime: ProjectRuntime,
+        projectId: string
+    ): void {
+        const interventionService = InterventionService.getInstance();
+        if (!interventionService.isEnabled()) {
+            return;
+        }
+
+        // Only process kind:1 events
+        if (event.kind !== 1) {
+            return;
+        }
+
+        const context = runtime.getContext();
+        if (!context) {
+            return;
+        }
+
+        const eventTimestamp = (event.created_at || 0) * 1000; // Convert to ms
+
+        // Get conversation ID from the event (e-tag or reply target)
+        const replyTarget = AgentEventDecoder.getReplyTarget(event);
+        if (!replyTarget) {
+            // This is a root event, not a reply - no intervention needed
+            return;
+        }
+
+        // Find the conversation for this event
+        const conversation = ConversationStore.findByEventId(replyTarget);
+        if (!conversation) {
+            // Conversation not found - can't determine root author
+            return;
+        }
+
+        const conversationId = conversation.id || replyTarget;
+        const rootAuthorPubkey = conversation.getRootAuthorPubkey();
+        if (!rootAuthorPubkey) {
+            return;
+        }
+
+        const isUserEvent = this.whitelistedPubkeys.includes(event.pubkey);
+        const isAgentEvent = this.agentPubkeyToProjects.has(event.pubkey);
+
+        if (isUserEvent) {
+            // User response - potentially cancel intervention timer
+            interventionService.onUserResponse(
+                conversationId,
+                eventTimestamp,
+                event.pubkey
+            );
+        } else if (isAgentEvent) {
+            // Check if agent is p-tagging the root author (completion signal)
+            const pTags = event.tags.filter((t) => t[0] === "p").map((t) => t[1]);
+            const pTagsRootAuthor = pTags.includes(rootAuthorPubkey);
+
+            if (pTagsRootAuthor) {
+                // Agent completed work and notified the user
+                const project = this.knownProjects.get(projectId);
+                const projectPubkey = project?.pubkey || "";
+
+                interventionService.onAgentCompletion(
+                    conversationId,
+                    eventTimestamp,
+                    event.pubkey,
+                    rootAuthorPubkey,
+                    projectPubkey
+                );
+            }
         }
     }
 
@@ -876,6 +973,11 @@ export class Daemon {
                 getConversationIndexingJob().stop();
                 console.log(" done");
 
+                // Stop intervention service
+                process.stdout.write("Stopping intervention service...");
+                InterventionService.getInstance().shutdown();
+                console.log(" done");
+
                 if (this.subscriptionManager) {
                     process.stdout.write("Stopping subscriptions...");
                     this.subscriptionManager.stop();
@@ -1128,6 +1230,9 @@ export class Daemon {
 
         // Stop conversation indexing job
         getConversationIndexingJob().stop();
+
+        // Stop intervention service
+        InterventionService.getInstance().shutdown();
 
         // Stop subscription
         if (this.subscriptionManager) {

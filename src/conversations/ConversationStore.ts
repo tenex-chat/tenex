@@ -303,6 +303,10 @@ export class ConversationStore {
         return this.state.messages[0]?.eventId;
     }
 
+    getRootAuthorPubkey(): string | undefined {
+        return this.state.messages[0]?.pubkey;
+    }
+
     async save(): Promise<void> {
         this.ensureDirectory();
         const filePath = this.getFilePath();
