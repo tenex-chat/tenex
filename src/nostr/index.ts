@@ -9,6 +9,7 @@ export type {
 export { AgentEventEncoder } from "./AgentEventEncoder";
 export { AgentProfilePublisher } from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
+export { InterventionPublisher } from "./InterventionPublisher";
 export { getNDK } from "./ndkClient";
 export {
     getAgentSlugFromEvent,
