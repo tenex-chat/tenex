@@ -64,6 +64,17 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * Set of agent+conversation keys that have been killed via abortWithCascade.
+   * Key format: "agentPubkey:conversationId" (same as other state maps).
+   * Used to prevent killed agents from publishing completion events
+   * (race condition where agent continues running during long tool execution).
+   *
+   * ISSUE 3 FIX: Using agentPubkey:conversationId scope ensures that killing
+   * one agent doesn't suppress completions for other agents in the same conversation.
+   */
+  private killedAgentConversations: Set<string> = new Set();
+
   /** Maximum age for RAL states before cleanup (default: 24 hours) */
   private static readonly STATE_TTL_MS = 24 * 60 * 60 * 1000;
   /** Cleanup interval (default: 1 hour) */
@@ -254,6 +265,25 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       if (rals.size === 0) {
         this.states.delete(key);
       }
+    }
+
+    // ISSUE 1 FIX: Prune killed agent entries that correspond to cleaned states.
+    // This prevents unbounded growth of killedAgentConversations Set.
+    // We prune keys that no longer have active RAL states - if there's no state,
+    // the conversation is done and the kill marker is no longer needed.
+    let prunedKilledCount = 0;
+    for (const key of this.killedAgentConversations) {
+      if (!this.states.has(key)) {
+        this.killedAgentConversations.delete(key);
+        prunedKilledCount++;
+      }
+    }
+
+    if (prunedKilledCount > 0) {
+      logger.debug("[RALRegistry] Pruned stale killed agent entries", {
+        prunedKilledCount,
+        remainingKilledCount: this.killedAgentConversations.size,
+      });
     }
 
     if (cleanedCount > 0) {
@@ -1172,7 +1202,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
   /**
    * Clear all RALs for an agent+conversation.
-   * Also cleans up conversation-level delegation storage.
+   * Also cleans up conversation-level delegation storage and killed markers.
    */
   clear(agentPubkey: string, conversationId: string): void {
     const key = this.makeKey(agentPubkey, conversationId);
@@ -1182,6 +1212,10 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         this.clearRAL(agentPubkey, conversationId, ralNumber);
       }
     }
+
+    // ISSUE 1 FIX: Clean up killed agent marker when clearing state.
+    // This prevents unbounded growth and allows conversation ID reuse.
+    this.killedAgentConversations.delete(key);
 
     // Clean up conversation-level delegation storage and routing
     const convDelegations = this.conversationDelegations.get(key);
@@ -1734,6 +1768,17 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     if (directAbortCount > 0) {
       abortedTuples.push({ conversationId, agentPubkey });
 
+      // RACE CONDITION FIX #2: Mark agent+conversation as killed to prevent late completion events.
+      // If the agent is in a long-running tool execution when killed, it may eventually
+      // finish and try to call complete(). This flag ensures we skip that completion.
+      // ISSUE 3 FIX: Use agent-scoped key to avoid affecting other agents in same conversation.
+      this.markAgentConversationKilled(agentPubkey, conversationId);
+
+      // FIX #1: Update parent's delegation state when killing a child conversation.
+      // The conversationId being killed is the delegation conversation for some parent.
+      // Use delegationToRal to find and update the parent's pending delegation.
+      this.markParentDelegationKilled(conversationId);
+
       // Add to cooldown registry if provided
       if (cooldownRegistry) {
         cooldownRegistry.add(projectId, conversationId, agentPubkey, reason);
@@ -1864,6 +1909,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.abortControllers.clear();
     this.conversationDelegations.clear();
     this.followupToCanonical.clear();
+    this.killedAgentConversations.clear();
   }
 
   // ============================================================================
@@ -1996,6 +2042,162 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     }
 
     return killedCount;
+  }
+
+  /**
+   * Mark an agent+conversation as killed.
+   * Used to prevent killed agents from publishing completion events.
+   * This addresses the race condition where an agent continues running
+   * (e.g., in a long tool execution) after being killed.
+   *
+   * ISSUE 3 FIX: Scoped to agentPubkey:conversationId to ensure killing one
+   * agent doesn't suppress completions for other agents in the same conversation.
+   *
+   * @param agentPubkey - The agent's pubkey
+   * @param conversationId - The conversation ID
+   */
+  markAgentConversationKilled(agentPubkey: string, conversationId: string): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    this.killedAgentConversations.add(key);
+
+    trace.getActiveSpan()?.addEvent("ral.agent_conversation_marked_killed", {
+      "agent.pubkey": agentPubkey.substring(0, 12),
+      "conversation.id": shortenConversationId(conversationId),
+    });
+
+    logger.info("[RALRegistry.markAgentConversationKilled] Agent+conversation marked as killed", {
+      agentPubkey: agentPubkey.substring(0, 12),
+      conversationId: conversationId.substring(0, 12),
+    });
+  }
+
+  /**
+   * Check if an agent+conversation has been killed.
+   * Used by AgentPublisher to skip completion events for killed agents.
+   *
+   * ISSUE 3 FIX: Scoped to agentPubkey:conversationId to ensure killing one
+   * agent doesn't suppress completions for other agents in the same conversation.
+   *
+   * @param agentPubkey - The agent's pubkey
+   * @param conversationId - The conversation ID
+   * @returns true if the agent+conversation has been killed
+   */
+  isAgentConversationKilled(agentPubkey: string, conversationId: string): boolean {
+    const key = this.makeKey(agentPubkey, conversationId);
+    return this.killedAgentConversations.has(key);
+  }
+
+  /**
+   * Mark the parent's pending delegation as killed when killing a child conversation.
+   * Uses the delegationToRal map to find the parent that owns this delegation.
+   *
+   * This fixes the bug where Agent0's pending_delegations count remains at 1
+   * after killing a delegation, because the parent's state wasn't updated.
+   *
+   * @param delegationConversationId - The delegation conversation ID being killed
+   * @returns true if parent delegation was found and marked, false otherwise
+   */
+  markParentDelegationKilled(delegationConversationId: string): boolean {
+    // Look up which parent owns this delegation
+    const location = this.delegationToRal.get(delegationConversationId);
+    if (!location) {
+      logger.debug("[RALRegistry.markParentDelegationKilled] No parent found for delegation", {
+        delegationConversationId: delegationConversationId.substring(0, 12),
+      });
+      return false;
+    }
+
+    // Get the parent's conversation delegations
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      logger.debug("[RALRegistry.markParentDelegationKilled] No delegations found for parent", {
+        parentKey: location.key.substring(0, 20),
+      });
+      return false;
+    }
+
+    // Resolve followup event ID to canonical delegation conversation ID if needed
+    const canonicalId = this.followupToCanonical.get(delegationConversationId)
+      ?? delegationConversationId;
+
+    const pendingDelegation = convDelegations.pending.get(canonicalId);
+    if (!pendingDelegation) {
+      logger.debug("[RALRegistry.markParentDelegationKilled] No pending delegation found", {
+        delegationConversationId: canonicalId.substring(0, 12),
+      });
+      return false;
+    }
+
+    // Mark the delegation as killed (idempotent)
+    if (!pendingDelegation.killed) {
+      pendingDelegation.killed = true;
+      pendingDelegation.killedAt = Date.now();
+
+      trace.getActiveSpan()?.addEvent("ral.parent_delegation_marked_killed", {
+        "parent.key": location.key.substring(0, 20),
+        "delegation.conversation_id": shortenConversationId(canonicalId),
+        "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+      });
+
+      logger.info("[RALRegistry.markParentDelegationKilled] Parent delegation marked as killed", {
+        parentKey: location.key.substring(0, 20),
+        delegationConversationId: canonicalId.substring(0, 12),
+        recipientPubkey: pendingDelegation.recipientPubkey.substring(0, 12),
+      });
+    }
+
+    // Remove from pending
+    convDelegations.pending.delete(canonicalId);
+
+    // ISSUE 2 FIX: Check if there's an existing completion entry (from followup scenario).
+    // If so, preserve the existing transcript when creating the abort entry.
+    const existingCompletion = convDelegations.completed.get(canonicalId);
+    if (existingCompletion) {
+      // Replace existing completion with aborted entry, but PRESERVE the transcript
+      // The discriminated union type requires replacing the entire object to change status
+      convDelegations.completed.set(canonicalId, {
+        delegationConversationId: canonicalId,
+        recipientPubkey: existingCompletion.recipientPubkey,
+        senderPubkey: existingCompletion.senderPubkey,
+        ralNumber: existingCompletion.ralNumber,
+        transcript: existingCompletion.transcript, // PRESERVE original transcript
+        completedAt: Date.now(),
+        status: "aborted",
+        abortReason: "killed via kill tool (after partial completion)",
+      });
+
+      trace.getActiveSpan()?.addEvent("ral.parent_delegation_updated_as_aborted", {
+        "delegation.conversation_id": shortenConversationId(canonicalId),
+        "delegation.status": "aborted",
+        "delegation.transcript_preserved": existingCompletion.transcript.length,
+      });
+    } else {
+      // No existing completion - create new aborted entry
+      convDelegations.completed.set(canonicalId, {
+        delegationConversationId: canonicalId,
+        recipientPubkey: pendingDelegation.recipientPubkey,
+        senderPubkey: pendingDelegation.senderPubkey,
+        ralNumber: pendingDelegation.ralNumber,
+        transcript: [], // Empty transcript since it was killed before completion
+        completedAt: Date.now(),
+        status: "aborted",
+        abortReason: "killed via kill tool",
+      });
+
+      trace.getActiveSpan()?.addEvent("ral.parent_delegation_moved_to_completed", {
+        "delegation.conversation_id": shortenConversationId(canonicalId),
+        "delegation.status": "aborted",
+      });
+    }
+
+    // Decrement the O(1) delegation counter
+    this.decrementDelegationCounter(
+      location.key.split(":")[0], // agentPubkey
+      location.key.split(":")[1], // conversationId
+      pendingDelegation.ralNumber
+    );
+
+    return true;
   }
 
   // ============================================================================
