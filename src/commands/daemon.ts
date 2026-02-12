@@ -69,11 +69,8 @@ export const daemonCommand = new Command("daemon")
         await initNDK();
         console.log(chalk.gray("✓ Nostr connected"));
 
-        // Initialize services that the daemon needs
-        console.log(chalk.gray("⚙️  Initializing scheduler service..."));
+        // Get scheduler service instance (initialization deferred until callbacks are registered)
         const schedulerService = SchedulerService.getInstance();
-        await schedulerService.initialize(getNDK(), ".tenex");
-        console.log(chalk.gray("✓ Scheduler initialized"));
 
         // DIAGNOSTIC: Start event loop monitoring for concurrent streaming bottleneck analysis
         eventLoopMonitor.start(
@@ -115,6 +112,57 @@ export const daemonCommand = new Command("daemon")
             // Start the daemon
             await daemon.start();
             console.log(chalk.gray("✓ Daemon core started"));
+
+            // Register project callbacks with scheduler service (dependency injection)
+            // This enables Layer 3 (SchedulerService) to use Layer 4 (Daemon) functionality
+            // without direct imports, maintaining architectural separation
+            schedulerService.setProjectCallbacks(
+                // Boot handler: called when a scheduled task needs to boot a project
+                async (projectId: string) => {
+                    await daemon.startRuntime(projectId);
+                },
+                // State resolver: called to check if a project is already running
+                (projectId: string) => {
+                    return daemon.getActiveRuntimes().has(projectId);
+                },
+                // Target resolver: called to resolve the target pubkey (may reroute to PM)
+                (projectId: string, originalTargetPubkey: string) => {
+                    const runtime = daemon.getActiveRuntimes().get(projectId);
+                    if (!runtime) {
+                        // Project not running, use original target
+                        return originalTargetPubkey;
+                    }
+
+                    const context = runtime.getContext();
+                    if (!context) {
+                        // No context available, use original target
+                        return originalTargetPubkey;
+                    }
+
+                    // Check if the target agent is in this project
+                    const targetAgent = context.getAgentByPubkey(originalTargetPubkey);
+                    if (targetAgent) {
+                        // Target agent exists in project, use original target
+                        return originalTargetPubkey;
+                    }
+
+                    // Target agent is NOT in this project - route to PM instead
+                    const pm = context.projectManager;
+                    if (!pm) {
+                        // No PM available, use original target
+                        return originalTargetPubkey;
+                    }
+
+                    return pm.pubkey;
+                }
+            );
+            console.log(chalk.gray("✓ Scheduler callbacks registered"));
+
+            // Initialize scheduler AFTER callbacks are registered
+            // This ensures catch-up tasks can use ensureProjectRunning() for auto-boot
+            console.log(chalk.gray("⚙️  Initializing scheduler service..."));
+            await schedulerService.initialize(getNDK(), ".tenex");
+            console.log(chalk.gray("✓ Scheduler initialized"));
 
             console.log(chalk.green("✅ Daemon started successfully"));
 
