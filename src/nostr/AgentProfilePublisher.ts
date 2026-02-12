@@ -95,13 +95,26 @@ export class AgentProfilePublisher {
                 tags: [],
             });
 
-            // Properly tag the project event (creates an "a" tag for kind:31933)
-            profileEvent.tag(projectEvent.tagReference());
-
-            // Add "a" tags for all projects this agent belongs to
-            const projectTags = await agentStorage.getAgentProjects(signer.pubkey);
-            for (const tag of projectTags) {
-                profileEvent.tag(["a", tag]);
+            // Validate projectEvent has required fields before tagging
+            // Both pubkey and dTag are required for valid NIP-01 addressable coordinates:
+            // Format: <kind>:<pubkey>:<d-tag> (e.g., "31933:abc123:my-project")
+            const projectDTag = projectEvent.dTag;
+            if (!projectEvent.pubkey) {
+                logger.warn("Project event missing pubkey, skipping a-tag", {
+                    agentPubkey: signer.pubkey,
+                });
+            } else if (!projectDTag) {
+                logger.warn("Project event missing d-tag, skipping a-tag", {
+                    agentPubkey: signer.pubkey,
+                    projectPubkey: projectEvent.pubkey,
+                });
+            } else {
+                // Properly tag the project event (creates an "a" tag for kind:31933)
+                // Note: We only tag the CURRENT project. Each project publishes
+                // the agent's profile with its own a-tag when the agent boots there.
+                // This avoids the multi-owner problem where other projects may have
+                // different owner pubkeys that we don't have access to.
+                profileEvent.tag(projectEvent.tagReference());
             }
 
             // Add e-tag for the agent definition event if it exists and is valid
