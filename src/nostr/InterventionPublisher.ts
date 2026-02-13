@@ -1,41 +1,10 @@
 import { config } from "@/services/ConfigService";
-import { getLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { context as otelContext, propagation, trace } from "@opentelemetry/api";
+import { trace } from "@opentelemetry/api";
 import { AgentEventEncoder } from "./AgentEventEncoder";
+import { injectTraceContext } from "./trace-context";
 import type { InterventionReviewIntent } from "./types";
-
-/**
- * Inject W3C trace context into an event's tags.
- * This allows the daemon to link incoming events back to their parent span.
- * Also adds trace_context_llm which links to the LLM execution span for better debugging.
- *
- * Note: This is duplicated from AgentPublisher since intervention events
- * are published outside the normal agent execution context but still need
- * trace context for observability.
- */
-function injectTraceContext(event: { tags: string[][] }): void {
-    const carrier: Record<string, string> = {};
-    propagation.inject(otelContext.active(), carrier);
-    if (carrier.traceparent) {
-        event.tags.push(["trace_context", carrier.traceparent]);
-    }
-
-    // Add trace context that links to LLM execution span (more useful for debugging)
-    const activeSpan = trace.getActiveSpan();
-    if (activeSpan) {
-        const spanContext = activeSpan.spanContext();
-        const traceId = spanContext.traceId;
-
-        // Use LLM span ID if available (links to actual LLM execution)
-        // Otherwise fall back to current span ID
-        const llmSpanId = getLLMSpanId(traceId);
-        const spanIdToUse = llmSpanId || spanContext.spanId;
-
-        event.tags.push(["trace_context_llm", `00-${traceId}-${spanIdToUse}-01`]);
-    }
-}
 
 /**
  * Publisher for intervention review request events.
