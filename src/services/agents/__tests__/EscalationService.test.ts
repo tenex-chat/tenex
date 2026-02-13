@@ -425,7 +425,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
     // Create typed mock functions for AgentRegistry methods
-    const mockGetAgent = mock(() => null as ReturnType<import("@/agents/AgentRegistry").AgentRegistry["getAgent"]>);
+    const mockGetAgent = mock(() => undefined as ReturnType<import("@/agents/AgentRegistry").AgentRegistry["getAgent"]>);
     const mockAddAgentLocal = mock(() => {});
     const mockGetBasePathLocal = mock(() => "/test/path");
     const mockGetMetadataPathLocal = mock(() => "/test/metadata");
@@ -459,7 +459,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
         mockGetMetadataPathLocal.mockClear();
 
         // Set default returns
-        mockGetAgent.mockReturnValue(null);
+        mockGetAgent.mockReturnValue(undefined);
 
         // Reset all mocks
         mockGetConfig.mockClear();
@@ -507,7 +507,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
     describe("when escalation agent needs loading", () => {
         beforeEach(() => {
-            mockGetAgent.mockReturnValue(null); // Not in registry
+            mockGetAgent.mockReturnValue(undefined); // Not in registry
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
@@ -562,7 +562,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
     describe("when escalation agent does not exist in storage", () => {
         it("should return false when agent not found in storage", async () => {
-            mockGetAgent.mockReturnValue(null);
+            mockGetAgent.mockReturnValue(undefined);
             mockGetAgentBySlug.mockReturnValue(null);
 
             const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
@@ -574,7 +574,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
     describe("edge cases", () => {
         it("should return false when projectDTag is undefined", async () => {
-            const result = await loadEscalationAgentIntoRegistry(mockRegistry, undefined as unknown as string);
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, undefined);
 
             expect(result).toBe(false);
             expect(mockGetAgent).not.toHaveBeenCalled();
@@ -589,8 +589,16 @@ describe("loadEscalationAgentIntoRegistry", () => {
             expect(mockAddAgentLocal).not.toHaveBeenCalled();
         });
 
+        it("should return false when projectDTag is whitespace-only", async () => {
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "   ");
+
+            expect(result).toBe(false);
+            expect(mockGetAgent).not.toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+
         it("should return false when agent reload fails after adding to project", async () => {
-            mockGetAgent.mockReturnValue(null);
+            mockGetAgent.mockReturnValue(undefined);
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue(null); // Reload fails
 
@@ -624,7 +632,7 @@ describe("loadEscalationAgentIntoRegistry", () => {
 
     describe("idempotency", () => {
         it("should be idempotent - storage add is idempotent", async () => {
-            mockGetAgent.mockReturnValue(null);
+            mockGetAgent.mockReturnValue(undefined);
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,

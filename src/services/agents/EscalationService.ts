@@ -200,8 +200,8 @@ export async function loadEscalationAgentIntoRegistry(
     agentRegistry: AgentRegistry,
     projectDTag: string | undefined
 ): Promise<boolean> {
-    // Validate projectDTag is provided and non-empty
-    if (!projectDTag || projectDTag.length === 0) {
+    // Validate projectDTag is provided and non-empty (including whitespace-only)
+    if (!projectDTag?.trim()) {
         logger.warn("[EscalationService] Cannot load escalation agent: projectDTag is required");
         return false;
     }
