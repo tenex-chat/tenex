@@ -22,6 +22,9 @@ import { z } from "zod";
 import { logger } from "@/utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { trace } from "@opentelemetry/api";
+import { resolvePrefixToId, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
+import { nip19 } from "nostr-tools";
+import { isFullEventId, isShortEventId, isShellTaskId } from "@/types/event-ids";
 
 const killSchema = z.object({
     target: z
@@ -39,6 +42,95 @@ const killSchema = z.object({
 });
 
 type KillInput = z.infer<typeof killSchema>;
+
+/**
+ * Resolve a target ID from various formats to a canonical full ID.
+ *
+ * Supports:
+ * - 64-char hex: Already a full ID, returned as-is
+ * - 12-char hex: Resolve via PrefixKVStore or RALRegistry fallback
+ * - 7-char alphanumeric: Shell task ID (returned as-is for separate handling)
+ * - NIP-19 formats (nevent, note): Decode to 64-char hex
+ *
+ * @param input - The target identifier in any supported format
+ * @returns Object with resolved ID and type, or null if resolution failed
+ */
+async function resolveTargetId(input: string): Promise<{
+    id: string;
+    type: 'conversation' | 'shell' | 'unknown';
+    wasResolved: boolean;
+} | null> {
+    const trimmed = input.trim().toLowerCase();
+
+    // 64-char hex: already a full ID (use typed guard)
+    if (isFullEventId(trimmed)) {
+        return { id: trimmed, type: 'conversation', wasResolved: false };
+    }
+
+    // 12-char hex: resolve via prefix store or RALRegistry fallback (use typed guard)
+    if (isShortEventId(trimmed)) {
+        // Try PrefixKVStore first (O(1) lookup)
+        const resolved = resolvePrefixToId(trimmed);
+        if (resolved) {
+            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via PrefixKVStore", {
+                prefix: trimmed,
+                fullId: resolved.substring(0, 12),
+            });
+            return { id: resolved, type: 'conversation', wasResolved: true };
+        }
+
+        // Fallback: scan RALRegistry for active delegations
+        const ralRegistry = RALRegistry.getInstance();
+        const ralResolved = ralRegistry.resolveDelegationPrefix(trimmed);
+        if (ralResolved) {
+            logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via RALRegistry", {
+                prefix: trimmed,
+                fullId: ralResolved.substring(0, 12),
+            });
+            return { id: ralResolved, type: 'conversation', wasResolved: true };
+        }
+
+        // Prefix not found - could still be valid but unknown
+        logger.debug("[kill.resolveTargetId] Could not resolve 12-char prefix", {
+            prefix: trimmed,
+        });
+        return null;
+    }
+
+    // 7-char alphanumeric: shell task ID (different ID space, use typed guard)
+    if (isShellTaskId(trimmed)) {
+        return { id: trimmed, type: 'shell', wasResolved: false };
+    }
+
+    // NIP-19 formats (nevent, note)
+    const normalized = normalizeNostrIdentifier(input);
+    if (normalized && (normalized.startsWith("nevent1") || normalized.startsWith("note1"))) {
+        try {
+            const decoded = nip19.decode(normalized);
+            if (decoded.type === "note" && typeof decoded.data === "string") {
+                const eventId = decoded.data.toLowerCase();
+                return { id: eventId, type: 'conversation', wasResolved: true };
+            }
+            if (decoded.type === "nevent" && typeof decoded.data === "object" && decoded.data !== null) {
+                const data = decoded.data as { id: string };
+                const eventId = data.id.toLowerCase();
+                return { id: eventId, type: 'conversation', wasResolved: true };
+            }
+        } catch (error) {
+            logger.debug("[kill.resolveTargetId] Failed to decode NIP-19 identifier", {
+                input,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    // UUID format (legacy shell task IDs) - check as fallback
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(trimmed)) {
+        return { id: trimmed, type: 'shell', wasResolved: false };
+    }
+
+    return null;
+}
 
 interface KillOutput {
     success: boolean;
@@ -65,69 +157,102 @@ interface KillOutput {
 async function executeKill(input: KillInput, context: ToolExecutionContext): Promise<KillOutput> {
     const { target, reason } = input;
 
+    // Normalize target once for consistent matching throughout
+    const normalizedTarget = target.trim().toLowerCase();
+
     // Get caller's project ID for filtering (prevents cross-project metadata leakage)
     const callerConversation = context.getConversation?.();
     const callerProjectId = callerConversation?.getProjectId();
 
-    // Determine if target is a conversation ID or shell task ID
-    // Convention: conversation IDs are hex strings (64 chars), shell task IDs are UUIDs
-    const isConversationId = ConversationStore.has(target);
-    const isShellTaskId = !isConversationId && getBackgroundTaskInfo(target) !== null;
+    // First, try to resolve the target ID to a canonical format
+    const resolved = await resolveTargetId(target);
 
-    if (!isConversationId && !isShellTaskId) {
-        // Try partial match for conversation ID (prefix lookup)
-        const allConversations = ConversationStore.getAll();
-        const matchingConv = allConversations.find((c) => c.id.startsWith(target));
-
-        if (matchingConv) {
-            // Found a conversation by prefix - use it
-            return await killAgent(matchingConv.id, reason, context);
-        }
-
-        // Not found - provide helpful error with project-filtered listings
-        // SECURITY: Only show tasks/conversations from caller's project to prevent metadata leakage
-        let errorMessage = `Target '${target}' not found.`;
-
-        if (callerProjectId) {
-            // Filter by caller's project to prevent cross-project information disclosure
-            const projectTasks = getAllBackgroundTasks().filter(
-                (t) => t.projectId === callerProjectId
-            );
-            const projectConversations = allConversations.filter(
-                (c) => c.getProjectId() === callerProjectId
-            );
-
-            if (projectTasks.length > 0) {
-                errorMessage += ` Available background tasks in this project: ${projectTasks
-                    .map((t) => t.taskId)
-                    .join(", ")}.`;
+    if (resolved) {
+        // Successfully resolved to a known format
+        if (resolved.type === 'shell') {
+            // Shell task ID - check if it exists and handle
+            const taskInfo = getBackgroundTaskInfo(resolved.id);
+            if (taskInfo) {
+                return killShellTask(resolved.id, context);
             }
-
-            if (projectConversations.length > 0) {
-                errorMessage += ` Active conversations in this project: ${projectConversations
-                    .map((c) => c.id.substring(0, 12))
-                    .join(", ")}.`;
-            } else if (projectTasks.length === 0) {
-                errorMessage += " No active tasks or conversations found in this project.";
+            // Shell ID format but task not found - fall through to error
+        } else if (resolved.type === 'conversation') {
+            // Conversation ID (64-char hex) - check if it exists
+            const isConversationId = ConversationStore.has(resolved.id);
+            if (isConversationId) {
+                return await killAgent(resolved.id, reason, context);
             }
-        } else {
-            // No project context - return generic error without enumeration
-            errorMessage += " Unable to list available targets without project context.";
+            // Also try prefix match on the resolved ID (in case it's a prefix itself)
+            const allConversations = ConversationStore.getAll();
+            const matchingConv = allConversations.find((c) => c.id.startsWith(resolved.id));
+            if (matchingConv) {
+                return await killAgent(matchingConv.id, reason, context);
+            }
+            // Resolved ID but not found in store - fall through to error
         }
-
-        return {
-            success: false,
-            message: errorMessage,
-            target,
-            targetType: "agent",
-        };
     }
 
-    if (isConversationId) {
-        return await killAgent(target, reason, context);
+    // Resolution failed or target not found
+    // Legacy fallback: try direct lookup with normalized target (handles edge cases)
+    const isDirectConversationId = ConversationStore.has(normalizedTarget);
+    // Note: getBackgroundTaskInfo returns undefined for non-existent tasks, so use truthiness check
+    const isDirectShellTaskId = !isDirectConversationId && !!getBackgroundTaskInfo(normalizedTarget);
+
+    if (isDirectConversationId) {
+        return await killAgent(normalizedTarget, reason, context);
+    }
+
+    if (isDirectShellTaskId) {
+        return killShellTask(normalizedTarget, context);
+    }
+
+    // Try partial match for conversation ID (prefix lookup - legacy fallback)
+    // Use normalized target to handle uppercase input
+    const allConversations = ConversationStore.getAll();
+    const matchingConv = allConversations.find((c) => c.id.startsWith(normalizedTarget));
+
+    if (matchingConv) {
+        // Found a conversation by prefix - use it
+        return await killAgent(matchingConv.id, reason, context);
+    }
+
+    // Not found - provide helpful error with project-filtered listings
+    // SECURITY: Only show tasks/conversations from caller's project to prevent metadata leakage
+    let errorMessage = `Target '${target}' not found.`;
+
+    if (callerProjectId) {
+        // Filter by caller's project to prevent cross-project information disclosure
+        const projectTasks = getAllBackgroundTasks().filter(
+            (t) => t.projectId === callerProjectId
+        );
+        const projectConversations = allConversations.filter(
+            (c) => c.getProjectId() === callerProjectId
+        );
+
+        if (projectTasks.length > 0) {
+            errorMessage += ` Available background tasks in this project: ${projectTasks
+                .map((t) => t.taskId)
+                .join(", ")}.`;
+        }
+
+        if (projectConversations.length > 0) {
+            errorMessage += ` Active conversations in this project: ${projectConversations
+                .map((c) => c.id.substring(0, 12))
+                .join(", ")}.`;
+        } else if (projectTasks.length === 0) {
+            errorMessage += " No active tasks or conversations found in this project.";
+        }
     } else {
-        return killShellTask(target, context);
+        // No project context - return generic error without enumeration
+        errorMessage += " Unable to list available targets without project context.";
     }
+
+    return {
+        success: false,
+        message: errorMessage,
+        target,
+        targetType: "agent",
+    };
 }
 
 /**
@@ -438,13 +563,34 @@ export function createKillTool(context: ToolExecutionContext): AISdkTool {
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
         value: ({ target }: KillInput) => {
-            // Determine type based on target format
-            const isConvId = ConversationStore.has(target);
-            if (isConvId) {
-                return `Killing agent in conversation ${target.substring(0, 12)} (with cascade)`;
-            } else {
+            // Use the same detection logic as resolveTargetId for consistent classification
+            const trimmed = target.trim().toLowerCase();
+
+            // Check ID format to determine type
+            // Shell task IDs are 7-char alphanumeric
+            if (isShellTaskId(trimmed)) {
                 return `Killing background task ${target}`;
             }
+
+            // Full event IDs (64-char hex) or short prefixes (12-char hex)
+            // are conversation/agent targets
+            if (isFullEventId(trimmed) || isShortEventId(trimmed)) {
+                return `Killing agent in conversation ${trimmed.substring(0, 12)} (with cascade)`;
+            }
+
+            // NIP-19 formats (nevent, note) are also agent targets
+            const normalized = normalizeNostrIdentifier(target);
+            if (normalized && (normalized.startsWith("nevent1") || normalized.startsWith("note1"))) {
+                return `Killing agent from ${target.substring(0, 20)}... (with cascade)`;
+            }
+
+            // UUID format is shell task (legacy)
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(trimmed)) {
+                return `Killing background task ${target}`;
+            }
+
+            // Unknown format - let executeKill determine and error appropriately
+            return `Killing target ${target.substring(0, 12)}...`;
         },
         enumerable: false,
         configurable: true,

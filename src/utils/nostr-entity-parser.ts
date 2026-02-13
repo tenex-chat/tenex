@@ -3,6 +3,8 @@ import { type NDKEvent, NDKUser } from "@nostr-dev-kit/ndk";
 import { prefixKVStore } from "@/services/storage";
 import { nip19 } from "nostr-tools";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { FullEventId, ShortEventId } from "@/types/event-ids";
+import { isFullEventId, isShortEventId } from "@/types/event-ids";
 
 /**
  * The standard prefix length used for shortened hex IDs throughout the system.
@@ -176,6 +178,78 @@ export function resolvePrefixToId(prefix: string | undefined): string | null {
         console.debug("[resolvePrefixToId] Prefix lookup failed:", cleaned, message);
         return null;
     }
+}
+
+/**
+ * Resolves various event ID formats to a typed FullEventId.
+ *
+ * Accepts:
+ * - Full 64-character hex IDs (returns as-is after validation)
+ * - 12-character hex prefixes (resolved via PrefixKVStore)
+ * - NIP-19 formats: note1..., nevent1...
+ * - nostr: prefixed versions of all the above
+ *
+ * @param input - The event ID in any supported format
+ * @returns A typed FullEventId, or null if resolution failed
+ */
+export function resolveToFullEventId(input: string | undefined): FullEventId | null {
+    if (!input) return null;
+
+    const trimmed = input.trim();
+
+    // Strip nostr: prefix if present
+    const cleaned = trimmed.startsWith("nostr:") ? trimmed.slice(6) : trimmed;
+    const normalized = cleaned.toLowerCase();
+
+    // 1. Check for full 64-char hex ID
+    if (isFullEventId(normalized)) {
+        return normalized;
+    }
+
+    // 2. Check for 12-char hex prefix
+    if (isShortEventId(normalized)) {
+        const resolved = resolvePrefixToId(normalized);
+        if (resolved && isFullEventId(resolved)) {
+            return resolved;
+        }
+        return null;
+    }
+
+    // 3. Try NIP-19 decoding (note1..., nevent1...)
+    try {
+        const decoded = nip19.decode(cleaned);
+        if (decoded.type === "note" && typeof decoded.data === "string") {
+            const eventId = decoded.data.toLowerCase();
+            if (isFullEventId(eventId)) {
+                return eventId;
+            }
+        }
+        if (decoded.type === "nevent" && typeof decoded.data === "object" && decoded.data !== null) {
+            const data = decoded.data as { id: string };
+            const eventId = data.id.toLowerCase();
+            if (isFullEventId(eventId)) {
+                return eventId;
+            }
+        }
+    } catch {
+        // Not a valid NIP-19 format
+    }
+
+    return null;
+}
+
+/**
+ * Type-safe version of resolvePrefixToId that returns a typed FullEventId
+ *
+ * @param prefix - A ShortEventId (12-char hex prefix)
+ * @returns A typed FullEventId, or null if not found
+ */
+export function resolvePrefixToFullEventId(prefix: ShortEventId): FullEventId | null {
+    const resolved = resolvePrefixToId(prefix);
+    if (resolved && isFullEventId(resolved)) {
+        return resolved;
+    }
+    return null;
 }
 
 /**
