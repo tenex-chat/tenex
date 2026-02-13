@@ -817,6 +817,11 @@ export class AgentDispatchService {
                     // Message injector available - use it instead of abort-restart
                     injector.inject(message, (delivered) => {
                         if (delivered) {
+                            // Clear queued injections since MessageInjector delivered the message directly.
+                            // This prevents hasOutstandingWork() from incorrectly reporting pending work.
+                            // See: naddr1qvzqqqr4gupzqkmm302xww6uyne99rnhl5kjj53wthjypm2qaem9uz9fdf3hzcf0qyghwumn8ghj7ar9dejhstnrdpshgtcq9p382emxd9uz6en0d3kx7am4wqkkjmn2v43hg6t0dckhzat9w4jj6cmvv4shy6twvullqw7x
+                            ralRegistry.clearQueuedInjections(agent.pubkey, conversationId);
+
                             logger.info("[dispatch] Message injected via Claude Code MessageInjector", {
                                 agent: agent.slug,
                                 ralNumber: activeRal.ralNumber,
