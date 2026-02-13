@@ -424,19 +424,20 @@ describe("EscalationService", () => {
 describe("loadEscalationAgentIntoRegistry", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
-    // Use partial mock that's cast to AgentRegistry for testing
-    const mockGetAgent = mock(() => null as unknown);
+    // Create typed mock functions for AgentRegistry methods
+    const mockGetAgent = mock(() => null as ReturnType<import("@/agents/AgentRegistry").AgentRegistry["getAgent"]>);
     const mockAddAgentLocal = mock(() => {});
     const mockGetBasePathLocal = mock(() => "/test/path");
     const mockGetMetadataPathLocal = mock(() => "/test/metadata");
 
-    // Cast to AgentRegistry for function calls - the mock has the required methods
+    // Create a minimal mock that satisfies the subset of AgentRegistry methods used by loadEscalationAgentIntoRegistry
+    // Using 'as any' is acceptable for test mocks when we're only testing specific method interactions
     const mockRegistry = {
         getAgent: mockGetAgent,
         addAgent: mockAddAgentLocal,
         getBasePath: mockGetBasePathLocal,
         getMetadataPath: mockGetMetadataPathLocal,
-    } as unknown as Parameters<typeof loadEscalationAgentIntoRegistry>[0];
+    } as import("@/agents/AgentRegistry").AgentRegistry;
 
     beforeEach(() => {
         // Create a test signer for the escalation agent
@@ -572,6 +573,22 @@ describe("loadEscalationAgentIntoRegistry", () => {
     });
 
     describe("edge cases", () => {
+        it("should return false when projectDTag is undefined", async () => {
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, undefined as unknown as string);
+
+            expect(result).toBe(false);
+            expect(mockGetAgent).not.toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+
+        it("should return false when projectDTag is empty string", async () => {
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "");
+
+            expect(result).toBe(false);
+            expect(mockGetAgent).not.toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+
         it("should return false when agent reload fails after adding to project", async () => {
             mockGetAgent.mockReturnValue(null);
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);

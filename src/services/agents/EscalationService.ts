@@ -198,8 +198,14 @@ export function getConfiguredEscalationAgent(): string | null {
  */
 export async function loadEscalationAgentIntoRegistry(
     agentRegistry: AgentRegistry,
-    projectDTag: string
+    projectDTag: string | undefined
 ): Promise<boolean> {
+    // Validate projectDTag is provided and non-empty
+    if (!projectDTag || projectDTag.length === 0) {
+        logger.warn("[EscalationService] Cannot load escalation agent: projectDTag is required");
+        return false;
+    }
+
     try {
         const config = configService.getConfig();
         const escalationAgentSlug = config.escalation?.agent;
