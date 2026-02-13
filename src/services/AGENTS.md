@@ -47,7 +47,7 @@ services/
 ├── reports/               # Task reports
 ├── nudge/                 # Stalled agent reminders
 ├── prompt-compiler/       # Lesson + comment synthesis
-├── system-reminders/      # System reminder injection
+├── system-reminder/       # System reminder utilities (<system-reminder> tags)
 └── trust-pubkeys/         # Trust determination
 ```
 
