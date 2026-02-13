@@ -93,7 +93,7 @@ mock.module("@/utils/logger", () => ({
 }));
 
 // Now import the service after mocks are set up
-import { resolveEscalationTarget, getConfiguredEscalationAgent } from "../EscalationService";
+import { resolveEscalationTarget, getConfiguredEscalationAgent, loadEscalationAgentIntoRegistry } from "../EscalationService";
 
 describe("EscalationService", () => {
     let testSigner: NDKPrivateKeySigner;
@@ -417,6 +417,221 @@ describe("EscalationService", () => {
             // Should not call addAgentToProject or addAgent again
             expect(mockAddAgentToProject).not.toHaveBeenCalled();
             expect(mockAddAgent).not.toHaveBeenCalled();
+        });
+    });
+});
+
+describe("loadEscalationAgentIntoRegistry", () => {
+    let testSigner: NDKPrivateKeySigner;
+    let testStoredAgent: StoredAgent;
+    // Use partial mock that's cast to AgentRegistry for testing
+    const mockGetAgent = mock(() => null as unknown);
+    const mockAddAgentLocal = mock(() => {});
+    const mockGetBasePathLocal = mock(() => "/test/path");
+    const mockGetMetadataPathLocal = mock(() => "/test/metadata");
+
+    // Cast to AgentRegistry for function calls - the mock has the required methods
+    const mockRegistry = {
+        getAgent: mockGetAgent,
+        addAgent: mockAddAgentLocal,
+        getBasePath: mockGetBasePathLocal,
+        getMetadataPath: mockGetMetadataPathLocal,
+    } as unknown as Parameters<typeof loadEscalationAgentIntoRegistry>[0];
+
+    beforeEach(() => {
+        // Create a test signer for the escalation agent
+        testSigner = NDKPrivateKeySigner.generate();
+
+        // Create a test stored agent
+        testStoredAgent = {
+            nsec: testSigner.nsec,
+            slug: "test-escalation-agent",
+            name: "Test Escalation Agent",
+            role: "escalation",
+            projects: [],
+        };
+
+        // Reset local mocks
+        mockGetAgent.mockClear();
+        mockAddAgentLocal.mockClear();
+        mockGetBasePathLocal.mockClear();
+        mockGetMetadataPathLocal.mockClear();
+
+        // Set default returns
+        mockGetAgent.mockReturnValue(null);
+
+        // Reset all mocks
+        mockGetConfig.mockClear();
+        mockGetAgentBySlug.mockClear();
+        mockAddAgentToProject.mockClear();
+        mockLoadAgent.mockClear();
+        mockCreateAgentInstance.mockClear();
+
+        // Set up default mock returns
+        mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
+        mockGetAgentBySlug.mockReturnValue(null);
+        mockLoadAgent.mockReturnValue(null);
+    });
+
+    describe("when no escalation agent configured", () => {
+        it("should return false when escalation.agent is not set", async () => {
+            mockGetConfig.mockReturnValue({});
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+
+        it("should return false when escalation config is missing", async () => {
+            mockGetConfig.mockReturnValue({ someOtherConfig: true });
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+        });
+    });
+
+    describe("when escalation agent already in registry (fast path)", () => {
+        it("should return true without loading when agent exists in registry", async () => {
+            mockGetAgent.mockReturnValue({ slug: "test-escalation-agent" });
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(true);
+            expect(mockGetAgentBySlug).not.toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("when escalation agent needs loading", () => {
+        beforeEach(() => {
+            mockGetAgent.mockReturnValue(null); // Not in registry
+            mockGetAgentBySlug.mockReturnValue(testStoredAgent);
+            mockLoadAgent.mockReturnValue({
+                ...testStoredAgent,
+                projects: ["test-project"],
+            });
+        });
+
+        it("should load agent when found in storage but not in registry", async () => {
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(true);
+        });
+
+        it("should query storage by slug when agent not in registry", async () => {
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockGetAgentBySlug).toHaveBeenCalledWith("test-escalation-agent");
+        });
+
+        it("should add agent to project in storage", async () => {
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockAddAgentToProject).toHaveBeenCalledWith(
+                testSigner.pubkey,
+                "test-project"
+            );
+        });
+
+        it("should reload agent after adding to project", async () => {
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockLoadAgent).toHaveBeenCalledWith(testSigner.pubkey);
+        });
+
+        it("should create agent instance with correct data", async () => {
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockCreateAgentInstance).toHaveBeenCalledTimes(1);
+            const [storedAgent, registry] = mockCreateAgentInstance.mock.calls[0];
+            expect(storedAgent.slug).toBe("test-escalation-agent");
+            expect(registry).toBe(mockRegistry);
+        });
+
+        it("should add agent to registry", async () => {
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockAddAgentLocal).toHaveBeenCalledTimes(1);
+            const addedAgent = mockAddAgentLocal.mock.calls[0][0];
+            expect(addedAgent.slug).toBe("test-escalation-agent");
+        });
+    });
+
+    describe("when escalation agent does not exist in storage", () => {
+        it("should return false when agent not found in storage", async () => {
+            mockGetAgent.mockReturnValue(null);
+            mockGetAgentBySlug.mockReturnValue(null);
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("edge cases", () => {
+        it("should return false when agent reload fails after adding to project", async () => {
+            mockGetAgent.mockReturnValue(null);
+            mockGetAgentBySlug.mockReturnValue(testStoredAgent);
+            mockLoadAgent.mockReturnValue(null); // Reload fails
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+            expect(mockAddAgentToProject).toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
+        });
+
+        it("should handle config.getConfig throwing gracefully", async () => {
+            mockGetConfig.mockImplementation(() => {
+                throw new Error("Config not loaded");
+            });
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+        });
+
+        it("should handle unexpected errors gracefully", async () => {
+            mockGetConfig.mockImplementation(() => {
+                throw new Error("Some unexpected error");
+            });
+
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(false);
+        });
+    });
+
+    describe("idempotency", () => {
+        it("should be idempotent - storage add is idempotent", async () => {
+            mockGetAgent.mockReturnValue(null);
+            mockGetAgentBySlug.mockReturnValue(testStoredAgent);
+            mockLoadAgent.mockReturnValue({
+                ...testStoredAgent,
+                projects: ["test-project"],
+            });
+
+            // First call
+            await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(mockAddAgentToProject).toHaveBeenCalledTimes(1);
+
+            // Reset mocks
+            mockAddAgentToProject.mockClear();
+            mockAddAgentLocal.mockClear();
+
+            // Simulate agent now being in registry
+            mockGetAgent.mockReturnValue({ slug: "test-escalation-agent" });
+
+            // Second call - should skip loading since agent is in registry
+            const result = await loadEscalationAgentIntoRegistry(mockRegistry, "test-project");
+
+            expect(result).toBe(true);
+            expect(mockAddAgentToProject).not.toHaveBeenCalled();
+            expect(mockAddAgentLocal).not.toHaveBeenCalled();
         });
     });
 });
