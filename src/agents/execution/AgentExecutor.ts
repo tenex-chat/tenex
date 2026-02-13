@@ -134,6 +134,30 @@ export class AgentExecutor {
                     span,
                 });
 
+                // RACE CONDITION FIX: Early kill check
+                // If this conversation was killed before the agent started (or during RAL resolution),
+                // abort immediately without spending compute resources.
+                const ralRegistry = RALRegistry.getInstance();
+                if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
+                    span.addEvent("executor.aborted_early_kill", {
+                        "ral.number": ralNumber,
+                        "agent.pubkey": context.agent.pubkey.substring(0, 12),
+                        "conversation.id": shortenConversationId(context.conversationId),
+                    });
+
+                    logger.info("[AgentExecutor] Execution aborted - conversation was killed before agent started", {
+                        agent: context.agent.slug,
+                        conversationId: shortenConversationId(context.conversationId),
+                        ralNumber,
+                    });
+
+                    // Clean up the RAL we just created since we're not going to use it
+                    ralRegistry.clear(context.agent.pubkey, context.conversationId);
+
+                    span.setStatus({ code: SpanStatusCode.OK, message: "aborted_early_kill" });
+                    return undefined;
+                }
+
                 const contextWithRal = { ...context, ralNumber };
                 const { fullContext, toolTracker, agentPublisher, cleanup } =
                     this.prepareExecution(contextWithRal);

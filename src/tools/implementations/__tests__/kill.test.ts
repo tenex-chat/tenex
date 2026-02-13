@@ -90,37 +90,36 @@ describe("kill tool", () => {
             ralRegistry.abortWithCascade = originalAbortWithCascade;
         });
 
-        test("should detect shell task ID target", async () => {
+        test("should detect shell task ID format (UUID) via resolveTargetId", async () => {
+            // This test verifies that UUID-format shell task IDs are correctly
+            // identified as shell targets by the resolveTargetId function.
+            //
+            // NOTE: When the shell task doesn't exist, the error response uses
+            // the default targetType "agent" because the code falls through to
+            // the generic "not found" error path. The actual shell kill path
+            // is only exercised when getBackgroundTaskInfo returns a valid task.
+            //
+            // This test verifies the ID format is correctly identified but since
+            // no actual shell task exists, we get the generic error response.
             const shellTaskId = "550e8400-e29b-41d4-a716-446655440000"; // UUID format
 
             // Mock ConversationStore to not find this as a conversation
             const originalHas = ConversationStore.has;
+            const originalGetAll = ConversationStore.getAll;
             ConversationStore.has = mock(() => false);
-
-            // Mock shell functions
-            const { getBackgroundTaskInfo, killBackgroundTask } = await import("../shell");
-            const originalGetInfo = getBackgroundTaskInfo;
-            const originalKill = killBackgroundTask;
-
-            (global as any).getBackgroundTaskInfo = mock(() => ({
-                taskId: shellTaskId,
-                command: "test command",
-                description: "test description",
-                outputFile: "/tmp/output",
-                startTime: new Date(),
-            }));
-
-            (global as any).killBackgroundTask = mock(() => ({
-                success: true,
-                message: "Task killed",
-                pid: 12345,
-            }));
+            ConversationStore.getAll = mock(() => []);
 
             const killTool = createKillTool(mockContext);
-            // Note: This test is illustrative - actual shell killing logic may vary
+            const result = await killTool.execute({ target: shellTaskId });
+
+            // Task won't be found - generic error returned (targetType defaults to "agent")
+            // The shell path was attempted but fell through to the error handler
+            expect(result.success).toBe(false);
+            expect(result.message).toContain("not found");
 
             // Restore
             ConversationStore.has = originalHas;
+            ConversationStore.getAll = originalGetAll;
         });
 
         test("should support prefix matching for conversation IDs via fallback", async () => {
@@ -394,22 +393,15 @@ describe("kill tool", () => {
             ConversationStore.get = originalGet;
         });
 
-        test("should reject shell kill when projectId does not match (cross-project protection)", async () => {
-            // This test validates the cross-project authorization check for shell tasks.
-            // The authorization logic at kill.ts lines 452-475 enforces:
-            // - taskInfo.projectId (from getBackgroundTaskInfo)
-            // - callerProjectId (from context.getConversation().getProjectId())
-            // - If these don't match, returns "Authorization failed: task belongs to different project"
+        test("should attempt shell kill path for 7-char alphanumeric IDs", async () => {
+            // This test validates that 7-char alphanumeric IDs are correctly
+            // identified as shell task IDs by resolveTargetId and routed to
+            // the shell kill path.
             //
-            // Since shell.ts uses a module-level Map and getBackgroundTaskInfo is imported
-            // directly as a named import, we cannot mock it without jest.mock() or similar.
-            // Instead, we validate the logic by inspecting the code path and verifying
-            // the error handling for a non-existent task (which exercises the error path).
-            //
-            // The actual cross-project protection is verified through:
-            // 1. Code review: kill.ts lines 452-475 explicitly compare projectIds
-            // 2. Integration tests: Manual testing confirms cross-project tasks are rejected
-            // 3. This test: Validates the code structure rejects properly scoped tasks
+            // NOTE: When the shell task doesn't exist, the error response uses
+            // the default targetType "agent" because the code falls through to
+            // the generic "not found" error path. Testing the actual shell
+            // authorization would require module-level mocking of shell.ts.
 
             const shellTaskId = "xyz7890";  // 7-char alphanumeric (valid ShellTaskId format)
             const callerProjectId = "caller-project-id-123456789012345678901234567890123456789012345678901234567";
@@ -433,14 +425,10 @@ describe("kill tool", () => {
             const killTool = createKillTool(contextWithProject);
             const result = await killTool.execute({ target: shellTaskId });
 
-            // For a non-existent task, we get "not found" - this exercises the same code path
-            // that would check projectId if the task existed
+            // Task won't be found - generic error returned
+            // The shell path was attempted via resolveTargetId but task doesn't exist
             expect(result.success).toBe(false);
             expect(result.message).toContain("not found");
-
-            // Verify the targetType is correctly identified as shell based on ID format
-            // (The error is about the target not being found, not about format detection)
-            // This confirms the code correctly routes 7-char IDs as shell tasks
 
             // Restore mocks
             ConversationStore.has = originalHas;
@@ -643,6 +631,167 @@ describe("kill tool", () => {
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
             ConversationStore.getAll = originalGetAll;
+        });
+    });
+
+    describe("Race condition: Kill before RAL registered in ConversationStore", () => {
+        test("should kill agent found in RALRegistry even if not in ConversationStore.getAllActiveRals()", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const conversationId = "conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            // Create a RAL in RALRegistry (simulates agent that just started)
+            ralRegistry.create(agentPubkey, conversationId, projectId);
+
+            // Mock conversation that has no active RALs in ConversationStore (not yet registered)
+            // This simulates the race condition window
+            const mockConversation = {
+                id: conversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map(), // Empty - not yet registered
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            // Mock abortWithCascade
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: conversationId });
+
+            // Should succeed because we found the agent in RALRegistry
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+            expect(ralRegistry.abortWithCascade).toHaveBeenCalled();
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("should prefer ConversationStore when agent is in both stores", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const conversationId = "conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            // Create a RAL in RALRegistry
+            ralRegistry.create(agentPubkey, conversationId, projectId);
+
+            // Mock conversation that HAS the agent in ConversationStore
+            const mockConversation = {
+                id: conversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, [1]]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            // Mock abortWithCascade
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: conversationId });
+
+            // Should succeed - agent found in both stores
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+    });
+
+    describe("Pre-emptive kill: Kill before agent starts", () => {
+        test("should pre-emptively kill a delegation that hasn't started yet", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const parentConversationId = "parent-conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+            const delegationConversationId = "deleg-conv-1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+            const parentAgentPubkey = "parent-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef12";
+            const delegateAgentPubkey = "delegate-agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcd";
+
+            // Create parent RAL and register a pending delegation
+            const ralNumber = ralRegistry.create(parentAgentPubkey, parentConversationId, projectId);
+            ralRegistry.mergePendingDelegations(parentAgentPubkey, parentConversationId, ralNumber, [{
+                delegationConversationId,
+                recipientPubkey: delegateAgentPubkey,
+                senderPubkey: parentAgentPubkey,
+                prompt: "Test prompt",
+                ralNumber,
+            }]);
+
+            // Mock conversation that has no active RALs (delegation hasn't started yet)
+            const mockDelegationConversation = {
+                id: delegationConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map(), // Empty - agent hasn't started
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockDelegationConversation as any);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: delegationConversationId });
+
+            // Should succeed with pre-emptive kill
+            expect(result.success).toBe(true);
+            expect(result.message).toContain("Pre-emptive kill");
+            expect(result.abortedTuples).toBeDefined();
+            expect(result.abortedTuples!.length).toBe(1);
+            expect(result.abortedTuples![0].agentPubkey).toBe(delegateAgentPubkey);
+
+            // Verify that the agent is marked as killed
+            expect(ralRegistry.isAgentConversationKilled(delegateAgentPubkey, delegationConversationId)).toBe(true);
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+        });
+
+        test("should fail gracefully when conversation has no delegation info and no active agents", async () => {
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const conversationId = "lonely-conv-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            // Mock conversation with no active RALs and no delegation info
+            const mockConversation = {
+                id: conversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map(),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock(() => true);
+            ConversationStore.get = mock(() => mockConversation as any);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: conversationId });
+
+            // Should fail - no agents and no delegation info
+            expect(result.success).toBe(false);
+            expect(result.message).toContain("No active agents found");
+
+            // Restore
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
         });
     });
 });
