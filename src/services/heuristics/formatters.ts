@@ -1,9 +1,11 @@
 /**
  * Formatters for heuristic violations
  *
- * Converts violations into markdown warnings for LLM context
+ * Converts violations into markdown warnings for LLM context.
+ * Output is wrapped in <system-reminder> tags for consistent injection.
  */
 
+import { wrapInSystemReminder } from "@/services/system-reminder";
 import type { HeuristicViolation } from "./types";
 
 /**
@@ -21,10 +23,12 @@ export function formatViolation(violation: HeuristicViolation): string {
 }
 
 /**
- * Format multiple violations into a single system reminder block
+ * Format multiple violations into a single system reminder block.
+ * Output is wrapped in <system-reminder> tags for consistent injection
+ * and appending to user messages.
  *
  * @param violations - List of violations to format (max 3 recommended)
- * @returns Markdown string ready for LLM injection
+ * @returns Content wrapped in system-reminder tags, ready for injection
  */
 export function formatViolations(violations: HeuristicViolation[]): string {
   if (violations.length === 0) {
@@ -33,8 +37,8 @@ export function formatViolations(violations: HeuristicViolation[]): string {
 
   const formattedViolations = violations.map(formatViolation).join("\n\n---\n\n");
 
-  return [
-    "# 🔍 Heuristic Reminders",
+  const content = [
+    "# Heuristic Reminders",
     "",
     "The following pattern violations were detected based on your recent actions:",
     "",
@@ -42,6 +46,8 @@ export function formatViolations(violations: HeuristicViolation[]): string {
     "",
     "Please address these before continuing.",
   ].join("\n");
+
+  return wrapInSystemReminder(content);
 }
 
 /**
