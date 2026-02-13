@@ -2105,6 +2105,46 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Look up the recipient agent pubkey for a PENDING delegation conversation.
+   * Uses the delegationToRal map to find the parent, then looks up the pending delegation
+   * to find the recipient.
+   *
+   * IMPORTANT: This method ONLY returns pubkeys for pending delegations. Completed
+   * delegations are intentionally excluded to prevent pre-emptive kill from succeeding
+   * on already-completed delegations (which would be a no-op that adds unnecessary
+   * cooldown entries and misleading success messages).
+   *
+   * @param delegationConversationId - The delegation conversation ID
+   * @returns The recipient agent pubkey if delegation is PENDING, or null if not found or completed
+   */
+  getDelegationRecipientPubkey(delegationConversationId: string): string | null {
+    // Look up which parent owns this delegation
+    const location = this.delegationToRal.get(delegationConversationId);
+    if (!location) {
+      return null;
+    }
+
+    // Get the parent's conversation delegations
+    const convDelegations = this.conversationDelegations.get(location.key);
+    if (!convDelegations) {
+      return null;
+    }
+
+    // Resolve followup event ID to canonical delegation conversation ID if needed
+    const canonicalId = this.followupToCanonical.get(delegationConversationId)
+      ?? delegationConversationId;
+
+    // ONLY return for pending delegations - completed delegations are excluded
+    // to prevent pre-emptive kill on already-finished work
+    const pendingDelegation = convDelegations.pending.get(canonicalId);
+    if (pendingDelegation) {
+      return pendingDelegation.recipientPubkey;
+    }
+
+    return null;
+  }
+
+  /**
    * Mark the parent's pending delegation as killed when killing a child conversation.
    * Uses the delegationToRal map to find the parent that owns this delegation.
    *
