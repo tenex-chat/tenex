@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
 import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
+import { loadEscalationAgentIntoRegistry } from "@/services/agents/EscalationService";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
@@ -179,6 +180,10 @@ export class AgentRegistry {
                 logger.error(`Failed to load agent ${storedAgent.slug}`, { error });
             }
         }
+
+        // Proactively load escalation agent if configured
+        // This ensures the escalation agent appears in "Available Agents" for all projects
+        await loadEscalationAgentIntoRegistry(this, this.projectDTag);
 
         logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
 
