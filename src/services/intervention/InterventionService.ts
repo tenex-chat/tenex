@@ -9,6 +9,9 @@ import { trace } from "@opentelemetry/api";
 /** Default timeout for user response: 5 minutes */
 const DEFAULT_TIMEOUT_MS = 300_000;
 
+/** Default conversation inactivity timeout: 2 minutes (in seconds) */
+const DEFAULT_CONVERSATION_INACTIVITY_TIMEOUT_SECONDS = 120;
+
 /** Default retry interval for failed publish attempts: 30 seconds */
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 
@@ -74,6 +77,7 @@ export class InterventionService {
     private agentResolutionAttempted = false;
 
     private timeoutMs: number = DEFAULT_TIMEOUT_MS;
+    private conversationInactivityTimeoutSeconds: number = DEFAULT_CONVERSATION_INACTIVITY_TIMEOUT_SECONDS;
     private enabled = false;
     private initialized = false;
 
@@ -154,6 +158,17 @@ export class InterventionService {
         // Store the slug for lazy resolution (don't resolve yet - ProjectContext may not exist)
         this.interventionAgentSlug = agentSlug;
         this.timeoutMs = interventionConfig.timeout ?? DEFAULT_TIMEOUT_MS;
+
+        // Clamp negative values to 0 and warn
+        const rawInactivityTimeout = interventionConfig.conversationInactivityTimeoutSeconds ?? DEFAULT_CONVERSATION_INACTIVITY_TIMEOUT_SECONDS;
+        if (rawInactivityTimeout < 0) {
+            logger.warn("InterventionService: conversationInactivityTimeoutSeconds is negative, clamping to 0", {
+                configuredValue: rawInactivityTimeout,
+            });
+            this.conversationInactivityTimeoutSeconds = 0;
+        } else {
+            this.conversationInactivityTimeoutSeconds = rawInactivityTimeout;
+        }
         this.enabled = true;
 
         // Initialize the publisher
@@ -167,11 +182,13 @@ export class InterventionService {
         logger.info("InterventionService initialized (agent resolution deferred)", {
             agentSlug,
             timeoutMs: this.timeoutMs,
+            conversationInactivityTimeoutSeconds: this.conversationInactivityTimeoutSeconds,
         });
 
         trace.getActiveSpan()?.addEvent("intervention.service_initialized", {
             "intervention.agent_slug": agentSlug,
             "intervention.timeout_ms": this.timeoutMs,
+            "intervention.conversation_inactivity_timeout_seconds": this.conversationInactivityTimeoutSeconds,
             "intervention.resolution_deferred": true,
         });
     }
@@ -301,18 +318,24 @@ export class InterventionService {
      * - Event p-tags a whitelisted pubkey
      * - That whitelisted pubkey is the author of the root event
      *
+     * If the user was recently active in the conversation (within conversationInactivityTimeoutSeconds),
+     * the intervention is skipped entirely. This prevents interventions when the user is
+     * actively engaged in the conversation.
+     *
      * @param conversationId - The conversation ID
      * @param completedAt - Timestamp of the completion event (ms)
      * @param agentPubkey - Pubkey of the completing agent
      * @param userPubkey - Pubkey of the root event author
      * @param projectId - Project ID for state scoping
+     * @param lastUserMessageTime - Timestamp of the last user message in the conversation (ms, optional)
      */
     public onAgentCompletion(
         conversationId: string,
         completedAt: number,
         agentPubkey: string,
         userPubkey: string,
-        projectId: string
+        projectId: string,
+        lastUserMessageTime?: number
     ): void {
         if (!this.isEnabled()) {
             return;
@@ -325,6 +348,30 @@ export class InterventionService {
             // Resolution failed, service is now disabled
             logger.warn("InterventionService: skipping completion, agent resolution failed");
             return;
+        }
+
+        // Check conversation inactivity: if user was recently active, skip intervention
+        if (lastUserMessageTime !== undefined && this.conversationInactivityTimeoutSeconds > 0) {
+            const timeSinceLastUserMessageMs = completedAt - lastUserMessageTime;
+            const thresholdMs = this.conversationInactivityTimeoutSeconds * 1000;
+
+            if (timeSinceLastUserMessageMs < thresholdMs) {
+                logger.debug("InterventionService: skipping intervention, user was recently active", {
+                    conversationId: conversationId.substring(0, 12),
+                    timeSinceLastUserMessageMs,
+                    thresholdMs,
+                    lastUserMessageTime,
+                    completedAt,
+                });
+
+                trace.getActiveSpan()?.addEvent("intervention.skipped_recent_user_activity", {
+                    "conversation.id": conversationId,
+                    "time_since_last_user_message_ms": timeSinceLastUserMessageMs,
+                    "threshold_ms": thresholdMs,
+                });
+
+                return;
+            }
         }
 
         // Ensure project is set
@@ -868,6 +915,13 @@ export class InterventionService {
      */
     public getTimeoutMs(): number {
         return this.timeoutMs;
+    }
+
+    /**
+     * Get the conversation inactivity timeout in seconds (for testing).
+     */
+    public getConversationInactivityTimeoutSeconds(): number {
+        return this.conversationInactivityTimeoutSeconds;
     }
 
     /**
