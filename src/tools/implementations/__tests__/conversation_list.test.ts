@@ -12,12 +12,50 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
+// Mock PubkeyService
+const mockGetNameSync = mock((pubkey: string) => {
+    // Map specific pubkeys to names for testing
+    if (pubkey === "agent-pubkey-1") return "agent-1";
+    if (pubkey === "agent-pubkey-2") return "agent-2";
+    if (pubkey === "user-pubkey") return "user-pubkey12"; // shortened pubkey format
+    return pubkey.substring(0, 12);
+});
+
+mock.module("@/services/PubkeyService", () => ({
+    getPubkeyService: () => ({
+        getNameSync: mockGetNameSync,
+    }),
+}));
+
+// Mock AgentResolution
+const mockResolveAgentSlug = mock((slug: string) => {
+    if (slug === "agent-1") return { pubkey: "agent-pubkey-1", availableSlugs: ["agent-1", "agent-2"] };
+    if (slug === "agent-2") return { pubkey: "agent-pubkey-2", availableSlugs: ["agent-1", "agent-2"] };
+    return { pubkey: null, availableSlugs: ["agent-1", "agent-2"] };
+});
+
+mock.module("@/services/agents/AgentResolution", () => ({
+    resolveAgentSlug: mockResolveAgentSlug,
+}));
+
+// Mock parseNostrUser
+mock.module("@/utils/nostr-entity-parser", () => ({
+    PREFIX_LENGTH: 12,
+    parseNostrUser: (input: string) => {
+        // Accept valid 64-char hex pubkeys
+        if (/^[0-9a-fA-F]{64}$/.test(input.trim())) {
+            return input.trim().toLowerCase();
+        }
+        return null;
+    },
+}));
+
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
 import { createConversationListTool } from "../conversation_list";
 
 type StoreOverrides = {
-    messages?: Array<{ timestamp: number }>;
+    messages?: Array<{ timestamp: number; pubkey?: string; messageType?: string; delegationMarker?: { delegationConversationId: string; recipientPubkey: string; parentConversationId: string; completedAt: number; status: string } }>;
     metadata?: Record<string, unknown>;
     lastActivityTime?: number;
 };
@@ -40,13 +78,21 @@ const mockListConversationIdsFromDiskForProject = mock((projectId: string) => {
 });
 
 const buildMessages = (overrides: StoreOverrides) => {
-    if (overrides.messages && overrides.messages.length > 0) return overrides.messages;
+    if (overrides.messages && overrides.messages.length > 0) {
+        return overrides.messages.map(msg => ({
+            pubkey: msg.pubkey ?? "user-pubkey",
+            content: "",
+            messageType: msg.messageType ?? "text",
+            timestamp: msg.timestamp,
+            delegationMarker: msg.delegationMarker,
+        }));
+    }
     if (typeof overrides.lastActivityTime === "number") {
-        return [{ timestamp: overrides.lastActivityTime }];
+        return [{ pubkey: "user-pubkey", content: "", messageType: "text", timestamp: overrides.lastActivityTime }];
     }
     return [
-        { timestamp: 1700000000 },
-        { timestamp: 1700001000 },
+        { pubkey: "user-pubkey", content: "", messageType: "text", timestamp: 1700000000 },
+        { pubkey: "user-pubkey", content: "", messageType: "text", timestamp: 1700001000 },
     ];
 };
 
@@ -76,11 +122,12 @@ const applyStateToStore = (
         nextRalNumber: {},
         injections: [],
         messages: messages.map((message, index) => ({
-            pubkey: "user-pubkey",
-            content: "",
-            messageType: "text",
+            pubkey: (message as any).pubkey ?? "user-pubkey",
+            content: (message as any).content ?? "",
+            messageType: (message as any).messageType ?? "text",
             timestamp: message.timestamp,
             eventId: `event-${projectId}-${conversationId}-${index}`,
+            delegationMarker: (message as any).delegationMarker,
         })),
         metadata,
         agentTodos: {},
@@ -267,8 +314,14 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe("conv1");
+            // ID is now shortened to 12 characters
+            expect(result.conversations[0].id).toBe("conv1".substring(0, 12));
             expect(result.conversations[0].title).toBe("Current Project Conversation");
+            // New fields: participants and delegations
+            expect(result.conversations[0].participants).toBeDefined();
+            expect(Array.isArray(result.conversations[0].participants)).toBe(true);
+            expect(result.conversations[0].delegations).toBeDefined();
+            expect(Array.isArray(result.conversations[0].delegations)).toBe(true);
         });
 
         it("should log the current projectId in the log output", async () => {
@@ -323,7 +376,8 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe("conv2");
+            // ID is now shortened to 12 characters
+            expect(result.conversations[0].id).toBe("conv2".substring(0, 12));
         });
 
         it("should include projectId in ConversationSummary for external project", async () => {
@@ -401,9 +455,10 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
 
+            // IDs are shortened but since they're short anyway, they remain the same
             const convIds = result.conversations.map(c => c.id);
-            expect(convIds).toContain("conv1");
-            expect(convIds).toContain("conv2");
+            expect(convIds).toContain("conv1".substring(0, 12));
+            expect(convIds).toContain("conv2".substring(0, 12));
         });
 
         it("should include correct projectId in each ConversationSummary", async () => {
@@ -423,8 +478,9 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
 
-            const conv1 = result.conversations.find(c => c.id === "conv1");
-            const conv2 = result.conversations.find(c => c.id === "conv2");
+            // IDs are shortened
+            const conv1 = result.conversations.find(c => c.id === "conv1".substring(0, 12));
+            const conv2 = result.conversations.find(c => c.id === "conv2".substring(0, 12));
 
             expect(conv1?.projectId).toBe("current-project");
             expect(conv2?.projectId).toBe("other-project");
@@ -451,12 +507,12 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
 
-            // Most recent should be first
-            expect(result.conversations[0].id).toBe("conv2");
+            // Most recent should be first (IDs are shortened)
+            expect(result.conversations[0].id).toBe("conv2".substring(0, 12));
             expect(result.conversations[0].lastActivity).toBe(1700005000);
 
             // Older should be second
-            expect(result.conversations[1].id).toBe("conv1");
+            expect(result.conversations[1].id).toBe("conv1".substring(0, 12));
             expect(result.conversations[1].lastActivity).toBe(1700000000);
         });
 
@@ -496,11 +552,11 @@ describe("conversation_list Tool", () => {
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(4);
 
-            // Should be sorted by lastActivity descending
-            expect(result.conversations[0].id).toBe("conv4"); // 1700004000
-            expect(result.conversations[1].id).toBe("conv3"); // 1700003000
-            expect(result.conversations[2].id).toBe("conv2"); // 1700002000
-            expect(result.conversations[3].id).toBe("conv1"); // 1700001000
+            // Should be sorted by lastActivity descending (IDs are shortened)
+            expect(result.conversations[0].id).toBe("conv4".substring(0, 12)); // 1700004000
+            expect(result.conversations[1].id).toBe("conv3".substring(0, 12)); // 1700003000
+            expect(result.conversations[2].id).toBe("conv2".substring(0, 12)); // 1700002000
+            expect(result.conversations[3].id).toBe("conv1".substring(0, 12)); // 1700001000
         });
     });
 
@@ -524,7 +580,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe("conv2");
+            expect(result.conversations[0].id).toBe("conv2".substring(0, 12));
         });
 
         it("should filter by toTime", async () => {
@@ -546,7 +602,7 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(1);
-            expect(result.conversations[0].id).toBe("conv1");
+            expect(result.conversations[0].id).toBe("conv1".substring(0, 12));
         });
     });
 
@@ -563,9 +619,9 @@ describe("conversation_list Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.conversations).toHaveLength(2);
-            // Should return the 2 most recent
-            expect(result.conversations[0].id).toBe("conv3");
-            expect(result.conversations[1].id).toBe("conv2");
+            // Should return the 2 most recent (IDs are shortened)
+            expect(result.conversations[0].id).toBe("conv3".substring(0, 12));
+            expect(result.conversations[1].id).toBe("conv2".substring(0, 12));
         });
 
         it("should default limit to 50", async () => {
@@ -615,8 +671,6 @@ describe("conversation_list Tool", () => {
                     title: "Test Conversation",
                     summary: "A test summary",
                     phase: "execution",
-                    statusLabel: "active",
-                    statusCurrentActivity: "Working on task",
                 },
                 lastActivityTime: 1700001000,
             };
@@ -628,16 +682,74 @@ describe("conversation_list Tool", () => {
             expect(result.conversations).toHaveLength(1);
 
             const summary = result.conversations[0];
-            expect(summary).toMatchObject({
-                id: "conv1",
-                title: "Test Conversation",
-                summary: "A test summary",
-                statusLabel: "active",
-                statusCurrentActivity: "Working on task",
-                messageCount: 2,
-                createdAt: 1700000000,
-                lastActivity: 1700001000,
-            });
+            // ID is shortened to 12 characters
+            expect(summary.id).toBe("conv1".substring(0, 12));
+            expect(summary.title).toBe("Test Conversation");
+            expect(summary.summary).toBe("A test summary");
+            expect(summary.messageCount).toBe(2);
+            expect(summary.createdAt).toBe(1700000000);
+            expect(summary.lastActivity).toBe(1700001000);
+            // New fields
+            expect(summary.participants).toBeDefined();
+            expect(Array.isArray(summary.participants)).toBe(true);
+            expect(summary.delegations).toBeDefined();
+            expect(Array.isArray(summary.delegations)).toBe(true);
+            // Should NOT have statusLabel and statusCurrentActivity
+            expect((summary as any).statusLabel).toBeUndefined();
+            expect((summary as any).statusCurrentActivity).toBeUndefined();
+        });
+
+        it("should include participant names resolved from pubkeys", async () => {
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: "agent-pubkey-1" },
+                    { timestamp: 1700001000, pubkey: "agent-pubkey-2" },
+                    { timestamp: 1700002000, pubkey: "agent-pubkey-1" },
+                ],
+                metadata: { title: "Multi-participant Conv" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            const summary = result.conversations[0];
+            // Should have unique participants (agent-1 and agent-2)
+            expect(summary.participants).toContain("agent-1");
+            expect(summary.participants).toContain("agent-2");
+            expect(summary.participants).toHaveLength(2);
+        });
+
+        it("should include shortened delegation IDs", async () => {
+            const delegationConvId = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000 },
+                    {
+                        timestamp: 1700001000,
+                        messageType: "delegation-marker",
+                        delegationMarker: {
+                            delegationConversationId: delegationConvId,
+                            recipientPubkey: "recipient-pubkey",
+                            parentConversationId: "parent-conv-id",
+                            completedAt: 1700001000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+                metadata: { title: "Conv with Delegation" },
+                lastActivityTime: 1700001000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            const summary = result.conversations[0];
+            expect(summary.delegations).toHaveLength(1);
+            // Should be shortened to 12 characters
+            expect(summary.delegations[0]).toBe(delegationConvId.substring(0, 12));
         });
     });
 
@@ -675,6 +787,185 @@ describe("conversation_list Tool", () => {
         });
     });
 
+    describe("'with' Parameter Filtering", () => {
+        it("should filter by agent slug", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: "agent-pubkey-1" },
+                ],
+                metadata: { title: "Conv with agent-1" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [
+                    { timestamp: 1700002000, pubkey: "agent-pubkey-2" },
+                ],
+                metadata: { title: "Conv with agent-2" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ with: "agent-1" });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Conv with agent-1");
+        });
+
+        it("should filter by pubkey (hex format)", async () => {
+            const hexPubkey = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    { timestamp: 1700000000, pubkey: hexPubkey },
+                ],
+                metadata: { title: "Conv with hex pubkey" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [
+                    { timestamp: 1700002000, pubkey: "other-pubkey" },
+                ],
+                metadata: { title: "Conv with other pubkey" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ with: hexPubkey });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Conv with hex pubkey");
+        });
+
+        it("should throw an error when 'with' slug cannot be resolved", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700000000 }],
+                metadata: { title: "Conv 1" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [{ timestamp: 1700002000 }],
+                metadata: { title: "Conv 2" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+
+            // When the 'with' parameter cannot be resolved, it should throw an error
+            // instead of silently returning all conversations
+            await expect(tool.execute({ with: "unknown-agent" })).rejects.toThrow(
+                /Failed to resolve 'with' parameter: "unknown-agent"/
+            );
+        });
+
+        it("should include available slugs in error message when slug resolution fails", async () => {
+            const tool = createConversationListTool(mockContext);
+
+            await expect(tool.execute({ with: "nonexistent-slug" })).rejects.toThrow(
+                /Available agent slugs in this project: agent-1, agent-2/
+            );
+        });
+
+        it("should throw an error when slug is used with projectId='all'", async () => {
+            (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
+                "current-project",
+                "other-project",
+            ]);
+
+            const tool = createConversationListTool(mockContext);
+
+            // Using a slug with projectId="all" should throw an error
+            await expect(tool.execute({ projectId: "all", with: "agent-1" })).rejects.toThrow(
+                /Agent slugs are not supported when projectId='all'/
+            );
+        });
+
+        it("should throw an error when slug is used with projectId='ALL' (case insensitive)", async () => {
+            (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
+                "current-project",
+                "other-project",
+            ]);
+
+            const tool = createConversationListTool(mockContext);
+
+            // Using a slug with projectId="ALL" (uppercase) should also throw
+            await expect(tool.execute({ projectId: "ALL", with: "agent-1" })).rejects.toThrow(
+                /Agent slugs are not supported when projectId='all'/
+            );
+        });
+
+        it("should allow pubkey with projectId='all'", async () => {
+            const hexPubkey = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+            (ConversationStore.listProjectIdsFromDisk as ReturnType<typeof mock>).mockReturnValue([
+                "current-project",
+                "other-project",
+            ]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700000000, pubkey: hexPubkey }],
+                metadata: { title: "Conv with hex pubkey" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["other-project:conv2"] = {
+                messages: [{ timestamp: 1700002000, pubkey: "other-pubkey" }],
+                metadata: { title: "Conv with other pubkey" },
+                lastActivityTime: 1700002000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            // Using a pubkey with projectId="all" should work fine
+            const result = await tool.execute({ projectId: "all", with: hexPubkey });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("Conv with hex pubkey");
+        });
+
+        it("should throw descriptive error for invalid pubkey format", async () => {
+            const tool = createConversationListTool(mockContext);
+
+            // A value that looks like a pubkey but is invalid
+            const invalidPubkey = "npub1invalid";
+
+            await expect(tool.execute({ with: invalidPubkey })).rejects.toThrow(
+                /looks like a pubkey but could not be parsed/
+            );
+        });
+
+        it("should combine 'with' filter with date range filter", async () => {
+            (ConversationStore.listConversationIdsFromDisk as ReturnType<typeof mock>).mockReturnValue(["conv1", "conv2", "conv3"]);
+
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [{ timestamp: 1700000000, pubkey: "agent-pubkey-1" }],
+                metadata: { title: "Old conv with agent-1" },
+                lastActivityTime: 1700000000,
+            };
+            mockStoreOverrides["current-project:conv2"] = {
+                messages: [{ timestamp: 1700005000, pubkey: "agent-pubkey-1" }],
+                metadata: { title: "New conv with agent-1" },
+                lastActivityTime: 1700005000,
+            };
+            mockStoreOverrides["current-project:conv3"] = {
+                messages: [{ timestamp: 1700005000, pubkey: "agent-pubkey-2" }],
+                metadata: { title: "New conv with agent-2" },
+                lastActivityTime: 1700005000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({ with: "agent-1", fromTime: 1700004000 });
+
+            expect(result.success).toBe(true);
+            expect(result.conversations).toHaveLength(1);
+            expect(result.conversations[0].title).toBe("New conv with agent-1");
+        });
+    });
+
     describe("getHumanReadableContent", () => {
         it("should return descriptive content for empty params", () => {
             const tool = createConversationListTool(mockContext);
@@ -708,6 +999,12 @@ describe("conversation_list Tool", () => {
             const tool = createConversationListTool(mockContext);
             const content = (tool as any).getHumanReadableContent({ projectId: "all" });
             expect(content).toContain("all projects");
+        });
+
+        it("should include 'with' in human readable content", () => {
+            const tool = createConversationListTool(mockContext);
+            const content = (tool as any).getHumanReadableContent({ with: "agent-1" });
+            expect(content).toContain("with=agent-1");
         });
     });
 });
