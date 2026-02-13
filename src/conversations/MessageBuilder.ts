@@ -605,10 +605,28 @@ export async function buildMessagesFromEntries(
                 // Get delegation messages using the provided callback
                 const delegationMessages = ctx.getDelegationMessages?.(marker.delegationConversationId);
                 const expandedMessage = await expandDelegationMarker(marker, delegationMessages);
+
+                // CRITICAL: Delegation markers can arrive mid-tool-execution when a delegation
+                // completes while tools are running. We must defer them just like regular
+                // user messages to maintain tool-call/tool-result adjacency for AI SDK validation.
                 if (pendingToolCalls.size > 0) {
-                    // Can't add to deferred since it's already a ModelMessage
-                    // But markers shouldn't typically appear mid-tool-call
-                    result.push(expandedMessage);
+                    // Create a synthetic entry to defer the already-expanded ModelMessage
+                    // We store the expanded content as a text entry for the deferred queue
+                    // CRITICAL: Explicit role: "user" ensures consistency with expandDelegationMarker()
+                    // which always returns user role. Without this, if recipientPubkey === viewingAgentPubkey
+                    // (self-delegation), deriveRole() would incorrectly produce "assistant" role.
+                    deferredMessages.push({
+                        entry: {
+                            pubkey: marker.recipientPubkey,
+                            role: "user",
+                            content: expandedMessage.content as string,
+                            messageType: "text",
+                            // Use the delegation marker's entry properties for context
+                            eventId: entry.eventId,
+                            ral: entry.ral,
+                        },
+                        truncationContext,
+                    });
                 } else {
                     result.push(expandedMessage);
                 }
@@ -617,12 +635,31 @@ export async function buildMessagesFromEntries(
                     "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
                     "delegation.status": marker.status,
                     "delegation.transcript_found": !!delegationMessages,
+                    "delegation.deferred": pendingToolCalls.size > 0,
                 });
             } else {
                 // Nested delegation marker - show minimal reference only
                 // Don't expand transcript to avoid exponential bloat
                 const nestedMarkerMessage = await formatNestedDelegationMarker(marker);
-                result.push(nestedMarkerMessage);
+
+                // Same deferral logic for nested markers
+                // CRITICAL: Explicit role: "user" ensures consistency with formatNestedDelegationMarker()
+                // which always returns user role.
+                if (pendingToolCalls.size > 0) {
+                    deferredMessages.push({
+                        entry: {
+                            pubkey: marker.recipientPubkey,
+                            role: "user",
+                            content: nestedMarkerMessage.content as string,
+                            messageType: "text",
+                            eventId: entry.eventId,
+                            ral: entry.ral,
+                        },
+                        truncationContext,
+                    });
+                } else {
+                    result.push(nestedMarkerMessage);
+                }
 
                 trace.getActiveSpan?.()?.addEvent("conversation.nested_delegation_marker_displayed", {
                     "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
@@ -630,6 +667,7 @@ export async function buildMessagesFromEntries(
                     "current.conversation_id": ctx.conversationId.substring(0, 12),
                     "delegation.status": marker.status,
                     "delegation.recipient_pubkey": marker.recipientPubkey.substring(0, 12),
+                    "delegation.deferred": pendingToolCalls.size > 0,
                 });
             }
             continue;
