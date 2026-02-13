@@ -277,17 +277,22 @@ async function killAgent(
     }
 
     // Find the agent executing in this conversation
+    // Check BOTH ConversationStore (where RALs are registered during stream setup)
+    // AND RALRegistry (where RALs are created earlier during RAL resolution)
+    // This prevents a race condition where kill is called after RAL creation but before stream setup
     const activeRals = conversation.getAllActiveRals();
-    if (activeRals.size === 0) {
-        return {
-            success: false,
-            message: `No active agents found in conversation ${conversationId.substring(0, 12)}`,
-            target: conversationId,
-            targetType: "agent",
-        };
+    const ralRegistryEntries = ralRegistry.getConversationEntries(conversationId);
+
+    // Build a combined set of agent pubkeys that have active RALs
+    const activeAgentPubkeys = new Set<string>();
+    for (const [pubkey] of activeRals) {
+        activeAgentPubkeys.add(pubkey);
+    }
+    for (const entry of ralRegistryEntries) {
+        activeAgentPubkeys.add(entry.agentPubkey);
     }
 
-    // Get projectId for proper cooldown isolation
+    // Get projectId for proper cooldown isolation (needed for both active and pre-emptive kills)
     const projectId = conversation.getProjectId();
     if (!projectId) {
         return {
@@ -298,9 +303,10 @@ async function killAgent(
         };
     }
 
-    // === AUTHORIZATION: Project Isolation Check ===
-    // Verify that the caller's project context matches the target conversation's project.
-    // This prevents cross-project kills and ensures agents can only kill within their own project.
+    // === AUTHORIZATION: Project Isolation Check (BEFORE pre-emptive or active kill) ===
+    // This check MUST happen before any kill operation to prevent cross-project kills.
+    // Moving this check before the pre-emptive kill branch fixes the security bug where
+    // a caller with no matching project context could kill a pending delegation.
     const callerConversation = context.getConversation?.();
     const callerProjectId = callerConversation?.getProjectId();
 
@@ -348,16 +354,61 @@ async function killAgent(
         };
     }
 
-    // Authorization passed - log audit trail
-    logger.info("[kill] Authorization check passed for agent kill", {
-        callerAgent: context.agent.slug,
-        callerConversationId: context.conversationId.substring(0, 12),
-        targetConversationId: conversationId.substring(0, 12),
-        projectId: projectId.substring(0, 12),
-    });
+    // If no active agents found, try PRE-EMPTIVE KILL:
+    // The conversation may be a delegation that hasn't started executing yet.
+    // Look up the recipient agent from the delegation info and mark it as killed
+    // so when it eventually starts, it will abort immediately.
+    if (activeAgentPubkeys.size === 0) {
+        const delegationRecipient = ralRegistry.getDelegationRecipientPubkey(conversationId);
+
+        if (delegationRecipient) {
+            // Pre-emptive kill: Mark the agent+conversation as killed before it starts
+            ralRegistry.markAgentConversationKilled(delegationRecipient, conversationId);
+
+            trace.getActiveSpan()?.addEvent("kill.pre_emptive_kill", {
+                "kill.conversation_id": shortenConversationId(conversationId),
+                "kill.recipient_pubkey": delegationRecipient.substring(0, 12),
+                "kill.reason": reason ?? "pre-emptive kill via kill tool",
+            });
+
+            logger.info("[kill] Pre-emptive kill: agent will be aborted when it starts", {
+                conversationId: shortenConversationId(conversationId),
+                recipientPubkey: delegationRecipient.substring(0, 12),
+                reason,
+            });
+
+            // Also mark the parent delegation as killed
+            ralRegistry.markParentDelegationKilled(conversationId);
+
+            // Add to cooldown registry
+            const cooldownRegistry = CooldownRegistry.getInstance();
+            cooldownRegistry.add(projectId, conversationId, delegationRecipient, reason);
+
+            return {
+                success: true,
+                message: `Pre-emptive kill: agent will be aborted when it starts in conversation ${conversationId.substring(0, 12)}`,
+                target: conversationId,
+                targetType: "agent",
+                cascadeAbortCount: 1,
+                abortedTuples: [{ conversationId, agentPubkey: delegationRecipient }],
+            };
+        }
+
+        // No active agents and not a known delegation - nothing to kill
+        return {
+            success: false,
+            message: `No active agents found in conversation ${conversationId.substring(0, 12)}`,
+            target: conversationId,
+            targetType: "agent",
+        };
+    }
+
+    // NOTE: Authorization check was already performed at the top of killAgent(),
+    // before the pre-emptive kill branch. No duplicate check needed here.
 
     // Get the first active agent (in multi-agent conversations, we abort all)
-    const agentPubkey = Array.from(activeRals.keys())[0];
+    // Use the combined set that includes both ConversationStore and RALRegistry
+    const agentPubkey = Array.from(activeAgentPubkeys)[0];
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_starting", {
         "kill.project_id": projectId.substring(0, 12),
