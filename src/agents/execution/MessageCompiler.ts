@@ -10,8 +10,9 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import { combineSystemReminders } from "@/services/system-reminder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, TextPart } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
 import type { LLMService } from "@/llm/service";
@@ -155,8 +156,8 @@ export class MessageCompiler {
                         context.projectBasePath
                     );
 
-                    // Build dynamic context (sub-span removed - parent compile span is sufficient)
-                    const dynamicContextMessages = await this.buildDynamicContextMessages(context);
+                    // Build dynamic context content (todo state, response context)
+                    const dynamicContextContent = await this.buildDynamicContextContent(context);
 
                     messages.push(...systemPromptMessages.map((sm) => sm.message));
 
@@ -179,27 +180,44 @@ export class MessageCompiler {
 
                     messages.push(...conversationMessages);
 
-                    messages.push(...dynamicContextMessages);
+                    // Collect all ephemeral content: dynamic context + any queued ephemeral messages.
+                    // These are appended to the last user message as <system-reminder> tags.
+                    // This unifies behavioral nudges (heuristic violations, deferred injections,
+                    // todo state, response context) into a consistent format.
+                    // AGENTS.md injections remain tool-bound (in tool result output).
+                    //
+                    // NOTE: dynamicContextCount is NOT incremented here because ephemeral content
+                    // is appended to an existing user message (not added as separate messages).
+                    // The count tracks messages in the array, not ephemeral injections.
+                    const allEphemeralMessages: EphemeralMessage[] = [];
 
-                    // Add ephemeral messages (e.g., supervision corrections) LAST in the message array.
-                    // This satisfies Gemini's constraint that multi-turn requests should end with a user role.
-                    // If ephemeral messages are placed before system messages, Gemini/OpenRouter strips them.
+                    // Add dynamic context as ephemeral
+                    if (dynamicContextContent) {
+                        allEphemeralMessages.push({
+                            role: "system",
+                            content: dynamicContextContent,
+                        });
+                    }
+
+                    // Add queued ephemeral messages (heuristic violations, deferred injections, etc.)
                     if (context.ephemeralMessages?.length) {
-                        for (const ephemeral of context.ephemeralMessages) {
-                            messages.push({
-                                role: ephemeral.role,
-                                content: ephemeral.content,
-                            });
-                        }
+                        allEphemeralMessages.push(...context.ephemeralMessages);
+                    }
+
+                    // Append all ephemeral content to the last user message
+                    if (allEphemeralMessages.length > 0) {
+                        this.appendEphemeralMessagesToLastUserMessage(messages, allEphemeralMessages);
                     }
 
                     systemPromptCount += systemPromptMessages.length;
-                    dynamicContextCount = dynamicContextMessages.length + (context.ephemeralMessages?.length ?? 0);
+                    // NOTE: dynamicContextCount stays 0 because ephemeral content is appended to
+                    // existing user messages, not added as separate messages. The count is retained
+                    // in the interface for backwards compatibility with telemetry consumers.
                 } else {
                     // In delta mode, only send new conversation messages.
                     // The session already has full context from initial compilation.
-                    // Sending wrapped system context as user messages confuses Claude Code
-                    // into responding to the context instead of the user's question.
+                    // However, dynamic context (todos, response routing) must still be included
+                    // since it can change between turns in a stateful session.
                     const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
                         context.agent.pubkey,
                         context.ralNumber,
@@ -208,15 +226,26 @@ export class MessageCompiler {
                     );
                     messages.push(...conversationMessages);
 
-                    // Add ephemeral messages LAST in delta mode too (for supervision corrections).
-                    // Must be last to satisfy Gemini's message ordering constraints.
+                    // Build dynamic context for delta mode (todo state, response context)
+                    const dynamicContextContent = await this.buildDynamicContextContent(context);
+
+                    // Collect all ephemeral content for delta mode
+                    const allEphemeralMessages: EphemeralMessage[] = [];
+
+                    if (dynamicContextContent) {
+                        allEphemeralMessages.push({
+                            role: "system",
+                            content: dynamicContextContent,
+                        });
+                    }
+
                     if (context.ephemeralMessages?.length) {
-                        for (const ephemeral of context.ephemeralMessages) {
-                            messages.push({
-                                role: ephemeral.role,
-                                content: ephemeral.content,
-                            });
-                        }
+                        allEphemeralMessages.push(...context.ephemeralMessages);
+                    }
+
+                    // Append all ephemeral content to the last user message
+                    if (allEphemeralMessages.length > 0) {
+                        this.appendEphemeralMessagesToLastUserMessage(messages, allEphemeralMessages);
                     }
                 }
 
@@ -308,9 +337,15 @@ export class MessageCompiler {
         return matches ? normalized : providerId;
     }
 
-    private async buildDynamicContextMessages(
+    /**
+     * Build dynamic context content for injection into the last user message.
+     * This includes todo state and response context.
+     *
+     * @returns Combined content string, or empty string if no content
+     */
+    private async buildDynamicContextContent(
         context: MessageCompilerContext
-    ): Promise<ModelMessage[]> {
+    ): Promise<string> {
         const parts: string[] = [];
 
         // Add todo content if present
@@ -326,13 +361,7 @@ export class MessageCompiler {
         const responseContextContent = await this.buildResponseContext(context);
         parts.push(responseContextContent);
 
-        // Return as a single combined system message
-        return [
-            {
-                role: "system",
-                content: parts.join("\n\n"),
-            },
-        ];
+        return parts.join("\n\n");
     }
 
     private async buildResponseContext(context: MessageCompilerContext): Promise<string> {
@@ -357,6 +386,160 @@ export class MessageCompiler {
         }
 
         return responseContextContent;
+    }
+
+    /**
+     * Append ephemeral messages to the last user message as <system-reminder> tags.
+     *
+     * This method finds the last user message in the array and appends all ephemeral
+     * messages as system-reminder blocks. This unifies behavioral nudges (heuristic
+     * violations, deferred injections, supervision corrections) into a consistent format.
+     *
+     * Handles both string content and multimodal content (TextPart + ImagePart arrays).
+     * For multimodal messages, the reminder is appended to the last text part.
+     *
+     * If no user message exists, the ephemeral messages are added as a new user message.
+     *
+     * @param messages - The message array to modify in place
+     * @param ephemeralMessages - The ephemeral messages to append
+     */
+    private appendEphemeralMessagesToLastUserMessage(
+        messages: ModelMessage[],
+        ephemeralMessages: EphemeralMessage[]
+    ): void {
+        if (ephemeralMessages.length === 0) {
+            return;
+        }
+
+        // Collect all ephemeral content, extracting inner content from already-wrapped reminders
+        const reminderContents: string[] = [];
+        for (const ephemeral of ephemeralMessages) {
+            const content = ephemeral.content.trim();
+            if (content) {
+                // If content already has system-reminder tags, extract the inner content
+                // to avoid double-wrapping when we combine them
+                if (content.startsWith("<system-reminder>")) {
+                    // Extract all system-reminder blocks from the content
+                    const extracted = this.extractAllSystemReminderContents(content);
+                    if (extracted.length > 0) {
+                        reminderContents.push(...extracted);
+                    } else {
+                        // Fallback: use raw content if extraction fails
+                        reminderContents.push(content);
+                    }
+                } else {
+                    reminderContents.push(content);
+                }
+            }
+        }
+
+        if (reminderContents.length === 0) {
+            return;
+        }
+
+        // Combine all contents into a single system-reminder block
+        const combinedReminder = combineSystemReminders(reminderContents);
+
+        // Find the last user message (searching from the end)
+        for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            if (msg.role === "user") {
+                if (typeof msg.content === "string") {
+                    // String content: append directly
+                    messages[i] = {
+                        ...msg,
+                        content: `${msg.content}\n\n${combinedReminder}`,
+                    };
+                    return;
+                } else if (Array.isArray(msg.content)) {
+                    // Multimodal content: find the last text part and append to it
+                    // We need to work with the array generically since content can be various part types
+                    const contentArray = msg.content;
+                    let lastTextIndex = -1;
+
+                    // Find the last text part
+                    for (let j = contentArray.length - 1; j >= 0; j--) {
+                        const part = contentArray[j];
+                        if (typeof part === "object" && part !== null && "type" in part &&
+                            part.type === "text" && "text" in part && typeof part.text === "string") {
+                            lastTextIndex = j;
+                            break;
+                        }
+                    }
+
+                    if (lastTextIndex >= 0) {
+                        // Append to the last text part
+                        const textPart = contentArray[lastTextIndex] as TextPart;
+                        const newTextPart: TextPart = {
+                            type: "text",
+                            text: `${textPart.text}\n\n${combinedReminder}`,
+                        };
+                        // Create new array with modified text part
+                        const newContent = contentArray.map((part, idx) =>
+                            idx === lastTextIndex ? newTextPart : part
+                        );
+                        messages[i] = {
+                            ...msg,
+                            content: newContent,
+                        };
+                        return;
+                    }
+                    // No text part found in multimodal - add a text part
+                    const newTextPart: TextPart = { type: "text", text: combinedReminder };
+                    messages[i] = {
+                        ...msg,
+                        content: [...contentArray, newTextPart],
+                    };
+                    return;
+                }
+            }
+        }
+
+        // No user message found - add as a new user message
+        // This is a fallback; in practice there should always be a user message
+        logger.warn("[MessageCompiler] No user message found for ephemeral injection, adding as new message");
+        messages.push({
+            role: "user",
+            content: combinedReminder,
+        });
+    }
+
+    /**
+     * Extract all content blocks from system-reminder tags.
+     * Handles multiple consecutive system-reminder blocks and trailing text.
+     *
+     * @param content - String potentially containing system-reminder tags
+     * @returns Array of extracted content blocks
+     */
+    private extractAllSystemReminderContents(content: string): string[] {
+        const results: string[] = [];
+        const regex = /<system-reminder>\n?([\s\S]*?)\n?<\/system-reminder>/g;
+        let match: RegExpExecArray | null;
+        let lastIndex = 0;
+
+        while ((match = regex.exec(content)) !== null) {
+            // Check for text before this match (after the last match)
+            const beforeText = content.substring(lastIndex, match.index).trim();
+            if (beforeText) {
+                results.push(beforeText);
+            }
+
+            // Add the inner content of this system-reminder block
+            const innerContent = match[1].trim();
+            if (innerContent) {
+                results.push(innerContent);
+            }
+
+            lastIndex = regex.lastIndex;
+        }
+
+        // Check for text after the last match
+        const afterText = content.substring(lastIndex).trim();
+        if (afterText) {
+            results.push(afterText);
+        }
+
+        return results;
     }
 
     /**
