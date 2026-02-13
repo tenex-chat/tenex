@@ -1,5 +1,4 @@
 import type { AISdkTool } from "@/tools/types";
-import { isStopExecutionSignal } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import { createSdkMcpServer, tool, type SdkMcpServer, type Tool, type ToolDefinition } from "ai-sdk-provider-codex-app-server";
 import { z, type ZodRawShape } from "zod";
@@ -83,11 +82,6 @@ export class CodexAppServerToolsAdapter {
                         toolCallId: "tool-call-" + Date.now(),
                         messages: [],
                     });
-
-                    if (isStopExecutionSignal(result)) {
-                        logger.debug(`[CodexAppServerToolsAdapter] Tool ${name} returned StopExecutionSignal`);
-                        return { _tenexStopSignal: true, ...result };
-                    }
 
                     return result;
                 },
