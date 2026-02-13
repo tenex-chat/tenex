@@ -33,7 +33,7 @@ import type { LLMService } from "@/llm/service";
 import type { MessageCompiler } from "./MessageCompiler";
 import type { SessionManager } from "./SessionManager";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
-import { createPrepareStep, createOnStopCheck } from "./StreamCallbacks";
+import { createPrepareStep } from "./StreamCallbacks";
 import { setupToolEventHandlers } from "./ToolEventHandlers";
 import type { FullRuntimeContext, RALExecutionContext, StreamExecutionResult } from "./types";
 import { extractLastUserMessage } from "./utils";
@@ -160,13 +160,6 @@ export class StreamExecutionHandler {
                 },
             });
 
-            const onStopCheck = createOnStopCheck({
-                context,
-                ralNumber,
-                execContext: this.execContext,
-                executionSpan: this.executionSpan,
-            });
-
             // DIAGNOSTIC: Track when we're about to call stream()
             const streamCallStartTime = Date.now();
             this.executionSpan?.addEvent("executor.stream_call_starting", {
@@ -180,7 +173,6 @@ export class StreamExecutionHandler {
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,
-                onStopCheck,
             });
 
             // DIAGNOSTIC: Track when stream() returns with process state comparison
