@@ -1,7 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
-import type { StopExecutionSignal } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { createEventContext } from "@/utils/event-context";
@@ -10,6 +9,8 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { tool } from "ai";
 import { z } from "zod";
+import { RALRegistry } from "@/services/ral";
+import type { PendingDelegation } from "@/services/ral/types";
 
 /**
  * Schema for a single-select question.
@@ -68,7 +69,12 @@ const askSchema = z.object({
 });
 
 type AskInput = z.infer<typeof askSchema>;
-type AskOutput = StopExecutionSignal;
+
+interface AskOutput {
+  success: boolean;
+  message: string;
+  delegationConversationId: string;
+}
 
 /**
  * Helper: Format questions with their full details for escalation prompt
@@ -223,18 +229,34 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
         // Build prompt summary for delegation tracking using helper
         const promptSummary = buildPromptSummary(input);
 
+        // Register delegation immediately (like delegate() does)
+        const pendingDelegations: PendingDelegation[] = [
+          {
+            type: "ask" as const,
+            delegationConversationId: eventId,
+            recipientPubkey: escalationAgentPubkey,
+            senderPubkey: context.agent.pubkey,
+            prompt: promptSummary,
+            ralNumber: context.ralNumber,
+          },
+        ];
+
+        RALRegistry.getInstance().mergePendingDelegations(
+          context.agent.pubkey,
+          context.conversationId,
+          context.ralNumber,
+          pendingDelegations
+        );
+
+        const conversationStore = ConversationStore.get(context.conversationId);
+        if (conversationStore) {
+          conversationStore.save();
+        }
+
         return {
-          __stopExecution: true,
-          pendingDelegations: [
-            {
-              type: "ask" as const,
-              delegationConversationId: eventId,
-              recipientPubkey: escalationAgentPubkey,
-              senderPubkey: context.agent.pubkey,
-              prompt: promptSummary,
-              ralNumber: context.ralNumber,
-            },
-          ],
+          success: true,
+          message: "Question sent, waiting for response",
+          delegationConversationId: eventId,
         };
       }
     }
@@ -266,18 +288,34 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   // Build prompt summary for delegation tracking using helper
   const promptSummary = buildPromptSummary(input);
 
+  // Register delegation immediately (like delegate() does)
+  const pendingDelegations: PendingDelegation[] = [
+    {
+      type: "ask" as const,
+      delegationConversationId: eventId,
+      recipientPubkey: ownerPubkey,
+      senderPubkey: context.agent.pubkey,
+      prompt: promptSummary,
+      ralNumber: context.ralNumber,
+    },
+  ];
+
+  RALRegistry.getInstance().mergePendingDelegations(
+    context.agent.pubkey,
+    context.conversationId,
+    context.ralNumber,
+    pendingDelegations
+  );
+
+  const conversationStore = ConversationStore.get(context.conversationId);
+  if (conversationStore) {
+    conversationStore.save();
+  }
+
   return {
-    __stopExecution: true,
-    pendingDelegations: [
-      {
-        type: "ask" as const,
-        delegationConversationId: eventId,
-        recipientPubkey: ownerPubkey,
-        senderPubkey: context.agent.pubkey,
-        prompt: promptSummary,
-        ralNumber: context.ralNumber,
-      },
-    ],
+    success: true,
+    message: "Question sent, waiting for response",
+    delegationConversationId: eventId,
   };
 }
 
