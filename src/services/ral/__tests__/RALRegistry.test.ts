@@ -2496,24 +2496,16 @@ describe("RALRegistry", () => {
   });
 
   /**
-   * BUG FIX: Followup Injection Queue Not Cleared After Delivery
+   * Injection Queue Clearing After Delivery
    *
-   * When a delegate_followup message arrives:
-   * 1. Message is queued via queueUserMessage()
-   * 2. MessageInjector delivers the message successfully
-   * 3. BUG: Message is NOT removed from queuedInjections after delivery
-   * 4. hasOutstandingWork() incorrectly returns { hasWork: true, queuedInjections: 1 }
-   * 5. Agent uses conversation() instead of complete()
-   * 6. Completion event gets dropped (no p-tags) - delegation stuck forever
-   *
-   * These tests verify the expected behavior after the fix is implemented.
+   * Tests for clearQueuedInjections() - called by AgentDispatchService after
+   * MessageInjector successfully delivers a queued message.
    */
-  describe("BUG: injection queue clearing after MessageInjector delivery", () => {
+  describe("clearQueuedInjections", () => {
     const agentPubkey = "test-agent-pubkey";
     const conversationId = "test-conv-id";
 
-    it("should have no outstanding work when queue is empty", () => {
-      // Baseline test - this should pass
+    it("reports no outstanding work when queue is empty", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
       const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
@@ -2522,12 +2514,9 @@ describe("RALRegistry", () => {
       expect(result.details.queuedInjections).toBe(0);
     });
 
-    it("should report outstanding work when message is queued", () => {
-      // Baseline test - this should pass
+    it("reports outstanding work when message is queued", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-      // Simulate delegate_followup message arriving
-      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message from parent");
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
 
       const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
 
@@ -2535,216 +2524,57 @@ describe("RALRegistry", () => {
       expect(result.details.queuedInjections).toBe(1);
     });
 
-    it("should clear queue and report no outstanding work after getAndConsumeInjections", () => {
-      // Baseline test - this should pass (existing behavior)
+    it("clears queue via getAndConsumeInjections (existing behavior)", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
       registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
 
-      // This is the normal consumption path (used by prepareStep)
       const injections = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
 
       expect(injections.length).toBe(1);
-
       const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
       expect(result.hasWork).toBe(false);
       expect(result.details.queuedInjections).toBe(0);
     });
 
-    /**
-     * THIS TEST CURRENTLY FAILS (demonstrates the bug)
-     *
-     * When MessageInjector delivers a message successfully, the RALRegistry
-     * needs a way to clear the queued injection without requiring the caller
-     * to use getAndConsumeInjections (which would double-deliver the message).
-     *
-     * Expected: A method to clear/acknowledge delivered injections exists
-     * Actual: No such method exists - queue never gets cleared after injection delivery
-     */
-    it("BUG: should provide a method to clear queued injections after MessageInjector delivery", () => {
+    it("clears queue after successful MessageInjector delivery", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-      // Simulate: Message arrives and is queued
       registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
 
-      // Verify message is queued
-      const beforeClear = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
-      expect(beforeClear.hasWork).toBe(true);
-      expect(beforeClear.details.queuedInjections).toBe(1);
-
-      // Simulate: MessageInjector successfully delivered the message
-      // The fix should add a method like clearQueuedInjections() that gets called
-      // when injector.inject() callback receives delivered=true
-      //
-      // This test will FAIL because the method doesn't exist yet
-      // @ts-expect-error - Method doesn't exist yet (this is the bug)
-      registry.clearQueuedInjections(agentPubkey, conversationId, ralNumber);
-
-      // After delivery, hasOutstandingWork should return false
-      const afterClear = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
-      expect(afterClear.hasWork).toBe(false);
-      expect(afterClear.details.queuedInjections).toBe(0);
-    });
-
-    /**
-     * THIS TEST CURRENTLY FAILS (demonstrates the bug from a different angle)
-     *
-     * Simulates the complete flow:
-     * 1. Parent sends followup -> message queued
-     * 2. MessageInjector delivers message -> queue should be cleared
-     * 3. Agent processes and finishes -> hasOutstandingWork should be false
-     * 4. Agent can call complete() (not conversation())
-     */
-    it("BUG: hasOutstandingWork should return false after successful injection delivery", () => {
-      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
-
-      // Step 1: Queue the followup message (happens in AgentDispatchService.queueUserMessage)
-      registry.queueUserMessage(
-        agentPubkey,
-        conversationId,
-        ralNumber,
-        "Please clarify your previous response",
-        { senderPubkey: "parent-agent-pubkey", eventId: "followup-event-123" }
-      );
-
-      // Verify: Queue has 1 message
+      // Verify queued
       expect(registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber).details.queuedInjections).toBe(1);
 
-      // Step 2: MessageInjector successfully delivers the message
-      // In the real code, this happens when injector.inject() callback receives delivered=true
-      // The message is now in the LLM context - it should NOT remain in queuedInjections
-      //
-      // CURRENT BUG: Nothing clears the queue after successful delivery
-      // The fix should call something like:
-      // registry.clearQueuedInjections(agentPubkey, conversationId, ralNumber);
-      //
-      // For now, we simulate what SHOULD happen but currently doesn't:
-      // We'll check if there's a way to clear the queue after delivery
+      // Clear after delivery (method to be implemented)
+      registry.clearQueuedInjections(agentPubkey, conversationId);
 
-      // Peek at the queue without consuming (if such method exists)
-      const ral = registry.getRAL(agentPubkey, conversationId, ralNumber);
-      expect(ral).toBeDefined();
-      expect(ral!.queuedInjections.length).toBe(1); // Message is still queued
-
-      // Step 3: After successful MessageInjector delivery, the queue SHOULD be empty
-      // This is the assertion that demonstrates the bug - it will FAIL
-      //
-      // The actual state: queue still has 1 message (BUG)
-      // The expected state: queue should be empty after delivery
-      //
-      // We can't test the "after delivery" state because there's no way to clear it
-      // other than getAndConsumeInjections which would be wrong (double delivery)
-
-      // This test structure shows the problem:
-      // After MessageInjector.inject() succeeds, we need to clear the queue
-      // but we can't call getAndConsumeInjections (would double-deliver)
-
-      // ASSERTION: After delivery, hasOutstandingWork SHOULD return false
-      // CURRENT BUG: It returns true because queue was never cleared
-      //
-      // We test this by simulating "delivery" has occurred (message was injected)
-      // and checking if hasOutstandingWork is false. Currently it's true (BUG).
-
-      // Since clearQueuedInjections doesn't exist, this test documents the bug
-      // by showing that even after we "know" the message was delivered,
-      // we have no way to tell RALRegistry about it.
-
-      // The workaround test: show that the queue IS NOT empty (demonstrating the bug)
+      // Should report no outstanding work
       const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
-
-      // BUG ASSERTION: This SHOULD be false after delivery, but it's true
-      // This test FAILS currently, proving the bug exists
-      expect(result.hasWork).toBe(false); // FAILS - proves the bug
-      expect(result.details.queuedInjections).toBe(0); // FAILS - proves the bug
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
     });
 
-    /**
-     * Integration scenario: Followup causes stuck delegation
-     *
-     * This test demonstrates the full scenario from the bug report:
-     * - Parent delegates to child
-     * - Child completes initial work
-     * - Parent sends followup via delegate_followup
-     * - Child processes followup but can't complete properly
-     */
-    it("BUG: followup message should not cause hasOutstandingWork to incorrectly report work", () => {
+    it("allows agent to complete after followup delivery", () => {
       const parentAgent = "parent-agent-pubkey";
-      const parentConv = "parent-conv-id";
       const childAgent = "child-agent-pubkey";
       const childConv = "child-conv-id";
 
-      // Setup parent's RAL
-      const parentRalNumber = registry.create(parentAgent, parentConv, projectId);
-
-      // Setup child's RAL
       const childRalNumber = registry.create(childAgent, childConv, projectId);
 
-      // Parent creates delegation to child
-      const delegation: PendingDelegation = {
-        type: "standard",
-        delegationConversationId: childConv,
-        recipientPubkey: childAgent,
+      // Parent sends followup
+      registry.queueUserMessage(childAgent, childConv, childRalNumber, "Can you clarify?", {
         senderPubkey: parentAgent,
-        prompt: "Please do this task",
-        ralNumber: parentRalNumber,
-      };
-      registry.mergePendingDelegations(parentAgent, parentConv, parentRalNumber, [delegation]);
-
-      // Child completes initial task (simulate completion recording)
-      registry.recordCompletion({
-        delegationConversationId: childConv,
-        recipientPubkey: childAgent,
-        response: "Task completed",
-        completedAt: Date.now(),
+        eventId: "followup-123",
       });
 
-      // Parent sends followup to child
-      // In real flow: delegate_followup event -> AgentDispatchService -> queueUserMessage
-      const followupMessage = "Can you also do X?";
-      registry.queueUserMessage(
-        childAgent,
-        childConv,
-        childRalNumber,
-        followupMessage,
-        { senderPubkey: parentAgent, eventId: "followup-event-456" }
-      );
+      // Verify queued
+      expect(registry.hasOutstandingWork(childAgent, childConv, childRalNumber).hasWork).toBe(true);
 
-      // At this point, child's RAL has a queued injection
-      const beforeDelivery = registry.hasOutstandingWork(childAgent, childConv, childRalNumber);
-      expect(beforeDelivery.hasWork).toBe(true);
-      expect(beforeDelivery.details.queuedInjections).toBe(1);
+      // MessageInjector delivers, then clears queue
+      registry.clearQueuedInjections(childAgent, childConv);
 
-      // MessageInjector delivers the message to the LLM stream
-      // ... (this happens via injector.inject() in AgentDispatchService)
-
-      // BUG: After successful delivery, the queue is NOT cleared
-      // The child agent processes the message, responds, but when it tries to complete:
-      // - hasOutstandingWork() still returns { hasWork: true, queuedInjections: 1 }
-      // - Agent uses conversation() instead of complete()
-      // - No p-tag on completion event -> event dropped
-      // - Parent never wakes up
-
-      // To fix: AgentDispatchService should call a new method after successful injection:
-      // registry.clearQueuedInjections(childAgent, childConv, childRalNumber);
-
-      // TEST THE BUG: After "delivery" (simulated), hasOutstandingWork SHOULD be false
-      // Since we can't actually deliver in a unit test, we demonstrate that
-      // there's no way to clear the queue other than getAndConsumeInjections
-
-      // Attempt to find a way to clear queue (none exists - this is the bug)
-      // @ts-expect-error - Method doesn't exist
-      const hasClearMethod = typeof registry.clearQueuedInjections === "function";
-      expect(hasClearMethod).toBe(true); // FAILS - method doesn't exist
-
-      // Even if we manually clear (simulating what the fix should do), show the flow works
-      // This is commented out because we want the test to FAIL to prove the bug
-      // registry.getAndConsumeInjections(childAgent, childConv, childRalNumber);
-
-      // BUG ASSERTION: Queue should be clearable after delivery, but there's no method
-      const afterDelivery = registry.hasOutstandingWork(childAgent, childConv, childRalNumber);
-      // This assertion will FAIL because queue still has the message
-      expect(afterDelivery.hasWork).toBe(false);
-      expect(afterDelivery.details.queuedInjections).toBe(0);
+      // Agent can now complete (no outstanding work)
+      const result = registry.hasOutstandingWork(childAgent, childConv, childRalNumber);
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
     });
   });
 
