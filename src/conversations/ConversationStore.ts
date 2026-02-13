@@ -31,6 +31,13 @@ import type {
 import type { CompressionSegment, CompressionLog } from "@/services/compression/compression-types.js";
 import { applySegmentsToEntries } from "@/services/compression/compression-utils.js";
 import { logger } from "@/utils/logger";
+import type { FullEventId } from "@/types/event-ids";
+
+/**
+ * Type alias for conversation IDs accepted by ConversationStore methods.
+ * Accepts both typed FullEventId and plain strings for backward compatibility.
+ */
+export type ConversationIdInput = string | FullEventId;
 
 // Re-export types for convenience
 export type {
@@ -47,15 +54,27 @@ export class ConversationStore {
         conversationRegistry.initialize(metadataPath, agentPubkeys);
     }
 
-    static getOrLoad(conversationId: string): ConversationStore {
+    /**
+     * Get or load a conversation store by ID.
+     * @param conversationId - Full 64-char conversation ID (FullEventId or string)
+     */
+    static getOrLoad(conversationId: ConversationIdInput): ConversationStore {
         return conversationRegistry.getOrLoad(conversationId);
     }
 
-    static get(conversationId: string): ConversationStore | undefined {
+    /**
+     * Get a conversation store if it exists.
+     * @param conversationId - Full 64-char conversation ID (FullEventId or string)
+     */
+    static get(conversationId: ConversationIdInput): ConversationStore | undefined {
         return conversationRegistry.get(conversationId);
     }
 
-    static has(conversationId: string): boolean {
+    /**
+     * Check if a conversation exists.
+     * @param conversationId - Full 64-char conversation ID (FullEventId or string)
+     */
+    static has(conversationId: ConversationIdInput): boolean {
         return conversationRegistry.has(conversationId);
     }
 

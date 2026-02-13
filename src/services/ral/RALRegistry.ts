@@ -6,6 +6,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { ConversationStore } from "@/conversations/ConversationStore";
+// Note: FullEventId type is available via @/types/event-ids for future typed method signatures
 import type {
   InjectionResult,
   InjectionRole,

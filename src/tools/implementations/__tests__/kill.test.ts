@@ -7,6 +7,7 @@ import { createKillTool } from "../kill";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
+import { prefixKVStore } from "@/services/storage";
 import type { ToolExecutionContext } from "@/tools/types";
 
 describe("kill tool", () => {
@@ -411,6 +412,163 @@ describe("kill tool", () => {
             // Restore
             ConversationStore.has = originalHas;
             ConversationStore.get = originalGet;
+        });
+    });
+
+    describe("12-char ID resolution", () => {
+        test("should resolve 12-char prefix to full conversation ID via PrefixKVStore", async () => {
+            const fullConversationId = "a1b2c3d4e5f61234567890abcdef1234567890abcdef1234567890abcdef1234";
+            const shortId = "a1b2c3d4e5f6"; // First 12 chars
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            // Mock PrefixKVStore to resolve the short ID
+            const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);
+            const originalLookup = prefixKVStore.lookup.bind(prefixKVStore);
+            prefixKVStore.isInitialized = mock(() => true);
+            prefixKVStore.lookup = mock((prefix: string) => {
+                if (prefix === shortId) {
+                    return fullConversationId;
+                }
+                return null;
+            });
+
+            // Mock conversation
+            const mockConversation = {
+                id: fullConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock((id: string) => id === fullConversationId);
+            ConversationStore.get = mock((id: string) => {
+                if (id === fullConversationId) return mockConversation as any;
+                return undefined;
+            });
+
+            // Mock RALRegistry.abortWithCascade
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({
+                target: shortId, // Use short 12-char ID
+                reason: "test kill with short ID"
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+            expect(result.target).toBe(fullConversationId);
+
+            // Restore
+            prefixKVStore.isInitialized = originalIsInitialized;
+            prefixKVStore.lookup = originalLookup;
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("should resolve 12-char prefix via RALRegistry when PrefixKVStore fails", async () => {
+            const fullConversationId = "b2c3d4e5f6a71234567890abcdef1234567890abcdef1234567890abcdef1234";
+            const shortId = "b2c3d4e5f6a7"; // First 12 chars
+            const projectId = "test-project-id-123456789012345678901234567890123456789012345678901234567890";
+            const agentPubkey = "agent-pubkey-1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+            // Mock PrefixKVStore to NOT find the ID (simulating not initialized or miss)
+            const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);
+            const originalLookup = prefixKVStore.lookup.bind(prefixKVStore);
+            prefixKVStore.isInitialized = mock(() => false);
+            prefixKVStore.lookup = mock(() => null);
+
+            // Mock RALRegistry to resolve the short ID
+            const originalResolveDelegationPrefix = ralRegistry.resolveDelegationPrefix.bind(ralRegistry);
+            ralRegistry.resolveDelegationPrefix = mock((prefix: string) => {
+                if (prefix === shortId) {
+                    return fullConversationId;
+                }
+                return null;
+            });
+
+            // Mock conversation
+            const mockConversation = {
+                id: fullConversationId,
+                getProjectId: () => projectId,
+                getAllActiveRals: () => new Map([[agentPubkey, {}]]),
+            };
+
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            ConversationStore.has = mock((id: string) => id === fullConversationId);
+            ConversationStore.get = mock((id: string) => {
+                if (id === fullConversationId) return mockConversation as any;
+                return undefined;
+            });
+
+            // Mock RALRegistry.abortWithCascade
+            const originalAbortWithCascade = ralRegistry.abortWithCascade.bind(ralRegistry);
+            ralRegistry.abortWithCascade = mock(async () => ({
+                abortedCount: 1,
+                descendantConversations: [],
+            })) as any;
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({
+                target: shortId,
+                reason: "test kill with short ID via RAL"
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.targetType).toBe("agent");
+            expect(result.target).toBe(fullConversationId);
+
+            // Restore
+            prefixKVStore.isInitialized = originalIsInitialized;
+            prefixKVStore.lookup = originalLookup;
+            ralRegistry.resolveDelegationPrefix = originalResolveDelegationPrefix;
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ralRegistry.abortWithCascade = originalAbortWithCascade;
+        });
+
+        test("should return error when 12-char prefix cannot be resolved", async () => {
+            const shortId = "c3d4e5f6a7b8"; // Unknown prefix
+
+            // Mock PrefixKVStore to not find it
+            const originalIsInitialized = prefixKVStore.isInitialized.bind(prefixKVStore);
+            const originalLookup = prefixKVStore.lookup.bind(prefixKVStore);
+            prefixKVStore.isInitialized = mock(() => true);
+            prefixKVStore.lookup = mock(() => null);
+
+            // Mock RALRegistry to not find it
+            const originalResolveDelegationPrefix = ralRegistry.resolveDelegationPrefix.bind(ralRegistry);
+            ralRegistry.resolveDelegationPrefix = mock(() => null);
+
+            // Mock ConversationStore to not find it
+            const originalHas = ConversationStore.has;
+            const originalGet = ConversationStore.get;
+            const originalGetAll = ConversationStore.getAll;
+            ConversationStore.has = mock(() => false);
+            ConversationStore.get = mock(() => undefined);
+            ConversationStore.getAll = mock(() => []);
+
+            const killTool = createKillTool(mockContext);
+            const result = await killTool.execute({ target: shortId });
+
+            expect(result.success).toBe(false);
+            expect(result.message).toContain("not found");
+
+            // Restore
+            prefixKVStore.isInitialized = originalIsInitialized;
+            prefixKVStore.lookup = originalLookup;
+            ralRegistry.resolveDelegationPrefix = originalResolveDelegationPrefix;
+            ConversationStore.has = originalHas;
+            ConversationStore.get = originalGet;
+            ConversationStore.getAll = originalGetAll;
         });
     });
 });

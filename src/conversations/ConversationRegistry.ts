@@ -17,6 +17,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
 import type { ConversationMetadata } from "./types";
 import type { ConversationStore } from "./ConversationStore";
+// Note: FullEventId type is available via @/types/event-ids for future typed method signatures
 import {
     listConversationIdsFromDiskForProject,
     listProjectIdsFromDisk,
