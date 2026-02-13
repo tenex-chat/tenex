@@ -158,6 +158,23 @@ describe("shellTool - schema validation", () => {
             const result = schema.safeParse({ command: "echo test", timeout: "not-a-number" });
             expect(result.success).toBe(false);
         });
+
+        it("should treat empty string timeout as undefined (not zero)", () => {
+            const result = schema.safeParse({ command: "echo test", timeout: "" });
+            expect(result.success).toBe(true);
+            if (result.success) {
+                // Empty string should become undefined, not 0
+                expect(result.data.timeout).toBeUndefined();
+            }
+        });
+
+        it("should treat whitespace-only string timeout as undefined", () => {
+            const result = schema.safeParse({ command: "echo test", timeout: "   " });
+            expect(result.success).toBe(true);
+            if (result.success) {
+                expect(result.data.timeout).toBeUndefined();
+            }
+        });
     });
 
     describe("required command parameter", () => {
@@ -166,11 +183,11 @@ describe("shellTool - schema validation", () => {
             expect(result.success).toBe(false);
         });
 
-        it("should fail validation when command is empty string", () => {
+        it("should allow empty string command (schema validates structure, not semantics)", () => {
             // Empty string is technically valid by schema, but meaningless
-            // We're testing schema structure, not semantic validation
+            // Semantic validation (rejecting empty commands) would happen at execute time
             const result = schema.safeParse({ command: "" });
-            expect(result.success).toBe(true); // Schema allows empty string
+            expect(result.success).toBe(true);
         });
     });
 });

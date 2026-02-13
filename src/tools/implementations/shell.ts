@@ -134,11 +134,14 @@ const shellSchema = z.object({
     timeout: z
         .preprocess(
             // Coerce numeric strings to numbers while preserving undefined/null
+            // Reject empty/whitespace strings (treat as undefined) to avoid Number("") === 0
             (val) => {
                 if (val === undefined || val === null) return val;
                 if (typeof val === "number") return val;
                 if (typeof val === "string") {
-                    const parsed = Number(val);
+                    const trimmed = val.trim();
+                    if (trimmed === "") return undefined; // Treat empty/whitespace as "not provided"
+                    const parsed = Number(trimmed);
                     return Number.isNaN(parsed) ? val : parsed;
                 }
                 return val;
