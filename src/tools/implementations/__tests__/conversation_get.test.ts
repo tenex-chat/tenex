@@ -164,14 +164,14 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pub1234abcdef", // 12+ chars for truncation test
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds (not milliseconds)
                     },
                     {
                         messageType: "text",
                         content: "Hi there!",
                         pubkey: "agent-pu1234abcdef", // 12+ chars for truncation test
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000002000, // +2 seconds
+                        timestamp: 1700000002, // +2 seconds (Unix seconds)
                         ral: {},
                         targetedPubkeys: ["user-pub1234abcdef"],
                     },
@@ -205,7 +205,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -226,21 +226,21 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000, // Base
+                        timestamp: 1700000000, // Base (Unix seconds)
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000010000, // +10 seconds
+                        timestamp: 1700000010, // +10 seconds (Unix seconds)
                     },
                     {
                         messageType: "text",
                         content: "Third",
                         pubkey: "user-pubkey",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000065000, // +65 seconds
+                        timestamp: 1700000065, // +65 seconds (Unix seconds)
                     },
                 ],
             };
@@ -267,7 +267,7 @@ describe("conversation_get Tool", () => {
                         content: "No target message",
                         pubkey: "user-pubkey123456", // 16 chars - truncated to 12
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -289,7 +289,7 @@ describe("conversation_get Tool", () => {
                         content: "Single target",
                         pubkey: "sender-pk123456", // 15 chars - truncated to 12
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                         targetedPubkeys: ["target-pk123456"], // 15 chars - truncated to 12
                     },
                 ],
@@ -311,7 +311,7 @@ describe("conversation_get Tool", () => {
                         content: "Multi target",
                         pubkey: "sender-pk123456", // 15 chars - truncated to 12
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                         targetedPubkeys: ["target-1pk12345", "target-2pk12345"], // 15 chars each - truncated to 12
                     },
                 ],
@@ -335,7 +335,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "tool-call",
@@ -343,7 +343,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         ral: {},
                     },
                     {
@@ -352,14 +352,14 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "some result" }],
                         pubkey: "agent-pub",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Thanks!",
                         pubkey: "user-pubkey",
                         eventId: "4444444444444444444444444444444444444444444444444444444444444444",
-                        timestamp: 1700000003000,
+                        timestamp: 1700000003, // Unix seconds
                     },
                 ],
             };
@@ -389,7 +389,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "shell", input: { command: "date" } }],
                         pubkey: "agent-pub",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                         ral: {},
                     },
                     {
@@ -398,7 +398,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "2020-01-01" }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -429,7 +429,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "standalone result" }],
                         pubkey: "agent-pub",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -457,7 +457,7 @@ describe("conversation_get Tool", () => {
                         content,
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -481,7 +481,7 @@ describe("conversation_get Tool", () => {
                         content,
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -508,7 +508,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "big_tool", input: largeArgs }],
                         pubkey: "agent-pub",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                         ral: {},
                     },
                     {
@@ -517,7 +517,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: largeResult }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -544,7 +544,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "tool-result",
@@ -552,7 +552,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "result" }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                     {
                         messageType: "tool-result",
@@ -560,7 +560,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "result2" }],
                         pubkey: "agent-pub",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -598,7 +598,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "tool1", input: {} }],
                         pubkey: "agent-pub",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                         ral: {},
                     },
                     {
@@ -607,7 +607,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "result1" }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                     {
                         messageType: "tool-call",
@@ -615,7 +615,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "tool2", input: {} }],
                         pubkey: "agent-pub",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                         ral: {},
                     },
                     {
@@ -624,7 +624,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "result2" }],
                         pubkey: "agent-pub",
                         eventId: "4444444444444444444444444444444444444444444444444444444444444444",
-                        timestamp: 1700000003000,
+                        timestamp: 1700000003, // Unix seconds
                     },
                 ],
             };
@@ -662,7 +662,7 @@ describe("conversation_get Tool", () => {
                         content: "Message from uncached user",
                         pubkey: uncachedPubkey,
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -694,14 +694,14 @@ describe("conversation_get Tool", () => {
                         content: "First message",
                         pubkey: pubkey1,
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Reply",
                         pubkey: pubkey2,
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         ral: {},
                         targetedPubkeys: [pubkey1],
                     },
@@ -733,21 +733,21 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Third",
                         pubkey: "user-pubkey",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -773,21 +773,21 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Third",
                         pubkey: "user-pubkey",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -817,14 +817,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -852,14 +852,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -887,14 +887,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -923,7 +923,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "tool-call",
@@ -931,7 +931,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         ral: {},
                     },
                     {
@@ -940,14 +940,14 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "some result" }],
                         pubkey: "agent-pub",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Thanks!",
                         pubkey: "user-pubkey",
                         eventId: "4444444444444444444444444444444444444444444444444444444444444444",
-                        timestamp: 1700000003000,
+                        timestamp: 1700000003, // Unix seconds
                     },
                 ],
             };
@@ -979,7 +979,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "tool-call",
@@ -987,7 +987,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ toolName: "test_tool", input: { foo: "bar" } }],
                         pubkey: "agent-pub",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         ral: {},
                     },
                     {
@@ -996,7 +996,7 @@ describe("conversation_get Tool", () => {
                         toolData: [{ output: "some result" }],
                         pubkey: "agent-pub",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -1028,21 +1028,21 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Third",
                         pubkey: "user-pubkey",
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -1069,14 +1069,14 @@ describe("conversation_get Tool", () => {
                         content: "Starting the task",
                         pubkey: "agent-pubkey-claude-code", // Registered agent
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "I'll handle architecture",
                         pubkey: "agent-pubkey-architect", // Another registered agent
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         targetedPubkeys: ["agent-pubkey-claude-code"],
                     },
                 ],
@@ -1106,14 +1106,14 @@ describe("conversation_get Tool", () => {
                         content: "Hello agents",
                         pubkey: userPubkey, // Human user (not registered)
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Hi! I can help",
                         pubkey: "agent-pubkey-claude-code", // Registered agent
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                         targetedPubkeys: [userPubkey],
                     },
                     {
@@ -1121,7 +1121,7 @@ describe("conversation_get Tool", () => {
                         content: "Investigating...",
                         pubkey: "agent-pubkey-debugger", // Another registered agent
                         eventId: "3333333333333333333333333333333333333333333333333333333333333333",
-                        timestamp: 1700000002000,
+                        timestamp: 1700000002, // Unix seconds
                     },
                 ],
             };
@@ -1151,14 +1151,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: fullHexId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "abc2234567890123456789012345678901234567890123456789012345678902",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1187,14 +1187,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: fullEventId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1223,14 +1223,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1261,14 +1261,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1300,14 +1300,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: hexEventId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1342,14 +1342,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: hexEventId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "0000000000000000000000000000000000000000000000000000000000000003",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1378,14 +1378,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: fullHexId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "def2234567890123456789012345678901234567890123456789012345678902",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1412,14 +1412,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1448,14 +1448,14 @@ describe("conversation_get Tool", () => {
                         content: "First",
                         pubkey: "user-pubkey",
                         eventId: lowerCaseId,
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                     {
                         messageType: "text",
                         content: "Second",
                         pubkey: "user-pubkey",
                         eventId: "2222222222222222222222222222222222222222222222222222222222222222",
-                        timestamp: 1700000001000,
+                        timestamp: 1700000001, // Unix seconds
                     },
                 ],
             };
@@ -1472,6 +1472,67 @@ describe("conversation_get Tool", () => {
             // Should match case-insensitively
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
+        });
+    });
+
+    describe("Relative Timestamp Calculation", () => {
+        it("should calculate relative timestamps correctly when messages are seconds apart", async () => {
+            // This test verifies that relative timestamps are calculated correctly
+            // when entry.timestamp is already in Unix seconds (not milliseconds).
+            // The bug was that the code was dividing by 1000, causing all relative
+            // timestamps to show as [+0] when timestamps were only seconds apart.
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First message",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000, // Base timestamp (Unix seconds)
+                    },
+                    {
+                        messageType: "text",
+                        content: "One second later",
+                        pubkey: "user-pubkey",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000001, // +1 second
+                    },
+                    {
+                        messageType: "text",
+                        content: "Five seconds later",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000005, // +5 seconds
+                    },
+                    {
+                        messageType: "text",
+                        content: "Thirty seconds later",
+                        pubkey: "user-pubkey",
+                        eventId: "4444444444444444444444444444444444444444444444444444444444444444",
+                        timestamp: 1700000030, // +30 seconds
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Verify exact relative timestamps - these should NOT all be [+0]
+            // Prior to the fix, dividing by 1000 caused all these to be [+0]
+            expect(lines[0]).toContain("[+0]");
+            expect(lines[1]).toContain("[+1]");
+            expect(lines[2]).toContain("[+5]");
+            expect(lines[3]).toContain("[+30]");
+
+            // Also verify the full line format
+            expect(lines[0]).toBe("[+0] [@user-pubkey] First message");
+            expect(lines[1]).toBe("[+1] [@user-pubkey] One second later");
+            expect(lines[2]).toBe("[+5] [@user-pubkey] Five seconds later");
+            expect(lines[3]).toBe("[+30] [@user-pubkey] Thirty seconds later");
         });
     });
 
@@ -1501,7 +1562,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
@@ -1540,7 +1601,7 @@ describe("conversation_get Tool", () => {
                         content: "Hello",
                         pubkey: "user-pubkey",
                         eventId: "1111111111111111111111111111111111111111111111111111111111111111",
-                        timestamp: 1700000000000,
+                        timestamp: 1700000000, // Unix seconds
                     },
                 ],
             };
