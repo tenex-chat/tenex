@@ -288,7 +288,7 @@ function serializeConversation(
 
     for (let i = 0; i < messages.length; i++) {
         const entry = messages[i];
-        const relativeSeconds = Math.floor(((entry.timestamp ?? 0) - firstTimestamp) / 1000);
+        const relativeSeconds = Math.floor((entry.timestamp ?? 0) - firstTimestamp);
         const from = pubkeyService.getNameSync(entry.pubkey);
         const targets = entry.targetedPubkeys?.map(pk => pubkeyService.getNameSync(pk));
 
