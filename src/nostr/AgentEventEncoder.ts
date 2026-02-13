@@ -13,6 +13,7 @@ import type {
     DelegationIntent,
     ErrorIntent,
     EventContext,
+    InterventionReviewIntent,
     LessonIntent,
     ToolUseIntent,
 } from "./types";
@@ -511,6 +512,58 @@ export class AgentEventEncoder {
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }
+
+        return event;
+    }
+
+    /**
+     * Encode an intervention review request event.
+     * This is used by the InterventionService when a user hasn't responded
+     * to an agent's completion within the configured timeout.
+     *
+     * Event structure:
+     * - kind: 1 (text note)
+     * - content: Review request message
+     * - tags:
+     *   - ["p", targetPubkey] - The intervention agent to notify
+     *   - ["original-conversation", conversationId] - Reference to the conversation
+     *   - ["context", "intervention-review"] - Context marker
+     *   - ["user-pubkey", userPubkey] - User who hasn't responded
+     *   - ["agent-pubkey", agentPubkey] - Agent that completed work
+     *   - ["a", projectTag] - Project reference (via addStandardTags)
+     *
+     * Note: This method does NOT call addStandardTags() since intervention events
+     * are not part of an agent execution context. The project tag must be added
+     * separately by the publisher.
+     */
+    encodeInterventionReview(intent: InterventionReviewIntent): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.Text; // kind:1
+
+        const shortConversationId = intent.conversationId.substring(0, 12);
+        const shortUserPubkey = intent.userPubkey.substring(0, 8);
+        const shortAgentPubkey = intent.agentPubkey.substring(0, 8);
+
+        event.content = `Conversation ${shortConversationId} has completed and the user (${shortUserPubkey}) hasn't responded. Agent ${shortAgentPubkey} finished their work. Please review and decide if action is needed.`;
+
+        // Target intervention agent
+        event.tag(["p", intent.targetPubkey]);
+
+        // Intervention-specific tags
+        event.tag(["original-conversation", intent.conversationId]);
+        event.tag(["context", "intervention-review"]);
+        event.tag(["user-pubkey", intent.userPubkey]);
+        event.tag(["agent-pubkey", intent.agentPubkey]);
+
+        // Add project tag (intervention events need project association)
+        this.aTagProject(event);
+
+        logger.debug("Encoded intervention review event", {
+            targetPubkey: intent.targetPubkey.substring(0, 8),
+            conversationId: shortConversationId,
+            userPubkey: shortUserPubkey,
+            agentPubkey: shortAgentPubkey,
+        });
 
         return event;
     }
