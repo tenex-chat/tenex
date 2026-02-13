@@ -208,6 +208,251 @@ describe("MessageBuilder", () => {
             expect(messages[3].role).toBe("assistant"); // call-2
             expect(messages[4].role).toBe("tool"); // result-2
         });
+
+        test("defers delegation marker between tool-call and tool-result", async () => {
+            // Scenario: Delegation completes while tool is executing
+            // This is the bug from trace c7f72338a7f200000000000000000000
+            // Chronological order: [tool-call, delegation-marker, tool-result]
+            // Expected order: [tool-call, tool-result, delegation-completion-message]
+            const delegationConversationId = "delegation-conv-123";
+            const conversationId = "parent-conv-456";
+            const delegatePubkey = "delegate-agent-789";
+
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "tool-call-event",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call_j2dmakq6",
+                        toolName: "delegate",
+                        args: { recipient: "other-agent" },
+                    }],
+                },
+                {
+                    pubkey: delegatePubkey,
+                    content: "",
+                    messageType: "delegation-marker",
+                    eventId: "delegation-marker-event",
+                    delegationMarker: {
+                        delegationConversationId,
+                        parentConversationId: conversationId,
+                        recipientPubkey: delegatePubkey,
+                        status: "completed",
+                        completedAt: Date.now(),
+                    },
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "tool-result-event",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call_j2dmakq6",
+                        toolName: "delegate",
+                        result: { success: true },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({
+                totalMessages: entries.length,
+                conversationId,
+                getDelegationMessages: (convId) => {
+                    if (convId === delegationConversationId) {
+                        // Return some messages from the delegation
+                        return [
+                            {
+                                pubkey: viewingAgentPubkey,
+                                content: "Please do the task",
+                                messageType: "text" as const,
+                                targetedPubkeys: [delegatePubkey],
+                            },
+                            {
+                                pubkey: delegatePubkey,
+                                content: "Task completed successfully",
+                                messageType: "text" as const,
+                                targetedPubkeys: [viewingAgentPubkey],
+                            },
+                        ];
+                    }
+                    return undefined;
+                },
+            });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // Should have 3 messages in correct order
+            expect(messages).toHaveLength(3);
+
+            // First: tool-call
+            expect(messages[0].role).toBe("assistant");
+            expect((messages[0].content as any[])[0].type).toBe("tool-call");
+            expect((messages[0].content as any[])[0].toolCallId).toBe("call_j2dmakq6");
+
+            // Second: tool-result (should come before delegation completion)
+            expect(messages[1].role).toBe("tool");
+            expect((messages[1].content as any[])[0].type).toBe("tool-result");
+            expect((messages[1].content as any[])[0].toolCallId).toBe("call_j2dmakq6");
+
+            // Third: deferred delegation completion message
+            expect(messages[2].role).toBe("user");
+            expect(messages[2].content).toContain("DELEGATION COMPLETED");
+        });
+
+        test("defers nested delegation marker between tool-call and tool-result", async () => {
+            // Scenario: Nested delegation marker arrives during tool execution
+            const delegationConversationId = "nested-delegation-123";
+            const parentConversationId = "different-parent-456";
+            const currentConversationId = "current-conv-789";
+            const delegatePubkey = "nested-delegate-pubkey";
+
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "tool-call-event",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-nested",
+                        toolName: "some_tool",
+                        args: {},
+                    }],
+                },
+                {
+                    pubkey: delegatePubkey,
+                    content: "",
+                    messageType: "delegation-marker",
+                    eventId: "nested-marker-event",
+                    delegationMarker: {
+                        delegationConversationId,
+                        // Different parent = nested marker
+                        parentConversationId,
+                        recipientPubkey: delegatePubkey,
+                        status: "completed",
+                        completedAt: Date.now(),
+                    },
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "tool-result-event",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-nested",
+                        toolName: "some_tool",
+                        result: { data: "result" },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({
+                totalMessages: entries.length,
+                conversationId: currentConversationId,
+            });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            // Should have 3 messages in correct order
+            expect(messages).toHaveLength(3);
+
+            // First: tool-call
+            expect(messages[0].role).toBe("assistant");
+            expect((messages[0].content as any[])[0].toolCallId).toBe("call-nested");
+
+            // Second: tool-result
+            expect(messages[1].role).toBe("tool");
+            expect((messages[1].content as any[])[0].toolCallId).toBe("call-nested");
+
+            // Third: deferred nested delegation marker (minimal reference)
+            expect(messages[2].role).toBe("user");
+            expect(messages[2].content).toContain("Delegation to");
+            expect(messages[2].content).toContain("completed");
+        });
+
+        test("deferred delegation marker gets user role even when recipient equals viewer (self-delegation)", async () => {
+            // Edge case: delegation marker where recipientPubkey === viewingAgentPubkey
+            // This could happen with self-delegation or nested delegation back to same agent
+            // Without explicit role: "user", deriveRole() would produce "assistant"
+            const conversationId = "self-delegation-conv";
+            const delegationConversationId = "self-deleg-123";
+
+            const entries: ConversationEntry[] = [
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-call",
+                    eventId: "tool-call-event",
+                    toolData: [{
+                        type: "tool-call",
+                        toolCallId: "call-self",
+                        toolName: "delegate",
+                        args: { recipient: "self" },
+                    }],
+                },
+                {
+                    // CRITICAL: recipientPubkey === viewingAgentPubkey (self-delegation scenario)
+                    pubkey: viewingAgentPubkey,
+                    content: "",
+                    messageType: "delegation-marker",
+                    eventId: "self-delegation-marker",
+                    delegationMarker: {
+                        delegationConversationId,
+                        parentConversationId: conversationId,
+                        recipientPubkey: viewingAgentPubkey, // Same as viewing agent!
+                        status: "completed",
+                        completedAt: Date.now(),
+                    },
+                },
+                {
+                    pubkey: viewingAgentPubkey,
+                    ral: 1,
+                    content: "",
+                    messageType: "tool-result",
+                    eventId: "tool-result-event",
+                    toolData: [{
+                        type: "tool-result",
+                        toolCallId: "call-self",
+                        toolName: "delegate",
+                        result: { success: true },
+                    }],
+                },
+            ];
+
+            const ctx = createContext({
+                totalMessages: entries.length,
+                conversationId,
+                getDelegationMessages: () => [
+                    {
+                        pubkey: viewingAgentPubkey,
+                        content: "Self-delegated task",
+                        messageType: "text" as const,
+                        targetedPubkeys: [viewingAgentPubkey],
+                    },
+                ],
+            });
+            const messages = await buildMessagesFromEntries(entries, ctx);
+
+            expect(messages).toHaveLength(3);
+
+            // First: tool-call (assistant)
+            expect(messages[0].role).toBe("assistant");
+
+            // Second: tool-result (tool)
+            expect(messages[1].role).toBe("tool");
+
+            // Third: deferred delegation - MUST be user role even though recipientPubkey === viewingAgentPubkey
+            expect(messages[2].role).toBe("user");
+            expect(messages[2].content).toContain("DELEGATION COMPLETED");
+        });
     });
 
     describe("Orphaned Tool-Call Reconciliation", () => {
