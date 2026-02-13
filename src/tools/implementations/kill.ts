@@ -195,7 +195,8 @@ async function executeKill(input: KillInput, context: ToolExecutionContext): Pro
     // Resolution failed or target not found
     // Legacy fallback: try direct lookup with normalized target (handles edge cases)
     const isDirectConversationId = ConversationStore.has(normalizedTarget);
-    const isDirectShellTaskId = !isDirectConversationId && getBackgroundTaskInfo(normalizedTarget) !== null;
+    // Note: getBackgroundTaskInfo returns undefined for non-existent tasks, so use truthiness check
+    const isDirectShellTaskId = !isDirectConversationId && !!getBackgroundTaskInfo(normalizedTarget);
 
     if (isDirectConversationId) {
         return await killAgent(normalizedTarget, reason, context);
