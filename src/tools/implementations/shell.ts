@@ -129,12 +129,14 @@ const shellSchema = z.object({
     cwd: z
         .string()
         .nullable()
+        .optional()
         .describe("Working directory for the command (defaults to project root)"),
-    timeout: z.coerce
+    timeout: z
         .number()
         .nullable()
+        .optional()
         .describe(
-            `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`
+            `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS}). Optional for background processes.`
         ),
     run_in_background: z
         .boolean()
