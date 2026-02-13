@@ -10,11 +10,10 @@ import { LLMService } from "@/llm/service";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
-import { RALRegistry, extractPendingDelegations } from "@/services/ral";
-import type { AISdkTool } from "@/tools/types";
+import { RALRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
-import type { LanguageModel, ModelMessage, StepResult } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
 import { MessageCompiler } from "./MessageCompiler";
@@ -302,61 +301,3 @@ export function createPrepareStep(
     };
 }
 
-/**
- * Configuration for creating the onStopCheck callback
- */
-export interface OnStopCheckConfig {
-    context: FullRuntimeContext;
-    ralNumber: number;
-    execContext: RALExecutionContext;
-    executionSpan?: ReturnType<typeof trace.getActiveSpan>;
-}
-
-/**
- * Create the onStopCheck callback for delegation stop detection
- */
-export function createOnStopCheck(
-    config: OnStopCheckConfig
-): (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean> {
-    const { context, ralNumber, executionSpan } = config;
-    const conversationStore = context.conversationStore;
-    const ralRegistry = RALRegistry.getInstance();
-
-    return async (steps: StepResult<Record<string, AISdkTool>>[]): Promise<boolean> => {
-        if (steps.length === 0) return false;
-
-        const lastStep = steps[steps.length - 1];
-        const toolResults = lastStep.toolResults ?? [];
-
-        for (const toolResult of toolResults) {
-            const pendingDelegations = extractPendingDelegations(toolResult.output);
-            if (pendingDelegations) {
-                executionSpan?.addEvent("executor.delegation_stop", {
-                    "ral.number": ralNumber,
-                    "delegation.count": pendingDelegations.length,
-                });
-
-                // Use atomic merge to safely handle concurrent delegation calls
-                ralRegistry.mergePendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber,
-                    pendingDelegations
-                );
-
-                conversationStore.save();
-
-                ralRegistry.setStreaming(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber,
-                    false
-                );
-
-                return true;
-            }
-        }
-
-        return false;
-    };
-}

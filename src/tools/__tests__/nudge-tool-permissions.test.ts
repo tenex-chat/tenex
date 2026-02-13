@@ -350,7 +350,7 @@ describe("Nudge Tool Permissions", () => {
                 expect(toolNames).toContain("ask");
             });
 
-            it("should return only core tools when no base tools and no nudge permissions", () => {
+            it("should return core tools and home_fs tools when no base tools and no nudge permissions", () => {
                 const baseTools: string[] = [];
 
                 const tools = getToolsObject(baseTools, mockContext, undefined);
@@ -360,7 +360,12 @@ describe("Nudge Tool Permissions", () => {
                 expect(toolNames).toContain("kill");
                 expect(toolNames).toContain("lesson_get");
                 expect(toolNames).toContain("todo_write");
-                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length); // All core tools
+                // Home fs tools are also auto-injected when agent lacks fs_* tools
+                expect(toolNames).toContain("home_fs_read");
+                expect(toolNames).toContain("home_fs_write");
+                expect(toolNames).toContain("home_fs_grep");
+                // All core tools (12) + home_fs tools (3) = 15
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 3);
             });
         });
     });

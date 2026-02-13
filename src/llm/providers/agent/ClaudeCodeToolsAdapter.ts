@@ -1,5 +1,4 @@
 import type { AISdkTool } from "@/tools/types";
-import { isStopExecutionSignal } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
 import { createSdkMcpServer, tool } from "ai-sdk-provider-claude-code";
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
@@ -94,21 +93,6 @@ export class ClaudeCodeToolsAdapter {
 
                     // Convert result to MCP format
                     // CallToolResult expects: { content: [{ type: "text", text: string }], isError?: boolean }
-                    //
-                    // IMPORTANT: For StopExecutionSignal results (from delegation tools like ask, delegate),
-                    // we need to preserve the pendingDelegations structure so that ToolExecutionTracker
-                    // can extract the delegation event IDs for q-tags. We do this by returning the
-                    // original result object directly instead of wrapping it in MCP format.
-                    // The Claude Code SDK handles this appropriately.
-                    if (isStopExecutionSignal(result)) {
-                        // Return the original result so ToolExecutionTracker can extract pendingDelegations
-                        // for q-tags. The MCP format wrapping will show a text message to the LLM.
-                        return {
-                            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-                            // Attach the original result for ToolExecutionTracker to access
-                            _tenexOriginalResult: result,
-                        };
-                    }
                     if (typeof result === "string") {
                         return {
                             content: [{ type: "text", text: result }],
