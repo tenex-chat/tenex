@@ -69,6 +69,7 @@ export interface TenexConfig {
         enabled?: boolean; // Enable intervention monitoring (default: false)
         agent?: string; // Agent slug to notify when user doesn't respond (required if enabled)
         timeout?: number; // Milliseconds to wait for user response (default: 300000 = 5 minutes)
+        conversationInactivityTimeoutSeconds?: number; // Seconds since last user message to skip intervention (default: 120 = 2 minutes). If user was active within this window when agent tags them, skip intervention entirely.
     };
 
     // Project fields (optional for global config)
@@ -131,6 +132,7 @@ export const TenexConfigSchema = z.object({
             enabled: z.boolean().optional(),
             agent: z.string().optional(),
             timeout: z.number().optional(),
+            conversationInactivityTimeoutSeconds: z.number().optional(),
         })
         .optional(),
     description: z.string().optional(),

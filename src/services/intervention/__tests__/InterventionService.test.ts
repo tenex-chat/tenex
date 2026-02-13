@@ -905,4 +905,224 @@ describe("InterventionService", () => {
             expect(instance2.isEnabled()).toBe(false);
         });
     });
+
+    describe("conversation inactivity timeout", () => {
+        it("should use default timeout of 120 seconds when not configured", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-agent",
+                    // No conversationInactivityTimeoutSeconds specified
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+
+            expect(service.getConversationInactivityTimeoutSeconds()).toBe(120);
+        });
+
+        it("should use configured conversation inactivity timeout", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-agent",
+                    conversationInactivityTimeoutSeconds: 60, // 1 minute
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+
+            expect(service.getConversationInactivityTimeoutSeconds()).toBe(60);
+        });
+
+        it("should skip intervention when user was recently active (within threshold)", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120, // 2 minutes = 120000ms
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            const lastUserMessageTime = now - 10000; // User sent message 10 seconds ago
+            const completedAt = now; // Agent completes now
+
+            // User was active 10 seconds ago, threshold is 120 seconds
+            // 10s < 120s => should skip intervention
+            service.onAgentCompletion(
+                "test-conv-1",
+                completedAt,
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // Should NOT create a pending intervention
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should allow intervention when user was inactive longer than threshold", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120, // 2 minutes = 120000ms
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            const lastUserMessageTime = now - 300000; // User sent message 5 minutes ago
+            const completedAt = now; // Agent completes now
+
+            // User was active 5 minutes ago, threshold is 2 minutes
+            // 5min > 2min => should allow intervention
+            service.onAgentCompletion(
+                "test-conv-1",
+                completedAt,
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // Should create a pending intervention
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should allow intervention when lastUserMessageTime is not provided (backward compat)", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120,
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            // No lastUserMessageTime passed (undefined)
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now(),
+                "agent-123",
+                "user-456",
+                "project-789"
+                // lastUserMessageTime omitted
+            );
+
+            // Should still create a pending intervention (backward compatible)
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should skip intervention at exact threshold boundary", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120, // 120 seconds = 120000ms
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            // User was active exactly at threshold boundary (119999ms ago - just under 120s)
+            const lastUserMessageTime = now - 119999;
+            const completedAt = now;
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                completedAt,
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // timeSince = 119999ms < 120000ms threshold => should skip
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should allow intervention just past threshold boundary", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120, // 120 seconds = 120000ms
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            // User was active exactly at threshold (120000ms ago = exactly 120s)
+            const lastUserMessageTime = now - 120000;
+            const completedAt = now;
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                completedAt,
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // timeSince = 120000ms >= 120000ms threshold => should allow intervention
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should handle zero conversationInactivityTimeoutSeconds (always allow intervention)", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 0, // Disabled - always allow
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            const lastUserMessageTime = now - 1000; // User sent message 1 second ago
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                now,
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // With threshold 0, check is skipped - should allow intervention
+            expect(service.getPendingCount()).toBe(1);
+        });
+    });
 });
