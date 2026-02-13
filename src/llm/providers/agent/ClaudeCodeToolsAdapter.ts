@@ -16,6 +16,34 @@ type SdkMcpServer = ReturnType<typeof createSdkMcpServer>;
  */
 export class ClaudeCodeToolsAdapter {
     /**
+     * Check if a tool is an external MCP tool (from external MCP servers).
+     * External MCP tools have JSON Schema format (not Zod), so they cannot be
+     * wrapped with the Claude SDK's tool() function which expects Zod schemas.
+     * These tools are passed directly to Claude Code as MCP servers instead.
+     *
+     * Detection is metadata-based (checking for Zod schema characteristics)
+     * rather than name-based, to avoid collisions if a user names their
+     * external MCP server "tenex".
+     */
+    private static isExternalMcpTool(toolName: string, tool: AISdkTool): boolean {
+        // External MCP tools follow the pattern: mcp__<servername>__<toolname>
+        if (!toolName.startsWith("mcp__")) {
+            return false;
+        }
+
+        // Use metadata-based detection: check if the schema is a Zod object (has safeParseAsync)
+        // External MCP tools have JSON Schema format, TENEX tools have Zod schemas
+        const schema = tool.inputSchema;
+        if (schema && typeof schema === "object" && "safeParseAsync" in schema) {
+            // Has Zod schema - this is a TENEX tool (not external)
+            return false;
+        }
+
+        // No Zod schema detected - treat as external MCP tool
+        return true;
+    }
+
+    /**
      * Convert TENEX tools to SDK MCP tools for Claude Code
      * Only converts non-MCP tools (MCP tools are handled separately)
      */
@@ -33,12 +61,35 @@ export class ClaudeCodeToolsAdapter {
             "shell",
             "web_search",
         ]);
-        const localTools = Object.entries(tools).filter(([name]) =>
+        // CRITICAL: Filter out external MCP tools - they have JSON Schema format (no .safeParseAsync())
+        // and will crash if we try to wrap them with tool() from Claude SDK.
+        // External MCP servers are passed directly to Claude Code via mcpConfig.servers instead.
+        const localTools = Object.entries(tools).filter(([name, tool]) =>
             !name.startsWith("fs_") &&
-            !claudeCodeBuiltinTools.has(name)
+            !claudeCodeBuiltinTools.has(name) &&
+            !this.isExternalMcpTool(name, tool)
         );
 
+        // Log external MCP tools that were filtered out (for debugging)
+        const externalMcpTools = Object.entries(tools)
+            .filter(([name, tool]) => this.isExternalMcpTool(name, tool))
+            .map(([name]) => name);
+
+        if (externalMcpTools.length > 0) {
+            logger.debug("[ClaudeCodeToolsAdapter] Filtered out external MCP tools (passed directly to Claude Code):", {
+                count: externalMcpTools.length,
+                tools: externalMcpTools,
+            });
+        }
+
         if (localTools.length === 0) {
+            logger.debug("[ClaudeCodeToolsAdapter] No local tools to wrap after filtering", {
+                totalTools: Object.keys(tools).length,
+                externalMcpCount: externalMcpTools.length,
+                builtinFilteredCount: Object.keys(tools).filter(name =>
+                    name.startsWith("fs_") || claudeCodeBuiltinTools.has(name)
+                ).length,
+            });
             return undefined;
         }
 
@@ -58,6 +109,19 @@ export class ClaudeCodeToolsAdapter {
                 } else if (schema && typeof schema === "object" && !("_def" in schema)) {
                     // It might already be a raw shape object (plain object with Zod types)
                     rawShape = schema as unknown as ZodRawShape;
+                } else if (schema !== null && typeof schema === "object") {
+                    // DEFENSIVE GUARD: Log warning if we encounter an unexpected schema type
+                    // This helps catch future regressions where non-Zod schemas slip through
+                    logger.warn(`[ClaudeCodeToolsAdapter] Tool '${name}' has unexpected schema type - using empty schema`, {
+                        hasShape: "shape" in schema,
+                        hasDef: "_def" in schema,
+                        hasSafeParseAsync: typeof (schema as { safeParseAsync?: unknown }).safeParseAsync === "function",
+                    });
+                } else {
+                    // Primitive schema (e.g., z.string()) - log warning but don't crash
+                    logger.warn(`[ClaudeCodeToolsAdapter] Tool '${name}' has primitive or non-object schema type - using empty schema`, {
+                        schemaType: typeof schema,
+                    });
                 }
                 // If it's some other Zod type, leave rawShape as empty object
             }
