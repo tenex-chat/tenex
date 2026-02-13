@@ -99,6 +99,22 @@ export interface ToolUseIntent {
     usage?: LanguageModelUsageWithCostUsd; // Cumulative usage from previous steps
 }
 
+/**
+ * Intent for intervention review requests.
+ * Used when the InterventionService detects that a user hasn't responded
+ * to an agent's completion and triggers a human-replica review.
+ */
+export interface InterventionReviewIntent {
+    /** Pubkey of the intervention agent (human-replica) to notify */
+    targetPubkey: string;
+    /** The conversation ID being reviewed */
+    conversationId: string;
+    /** Pubkey of the user who hasn't responded */
+    userPubkey: string;
+    /** Pubkey of the agent that completed work */
+    agentPubkey: string;
+}
+
 export type AgentIntent =
     | CompletionIntent
     | ConversationIntent
@@ -107,7 +123,8 @@ export type AgentIntent =
     | ErrorIntent
     | LessonIntent
     | StatusIntent
-    | ToolUseIntent;
+    | ToolUseIntent
+    | InterventionReviewIntent;
 
 // ============================================================================
 // Event Context - Execution context provided by RAL
