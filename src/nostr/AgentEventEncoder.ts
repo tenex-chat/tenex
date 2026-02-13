@@ -530,11 +530,11 @@ export class AgentEventEncoder {
      *   - ["context", "intervention-review"] - Context marker
      *   - ["user-pubkey", userPubkey] - User who hasn't responded
      *   - ["agent-pubkey", agentPubkey] - Agent that completed work
-     *   - ["a", projectTag] - Project reference (via addStandardTags)
+     *   - ["a", projectTag] - Project reference (added internally via aTagProject)
      *
      * Note: This method does NOT call addStandardTags() since intervention events
-     * are not part of an agent execution context. The project tag must be added
-     * separately by the publisher.
+     * are not part of an agent execution context. However, the project tag is
+     * added internally via aTagProject() for proper project association.
      */
     encodeInterventionReview(intent: InterventionReviewIntent): NDKEvent {
         const event = new NDKEvent(getNDK());
