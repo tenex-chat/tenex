@@ -25,6 +25,7 @@
  * ```
  */
 
+import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { agentStorage } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
 import { pubkeyFromNsec } from "@/nostr";
@@ -178,5 +179,107 @@ export function getConfiguredEscalationAgent(): string | null {
         return config.escalation?.agent || null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Load escalation agent into a registry proactively during project startup.
+ *
+ * This function is called during AgentRegistry.loadFromProject() to ensure
+ * the escalation agent is available in the "Available Agents" section of
+ * all project system prompts.
+ *
+ * Unlike resolveEscalationTarget() which is reactive (called when ask() is used),
+ * this function is proactive and runs during project initialization.
+ *
+ * @param agentRegistry - The agent registry to load the escalation agent into
+ * @param projectDTag - The project's dTag for storage association
+ * @returns true if escalation agent was loaded (new or existing), false otherwise
+ */
+export async function loadEscalationAgentIntoRegistry(
+    agentRegistry: AgentRegistry,
+    projectDTag: string | undefined
+): Promise<boolean> {
+    // Validate projectDTag is provided and non-empty (including whitespace-only)
+    if (!projectDTag?.trim()) {
+        logger.warn("[EscalationService] Cannot load escalation agent: projectDTag is required");
+        return false;
+    }
+
+    try {
+        const config = configService.getConfig();
+        const escalationAgentSlug = config.escalation?.agent;
+
+        if (!escalationAgentSlug) {
+            return false;
+        }
+
+        // Fast path: check if agent is already in registry (avoid duplicate work)
+        const existingAgent = agentRegistry.getAgent(escalationAgentSlug);
+        if (existingAgent) {
+            logger.debug("[EscalationService] Escalation agent already in registry", {
+                escalationAgentSlug,
+                projectDTag,
+            });
+            return true;
+        }
+
+        // Check global storage for the agent
+        const storedAgent = await agentStorage.getAgentBySlug(escalationAgentSlug);
+        if (!storedAgent) {
+            logger.warn("[EscalationService] Escalation agent configured but not found in system", {
+                escalationAgentSlug,
+            });
+            return false;
+        }
+
+        logger.info("[EscalationService] Proactively loading escalation agent into registry", {
+            escalationAgentSlug,
+            agentName: storedAgent.name,
+            projectDTag,
+        });
+
+        // Get the agent's pubkey from its nsec
+        const agentPubkey = pubkeyFromNsec(storedAgent.nsec);
+
+        // Add agent to project in storage (idempotent operation)
+        await agentStorage.addAgentToProject(agentPubkey, projectDTag);
+
+        // Reload the agent to get fresh state with the project association
+        const freshAgent = await agentStorage.loadAgent(agentPubkey);
+        if (!freshAgent) {
+            logger.error("[EscalationService] Failed to reload escalation agent after adding to project", {
+                escalationAgentSlug,
+                agentPubkey: agentPubkey.substring(0, 8),
+            });
+            return false;
+        }
+
+        // Create agent instance and add to registry
+        const agentInstance = createAgentInstance(freshAgent, agentRegistry);
+        agentRegistry.addAgent(agentInstance);
+
+        logger.info("[EscalationService] Successfully loaded escalation agent into registry", {
+            escalationAgentSlug,
+            agentPubkey: agentPubkey.substring(0, 8),
+            projectDTag,
+        });
+
+        return true;
+    } catch (error) {
+        // Distinguish between expected errors (config not loaded during startup)
+        // and unexpected errors that should be investigated
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const isConfigNotLoaded = errorMessage.includes("not loaded") || errorMessage.includes("not initialized");
+
+        if (isConfigNotLoaded) {
+            logger.debug("[EscalationService] Config not loaded yet, skipping escalation agent loading");
+        } else {
+            logger.warn("[EscalationService] Unexpected error loading escalation agent into registry", {
+                error,
+                errorMessage,
+            });
+        }
+        return false;
     }
 }
