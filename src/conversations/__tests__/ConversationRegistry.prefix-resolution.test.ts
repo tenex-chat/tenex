@@ -68,12 +68,32 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const testPrefix = testId.substring(0, 12);
 
-            // Add the mapping to PrefixKVStore
-            await prefixKVStore.add(testId);
+            // Create a conversation so it exists in the registry
+            const mockEvent = {
+                id: testId,
+                pubkey: "user-pubkey",
+                content: "Test message for prefix resolution",
+                kind: 1,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [],
+                getMatchingTags: () => [],
+                tagValue: () => undefined,
+            };
 
-            // Verify the mapping was added
+            // @ts-expect-error - Using minimal mock event
+            await conversationRegistry.create(mockEvent);
+
+            // Verify PrefixKVStore has the mapping (prerequisite)
             const lookup = prefixKVStore.lookup(testPrefix);
             expect(lookup).toBe(testId);
+
+            // Now actually exercise ConversationRegistry with the prefix
+            // This is the key assertion - verifying prefix resolution via ConversationRegistry
+            expect(conversationRegistry.has(testPrefix)).toBe(true);
+
+            const store = conversationRegistry.get(testPrefix);
+            expect(store).toBeDefined();
+            expect(store?.id).toBe(testId);
         });
 
         it("should return undefined for unknown 12-char prefix", () => {
