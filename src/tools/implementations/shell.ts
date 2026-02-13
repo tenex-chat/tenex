@@ -129,12 +129,27 @@ const shellSchema = z.object({
     cwd: z
         .string()
         .nullable()
+        .optional()
         .describe("Working directory for the command (defaults to project root)"),
-    timeout: z.coerce
-        .number()
-        .nullable()
+    timeout: z
+        .preprocess(
+            // Coerce numeric strings to numbers while preserving undefined/null
+            // Reject empty/whitespace strings (treat as undefined) to avoid Number("") === 0
+            (val) => {
+                if (val === undefined || val === null) return val;
+                if (typeof val === "number") return val;
+                if (typeof val === "string") {
+                    const trimmed = val.trim();
+                    if (trimmed === "") return undefined; // Treat empty/whitespace as "not provided"
+                    const parsed = Number(trimmed);
+                    return Number.isNaN(parsed) ? val : parsed;
+                }
+                return val;
+            },
+            z.number().nullable().optional()
+        )
         .describe(
-            `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS})`
+            `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS}). Optional for background processes.`
         ),
     run_in_background: z
         .boolean()
