@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -124,6 +124,11 @@ describe("InterventionService", () => {
         } catch {
             // Ignore cleanup errors
         }
+    });
+
+    afterAll(() => {
+        // Restore all mocked modules to prevent test pollution
+        mock.restore();
     });
 
     describe("initialization", () => {
