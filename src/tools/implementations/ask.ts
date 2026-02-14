@@ -3,7 +3,7 @@ import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/event-context";
+import { createEventContext } from "@/services/event-context";
 import { resolveRecipientToPubkey, resolveEscalationTarget } from "@/services/agents";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";

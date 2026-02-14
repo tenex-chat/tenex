@@ -1,4 +1,3 @@
-import { ConversationStore } from "@/conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
@@ -44,42 +43,32 @@ export class AgentEventEncoder {
     /**
      * Determine the correct recipient pubkey for a completion event.
      *
-     * This method implements the delegation completion routing fix:
-     * - If the conversation has a delegation chain, the completion should be routed
-     *   to the immediate delegator (second-to-last entry in the chain)
-     * - If no delegation chain exists, fall back to the triggeringEvent.pubkey
+     * Uses pre-resolved completionRecipientPubkey from context when available.
+     * This supports delegation chain routing where completions must route back
+     * to the immediate delegator, not the event that happened to trigger the
+     * current execution (e.g., a user responding to an ask).
      *
-     * This is critical for long-running interactions (e.g., ask tool followed by
-     * human response hours later). When RAL state is cleared and a fresh execution
-     * starts with the user's response as triggeringEvent, we still need to route
-     * the completion back up the delegation stack, not to the user.
+     * The recipient resolution is done by createEventContext() in EventContextService
+     * (services/event-context/, layer 3) which has access to ConversationStore. This
+     * method just uses the pre-resolved value or falls back to triggeringEvent.pubkey
+     * for direct conversations.
      *
-     * @param context - The event context containing conversationId and triggeringEvent
+     * @param context - The event context containing completionRecipientPubkey or triggeringEvent
      * @returns The pubkey to use for the completion p-tag
      */
     private getCompletionRecipientPubkey(context: EventContext): string {
-        // Try to get the conversation store to access the delegation chain
-        const conversationStore = ConversationStore.get(context.conversationId);
-        const delegationChain = conversationStore?.metadata?.delegationChain;
-
-        if (delegationChain && delegationChain.length >= 2) {
-            // The delegation chain is ordered [origin, ..., delegator, current_agent]
-            // We want the second-to-last entry (the immediate delegator)
-            const immediateDelegator = delegationChain[delegationChain.length - 2];
-
-            logger.debug("Completion routing via delegation chain", {
+        // Use pre-resolved recipient if available (set by createEventContext from delegation chain)
+        if (context.completionRecipientPubkey) {
+            logger.debug("Completion routing via pre-resolved recipient", {
                 conversationId: context.conversationId.substring(0, 12),
-                chainLength: delegationChain.length,
-                immediateDelegator: immediateDelegator.displayName,
-                immediateDelegatorPubkey: immediateDelegator.pubkey.substring(0, 8),
+                recipientPubkey: context.completionRecipientPubkey.substring(0, 8),
                 triggeringEventPubkey: context.triggeringEvent.pubkey.substring(0, 8),
-                usingDelegationChain: immediateDelegator.pubkey !== context.triggeringEvent.pubkey,
+                usingPreResolved: context.completionRecipientPubkey !== context.triggeringEvent.pubkey,
             });
-
-            return immediateDelegator.pubkey;
+            return context.completionRecipientPubkey;
         }
 
-        // No delegation chain - fall back to triggering event pubkey
+        // No pre-resolved recipient - fall back to triggering event pubkey
         // This is the correct behavior for direct user conversations
         return context.triggeringEvent.pubkey;
     }

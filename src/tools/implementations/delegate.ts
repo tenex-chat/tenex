@@ -18,7 +18,7 @@ import type { PendingDelegation } from "@/services/ral/types";
 import type { AISdkTool } from "@/tools/types";
 import { resolveAgentSlug } from "@/services/agents";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/event-context";
+import { createEventContext } from "@/services/event-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
