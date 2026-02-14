@@ -311,6 +311,9 @@ function addAgentFragments(
 
     // Add delegation best practices guidance (priority 16, after available-agents)
     builder.add("stay-in-your-lane", {});
+
+    // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
+    builder.add("todo-before-delegation", {});
 }
 
 /**
