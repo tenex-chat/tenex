@@ -4,6 +4,7 @@ import { logger } from "@/utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
 
 const tracer = trace.getTracer("tenex.delegation");
@@ -128,6 +129,35 @@ export async function handleDelegationCompletion(
             if (result) {
                 location = result;
                 delegationEventId = eTag;
+
+                // Add the completion event to the delegation conversation store.
+                // This ensures getDelegationMessages() can return the user's response
+                // when building the delegation marker transcript. Without this, ask
+                // conversations would show "transcript unavailable" instead of the
+                // actual user response.
+                // See: naddr1qvzqqqr4gupzqkmm302xww6uyne99rnhl5kjj53wthjypm2qaem9uz9fdf3hzcf0qyghwumn8ghj7ar9dejhstnrdpshgtcq9p382emxd9uz6en0d3kx7am4wqkkjmn2v43hg6t0dckhzat9w4jj6cmvv4shy6twvullqw7x
+                const delegationStore = ConversationStore.get(eTag);
+                if (delegationStore) {
+                    try {
+                        await ConversationStore.addEvent(eTag, event);
+                        span.addEvent("completion_event_added_to_delegation_store", {
+                            "delegation.conversation_id": shortenConversationId(eTag),
+                        });
+                    } catch (addEventError) {
+                        // Don't throw after recordCompletion has already run.
+                        // The completion is recorded - only transcript storage failed.
+                        logger.warn("[handleDelegationCompletion] Failed to add completion event to delegation store", {
+                            delegationEventId: eTag.substring(0, 8),
+                            completionEventId: event.id?.substring(0, 8),
+                            error: addEventError instanceof Error ? addEventError.message : String(addEventError),
+                        });
+                        span.addEvent("completion_event_add_failed", {
+                            "delegation.conversation_id": shortenConversationId(eTag),
+                            "error": addEventError instanceof Error ? addEventError.message : String(addEventError),
+                        });
+                    }
+                }
+
                 break; // Found a matching delegation
             }
         }
