@@ -1045,6 +1045,35 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Clear all queued injections for an agent's conversation.
+   * Called by AgentDispatchService after MessageInjector successfully delivers a message.
+   * This prevents hasOutstandingWork() from incorrectly reporting queued injections
+   * that have already been delivered, which would cause the agent to use conversation()
+   * instead of complete().
+   */
+  clearQueuedInjections(agentPubkey: string, conversationId: string): void {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const ralMap = this.states.get(key);
+    if (!ralMap) return;
+
+    let totalCleared = 0;
+    for (const ral of ralMap.values()) {
+      if (ral.queuedInjections.length > 0) {
+        totalCleared += ral.queuedInjections.length;
+        ral.queuedInjections = [];
+      }
+    }
+
+    if (totalCleared > 0) {
+      trace.getActiveSpan()?.addEvent("ral.injections_cleared_after_delivery", {
+        "agent.pubkey": agentPubkey.substring(0, 12),
+        "conversation.id": shortenConversationId(conversationId),
+        "cleared.count": totalCleared,
+      });
+    }
+  }
+
+  /**
    * Track a tool as active or completed by its toolCallId.
    * Supports concurrent tool execution by tracking each tool independently.
    *
