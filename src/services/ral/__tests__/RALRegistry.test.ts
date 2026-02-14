@@ -2495,4 +2495,87 @@ describe("RALRegistry", () => {
     });
   });
 
+  /**
+   * Injection Queue Clearing After Delivery
+   *
+   * Tests for clearQueuedInjections() - called by AgentDispatchService after
+   * MessageInjector successfully delivers a queued message.
+   */
+  describe("clearQueuedInjections", () => {
+    const agentPubkey = "test-agent-pubkey";
+    const conversationId = "test-conv-id";
+
+    it("reports no outstanding work when queue is empty", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
+
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
+    });
+
+    it("reports outstanding work when message is queued", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
+
+      const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
+
+      expect(result.hasWork).toBe(true);
+      expect(result.details.queuedInjections).toBe(1);
+    });
+
+    it("clears queue via getAndConsumeInjections (existing behavior)", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
+
+      const injections = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
+
+      expect(injections.length).toBe(1);
+      const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
+    });
+
+    it("clears queue after successful MessageInjector delivery", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "Followup message");
+
+      // Verify queued
+      expect(registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber).details.queuedInjections).toBe(1);
+
+      // Clear after delivery (method to be implemented)
+      registry.clearQueuedInjections(agentPubkey, conversationId);
+
+      // Should report no outstanding work
+      const result = registry.hasOutstandingWork(agentPubkey, conversationId, ralNumber);
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
+    });
+
+    it("allows agent to complete after followup delivery", () => {
+      const parentAgent = "parent-agent-pubkey";
+      const childAgent = "child-agent-pubkey";
+      const childConv = "child-conv-id";
+
+      const childRalNumber = registry.create(childAgent, childConv, projectId);
+
+      // Parent sends followup
+      registry.queueUserMessage(childAgent, childConv, childRalNumber, "Can you clarify?", {
+        senderPubkey: parentAgent,
+        eventId: "followup-123",
+      });
+
+      // Verify queued
+      expect(registry.hasOutstandingWork(childAgent, childConv, childRalNumber).hasWork).toBe(true);
+
+      // MessageInjector delivers, then clears queue
+      registry.clearQueuedInjections(childAgent, childConv);
+
+      // Agent can now complete (no outstanding work)
+      const result = registry.hasOutstandingWork(childAgent, childConv, childRalNumber);
+      expect(result.hasWork).toBe(false);
+      expect(result.details.queuedInjections).toBe(0);
+    });
+  });
+
 });
