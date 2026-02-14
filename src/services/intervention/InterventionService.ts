@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { InterventionPublisher } from "@/nostr/InterventionPublisher";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { config } from "@/services/ConfigService";
+import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 
@@ -347,6 +348,28 @@ export class InterventionService {
         if (!resolvedPubkey) {
             // Resolution failed, service is now disabled
             logger.warn("InterventionService: skipping completion, agent resolution failed");
+            return;
+        }
+
+        // CRITICAL: Only trigger interventions for whitelisted user pubkeys
+        // Skip if the "user" is actually an agent (agent-to-agent completion)
+        const trustService = getTrustPubkeyService();
+        const trustResult = trustService.isTrustedSync(userPubkey);
+
+        if (!trustResult.trusted || trustResult.reason !== "whitelisted") {
+            // The "user" is not a whitelisted human user - it's an agent or unknown
+            logger.debug("InterventionService: skipping intervention, user is not whitelisted", {
+                conversationId: conversationId.substring(0, 12),
+                userPubkey: userPubkey.substring(0, 8),
+                trustReason: trustResult.reason ?? "not-trusted",
+            });
+
+            trace.getActiveSpan()?.addEvent("intervention.skipped_not_whitelisted_user", {
+                "conversation.id": conversationId,
+                "user.pubkey": userPubkey.substring(0, 8),
+                "trust.reason": trustResult.reason ?? "not-trusted",
+            });
+
             return;
         }
 
