@@ -275,7 +275,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   });
 
   const eventContext = createEventContext(context);
-  const eventId = await context.agentPublisher.ask(
+  const askEvent = await context.agentPublisher.ask(
     {
       recipient: ownerPubkey,
       title,
@@ -284,6 +284,22 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     },
     eventContext
   );
+  const eventId = askEvent.id;
+
+  // Bug fix: Create ConversationStore for ask conversations to enable transcript retrieval
+  // See: naddr1qvzqqqr4gupzqkmm302xww6uyne99rnhl5kjj53wthjypm2qaem9uz9fdf3hzcf0qyghwumn8ghj7ar9dejhstnrdpshgtcqye382emxd9uz6ctndvkhgmm0dskhgunpdeekxunfwp6z6atwv9mxz6tvv93xceg8tzuz2
+  try {
+    await ConversationStore.create(askEvent);
+  } catch (error) {
+    // Don't fail the ask tool if transcript storage fails.
+    // The ask functionality still works - the delegation is already registered
+    // via agentPublisher.ask(). The user will get their question and can respond.
+    // Only transcript retrieval will be affected if this fails.
+    logger.warn("[ask] Failed to create ConversationStore for ask transcript", {
+      eventId: eventId.substring(0, 8),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // Build prompt summary for delegation tracking using helper
   const promptSummary = buildPromptSummary(input);
