@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
  * - State persistence and recovery (project-scoped)
  * - Serialized state writes (concurrent saveState calls)
  * - Agent slug validation at startup
+ * - Whitelisted user filtering (only trigger for whitelisted users, not agents)
  */
 
 // Mock dependencies before importing the service
@@ -80,6 +81,18 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
+// Mock TrustPubkeyService - default to whitelisted user
+const mockIsTrustedSync = mock((_pubkey: string) => ({
+    trusted: true,
+    reason: "whitelisted" as const,
+}));
+
+mock.module("@/services/trust-pubkeys/TrustPubkeyService", () => ({
+    getTrustPubkeyService: () => ({
+        isTrustedSync: mockIsTrustedSync,
+    }),
+}));
+
 // Import after mocks are set up
 import { InterventionService } from "../InterventionService";
 
@@ -100,6 +113,7 @@ describe("InterventionService", () => {
         mockResolveAgentSlug.mockClear();
         mockPublishReviewRequest.mockClear();
         mockPublisherInitialize.mockClear();
+        mockIsTrustedSync.mockClear();
 
         // Set default mock returns
         mockGetConfig.mockReturnValue({
@@ -112,6 +126,11 @@ describe("InterventionService", () => {
         mockResolveAgentSlug.mockReturnValue({
             pubkey: "test-intervention-pubkey",
             availableSlugs: ["test-intervention-agent"],
+        });
+        // Default: user is whitelisted
+        mockIsTrustedSync.mockReturnValue({
+            trusted: true,
+            reason: "whitelisted" as const,
         });
     });
 
@@ -1123,6 +1142,157 @@ describe("InterventionService", () => {
 
             // With threshold 0, check is skipped - should allow intervention
             expect(service.getPendingCount()).toBe(1);
+        });
+    });
+
+    describe("whitelisted user filtering", () => {
+        it("should trigger intervention when user is whitelisted", async () => {
+            // Default mock already returns whitelisted
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "whitelisted" as const,
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "whitelisted-user-pubkey",
+                "project-789"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+            expect(mockIsTrustedSync).toHaveBeenCalledWith("whitelisted-user-pubkey");
+        });
+
+        it("should NOT trigger intervention when user is an agent (agent-to-agent completion)", async () => {
+            // Mock returns "agent" reason - this is an agent pubkey, not a whitelisted user
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "agent" as const,
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",          // completing agent
+                "agent-456-pubkey",   // "user" is actually another agent
+                "project-789"
+            );
+
+            // Should NOT create a pending intervention
+            expect(service.getPendingCount()).toBe(0);
+            expect(mockIsTrustedSync).toHaveBeenCalledWith("agent-456-pubkey");
+        });
+
+        it("should NOT trigger intervention when user pubkey is the backend", async () => {
+            // Mock returns "backend" reason - the backend's own pubkey
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "backend" as const,
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "backend-pubkey",
+                "project-789"
+            );
+
+            // Should NOT create a pending intervention
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should NOT trigger intervention when user pubkey is not trusted at all", async () => {
+            // Mock returns not trusted (unknown pubkey)
+            mockIsTrustedSync.mockReturnValue({
+                trusted: false,
+                reason: undefined,
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "unknown-pubkey",
+                "project-789"
+            );
+
+            // Should NOT create a pending intervention
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should check trust status on each completion (not cached incorrectly)", async () => {
+            const service = InterventionService.getInstance();
+            await service.initialize();
+            await service.setProject("project-789");
+
+            // First completion: user is whitelisted
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "whitelisted" as const,
+            });
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-1",
+                "project-789"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Second completion: user is an agent (should be skipped)
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "agent" as const,
+            });
+
+            service.onAgentCompletion(
+                "test-conv-2",
+                Date.now() + 10000,
+                "agent-456",
+                "agent-789",
+                "project-789"
+            );
+
+            // Should still be 1 (second was skipped)
+            expect(service.getPendingCount()).toBe(1);
+
+            // Third completion: user is whitelisted again
+            mockIsTrustedSync.mockReturnValue({
+                trusted: true,
+                reason: "whitelisted" as const,
+            });
+
+            service.onAgentCompletion(
+                "test-conv-3",
+                Date.now() + 10000,
+                "agent-xyz",
+                "user-2",
+                "project-789"
+            );
+
+            // Should now be 2
+            expect(service.getPendingCount()).toBe(2);
         });
     });
 });
