@@ -18,14 +18,12 @@ Creating a todo list helps you stay organized, shows your progress to observers,
 - As soon as you receive a task, create a todo list
 - Even 1-2 item lists are valuable for tracking progress
 - Update your todos as you work (mark in_progress, done, add new items)
-- Delegation to other agents REQUIRES having a todo list first
 
 **Good candidates for todos:**
 - Any task you'll spend more than a few seconds on
 - Multi-step work (even just 2 steps)
 - Tasks that involve file changes, tool calls, or research
 - Work that others may want to observe or track
-- Before delegating to other agents
 
 **Task management rules:**
 - Only ONE task should be \`in_progress\` at a time

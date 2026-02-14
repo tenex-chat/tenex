@@ -19,6 +19,7 @@ import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
+import { todoBeforeDelegationFragment } from "./17-todo-before-delegation";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { nudgesFragment } from "./11-nudges";
@@ -57,6 +58,7 @@ export function registerAllFragments(): void {
     // Agent collaboration
     fragmentRegistry.register(availableAgentsFragment);
     fragmentRegistry.register(stayInYourLaneFragment);
+    fragmentRegistry.register(todoBeforeDelegationFragment);
 
     // Behavioral guidance
     // voice-mode and referenced-article are registered via side effects
