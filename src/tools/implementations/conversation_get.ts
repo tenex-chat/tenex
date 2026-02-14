@@ -281,14 +281,37 @@ function serializeConversation(
         }
     }
 
-    // Get the first message timestamp as baseline for relative times
-    const firstTimestamp = messages.length > 0 ? (messages[0].timestamp ?? 0) : 0;
+    // Find the first DEFINED timestamp to use as baseline for relative times.
+    // This handles edge cases where early messages (e.g., tool-calls synced via
+    // MessageSyncer) may lack timestamps. Using the first defined timestamp
+    // ensures later messages don't show huge epoch offsets.
+    let baselineTimestamp = 0;
+    for (const msg of messages) {
+        if (msg.timestamp !== undefined) {
+            baselineTimestamp = msg.timestamp;
+            break;
+        }
+    }
 
     const formattedLines: string[] = [];
 
+    // Track the last known timestamp for fallback on entries without timestamps.
+    // This provides more accurate ordering than always falling back to baseline.
+    let lastKnownTimestamp = baselineTimestamp;
+
     for (let i = 0; i < messages.length; i++) {
         const entry = messages[i];
-        const relativeSeconds = Math.floor((entry.timestamp ?? 0) - firstTimestamp);
+        // Use lastKnownTimestamp as fallback when entry.timestamp is undefined.
+        // This ensures entries without timestamps (e.g., tool-calls synced via MessageSyncer)
+        // appear at their approximate position rather than showing [+0] or huge negative
+        // numbers like [+-1771103685].
+        const effectiveTimestamp = entry.timestamp ?? lastKnownTimestamp;
+        const relativeSeconds = Math.floor(effectiveTimestamp - baselineTimestamp);
+
+        // Update lastKnownTimestamp if this entry has a defined timestamp
+        if (entry.timestamp !== undefined) {
+            lastKnownTimestamp = entry.timestamp;
+        }
         const from = pubkeyService.getNameSync(entry.pubkey);
         const targets = entry.targetedPubkeys?.map(pk => pubkeyService.getNameSync(pk));
 
