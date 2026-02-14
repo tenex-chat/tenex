@@ -1,3 +1,4 @@
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
@@ -41,6 +42,49 @@ export class AgentEventEncoder {
     }
 
     /**
+     * Determine the correct recipient pubkey for a completion event.
+     *
+     * This method implements the delegation completion routing fix:
+     * - If the conversation has a delegation chain, the completion should be routed
+     *   to the immediate delegator (second-to-last entry in the chain)
+     * - If no delegation chain exists, fall back to the triggeringEvent.pubkey
+     *
+     * This is critical for long-running interactions (e.g., ask tool followed by
+     * human response hours later). When RAL state is cleared and a fresh execution
+     * starts with the user's response as triggeringEvent, we still need to route
+     * the completion back up the delegation stack, not to the user.
+     *
+     * @param context - The event context containing conversationId and triggeringEvent
+     * @returns The pubkey to use for the completion p-tag
+     */
+    private getCompletionRecipientPubkey(context: EventContext): string {
+        // Try to get the conversation store to access the delegation chain
+        const conversationStore = ConversationStore.get(context.conversationId);
+        const delegationChain = conversationStore?.metadata?.delegationChain;
+
+        if (delegationChain && delegationChain.length >= 2) {
+            // The delegation chain is ordered [origin, ..., delegator, current_agent]
+            // We want the second-to-last entry (the immediate delegator)
+            const immediateDelegator = delegationChain[delegationChain.length - 2];
+
+            logger.debug("Completion routing via delegation chain", {
+                conversationId: context.conversationId.substring(0, 12),
+                chainLength: delegationChain.length,
+                immediateDelegator: immediateDelegator.displayName,
+                immediateDelegatorPubkey: immediateDelegator.pubkey.substring(0, 8),
+                triggeringEventPubkey: context.triggeringEvent.pubkey.substring(0, 8),
+                usingDelegationChain: immediateDelegator.pubkey !== context.triggeringEvent.pubkey,
+            });
+
+            return immediateDelegator.pubkey;
+        }
+
+        // No delegation chain - fall back to triggering event pubkey
+        // This is the correct behavior for direct user conversations
+        return context.triggeringEvent.pubkey;
+    }
+
+    /**
      * Forward branch tag from triggering event to reply event.
      * Ensures agents carry forward the branch context from the message they're replying to.
      */
@@ -58,6 +102,12 @@ export class AgentEventEncoder {
     /**
      * Encode a completion intent into a tagged event.
      * Completions have p-tag (triggers notification) and status=completed.
+     *
+     * IMPORTANT: For delegation contexts, the p-tag targets the immediate delegator
+     * (second-to-last entry in the delegation chain), NOT the triggeringEvent.pubkey.
+     * This ensures completions route back up the delegation stack even when RAL state
+     * is lost and the execution restarts with a fresh triggeringEvent (e.g., after
+     * a human responds to an "ask" hours later).
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
@@ -65,7 +115,10 @@ export class AgentEventEncoder {
         event.content = intent.content;
 
         this.addConversationTags(event, context);
-        event.tag(["p", context.triggeringEvent.pubkey]);
+
+        // Determine the correct p-tag recipient
+        const recipientPubkey = this.getCompletionRecipientPubkey(context);
+        event.tag(["p", recipientPubkey]);
         event.tag(["status", "completed"]);
 
         if (intent.usage) {
@@ -87,8 +140,9 @@ export class AgentEventEncoder {
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            replyingTo: context.triggeringEvent.id?.substring(0, 8),
-            replyingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            recipientPubkey: recipientPubkey.substring(0, 8),
+            triggeringEventPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            conversationId: context.conversationId?.substring(0, 12),
         });
 
         return event;
