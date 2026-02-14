@@ -2712,4 +2712,49 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       },
     };
   }
+
+  // ============================================================================
+  // Graceful Restart Support
+  // ============================================================================
+
+  /**
+   * Get the total count of active RALs across all conversations.
+   * Used by the daemon to determine when it's safe to perform a graceful restart.
+   *
+   * A RAL is considered "active" if it exists in the states map, meaning:
+   * - An agent execution is in progress (streaming, tool execution, etc.)
+   * - An agent is waiting on pending delegations
+   *
+   * @returns Total count of active RALs
+   */
+  getTotalActiveCount(): number {
+    let totalCount = 0;
+    for (const rals of this.states.values()) {
+      totalCount += rals.size;
+    }
+    return totalCount;
+  }
+
+  /**
+   * Get all active RALs for a specific conversation (across all agents).
+   * Used by the kill tool to find active agents in a conversation.
+   *
+   * @param conversationId - The conversation ID to search for
+   * @returns Array of RAL entries with their agent pubkeys
+   */
+  getActiveRalsForConversation(conversationId: string): Array<{ agentPubkey: string; ralNumber: number }> {
+    const results: Array<{ agentPubkey: string; ralNumber: number }> = [];
+
+    for (const [key, rals] of this.states) {
+      // Key format: "agentPubkey:conversationId"
+      const [agentPubkey, convId] = key.split(":");
+      if (convId === conversationId) {
+        for (const ralNumber of rals.keys()) {
+          results.push({ agentPubkey, ralNumber });
+        }
+      }
+    }
+
+    return results;
+  }
 }

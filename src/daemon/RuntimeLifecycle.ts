@@ -257,4 +257,12 @@ export class RuntimeLifecycle {
         const promises = Array.from(this.startingRuntimes.values());
         await Promise.allSettled(promises);
     }
+
+    /**
+     * Get list of currently active project IDs.
+     * Used by graceful restart to persist which projects to auto-boot after restart.
+     */
+    getActiveProjectIds(): string[] {
+        return Array.from(this.activeRuntimes.keys());
+    }
 }
