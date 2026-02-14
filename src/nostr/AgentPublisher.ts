@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
+import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -16,7 +17,6 @@ import type {
     LessonIntent,
     ToolUseIntent,
 } from "./types";
-import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 
 /**
  * Comprehensive publisher for all agent-related Nostr events.
@@ -122,6 +122,12 @@ export class AgentPublisher {
      * Creates and publishes a properly tagged completion event with p-tag.
      * Includes both incremental runtime (llm-runtime) and total runtime (llm-runtime-total).
      *
+     * DELEGATION CHAIN ROUTING: For conversations with a delegation chain, the completion
+     * is routed to the immediate delegator (second-to-last in chain), not triggeringEvent.pubkey.
+     * The recipient pubkey is pre-resolved by createEventContext (layer 3) and passed via
+     * context.completionRecipientPubkey. This avoids a layer violation - AgentPublisher (layer 2)
+     * cannot import ConversationStore directly.
+     *
      * RACE CONDITION GUARD: If this conversation was killed via the kill tool,
      * this method returns undefined instead of publishing. This prevents the scenario
      * where an agent continues running (e.g., in a long tool execution) after being
@@ -161,12 +167,15 @@ export class AgentPublisher {
             context.ralNumber
         );
 
-        const contextWithTotal: EventContext = {
+        // completionRecipientPubkey is pre-resolved by createEventContext (layer 3)
+        // from the delegation chain stored in ConversationStore. This avoids a layer
+        // violation - AgentPublisher (layer 2) cannot import ConversationStore directly.
+        const contextWithExtras: EventContext = {
             ...enhancedContext,
             llmRuntimeTotal: totalRuntime > 0 ? totalRuntime : undefined,
         };
 
-        const event = this.encoder.encodeCompletion(intent, contextWithTotal);
+        const event = this.encoder.encodeCompletion(intent, contextWithExtras);
 
         injectTraceContext(event);
         await this.agent.sign(event);

@@ -145,6 +145,18 @@ export interface EventContext {
     llmRuntime?: number;
     /** Total accumulated LLM runtime for this RAL (used in completion events) */
     llmRuntimeTotal?: number;
+    /**
+     * Pre-resolved recipient pubkey for completion events.
+     * When set, the encoder uses this pubkey for the completion p-tag instead of
+     * triggeringEvent.pubkey. This supports delegation chain routing where completions
+     * must route back to the immediate delegator, not the event that happened to
+     * trigger the current execution (e.g., a user responding to an ask).
+     *
+     * Resolved by createEventContext() (layer 3, in services/event-context/) from the
+     * ConversationStore's delegation chain. This avoids layer violations - neither
+     * AgentPublisher nor AgentEventEncoder (layer 2) can import ConversationStore (layer 3).
+     */
+    completionRecipientPubkey?: string;
 }
 
 // ============================================================================

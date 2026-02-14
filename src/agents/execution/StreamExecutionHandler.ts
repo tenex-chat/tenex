@@ -24,7 +24,7 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { AISdkTool } from "@/tools/types";
-import { createEventContext } from "@/utils/event-context";
+import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { LanguageModel, ModelMessage } from "ai";
