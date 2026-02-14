@@ -148,10 +148,27 @@ export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocume
 
 /**
  * Calculate relevance score from vector distance.
- * Converts distance to similarity score (0-1 range).
+ * Converts L2 (Euclidean) distance to similarity score (0-1 range).
+ *
+ * METRIC ASSUMPTION: This formula assumes L2 (Euclidean) distance metric.
+ * If LanceDB is configured to use a different metric (e.g., cosine similarity),
+ * this conversion would need adjustment:
+ *   - L2 distance: Use 1/(1+d) as implemented here
+ *   - Cosine similarity: Already in [0,1] or [-1,1], may need different mapping
+ *   - Cosine distance: Use 1-d for distances in [0,2] range
+ *
+ * OpenAI's text-embedding-3-large returns L2 distances typically in
+ * the ~1.2-1.8 range, NOT normalized [0,1]. The formula 1/(1+distance)
+ * properly handles this:
+ *   - distance = 0   → similarity = 1.0
+ *   - distance = 1   → similarity = 0.5
+ *   - distance = 1.5 → similarity = 0.4
+ *   - distance = 2   → similarity = 0.33
  */
 export function calculateRelevanceScore(distance: number | undefined): number {
     if (distance === undefined || distance === null) return 0;
-    // Closer distance = higher similarity
-    return Math.max(0, Math.min(1, 1 - distance));
+    if (!Number.isFinite(distance)) return 0;
+    if (distance < 0) return 0;
+    // Convert L2 distance to similarity: closer distance = higher similarity
+    return 1 / (1 + distance);
 }
