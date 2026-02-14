@@ -5,7 +5,7 @@ import { config } from "@/services/ConfigService";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import { z } from "zod";
@@ -388,6 +388,25 @@ function serializeConversation(
                 }
                 formattedLines.push(formatLine(relativeSeconds, from, targets, resultParts.join(" ")));
             }
+        } else if (entry.messageType === "delegation-marker") {
+            // Delegation markers: always shown (regardless of includeToolResults)
+            const marker = entry.delegationMarker;
+
+            // Validate required fields - skip gracefully if missing
+            if (!marker?.delegationConversationId || !marker?.recipientPubkey || !marker?.status) {
+                // Skip malformed delegation marker - don't crash, just omit from output
+                continue;
+            }
+
+            const shortConversationId = marker.delegationConversationId.slice(0, PREFIX_LENGTH);
+            const recipientName = pubkeyService.getNameSync(marker.recipientPubkey);
+
+            // Format: ✅/⚠️ Delegation <shortId> → <recipient> completed/aborted
+            const emoji = marker.status === "completed" ? "✅" : "⚠️";
+            const statusText = marker.status === "completed" ? "completed" : "aborted";
+            const content = `${emoji} Delegation ${shortConversationId} → ${recipientName} ${statusText}`;
+
+            formattedLines.push(formatLine(relativeSeconds, from, targets, content));
         }
     }
 
