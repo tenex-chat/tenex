@@ -232,8 +232,9 @@ export class AgentPublisher {
 
     /**
      * Publish an ask event using the multi-question format.
+     * Returns the published NDKEvent so callers can create a ConversationStore.
      */
-    async ask(config: AskConfig, context: EventContext): Promise<string> {
+    async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
@@ -285,7 +286,7 @@ export class AgentPublisher {
         // Register with PendingDelegationsRegistry for q-tag correlation
         PendingDelegationsRegistry.register(this.agent.pubkey, enhancedContext.conversationId, event.id);
 
-        return event.id;
+        return event;
     }
 
     /**
