@@ -3,7 +3,7 @@ import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
-import { PubkeyService } from "@/services/PubkeyService";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
@@ -524,7 +524,7 @@ export class AgentEventEncoder {
      *
      * Event structure:
      * - kind: 1 (text note)
-     * - content: Review request message with human-readable names
+     * - content: Review request message with human-readable names (pre-resolved by caller)
      * - tags:
      *   - ["p", targetPubkey] - The intervention agent to notify
      *   - ["context", "intervention-review"] - Context marker
@@ -534,19 +534,17 @@ export class AgentEventEncoder {
      * Note: This method does NOT call addStandardTags() since intervention events
      * are not part of an agent execution context. However, the project tag is
      * added internally via aTagProject() for proper project association.
+     *
+     * Names (userName, agentName) are pre-resolved by the caller (InterventionPublisher)
+     * to avoid layer violations - AgentEventEncoder (layer 2) cannot import PubkeyService (layer 3).
      */
     encodeInterventionReview(intent: InterventionReviewIntent): NDKEvent {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.Text; // kind:1
 
-        const shortConversationId = intent.conversationId.substring(0, 12);
+        const shortConversationId = shortenConversationId(intent.conversationId);
 
-        // Resolve human-readable names using PubkeyService
-        const pubkeyService = PubkeyService.getInstance();
-        const userName = pubkeyService.getNameSync(intent.userPubkey);
-        const agentName = pubkeyService.getNameSync(intent.agentPubkey);
-
-        event.content = `Conversation ${shortConversationId} has completed and ${userName} hasn't responded. ${agentName} finished their work. Please review and decide if action is needed.`;
+        event.content = `Conversation ${shortConversationId} has completed and ${intent.userName} hasn't responded. ${intent.agentName} finished their work. Please review and decide if action is needed.`;
 
         // Target intervention agent
         event.tag(["p", intent.targetPubkey]);
@@ -563,8 +561,8 @@ export class AgentEventEncoder {
         logger.debug("Encoded intervention review event", {
             targetPubkey: intent.targetPubkey.substring(0, 8),
             conversationId: shortConversationId,
-            userName,
-            agentName,
+            userName: intent.userName,
+            agentName: intent.agentName,
         });
 
         return event;

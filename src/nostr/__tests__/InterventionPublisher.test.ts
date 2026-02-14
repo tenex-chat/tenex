@@ -7,10 +7,13 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  * Verifies:
  * - Event has correct kind (1)
  * - Event has correct tags (p, e, context, a)
- * - Event content is properly formatted with human-readable names via PubkeyService.getNameSync()
+ * - Event content is properly formatted with human-readable names
  * - Project a-tag is included (via AgentEventEncoder.aTagProject)
  * - Trace context is injected
- * - Fallback to truncated pubkey when name resolution fails (cache miss)
+ * - Names are passed pre-resolved from InterventionService (to avoid circular dependencies)
+ *
+ * Note: Name resolution happens in InterventionService (services layer), not InterventionPublisher
+ * (nostr layer), to avoid circular dependencies with PubkeyService.
  */
 
 // Mock dependencies before importing - must be comprehensive to avoid test-setup issues
@@ -173,8 +176,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -186,8 +189,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -201,8 +204,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -216,8 +219,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -231,8 +234,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -245,8 +248,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -259,8 +262,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -273,8 +276,8 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
@@ -284,77 +287,40 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
         expect(aTag?.[1]).toBe("31933:projectpubkey:test-project");
     });
 
-    it("should format content with human-readable names from PubkeyService", () => {
-        // Clear any previous calls
-        mockPubkeyService.getNameSync.mockClear();
-
+    it("should format content with pre-resolved human-readable names", () => {
+        // Names are pre-resolved by InterventionPublisher (layer 3), not by the encoder (layer 2)
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "user-pubkey-123456789012345678901234567890123456",
-            agentPubkey: "agent-pubkey-123456789012345678901234567890123456",
+            userName: "Pablo",
+            agentName: "Architect-Orchestrator",
         };
 
         const event = encoder.encodeInterventionReview(intent);
 
-        // Verify getNameSync was called for both user and agent pubkeys
-        expect(mockPubkeyService.getNameSync).toHaveBeenCalledTimes(2);
-        expect(mockPubkeyService.getNameSync).toHaveBeenCalledWith(
-            "user-pubkey-123456789012345678901234567890123456"
-        );
-        expect(mockPubkeyService.getNameSync).toHaveBeenCalledWith(
-            "agent-pubkey-123456789012345678901234567890123456"
-        );
-
-        // Verify content uses human-readable names from PubkeyService
+        // Verify content uses the pre-resolved names from the intent
         expect(event.content).toContain("conv-id-1234"); // First 12 chars of conversation ID
-        expect(event.content).toContain("Pablo"); // Resolved user name
-        expect(event.content).toContain("Architect-Orchestrator"); // Resolved agent name
+        expect(event.content).toContain("Pablo"); // Pre-resolved user name
+        expect(event.content).toContain("Architect-Orchestrator"); // Pre-resolved agent name
         expect(event.content).toContain("Please review and decide if action is needed");
-        // Should NOT contain raw pubkey prefixes
-        expect(event.content).not.toContain("user-pub");
-        expect(event.content).not.toContain("agent-pu");
     });
 
-    it("should use truncated pubkey when getNameSync returns shortened pubkey (cache miss)", () => {
-        // Simulate PubkeyService.getNameSync behavior on cache miss:
-        // it returns pubkey.substring(0, 12) when no cached profile exists
-        const originalGetNameSync = mockPubkeyService.getNameSync;
-        mockPubkeyService.getNameSync = mock((pubkey: string) => {
-            // Simulate cache miss - return truncated pubkey (matching real PubkeyService behavior)
-            if (pubkey.startsWith("uncached-usr")) {
-                return pubkey.substring(0, 12); // "uncached-usr"
-            }
-            if (pubkey.startsWith("uncached-agt")) {
-                return pubkey.substring(0, 12); // "uncached-agt"
-            }
-            return originalGetNameSync(pubkey);
-        });
-
+    it("should use truncated pubkey when name is pre-resolved as shortened pubkey (cache miss scenario)", () => {
+        // When PubkeyService has a cache miss, the caller (InterventionPublisher) passes
+        // the truncated pubkey as the name. The encoder just uses whatever names are passed.
         const intent: InterventionReviewIntent = {
             targetPubkey: "target-pubkey-123456789012345678901234567890123456",
             conversationId: "conv-id-123456789012345678901234567890123456789012",
-            userPubkey: "uncached-usr-123456789012345678901234567890123456",
-            agentPubkey: "uncached-agt-123456789012345678901234567890123456",
+            userName: "uncached-usr", // Pre-resolved as truncated pubkey (cache miss)
+            agentName: "uncached-agt", // Pre-resolved as truncated pubkey (cache miss)
         };
 
         const event = encoder.encodeInterventionReview(intent);
 
-        // Verify getNameSync was called
-        expect(mockPubkeyService.getNameSync).toHaveBeenCalledWith(
-            "uncached-usr-123456789012345678901234567890123456"
-        );
-        expect(mockPubkeyService.getNameSync).toHaveBeenCalledWith(
-            "uncached-agt-123456789012345678901234567890123456"
-        );
-
-        // When cache miss, PubkeyService returns truncated pubkey (first 12 chars)
+        // When cache miss, the pre-resolved name is the truncated pubkey (first 12 chars)
         expect(event.content).toContain("uncached-usr"); // Truncated user pubkey
         expect(event.content).toContain("uncached-agt"); // Truncated agent pubkey
         expect(event.content).toContain("Please review and decide if action is needed");
-
-        // Restore original mock
-        mockPubkeyService.getNameSync = originalGetNameSync;
     });
 });
 
@@ -395,8 +361,8 @@ describe("InterventionPublisher", () => {
         await publisher.publishReviewRequest(
             "target-pubkey-123456789012345678901234567890123456",
             "conv-id-123456789012345678901234567890123456789012",
-            "user-pubkey-123456789012345678901234567890123456",
-            "agent-pubkey-123456789012345678901234567890123456"
+            "Pablo", // Pre-resolved user name
+            "Architect-Orchestrator" // Pre-resolved agent name
         );
 
         expect(capturedEvents.length).toBe(1);
@@ -419,8 +385,8 @@ describe("InterventionPublisher", () => {
         await publisher.publishReviewRequest(
             "target-pubkey-123456789012345678901234567890123456",
             "conv-id-123456789012345678901234567890123456789012",
-            "user-pubkey-123456789012345678901234567890123456",
-            "agent-pubkey-123456789012345678901234567890123456"
+            "Pablo", // Pre-resolved user name
+            "Architect-Orchestrator" // Pre-resolved agent name
         );
 
         expect(capturedEvents.length).toBe(1);
@@ -439,8 +405,8 @@ describe("InterventionPublisher", () => {
         const eventId = await publisher.publishReviewRequest(
             "target-pubkey-123456789012345678901234567890123456",
             "conv-id-123456789012345678901234567890123456789012",
-            "user-pubkey-123456789012345678901234567890123456",
-            "agent-pubkey-123456789012345678901234567890123456"
+            "Pablo", // Pre-resolved user name
+            "Architect-Orchestrator" // Pre-resolved agent name
         );
 
         expect(eventId).toBe("signed-event-id-12345");
@@ -457,5 +423,26 @@ describe("InterventionPublisher", () => {
                 "agent"
             )
         ).rejects.toThrow("InterventionPublisher not initialized");
+    });
+
+    it("should use pre-resolved names in event content (names resolved by caller)", async () => {
+        // Names are now pre-resolved by the CALLER (InterventionService), not by InterventionPublisher.
+        // This avoids circular dependencies: InterventionPublisher (nostr layer) cannot import
+        // PubkeyService (services layer).
+
+        await publisher.publishReviewRequest(
+            "target-pubkey-123456789012345678901234567890123456",
+            "conv-id-123456789012345678901234567890123456789012",
+            "Pablo", // Pre-resolved user name (passed directly)
+            "Architect-Orchestrator" // Pre-resolved agent name (passed directly)
+        );
+
+        // Verify the event content uses the pre-resolved names passed as parameters
+        expect(capturedEvents.length).toBe(1);
+        const event = capturedEvents[0];
+        expect(event.content).toContain("Pablo"); // Pre-resolved user name
+        expect(event.content).toContain("Architect-Orchestrator"); // Pre-resolved agent name
+        expect(event.content).toContain("conv-id-1234"); // Shortened conversation ID
+        expect(event.content).toContain("Please review and decide if action is needed");
     });
 });

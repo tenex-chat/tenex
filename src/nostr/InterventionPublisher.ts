@@ -1,4 +1,5 @@
 import { config } from "@/services/ConfigService";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -53,17 +54,21 @@ export class InterventionPublisher {
      * - Trace context injection for observability
      * - Standard intervention-specific tags
      *
+     * Names are pre-resolved by the caller (InterventionService) before being
+     * passed to this method. This avoids circular dependencies since
+     * InterventionPublisher (nostr layer) cannot import PubkeyService (services layer).
+     *
      * @param humanReplicaPubkey - Pubkey of the intervention agent to notify
      * @param conversationId - ID of the original conversation
-     * @param userPubkey - Pubkey of the user who hasn't responded
-     * @param agentPubkey - Pubkey of the agent that completed work
+     * @param userName - Human-readable name of the user who hasn't responded (pre-resolved)
+     * @param agentName - Human-readable name of the agent that completed work (pre-resolved)
      * @returns The published event ID
      */
     async publishReviewRequest(
         humanReplicaPubkey: string,
         conversationId: string,
-        userPubkey: string,
-        agentPubkey: string
+        userName: string,
+        agentName: string
     ): Promise<string> {
         if (!this.signer) {
             throw new Error("InterventionPublisher not initialized");
@@ -72,8 +77,8 @@ export class InterventionPublisher {
         const intent: InterventionReviewIntent = {
             targetPubkey: humanReplicaPubkey,
             conversationId,
-            userPubkey,
-            agentPubkey,
+            userName,
+            agentName,
         };
 
         // Use encoder to create properly tagged event
@@ -85,7 +90,7 @@ export class InterventionPublisher {
         // Sign with backend signer
         await event.sign(this.signer);
 
-        const shortConversationId = conversationId.substring(0, 12);
+        const shortConversationId = shortenConversationId(conversationId);
 
         try {
             const relaySet = await event.publish();
