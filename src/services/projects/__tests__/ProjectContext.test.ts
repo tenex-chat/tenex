@@ -2,12 +2,17 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 
+// Track logger warnings for testing
+let loggerWarnings: Array<{ message: string; data: any }> = [];
+
 // Mock modules before importing ProjectContext
 mock.module("@/utils/logger", () => ({
     logger: {
         info: () => {},
         debug: () => {},
-        warn: () => {},
+        warn: (message: string, data: any) => {
+            loggerWarnings.push({ message, data });
+        },
         error: () => {},
     },
 }));
@@ -17,7 +22,7 @@ mock.module("@/services/reports/articleUtils", () => ({
 }));
 
 // Import after mocking
-import { ProjectContext } from "../ProjectContext";
+import { ProjectContext, resolveProjectManager } from "../ProjectContext";
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 
 describe("ProjectContext", () => {
@@ -25,6 +30,9 @@ describe("ProjectContext", () => {
     let mockAgentRegistry: AgentRegistry;
 
     beforeEach(() => {
+        // Reset logger tracking
+        loggerWarnings = [];
+
         // Create mock project
         mockProject = {
             id: "test-project-id",
@@ -195,6 +203,245 @@ describe("ProjectContext", () => {
             expect(receivedAgents[0]).toBe(agents[0]);
             expect(receivedAgents[1]).toBe(agents[1]);
             expect(receivedAgents[2]).toBe(agents[2]);
+        });
+    });
+
+    describe("resolveProjectManager", () => {
+        /**
+         * Helper to create a minimal mock agent
+         */
+        function createMockAgent(overrides: Partial<AgentInstance> & { slug: string }): AgentInstance {
+            return {
+                name: overrides.name || `Agent ${overrides.slug}`,
+                slug: overrides.slug,
+                pubkey: overrides.pubkey || `pubkey-${overrides.slug}`,
+                eventId: overrides.eventId || `event-${overrides.slug}`,
+                role: overrides.role || "assistant",
+                llmConfig: "test-config",
+                tools: [],
+                signer: {} as any,
+                pmOverrides: overrides.pmOverrides,
+                isPM: overrides.isPM,
+                createMetadataStore: () => ({} as any),
+                createLLMService: () => ({} as any),
+                sign: async () => {},
+            };
+        }
+
+        it("should prioritize global isPM flag over other designations", () => {
+            // Agent with isPM=true should win even if another has pmOverrides
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                isPM: true, // Global PM designation via kind 24020
+            });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                pmOverrides: { "test-project": true }, // Local PM override
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBe(agent1);
+        });
+
+        it("should fall back to pmOverrides when no global isPM flag exists", () => {
+            const agent1 = createMockAgent({ slug: "agent-1" });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                pmOverrides: { "test-project": true },
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBe(agent2);
+        });
+
+        it("should fall back to project tag designation when no overrides exist", () => {
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                eventId: "event-id-1",
+            });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                eventId: "event-id-2",
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            // Project with explicit PM designation in tags
+            const project = {
+                tags: [["agent", "event-id-2", "pm"]], // agent-2 designated as PM
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBe(agent2);
+        });
+
+        it("should return first agent when no PM designation exists", () => {
+            const agent1 = createMockAgent({ slug: "agent-1" });
+            const agent2 = createMockAgent({ slug: "agent-2" });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            // Project with agent tags but no PM role
+            const project = {
+                tags: [["agent", "event-agent-1"]],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // First agent from tags should be returned
+            expect(pm).toBe(agent1);
+        });
+
+        it("should handle isPM=false as no designation", () => {
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                isPM: false, // Explicitly false
+            });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                pmOverrides: { "test-project": true },
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Should fall through to pmOverrides since isPM is false
+            expect(pm).toBe(agent2);
+        });
+
+        it("should return undefined when no agents exist", () => {
+            const agents = new Map<string, AgentInstance>();
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBeUndefined();
+        });
+
+        it("should log warning when multiple agents have isPM=true and use first one", () => {
+            // Multiple agents with isPM=true - this is a configuration issue
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                name: "First PM Agent",
+                isPM: true,
+            });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                name: "Second PM Agent",
+                isPM: true,
+            });
+            const agent3 = createMockAgent({
+                slug: "agent-3",
+                name: "Third PM Agent",
+                isPM: true,
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+                ["agent-3", agent3],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Should return first agent found
+            expect(pm).toBe(agent1);
+
+            // Should have logged a warning about multiple PMs
+            const multiPMWarning = loggerWarnings.find(
+                (w) => w.message.includes("Multiple agents have global PM designation")
+            );
+            expect(multiPMWarning).toBeDefined();
+            expect(multiPMWarning?.data.pmAgents.length).toBe(3);
+            expect(multiPMWarning?.data.selectedAgent).toBe("agent-1");
+        });
+
+        it("should not log warning when only one agent has isPM=true", () => {
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                isPM: true,
+            });
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                isPM: false,
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBe(agent1);
+
+            // Should NOT have logged a multiple PM warning
+            const multiPMWarning = loggerWarnings.find(
+                (w) => w.message.includes("Multiple agents have global PM designation")
+            );
+            expect(multiPMWarning).toBeUndefined();
         });
     });
 });

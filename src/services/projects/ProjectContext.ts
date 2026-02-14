@@ -14,10 +14,11 @@ import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
  * Resolve the Project Manager for a project.
  *
  * Priority order:
- * 1. Local PM override for this specific project (highest priority)
- * 2. Explicit PM designation in 31933 project tags (role="pm")
- * 3. First agent from project tags
- * 4. First agent in registry (fallback for projects with no agent tags)
+ * 1. Global PM designation via kind 24020 event ["pm"] tag (highest priority)
+ * 2. Local PM override for this specific project (pmOverrides)
+ * 3. Explicit PM designation in 31933 project tags (role="pm")
+ * 4. First agent from project tags
+ * 5. First agent in registry (fallback for projects with no agent tags)
  *
  * @param project - The NDKProject event
  * @param agents - Map of agent slug to AgentInstance
@@ -30,7 +31,32 @@ export function resolveProjectManager(
     agents: Map<string, AgentInstance>,
     projectDTag: string | undefined
 ): AgentInstance | undefined {
-    // Step 1: Check for local PM override for this specific project (highest priority)
+    // Step 1: Check for global PM designation via kind 24020 ["pm"] tag (highest priority)
+    // Collect all agents with isPM=true to detect conflicts
+    const globalPMAgents: AgentInstance[] = [];
+    for (const agent of agents.values()) {
+        if (agent.isPM === true) {
+            globalPMAgents.push(agent);
+        }
+    }
+
+    if (globalPMAgents.length > 0) {
+        if (globalPMAgents.length > 1) {
+            // Warn about multiple global PM agents - this is a configuration issue
+            logger.warn("Multiple agents have global PM designation (isPM=true). Using first found.", {
+                pmAgents: globalPMAgents.map((a) => ({ slug: a.slug, name: a.name })),
+                selectedAgent: globalPMAgents[0].slug,
+            });
+        }
+
+        logger.info("Found global PM designation via kind 24020 event", {
+            agentName: globalPMAgents[0].name,
+            agentSlug: globalPMAgents[0].slug,
+        });
+        return globalPMAgents[0];
+    }
+
+    // Step 2: Check for local PM override for this specific project
     if (projectDTag) {
         for (const agent of agents.values()) {
             if (agent.pmOverrides?.[projectDTag] === true) {
@@ -44,7 +70,7 @@ export function resolveProjectManager(
         }
     }
 
-    // Step 2: Check for explicit "pm" role in project tags
+    // Step 3: Check for explicit "pm" role in project tags
     const pmAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
     );
@@ -64,7 +90,7 @@ export function resolveProjectManager(
         );
     }
 
-    // Step 3: Fallback to first agent from project tags
+    // Step 4: Fallback to first agent from project tags
     const firstAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "agent" && tag[1]
     );
@@ -84,7 +110,7 @@ export function resolveProjectManager(
         );
     }
 
-    // Step 4: No agent tags in project, use first from registry if any exist
+    // Step 5: No agent tags in project, use first from registry if any exist
     if (agents.size > 0) {
         const firstAgent = agents.values().next().value;
         if (firstAgent) {
