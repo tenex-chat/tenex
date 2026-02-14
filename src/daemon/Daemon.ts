@@ -30,6 +30,8 @@ import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult } from "@/services/intervention";
+import { RALRegistry } from "@/services/ral/RALRegistry";
+import { RestartState } from "./RestartState";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -67,6 +69,18 @@ export class Daemon {
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
 
+    // Graceful restart state
+    private pendingRestart = false;
+    private restartInProgress = false;
+    private restartState: RestartState | null = null;
+    private supervisedMode = false;
+
+    // Projects pending auto-boot from restart state (populated by loadRestartState, consumed by handleProjectEvent)
+    private pendingRestartBootProjects: Set<string> = new Set();
+
+    // Shutdown function (set by setupShutdownHandlers, used by triggerGracefulRestart)
+    private shutdownFn: ((exitCode?: number, isGracefulRestart?: boolean) => Promise<void>) | null = null;
+
     constructor() {
         this.routingLogger = new EventRoutingLogger();
     }
@@ -78,6 +92,32 @@ export class Daemon {
     setAutoBootPatterns(patterns: string[]): void {
         this.autoBootPatterns = patterns;
         logger.info("Auto-boot patterns configured", { patterns });
+    }
+
+    /**
+     * Enable supervised mode for graceful restart support.
+     * In supervised mode:
+     * - SIGHUP triggers deferred restart instead of immediate shutdown
+     * - Daemon waits for all RALs to complete before exiting
+     * - Booted projects are persisted for auto-boot on restart
+     */
+    setSupervisedMode(supervised: boolean): void {
+        this.supervisedMode = supervised;
+        logger.info("Supervised mode configured", { supervised });
+    }
+
+    /**
+     * Check if daemon is in supervised mode
+     */
+    isSupervisedMode(): boolean {
+        return this.supervisedMode;
+    }
+
+    /**
+     * Check if a restart is pending
+     */
+    isPendingRestart(): boolean {
+        return this.pendingRestart;
     }
 
     /**
@@ -172,7 +212,16 @@ export class Daemon {
 
             await interventionService.initialize();
 
-            // 13. Setup graceful shutdown
+            // 13. Initialize restart state manager
+            logger.debug("Initializing restart state manager");
+            this.restartState = new RestartState(this.daemonDir);
+
+            // 14. Setup RAL completion listener for graceful restart
+            if (this.supervisedMode) {
+                this.setupRALCompletionListener();
+            }
+
+            // 15. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -779,6 +828,8 @@ export class Daemon {
                 try {
                     runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
                     await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                    // Clear any pending restart boot entry since we've successfully started
+                    this.pendingRestartBootProjects.delete(projectId);
                     logger.info("Auto-booted project successfully", { projectId, projectTitle });
                 } catch (error) {
                     logger.error("Failed to auto-boot project", {
@@ -786,6 +837,38 @@ export class Daemon {
                         projectTitle,
                         error: error instanceof Error ? error.message : String(error),
                     });
+                }
+            }
+        }
+
+        // Auto-boot projects from restart state when they are discovered or retried
+        // Drop the isNewProject guard: already-known projects that failed to boot in loadRestartState
+        // need another chance when their project event is re-processed
+        if (!runtime && this.pendingRestartBootProjects.has(projectId)) {
+            if (this.runtimeLifecycle) {
+                const projectTitle = project.tagValue("title") || event.tags.find((t) => t[0] === "d")?.[1] || "untitled";
+                logger.info("Auto-booting project from restart state (deferred)", {
+                    projectId,
+                    projectTitle,
+                });
+
+                try {
+                    runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
+                    await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                    this.pendingRestartBootProjects.delete(projectId);
+                    logger.info("Auto-booted project from restart state (deferred) successfully", {
+                        projectId,
+                        projectTitle,
+                        remainingPending: this.pendingRestartBootProjects.size,
+                    });
+                } catch (error) {
+                    logger.error("Failed to auto-boot project from restart state (deferred)", {
+                        projectId,
+                        projectTitle,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                    // Remove from pending to avoid repeated failures
+                    this.pendingRestartBootProjects.delete(projectId);
                 }
             }
         }
@@ -1033,15 +1116,32 @@ export class Daemon {
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
-        const shutdown = async (): Promise<void> => {
-            console.log("\nShutting down gracefully...");
+        /**
+         * Perform graceful shutdown of the daemon.
+         * @param exitCode - Exit code to use (default: 0)
+         * @param isGracefulRestart - If true, persist restart state before shutdown
+         */
+        const shutdown = async (exitCode: number = 0, isGracefulRestart: boolean = false): Promise<void> => {
+            if (isGracefulRestart) {
+                console.log("\n[Daemon] Triggering graceful restart...");
+            } else {
+                console.log("\nShutting down gracefully...");
+            }
+
             if (!this.isRunning) {
-                process.exit(0);
+                process.exit(exitCode);
             }
 
             this.isRunning = false;
 
             try {
+                // Persist booted projects for auto-boot on restart (only for graceful restart)
+                if (isGracefulRestart && this.restartState && this.runtimeLifecycle) {
+                    const bootedProjects = this.runtimeLifecycle.getActiveProjectIds();
+                    await this.restartState.save(bootedProjects);
+                    console.log(`[Daemon] Saved ${bootedProjects.length} booted project(s) for restart`);
+                }
+
                 if (this.streamTransport) {
                     process.stdout.write("Stopping stream transport...");
                     await this.streamTransport.stop();
@@ -1097,25 +1197,66 @@ export class Daemon {
                 await shutdownTelemetry();
                 console.log(" done");
 
-                console.log("Shutdown complete.");
-                process.exit(0);
+                if (isGracefulRestart) {
+                    console.log("[Daemon] Graceful restart complete - exiting with code 0");
+                } else {
+                    console.log("Shutdown complete.");
+                }
+                process.exit(exitCode);
             } catch (error) {
                 logger.error("Error during shutdown", { error });
                 process.exit(1);
             }
         };
 
+        // Store shutdown function for use by triggerGracefulRestart
+        this.shutdownFn = shutdown;
+
+        // SIGHUP handler - deferred restart in supervised mode, immediate shutdown otherwise
+        const handleSighup = async (): Promise<void> => {
+            if (this.supervisedMode) {
+                // Ignore duplicate SIGHUP if restart is already pending or in progress
+                if (this.pendingRestart || this.restartInProgress) {
+                    logger.info("[Daemon] SIGHUP received but restart already pending/in progress, ignoring");
+                    console.log("Restart already pending, ignoring duplicate SIGHUP");
+                    return;
+                }
+
+                this.pendingRestart = true;
+                const activeRalCount = RALRegistry.getInstance().getTotalActiveCount();
+
+                console.log("\n[Daemon] SIGHUP received - initiating deferred restart");
+                logger.info("[Daemon] SIGHUP received - initiating deferred restart", {
+                    activeRalCount,
+                });
+
+                // If no active RALs, trigger restart immediately
+                if (activeRalCount === 0) {
+                    console.log("[Daemon] No active RALs, triggering immediate graceful restart");
+                    await this.triggerGracefulRestart();
+                } else {
+                    console.log(`[Daemon] Waiting for ${activeRalCount} active RAL(s) to complete before restart...`);
+                    // The RAL completion listener will trigger restart when count hits 0
+                }
+            } else {
+                // Non-supervised mode: immediate shutdown
+                shutdown();
+            }
+        };
+
         process.on("SIGTERM", () => shutdown());
         process.on("SIGINT", () => shutdown());
-        process.on("SIGHUP", () => shutdown());
+        process.on("SIGHUP", () => handleSighup());
 
-        // Handle uncaught exceptions
+        // Handle uncaught exceptions - exit with code 1 to trigger crash counter
         process.on("uncaughtException", (error) => {
             logger.error("Uncaught exception", {
                 error: error.message,
                 stack: error.stack,
             });
-            shutdown();
+            // Use exit code 1 to indicate a crash, not a graceful restart
+            // This ensures the wrapper's crash counter is incremented
+            shutdown(1);
         });
 
         process.on("unhandledRejection", (reason, promise) => {
@@ -1129,10 +1270,143 @@ export class Daemon {
     }
 
     /**
+     * Setup listener for RAL completion events to trigger deferred restart.
+     * Called when supervised mode is enabled.
+     */
+    private setupRALCompletionListener(): void {
+        const ralRegistry = RALRegistry.getInstance();
+
+        // Subscribe to RAL updates
+        ralRegistry.on("updated", (_projectId: string, _conversationId: string) => {
+            // Only check if restart is pending
+            if (!this.pendingRestart) {
+                return;
+            }
+
+            const activeRalCount = ralRegistry.getTotalActiveCount();
+            logger.debug("[Daemon] RAL update received during pending restart", {
+                activeRalCount,
+            });
+
+            // When count hits 0, trigger graceful restart
+            if (activeRalCount === 0) {
+                console.log("[Daemon] All RALs completed, triggering graceful restart");
+                this.triggerGracefulRestart().catch((error) => {
+                    logger.error("[Daemon] Failed to trigger graceful restart", {
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                    process.exit(1);
+                });
+            }
+        });
+
+        logger.debug("[Daemon] RAL completion listener registered for supervised mode");
+    }
+
+    /**
+     * Trigger graceful restart: persist state and exit cleanly.
+     * The wrapper process will respawn the daemon.
+     */
+    private async triggerGracefulRestart(): Promise<void> {
+        // Guard against concurrent calls (race condition from multiple RAL updates)
+        if (this.restartInProgress) {
+            logger.debug("[Daemon] Graceful restart already in progress, ignoring duplicate trigger");
+            return;
+        }
+        this.restartInProgress = true;
+
+        // Use the unified shutdown function with graceful restart flag
+        if (this.shutdownFn) {
+            await this.shutdownFn(0, true);
+        } else {
+            // Fallback if shutdown function not yet initialized (shouldn't happen)
+            logger.error("[Daemon] Shutdown function not initialized, exiting with code 0");
+            process.exit(0);
+        }
+    }
+
+    /**
      * Add a custom shutdown handler
      */
     addShutdownHandler(handler: () => Promise<void>): void {
         this.shutdownHandlers.push(handler);
+    }
+
+    /**
+     * Load restart state and queue previously booted projects for auto-boot.
+     * Called after daemon is fully initialized to restore state from a graceful restart.
+     *
+     * Note: Projects may not be discovered yet via SubscriptionManager, so we store
+     * the project IDs and attempt to boot them when they are discovered in handleProjectEvent.
+     */
+    async loadRestartState(): Promise<void> {
+        if (!this.restartState) {
+            return;
+        }
+
+        const state = await this.restartState.load();
+        if (!state) {
+            return;
+        }
+
+        console.log(`[Daemon] Found restart state from ${new Date(state.requestedAt).toISOString()}`);
+        console.log(`[Daemon] Queuing ${state.bootedProjects.length} project(s) for auto-boot from restart state`);
+
+        // Store projects to boot - they will be booted when discovered via handleProjectEvent
+        this.pendingRestartBootProjects = new Set(state.bootedProjects);
+
+        // Attempt to boot any projects that are already known
+        // (This handles the case where some projects were discovered before loadRestartState was called)
+        let bootedCount = 0;
+
+        for (const projectId of state.bootedProjects) {
+            const project = this.knownProjects.get(projectId);
+            if (!project) {
+                // Project not yet discovered - will be booted when discovered
+                logger.debug("[Daemon] Project from restart state not yet discovered, deferring boot", {
+                    projectId: projectId.substring(0, 20),
+                });
+                continue;
+            }
+
+            if (!this.runtimeLifecycle) {
+                logger.error("[Daemon] RuntimeLifecycle not initialized during restart state loading");
+                break;
+            }
+
+            // Already running? Skip
+            if (this.runtimeLifecycle.getRuntime(projectId)) {
+                this.pendingRestartBootProjects.delete(projectId);
+                continue;
+            }
+
+            try {
+                const runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
+                await this.updateSubscriptionWithProjectAgents(projectId, runtime);
+                this.pendingRestartBootProjects.delete(projectId);
+                bootedCount++;
+                logger.info("[Daemon] Auto-booted project from restart state", {
+                    projectId: projectId.substring(0, 20),
+                });
+            } catch (error) {
+                logger.error("[Daemon] Failed to auto-boot project from restart state", {
+                    projectId: projectId.substring(0, 20),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                // Keep in pending set - will retry when project event is re-processed in handleProjectEvent
+            }
+        }
+
+        // Clear restart state file now that we've loaded it
+        // (Pending boots are tracked in memory via pendingRestartBootProjects)
+        await this.restartState.clear();
+
+        const pendingCount = this.pendingRestartBootProjects.size;
+        if (pendingCount > 0) {
+            console.log(`[Daemon] Restart state loaded: ${bootedCount} booted immediately, ${pendingCount} pending discovery`);
+        } else {
+            console.log(`[Daemon] Restart state processed: ${bootedCount} booted`);
+        }
     }
 
     /**

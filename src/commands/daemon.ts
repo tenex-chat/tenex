@@ -20,6 +20,7 @@ export const daemonCommand = new Command("daemon")
     .option("-b, --boot <pattern>", "Auto-boot projects whose d-tag contains this pattern (can be used multiple times)", (value: string, prev: string[]) => {
         return prev ? [...prev, value] : [value];
     }, [])
+    .option("--supervised", "Run in supervised mode (enables graceful restart via SIGHUP)")
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
@@ -84,6 +85,12 @@ export const daemonCommand = new Command("daemon")
         console.log(chalk.gray("🚀 Starting daemon..."));
         const daemon = getDaemon();
 
+        // Set supervised mode if enabled
+        if (options.supervised) {
+            daemon.setSupervisedMode(true);
+            console.log(chalk.yellow("🔄 Supervised mode enabled (SIGHUP triggers graceful restart)"));
+        }
+
         // Set boot patterns if provided
         const bootPatterns: string[] = options.boot || [];
         if (bootPatterns.length > 0) {
@@ -112,6 +119,11 @@ export const daemonCommand = new Command("daemon")
             // Start the daemon
             await daemon.start();
             console.log(chalk.gray("✓ Daemon core started"));
+
+            // Load restart state if this is a restart (auto-boot previously booted projects)
+            if (options.supervised) {
+                await daemon.loadRestartState();
+            }
 
             // Register project callbacks with scheduler service (dependency injection)
             // This enables Layer 3 (SchedulerService) to use Layer 4 (Daemon) functionality
