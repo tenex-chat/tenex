@@ -88,7 +88,7 @@ let mockConversationData: {
     metadata?: Record<string, unknown>;
     executionTime?: unknown;
     messages: Array<{
-        messageType: "text" | "tool-call" | "tool-result";
+        messageType: "text" | "tool-call" | "tool-result" | "delegation-marker";
         content: string;
         toolData?: unknown;
         pubkey: string;
@@ -96,6 +96,14 @@ let mockConversationData: {
         timestamp?: number;  // Optional to test missing timestamp scenarios
         ral?: unknown;
         targetedPubkeys?: string[];
+        delegationMarker?: {
+            delegationConversationId: string;
+            recipientPubkey: string;
+            parentConversationId: string;
+            completedAt: number;
+            status: "completed" | "aborted";
+            abortReason?: string;
+        };
     }>;
 } | null = null;
 
@@ -1800,6 +1808,479 @@ describe("conversation_get Tool", () => {
 
             expect(result.success).toBe(true);
             expect((result.conversation as any).messages).toContain("Hello");
+        });
+    });
+
+    describe("Delegation Markers", () => {
+        it("should display completed delegation markers with checkmark emoji", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "I'll delegate this task",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000010,
+                        delegationMarker: {
+                            delegationConversationId: "b12f529a2df8abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000010000, // ms
+                            status: "completed",
+                        },
+                    },
+                    {
+                        messageType: "text",
+                        content: "Task completed successfully",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000015,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(3);
+            expect(lines[0]).toBe("[+0] [@claude-code] I'll delegate this task");
+            // Delegation marker: should show ✅, short ID (12 chars), recipient name, and "completed"
+            expect(lines[1]).toBe("[+10] [@claude-code] ✅ Delegation b12f529a2df8 → architect-orchestrator completed");
+            expect(lines[2]).toBe("[+15] [@claude-code] Task completed successfully");
+        });
+
+        it("should display aborted delegation markers with warning emoji", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Starting delegation",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000010,
+                        delegationMarker: {
+                            delegationConversationId: "c45f789b3ef9abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-debugger",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000010000, // ms
+                            status: "aborted",
+                            abortReason: "User cancelled",
+                        },
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toBe("[+0] [@claude-code] Starting delegation");
+            // Aborted delegation: should show ⚠️ and "aborted"
+            expect(lines[1]).toBe("[+10] [@claude-code] ⚠️ Delegation c45f789b3ef9 → debugger aborted");
+        });
+
+        it("should display delegation markers regardless of includeToolResults setting", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                        delegationMarker: {
+                            delegationConversationId: "d56f890c4fa0abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+
+            // Test with includeToolResults=false (default)
+            const resultWithoutTools = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: false,
+            });
+
+            expect((resultWithoutTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
+
+            // Test with includeToolResults=true
+            const resultWithTools = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: true,
+            });
+
+            expect((resultWithTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
+        });
+
+        it("should handle delegation markers mixed with tool calls", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "delegate", input: { recipient: "architect" } }],
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                        ral: {},
+                    },
+                    {
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "Delegation started" }],
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000001,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010,
+                        delegationMarker: {
+                            delegationConversationId: "e67f901d5fb1abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000010000,
+                            status: "completed",
+                        },
+                    },
+                    {
+                        messageType: "text",
+                        content: "Done!",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "4444444444444444444444444444444444444444444444444444444444444444",
+                        timestamp: 1700000015,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+
+            // Without includeToolResults: should show delegation marker but not tool calls
+            const resultWithoutTools = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: false,
+            });
+
+            const linesWithoutTools = (resultWithoutTools.conversation as any).messages.split("\n");
+            expect(linesWithoutTools).toHaveLength(2); // delegation marker + text
+            expect(linesWithoutTools[0]).toContain("✅ Delegation e67f901d5fb1");
+            expect(linesWithoutTools[1]).toContain("Done!");
+
+            // With includeToolResults: should show both tool calls and delegation marker
+            const resultWithTools = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: true,
+            });
+
+            const linesWithTools = (resultWithTools.conversation as any).messages.split("\n");
+            expect(linesWithTools).toHaveLength(3); // merged tool call/result + delegation marker + text
+            expect(linesWithTools[0]).toContain("[tool-use delegate");
+            expect(linesWithTools[1]).toContain("✅ Delegation e67f901d5fb1");
+            expect(linesWithTools[2]).toContain("Done!");
+        });
+
+        it("should use truncated pubkey for unknown recipient agents", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                        delegationMarker: {
+                            delegationConversationId: "f78f012e6fc2abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "unknown-agent-pubkey-not-registered", // Not in mock registry
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000000000,
+                            status: "completed",
+                        },
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            const messages = (result.conversation as any).messages;
+            // Unknown agent should show truncated pubkey (first 12 chars)
+            expect(messages).toContain("→ unknown-agen completed");
+        });
+
+        it("should handle delegation marker without delegationMarker data gracefully", async () => {
+            // Edge case: delegation-marker type but missing delegationMarker field
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Before",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        // Note: delegationMarker field is missing
+                    },
+                    {
+                        messageType: "text",
+                        content: "After",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            // Should skip the malformed delegation marker and not crash
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should only have 2 lines (the text messages, skipping the malformed marker)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Before");
+            expect(lines[1]).toContain("After");
+        });
+
+        it("should skip delegation marker with missing delegationConversationId", async () => {
+            // Edge case: delegationMarker exists but is missing delegationConversationId
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Before",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        delegationMarker: {
+                            // Missing delegationConversationId
+                            delegationConversationId: "", // Empty string
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000005000,
+                            status: "completed",
+                        },
+                    },
+                    {
+                        messageType: "text",
+                        content: "After",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            // Should skip the malformed delegation marker and not crash
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should only have 2 lines (the text messages, skipping the marker with empty delegationConversationId)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Before");
+            expect(lines[1]).toContain("After");
+        });
+
+        it("should skip delegation marker with missing recipientPubkey", async () => {
+            // Edge case: delegationMarker exists but is missing recipientPubkey
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Before",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        delegationMarker: {
+                            delegationConversationId: "g89f123f7gd3abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "", // Empty string
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000005000,
+                            status: "completed",
+                        },
+                    },
+                    {
+                        messageType: "text",
+                        content: "After",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            // Should skip the malformed delegation marker and not crash
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should only have 2 lines (the text messages, skipping the marker with empty recipientPubkey)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Before");
+            expect(lines[1]).toContain("After");
+        });
+
+        it("should skip delegation marker with missing status field", async () => {
+            // Edge case: delegationMarker exists but is missing status
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Before",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        delegationMarker: {
+                            delegationConversationId: "g89f123f7gd3abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000005000,
+                            // Missing status field - simulate with type assertion
+                        } as any,
+                    },
+                    {
+                        messageType: "text",
+                        content: "After",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010,
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            // Should skip the malformed delegation marker and not crash
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // Should only have 2 lines (the text messages, skipping the marker with missing status)
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toContain("Before");
+            expect(lines[1]).toContain("After");
+        });
+
+        it("should include delegation markers in messageCount", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        delegationMarker: {
+                            delegationConversationId: "g89f123f7gd3abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-architect",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            completedAt: 1700000005000,
+                            status: "completed",
+                        },
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            // messageCount should include the delegation marker
+            expect((result.conversation as any).messageCount).toBe(2);
         });
     });
 });
