@@ -317,6 +317,27 @@ export class EventHandler {
                 });
             }
 
+            // Check for PM designation tag: ["pm"] (no value, just the tag itself)
+            // Kind 24020 events are authoritative snapshots - presence of ["pm"] tag sets isPM=true,
+            // absence clears it (sets isPM=false). This matches how tools are handled (replace entirely).
+            const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
+            const pmUpdated = await agentStorage.updateAgentIsPM(agentPubkey, hasPMTag);
+
+            if (pmUpdated) {
+                await agentRegistry.reloadAgent(agentPubkey);
+                configUpdated = true;
+                logger.info(hasPMTag ? "Set PM designation for agent via kind 24020 event" : "Cleared PM designation for agent via kind 24020 event", {
+                    agentSlug: agent.slug,
+                    agentPubkey: agentPubkey.substring(0, 8),
+                });
+            } else {
+                logger.warn("Failed to update PM designation", {
+                    agentSlug: agent.slug,
+                    agentPubkey: agentPubkey.substring(0, 8),
+                    newValue: hasPMTag,
+                });
+            }
+
             // Immediately publish updated project status if config was changed
             if (configUpdated && projectContext.statusPublisher) {
                 await projectContext.statusPublisher.publishImmediately();

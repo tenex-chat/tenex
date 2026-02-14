@@ -27,6 +27,13 @@ export interface StoredAgent extends StoredAgentData {
      * Set via agent_configure tool.
      */
     pmOverrides?: Record<string, boolean>;
+    /**
+     * Global PM designation flag.
+     * When true, this agent is designated as PM for ALL projects where it exists.
+     * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag.
+     * Takes precedence over pmOverrides and project tag designations.
+     */
+    isPM?: boolean;
 }
 
 /**
@@ -636,6 +643,38 @@ export class AgentStorage {
         agent.tools = tools;
         await this.saveAgent(agent);
         logger.info(`Updated tools for agent ${agent.name}`);
+        return true;
+    }
+
+    /**
+     * Update an agent's global PM designation flag.
+     *
+     * When isPM is true, this agent becomes the PM for ALL projects where it exists.
+     * This takes precedence over pmOverrides and project tag designations.
+     *
+     * Updates ONLY the stored data on disk. To refresh the in-memory instance,
+     * call AgentRegistry.reloadAgent() after this method.
+     *
+     * @param pubkey - Agent's public key (hex string)
+     * @param isPM - Whether this agent is designated as PM (true/false/undefined to clear)
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateAgentIsPM(pubkey: string, isPM: boolean | undefined): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        if (isPM === undefined || isPM === false) {
+            // Clear the flag if it exists
+            delete agent.isPM;
+        } else {
+            agent.isPM = true;
+        }
+
+        await this.saveAgent(agent);
+        logger.info(`Updated isPM flag for agent ${agent.name}`, { isPM: agent.isPM });
         return true;
     }
 

@@ -255,6 +255,75 @@ describe("AgentStorage", () => {
         });
     });
 
+    describe("updateAgentIsPM", () => {
+        it("should set isPM flag in storage", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateAgentIsPM(signer.pubkey, true);
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.isPM).toBe(true);
+        });
+
+        it("should clear isPM flag when set to false", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(agent);
+
+            // First set to true
+            await storage.updateAgentIsPM(signer.pubkey, true);
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.isPM).toBe(true);
+
+            // Then set to false - should delete the field
+            await storage.updateAgentIsPM(signer.pubkey, false);
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.isPM).toBeUndefined();
+        });
+
+        it("should clear isPM flag when set to undefined", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(agent);
+
+            // First set to true
+            await storage.updateAgentIsPM(signer.pubkey, true);
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.isPM).toBe(true);
+
+            // Then clear with undefined
+            await storage.updateAgentIsPM(signer.pubkey, undefined);
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.isPM).toBeUndefined();
+        });
+
+        it("should return false for non-existent agent", async () => {
+            const success = await storage.updateAgentIsPM("nonexistent-pubkey", true);
+            expect(success).toBe(false);
+        });
+    });
+
     describe("project associations", () => {
         it("should add agent to project", async () => {
             const signer = NDKPrivateKeySigner.generate();
