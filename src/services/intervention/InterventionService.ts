@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { InterventionPublisher } from "@/nostr/InterventionPublisher";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { config } from "@/services/ConfigService";
+import { PubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -593,11 +594,17 @@ export class InterventionService {
         });
 
         try {
+            // Resolve human-readable names before calling the publisher
+            // This keeps name resolution in the services layer, avoiding circular dependencies
+            const pubkeyService = PubkeyService.getInstance();
+            const userName = pubkeyService.getNameSync(pending.userPubkey);
+            const agentName = pubkeyService.getNameSync(pending.agentPubkey);
+
             const eventId = await this.publisher.publishReviewRequest(
                 this.interventionAgentPubkey,
                 pending.conversationId,
-                pending.userPubkey,
-                pending.agentPubkey
+                userName,
+                agentName
             );
 
             logger.info("Intervention review request published", {
