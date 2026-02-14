@@ -5,7 +5,7 @@ import type { AISdkTool } from "@/tools/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
-import { createEventContext } from "@/utils/event-context";
+import { createEventContext } from "@/services/event-context";
 import { tool } from "ai";
 import { nip19 } from "nostr-tools";
 import { z } from "zod";

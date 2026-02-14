@@ -41,6 +41,39 @@ export class AgentEventEncoder {
     }
 
     /**
+     * Determine the correct recipient pubkey for a completion event.
+     *
+     * Uses pre-resolved completionRecipientPubkey from context when available.
+     * This supports delegation chain routing where completions must route back
+     * to the immediate delegator, not the event that happened to trigger the
+     * current execution (e.g., a user responding to an ask).
+     *
+     * The recipient resolution is done by createEventContext() in EventContextService
+     * (services/event-context/, layer 3) which has access to ConversationStore. This
+     * method just uses the pre-resolved value or falls back to triggeringEvent.pubkey
+     * for direct conversations.
+     *
+     * @param context - The event context containing completionRecipientPubkey or triggeringEvent
+     * @returns The pubkey to use for the completion p-tag
+     */
+    private getCompletionRecipientPubkey(context: EventContext): string {
+        // Use pre-resolved recipient if available (set by createEventContext from delegation chain)
+        if (context.completionRecipientPubkey) {
+            logger.debug("Completion routing via pre-resolved recipient", {
+                conversationId: context.conversationId.substring(0, 12),
+                recipientPubkey: context.completionRecipientPubkey.substring(0, 8),
+                triggeringEventPubkey: context.triggeringEvent.pubkey.substring(0, 8),
+                usingPreResolved: context.completionRecipientPubkey !== context.triggeringEvent.pubkey,
+            });
+            return context.completionRecipientPubkey;
+        }
+
+        // No pre-resolved recipient - fall back to triggering event pubkey
+        // This is the correct behavior for direct user conversations
+        return context.triggeringEvent.pubkey;
+    }
+
+    /**
      * Forward branch tag from triggering event to reply event.
      * Ensures agents carry forward the branch context from the message they're replying to.
      */
@@ -58,6 +91,12 @@ export class AgentEventEncoder {
     /**
      * Encode a completion intent into a tagged event.
      * Completions have p-tag (triggers notification) and status=completed.
+     *
+     * IMPORTANT: For delegation contexts, the p-tag targets the immediate delegator
+     * (second-to-last entry in the delegation chain), NOT the triggeringEvent.pubkey.
+     * This ensures completions route back up the delegation stack even when RAL state
+     * is lost and the execution restarts with a fresh triggeringEvent (e.g., after
+     * a human responds to an "ask" hours later).
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
         const event = new NDKEvent(getNDK());
@@ -65,7 +104,10 @@ export class AgentEventEncoder {
         event.content = intent.content;
 
         this.addConversationTags(event, context);
-        event.tag(["p", context.triggeringEvent.pubkey]);
+
+        // Determine the correct p-tag recipient
+        const recipientPubkey = this.getCompletionRecipientPubkey(context);
+        event.tag(["p", recipientPubkey]);
         event.tag(["status", "completed"]);
 
         if (intent.usage) {
@@ -87,8 +129,9 @@ export class AgentEventEncoder {
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            replyingTo: context.triggeringEvent.id?.substring(0, 8),
-            replyingToPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            recipientPubkey: recipientPubkey.substring(0, 8),
+            triggeringEventPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            conversationId: context.conversationId?.substring(0, 12),
         });
 
         return event;

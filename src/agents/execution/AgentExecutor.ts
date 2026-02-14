@@ -29,7 +29,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import { getToolsObject } from "@/tools/registry";
 import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { createEventContext } from "@/utils/event-context";
+import { createEventContext } from "@/services/event-context";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { ModelMessage } from "ai";
