@@ -93,7 +93,7 @@ let mockConversationData: {
         toolData?: unknown;
         pubkey: string;
         eventId: string;
-        timestamp: number;
+        timestamp?: number;  // Optional to test missing timestamp scenarios
         ral?: unknown;
         targetedPubkeys?: string[];
     }>;
@@ -1476,6 +1476,179 @@ describe("conversation_get Tool", () => {
     });
 
     describe("Relative Timestamp Calculation", () => {
+        it("should handle tool-calls without timestamps (using previous timestamp, not large negative numbers)", async () => {
+            // This test verifies the fix for the bug where tool-call entries stored
+            // via MessageSyncer/ToolEventHandlers without timestamps would cause
+            // malformed output like [+-1771103685] (note the +- combination).
+            // The fix uses lastKnownTimestamp as fallback, so missing timestamps
+            // inherit the timestamp of the previous message with a defined timestamp.
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Hello",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1771103685, // Real Unix timestamp
+                    },
+                    {
+                        // Tool-call WITHOUT timestamp (simulating MessageSyncer behavior)
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "delegate", input: { prompt: "test" } }],
+                        pubkey: "agent-pub",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        // timestamp intentionally omitted - this was causing the bug
+                        ral: {},
+                    },
+                    {
+                        // Tool-result also WITHOUT timestamp
+                        messageType: "tool-result",
+                        content: "",
+                        toolData: [{ output: "delegated" }],
+                        pubkey: "agent-pub",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        // timestamp intentionally omitted
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // CRITICAL: Tool calls without timestamps should show [+0], NOT malformed [+-N] values
+            // Bug behavior was: [+-1771103685] - the +- combination from subtracting baseline from 0
+            // Fixed behavior is: [+0] - using previous known timestamp as fallback
+            expect(lines[0]).toContain("[+0]");
+            expect(lines[1]).toContain("[+0]"); // Tool-call line (merged with result)
+
+            // Should NOT contain malformed [+-...] patterns (the actual bug symptom)
+            expect(messages).not.toContain("+-");
+            // Should NOT contain standalone negative timestamps either
+            expect(messages).not.toMatch(/\[-\d+\]/);
+        });
+
+        it("should use first DEFINED timestamp as baseline when first message lacks timestamp", async () => {
+            // This test verifies that when the first message lacks a timestamp,
+            // the baseline is taken from the first message WITH a defined timestamp.
+            // This prevents huge epoch offsets when early entries lack timestamps.
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        // First message WITHOUT timestamp
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "delegate", input: { prompt: "init" } }],
+                        pubkey: "agent-pub",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        // timestamp intentionally omitted
+                        ral: {},
+                    },
+                    {
+                        messageType: "text",
+                        content: "First message with timestamp",
+                        pubkey: "user-pubkey",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000000, // This should become the baseline
+                    },
+                    {
+                        messageType: "text",
+                        content: "Later message",
+                        pubkey: "user-pubkey",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        timestamp: 1700000010, // +10 seconds from baseline
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            // First message (tool-call without timestamp) should show [+0] using baseline
+            // NOT a huge negative number from using 0 as first message timestamp
+            expect(lines[0]).toContain("[+0]");
+            // Second message should also show [+0] since it IS the baseline
+            expect(lines[1]).toContain("[+0]");
+            // Third message should show relative offset from baseline
+            expect(lines[2]).toContain("[+10]");
+
+            // Verify no malformed timestamps
+            expect(messages).not.toContain("+-");
+            expect(messages).not.toMatch(/\[-\d+\]/);
+        });
+
+        it("should use previous known timestamp for missing timestamps mid-conversation", async () => {
+            // This test verifies that when a message in the middle lacks a timestamp,
+            // it inherits the timestamp of the previous message with a defined timestamp.
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "First",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000, // Baseline
+                    },
+                    {
+                        messageType: "text",
+                        content: "Ten seconds later",
+                        pubkey: "user-pubkey",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000010, // +10 seconds
+                    },
+                    {
+                        // Tool-call WITHOUT timestamp in the middle
+                        messageType: "tool-call",
+                        content: "",
+                        toolData: [{ toolName: "shell", input: { command: "ls" } }],
+                        pubkey: "agent-pub",
+                        eventId: "3333333333333333333333333333333333333333333333333333333333333333",
+                        // timestamp intentionally omitted - should inherit +10
+                        ral: {},
+                    },
+                    {
+                        messageType: "text",
+                        content: "Twenty seconds later",
+                        pubkey: "user-pubkey",
+                        eventId: "4444444444444444444444444444444444444444444444444444444444444444",
+                        timestamp: 1700000020, // +20 seconds
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                includeToolResults: true,
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines[0]).toContain("[+0]");   // First: baseline
+            expect(lines[1]).toContain("[+10]"); // Second: +10 from baseline
+            expect(lines[2]).toContain("[+10]"); // Tool-call: inherits previous timestamp (+10)
+            expect(lines[3]).toContain("[+20]"); // Fourth: +20 from baseline
+
+            // Verify no malformed timestamps
+            expect(messages).not.toContain("+-");
+        });
+
         it("should calculate relative timestamps correctly when messages are seconds apart", async () => {
             // This test verifies that relative timestamps are calculated correctly
             // when entry.timestamp is already in Unix seconds (not milliseconds).
