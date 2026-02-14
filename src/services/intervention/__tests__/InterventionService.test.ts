@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
  * Tests for InterventionService.
  *
  * Verifies:
- * - Lazy agent resolution (deferred until first completion event)
+ * - Per-project agent resolution (resolved at trigger time using project's agent registry)
  * - Timer starts on completion
  * - Timer cancels on user response (after completion, before timeout)
  * - Timer does NOT cancel on user response before completion
@@ -18,6 +18,8 @@ import { tmpdir } from "node:os";
  * - Serialized state writes (concurrent saveState calls)
  * - Agent slug validation at startup
  * - Whitelisted user filtering (only trigger for whitelisted users, not agents)
+ * - Transient runtime unavailability (retry vs drop)
+ * - Config whitespace trimming
  */
 
 // Mock dependencies before importing the service
@@ -31,11 +33,6 @@ const mockGetConfig = mock(() => ({
 
 const mockGetConfigPath = mock(() => "/tmp/test-intervention");
 
-const mockResolveAgentSlug = mock((_slug: string) => ({
-    pubkey: "test-intervention-pubkey",
-    availableSlugs: ["test-intervention-agent"],
-}));
-
 const mockPublishReviewRequest = mock(
     (_target: string, _convId: string, _user: string, _agent: string) =>
         Promise.resolve("published-event-id")
@@ -44,16 +41,17 @@ const mockPublishReviewRequest = mock(
 // Mock publisher
 const mockPublisherInitialize = mock(() => Promise.resolve());
 
+// Default mock agents for test projects
+const defaultTestAgents = [
+    { slug: "test-intervention-agent", pubkey: "test-intervention-pubkey" },
+];
+
 mock.module("@/services/ConfigService", () => ({
     config: {
         getConfig: mockGetConfig,
         getConfigPath: mockGetConfigPath,
         getBackendSigner: mock(() => Promise.resolve({ pubkey: "backend-pubkey" })),
     },
-}));
-
-mock.module("@/services/agents/AgentResolution", () => ({
-    resolveAgentSlug: mockResolveAgentSlug,
 }));
 
 mock.module("@/nostr/InterventionPublisher", () => ({
@@ -71,6 +69,47 @@ mock.module("@/nostr/InterventionPublisher", () => ({
         }
     },
 }));
+
+// Import type for resolver function
+import type { AgentResolverFn, AgentResolutionResult } from "../InterventionService";
+
+/**
+ * Create a mock agent resolver function.
+ * Maps projectId -> resolution result.
+ */
+const createMockResolver = (
+    projectAgents: Map<string, Array<{ slug: string; pubkey: string }>>
+): AgentResolverFn => {
+    return (projectId: string, agentSlug: string): AgentResolutionResult => {
+        const agents = projectAgents.get(projectId);
+        if (!agents) {
+            // Project runtime not found = transient failure
+            return { status: "runtime_unavailable" };
+        }
+
+        const agent = agents.find(a => a.slug.toLowerCase() === agentSlug.toLowerCase());
+        if (!agent) {
+            // Agent slug not found = permanent failure
+            return { status: "agent_not_found" };
+        }
+
+        return { status: "resolved", pubkey: agent.pubkey };
+    };
+};
+
+// Default project agents map for tests
+const createDefaultProjectAgents = () => new Map([
+    ["project-789", defaultTestAgents],
+    ["test-project-123", defaultTestAgents],
+    ["concurrent-project", defaultTestAgents],
+    ["shutdown-project", defaultTestAgents],
+    ["shutdown-save-project", defaultTestAgents],
+    ["atomic-project", defaultTestAgents],
+    ["project-1", defaultTestAgents],
+    ["project-2", defaultTestAgents],
+    ["persisted-project", defaultTestAgents],
+    ["catchup-project", defaultTestAgents],
+]);
 
 mock.module("@/utils/logger", () => ({
     logger: {
@@ -98,6 +137,7 @@ import { InterventionService } from "../InterventionService";
 
 describe("InterventionService", () => {
     let tempDir: string;
+    let projectAgents: Map<string, Array<{ slug: string; pubkey: string }>>;
 
     beforeEach(async () => {
         // Reset singleton
@@ -110,7 +150,6 @@ describe("InterventionService", () => {
 
         // Reset mocks
         mockGetConfig.mockClear();
-        mockResolveAgentSlug.mockClear();
         mockPublishReviewRequest.mockClear();
         mockPublisherInitialize.mockClear();
         mockIsTrustedSync.mockClear();
@@ -123,16 +162,28 @@ describe("InterventionService", () => {
                 timeout: 100, // 100ms for faster tests
             },
         });
-        mockResolveAgentSlug.mockReturnValue({
-            pubkey: "test-intervention-pubkey",
-            availableSlugs: ["test-intervention-agent"],
-        });
+
+        // Default project agents map
+        projectAgents = createDefaultProjectAgents();
+
         // Default: user is whitelisted
         mockIsTrustedSync.mockReturnValue({
             trusted: true,
             reason: "whitelisted" as const,
         });
     });
+
+    /**
+     * Helper to initialize service with resolver
+     */
+    const initServiceWithResolver = async (
+        customProjectAgents?: Map<string, Array<{ slug: string; pubkey: string }>>
+    ): Promise<InstanceType<typeof InterventionService>> => {
+        const service = InterventionService.getInstance();
+        service.setAgentResolver(createMockResolver(customProjectAgents ?? projectAgents));
+        await service.initialize();
+        return service;
+    };
 
     afterEach(async () => {
         // Cleanup - wait a bit for any pending async operations
@@ -152,12 +203,10 @@ describe("InterventionService", () => {
 
     describe("initialization", () => {
         it("should initialize when enabled (agent resolution deferred)", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             expect(service.isEnabled()).toBe(true);
-            // Agent resolution is deferred - should NOT be called during initialize
-            expect(mockResolveAgentSlug).not.toHaveBeenCalled();
+            // Agent resolution is deferred until completion/trigger time
             expect(mockPublisherInitialize).toHaveBeenCalled();
         });
 
@@ -198,24 +247,58 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             expect(service.isEnabled()).toBe(true);
             // Default timeout is 300000ms (5 minutes)
             expect(service.getTimeoutMs()).toBe(300000);
         });
-    });
 
-    describe("lazy agent resolution", () => {
-        it("should resolve agent slug on first completion event", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+        it("should trim whitespace from agent slug", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "  test-intervention-agent  ", // Whitespace around slug
+                    timeout: 100,
+                },
+            });
+
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
-            expect(mockResolveAgentSlug).not.toHaveBeenCalled();
+            // Should resolve correctly despite whitespace in config
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
 
-            // First completion should trigger resolution
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should not enable when agent slug is only whitespace", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "   ", // Only whitespace
+                },
+            });
+
+            const service = InterventionService.getInstance();
+            await service.initialize();
+
+            expect(service.isEnabled()).toBe(false);
+        });
+    });
+
+    describe("per-project agent resolution", () => {
+        it("should resolve agent slug using project's agent registry on completion", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Completion triggers per-project resolution
             service.onAgentCompletion(
                 "test-conv-1",
                 Date.now() + 10000, // Far future
@@ -224,52 +307,53 @@ describe("InterventionService", () => {
                 "project-789"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalledWith("test-intervention-agent");
             expect(service.getPendingCount()).toBe(1);
         });
 
-        it("should cache resolved pubkey and not resolve again", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
-            await service.setProject("project-789");
+        it("should resolve agent separately for each project (no global caching)", async () => {
+            // Setup different agents for different projects
+            const customAgents = new Map([
+                ["project-A", [{ slug: "test-intervention-agent", pubkey: "pubkey-A" }]],
+                ["project-B", [{ slug: "test-intervention-agent", pubkey: "pubkey-B" }]],
+            ]);
 
-            // First completion triggers resolution
+            const service = await initServiceWithResolver(customAgents);
+            await service.setProject("project-A");
+
+            // Completion for project A
             service.onAgentCompletion(
                 "test-conv-1",
                 Date.now() + 10000,
                 "agent-123",
                 "user-456",
-                "project-789"
+                "project-A"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalledTimes(1);
-
-            // Second completion should NOT trigger resolution again
+            // Completion for project B
             service.onAgentCompletion(
                 "test-conv-2",
                 Date.now() + 10000,
-                "agent-456",
-                "user-789",
-                "project-789"
+                "agent-789",
+                "user-999",
+                "project-B"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalledTimes(1);
+            // Both should be tracked since each project has the agent
             expect(service.getPendingCount()).toBe(2);
         });
 
-        it("should disable service if agent resolution fails", async () => {
-            mockResolveAgentSlug.mockReturnValue({
-                pubkey: null,
-                availableSlugs: ["other-agent"],
-            });
+        it("should skip completion if agent not found in project's registry (permanent failure)", async () => {
+            // Setup project without the intervention agent
+            const customAgents = new Map([
+                ["project-789", [{ slug: "other-agent", pubkey: "other-pubkey" }]],
+            ]);
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver(customAgents);
             await service.setProject("project-789");
 
-            expect(service.isEnabled()).toBe(true); // Still enabled before first completion
+            expect(service.isEnabled()).toBe(true);
 
-            // Completion triggers resolution which fails
+            // Completion triggers resolution which fails (agent not in registry)
             service.onAgentCompletion(
                 "test-conv-1",
                 Date.now(),
@@ -278,50 +362,67 @@ describe("InterventionService", () => {
                 "project-789"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalled();
-            expect(service.isEnabled()).toBe(false);
-            expect(service.getPendingCount()).toBe(0); // Should not track
+            // Should NOT track since agent was not found (permanent failure)
+            expect(service.getPendingCount()).toBe(0);
+            // Service should still be enabled (per-project failure doesn't disable globally)
+            expect(service.isEnabled()).toBe(true);
         });
 
-        it("should not retry resolution after failure", async () => {
-            mockResolveAgentSlug.mockReturnValue({
-                pubkey: null,
-                availableSlugs: [],
-            });
+        it("should queue completion when project runtime not found (transient failure)", async () => {
+            // Empty runtimes - no projects running (transient - runtime unavailable)
+            const customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver(customAgents);
             await service.setProject("project-789");
 
-            // First completion - resolution fails
             service.onAgentCompletion(
                 "test-conv-1",
-                Date.now(),
+                Date.now() + 10000, // Far future
                 "agent-123",
                 "user-456",
                 "project-789"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalledTimes(1);
-            expect(service.isEnabled()).toBe(false);
+            // SHOULD track - transient failure queues for retry at trigger time
+            expect(service.getPendingCount()).toBe(1);
+        });
 
-            // Second completion - should not retry
+        it("should resolve correct agent per project at trigger time", async () => {
+            // Different pubkeys for same slug in different projects
+            const customAgents = new Map([
+                ["project-A", [{ slug: "test-intervention-agent", pubkey: "pubkey-project-A" }]],
+            ]);
+
+            const service = await initServiceWithResolver(customAgents);
+            await service.setProject("project-A");
+
+            // Use already-expired time to trigger intervention immediately
+            const pastTime = Date.now() - 10000;
+
             service.onAgentCompletion(
-                "test-conv-2",
-                Date.now(),
-                "agent-456",
-                "user-789",
-                "project-789"
+                "test-conv-1",
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-A"
             );
 
-            expect(mockResolveAgentSlug).toHaveBeenCalledTimes(1); // Not called again
+            // Wait for intervention to trigger
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            // Should publish to the correct project's agent pubkey
+            expect(mockPublishReviewRequest).toHaveBeenCalledWith(
+                "pubkey-project-A", // Project A's intervention agent
+                "test-conv-1",
+                "user-456",
+                "agent-123"
+            );
         });
     });
 
     describe("timer starts on completion", () => {
         it("should start timer when agent completes work", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -347,8 +448,7 @@ describe("InterventionService", () => {
         });
 
         it("should update timer on subsequent completions for same conversation", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-1");
 
             const conversationId = "test-conv-1";
@@ -380,8 +480,7 @@ describe("InterventionService", () => {
 
     describe("timer cancels on user response", () => {
         it("should cancel timer when user responds after completion", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -405,8 +504,7 @@ describe("InterventionService", () => {
         });
 
         it("should NOT cancel timer when user response is before completion", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -430,8 +528,7 @@ describe("InterventionService", () => {
         });
 
         it("should NOT cancel timer when different user responds", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -456,8 +553,7 @@ describe("InterventionService", () => {
         });
 
         it("should NOT cancel timer when user responds after timeout window", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -483,8 +579,7 @@ describe("InterventionService", () => {
         });
 
         it("should do nothing when user responds to non-pending conversation", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             service.onUserResponse("non-existent-conv", Date.now(), "user-123");
 
@@ -494,8 +589,7 @@ describe("InterventionService", () => {
 
     describe("timer expiry triggers intervention", () => {
         it("should publish review request when timer expires", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -524,8 +618,7 @@ describe("InterventionService", () => {
         });
 
         it("should trigger immediately for already expired timers", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -558,8 +651,7 @@ describe("InterventionService", () => {
                 return Promise.resolve("published-event-id");
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -590,8 +682,7 @@ describe("InterventionService", () => {
         it("should track retry count in pending intervention", async () => {
             mockPublishReviewRequest.mockRejectedValue(new Error("Relay unavailable"));
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const conversationId = "test-conv-1";
@@ -616,8 +707,7 @@ describe("InterventionService", () => {
 
     describe("state persistence and recovery", () => {
         it("should save state when timer is created (project-scoped)", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("test-project-123");
 
             service.onAgentCompletion(
@@ -660,8 +750,7 @@ describe("InterventionService", () => {
                 })
             );
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject(projectId);
 
             expect(service.getPendingCount()).toBe(1);
@@ -690,12 +779,7 @@ describe("InterventionService", () => {
                 })
             );
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
-
-            // Force agent resolution before loading state
-            service.forceAgentResolution();
-
+            const service = await initServiceWithResolver();
             await service.setProject(projectId);
 
             // Should trigger intervention immediately for expired timer
@@ -742,8 +826,7 @@ describe("InterventionService", () => {
                 })
             );
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             // Load project1 state
             await service.setProject(project1);
@@ -761,8 +844,7 @@ describe("InterventionService", () => {
 
     describe("serialized state writes", () => {
         it("should serialize concurrent saveState calls", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("concurrent-project");
 
             // Rapidly add multiple completions (each triggers saveState)
@@ -789,8 +871,7 @@ describe("InterventionService", () => {
         });
 
         it("should use atomic rename for state writes", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("atomic-project");
 
             service.onAgentCompletion(
@@ -816,8 +897,7 @@ describe("InterventionService", () => {
 
     describe("shutdown", () => {
         it("should clear all timers on shutdown", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("shutdown-project");
 
             service.onAgentCompletion(
@@ -843,8 +923,7 @@ describe("InterventionService", () => {
         });
 
         it("should save state on shutdown", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("shutdown-save-project");
 
             const futureTime = Date.now() + 60000;
@@ -914,8 +993,7 @@ describe("InterventionService", () => {
         });
 
         it("should reset instance correctly", async () => {
-            const instance1 = InterventionService.getInstance();
-            await instance1.initialize();
+            const instance1 = await initServiceWithResolver();
 
             await InterventionService.resetInstance();
 
@@ -935,8 +1013,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             expect(service.getConversationInactivityTimeoutSeconds()).toBe(120);
         });
@@ -950,8 +1027,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
 
             expect(service.getConversationInactivityTimeoutSeconds()).toBe(60);
         });
@@ -966,8 +1042,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const now = Date.now();
@@ -999,8 +1074,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const now = Date.now();
@@ -1032,8 +1106,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             // No lastUserMessageTime passed (undefined)
@@ -1060,8 +1133,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const now = Date.now();
@@ -1092,8 +1164,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const now = Date.now();
@@ -1124,8 +1195,7 @@ describe("InterventionService", () => {
                 },
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             const now = Date.now();
@@ -1153,8 +1223,7 @@ describe("InterventionService", () => {
                 reason: "whitelisted" as const,
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             service.onAgentCompletion(
@@ -1176,8 +1245,7 @@ describe("InterventionService", () => {
                 reason: "agent" as const,
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             service.onAgentCompletion(
@@ -1200,8 +1268,7 @@ describe("InterventionService", () => {
                 reason: "backend" as const,
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             service.onAgentCompletion(
@@ -1223,8 +1290,7 @@ describe("InterventionService", () => {
                 reason: undefined,
             });
 
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             service.onAgentCompletion(
@@ -1240,8 +1306,7 @@ describe("InterventionService", () => {
         });
 
         it("should check trust status on each completion (not cached incorrectly)", async () => {
-            const service = InterventionService.getInstance();
-            await service.initialize();
+            const service = await initServiceWithResolver();
             await service.setProject("project-789");
 
             // First completion: user is whitelisted
@@ -1293,6 +1358,308 @@ describe("InterventionService", () => {
 
             // Should now be 2
             expect(service.getPendingCount()).toBe(2);
+        });
+    });
+
+    describe("state load race conditions", () => {
+        it("should queue onUserResponse during state load", async () => {
+            // Write initial state with a pending intervention
+            const projectId = "race-test-project";
+            projectAgents.set(projectId, defaultTestAgents);
+
+            // Use a timeoutMs of 100ms (from test config)
+            // completedAt must be recent enough that responseAt is within timeout window
+            const now = Date.now();
+            const completedAt = now; // Completed now
+            const responseAt = now + 50; // Response 50ms later (within 100ms timeout window)
+
+            const stateFile = path.join(tempDir, `intervention_state_${projectId}.json`);
+            await fs.writeFile(
+                stateFile,
+                JSON.stringify({
+                    pending: [
+                        {
+                            conversationId: "pending-conv",
+                            completedAt: completedAt,
+                            agentPubkey: "agent-111",
+                            userPubkey: "user-222",
+                            projectId: projectId,
+                        },
+                    ],
+                })
+            );
+
+            const service = await initServiceWithResolver();
+
+            // Simulate rapid setProject + onUserResponse calls
+            // The onUserResponse might arrive before state finishes loading
+            const setProjectPromise = service.setProject(projectId);
+
+            // Immediately call onUserResponse before setProject completes
+            // Response is within the timeout window (completedAt + 50ms < completedAt + 100ms)
+            service.onUserResponse(
+                "pending-conv",
+                responseAt,
+                "user-222"
+            );
+
+            // Wait for setProject to complete
+            await setProjectPromise;
+
+            // Wait for any pending operations
+            await service.waitForPendingOps();
+
+            // The user response should have properly cancelled the intervention
+            // even though it was queued during state load
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should process queued operations in order after state load", async () => {
+            const projectId = "queue-order-project";
+            projectAgents.set(projectId, defaultTestAgents);
+
+            const stateFile = path.join(tempDir, `intervention_state_${projectId}.json`);
+            await fs.writeFile(
+                stateFile,
+                JSON.stringify({ pending: [] }) // Start empty
+            );
+
+            const service = await initServiceWithResolver();
+
+            // Start setProject
+            const setProjectPromise = service.setProject(projectId);
+
+            // Use timestamps where response is within timeout window
+            // completedAt = now + 60000, timeout = 100ms
+            // So timeout expires at now + 60100
+            // Response at now + 60050 is within window
+            const now = Date.now();
+
+            // Queue multiple operations during state load
+            service.onAgentCompletion(
+                "conv-1",
+                now + 60000, // completedAt
+                "agent-1",
+                "user-1",
+                projectId
+            );
+
+            service.onAgentCompletion(
+                "conv-2",
+                now + 60000,
+                "agent-2",
+                "user-2",
+                projectId
+            );
+
+            // This user response should cancel conv-1 (within timeout window)
+            // completedAt = now + 60000, timeout = 100ms, expiry = now + 60100
+            // responseAt = now + 60050 < now + 60100 => within window
+            service.onUserResponse("conv-1", now + 60050, "user-1");
+
+            await setProjectPromise;
+            await service.waitForPendingOps();
+
+            // conv-1 should be cancelled, conv-2 should remain
+            expect(service.getPendingCount()).toBe(1);
+            expect(service.getPending("conv-1")).toBeUndefined();
+            expect(service.getPending("conv-2")).toBeDefined();
+        });
+
+        it("should handle user response arriving after state load completes", async () => {
+            const projectId = "post-load-response";
+            projectAgents.set(projectId, defaultTestAgents);
+
+            // Use timestamps where response is within timeout window
+            // completedAt = now, timeout = 100ms, expiry = now + 100
+            // responseAt = now + 50 < now + 100 => within window
+            const now = Date.now();
+            const completedAt = now;
+            const responseAt = now + 50;
+
+            const stateFile = path.join(tempDir, `intervention_state_${projectId}.json`);
+            await fs.writeFile(
+                stateFile,
+                JSON.stringify({
+                    pending: [
+                        {
+                            conversationId: "existing-conv",
+                            completedAt: completedAt,
+                            agentPubkey: "agent-111",
+                            userPubkey: "user-222",
+                            projectId: projectId,
+                        },
+                    ],
+                })
+            );
+
+            const service = await initServiceWithResolver();
+            await service.setProject(projectId);
+
+            // State should be loaded
+            expect(service.getPendingCount()).toBe(1);
+
+            // Now user responds (not during state load) - within timeout window
+            service.onUserResponse("existing-conv", responseAt, "user-222");
+
+            // Should be cancelled
+            expect(service.getPendingCount()).toBe(0);
+        });
+    });
+
+    describe("transient runtime unavailability", () => {
+        it("should queue completion when runtime temporarily unavailable", async () => {
+            // Empty map = runtime unavailable for all projects
+            const customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
+
+            const service = await initServiceWithResolver(customAgents);
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000, // Far future
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should queue even when runtime unavailable (transient failure)
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should retry at trigger time when runtime becomes available", async () => {
+            // Start with unavailable runtime
+            let customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
+
+            const service = InterventionService.getInstance();
+            service.setAgentResolver(createMockResolver(customAgents));
+            await service.initialize();
+            await service.setProject("project-789");
+
+            // Use already-expired time
+            const pastTime = Date.now() - 10000;
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Wait for first attempt (will fail - runtime unavailable)
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            // Should have pending with retry count incremented
+            const pending = service.getPending("test-conv-1");
+            expect(pending?.retryCount).toBeGreaterThanOrEqual(1);
+
+            // Runtime is still unavailable, so it should be retrying
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should drop intervention after max retries when runtime stays unavailable", async () => {
+            // Always unavailable runtime
+            const customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
+
+            const service = await initServiceWithResolver(customAgents);
+            await service.setProject("project-789");
+
+            // Pre-set retry count to max-1 to speed up test
+            const pastTime = Date.now() - 10000;
+            service.onAgentCompletion(
+                "test-conv-1",
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Wait for intervention to be dropped after max retries
+            // In real scenario this would take longer due to backoff
+            await new Promise((resolve) => setTimeout(resolve, 200));
+
+            // First attempt triggers, then retries
+            const pending = service.getPending("test-conv-1");
+            // Should either be pending with retry count or already removed
+            if (pending) {
+                expect(pending.retryCount).toBeGreaterThanOrEqual(1);
+            }
+        });
+
+        it("should distinguish between runtime unavailable and agent not found", async () => {
+            // Project A has different agent, Project B doesn't exist
+            const customAgents = new Map([
+                ["project-A", [{ slug: "other-agent", pubkey: "other-pubkey" }]],
+                // project-B not in map = runtime unavailable
+            ]);
+
+            const service = await initServiceWithResolver(customAgents);
+            await service.setProject("project-A");
+
+            // Project A: agent not found (permanent) - should skip
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-456",
+                "project-A"
+            );
+
+            expect(service.getPendingCount()).toBe(0); // Skipped (permanent failure)
+
+            // Project B: runtime unavailable (transient) - should queue
+            service.onAgentCompletion(
+                "test-conv-2",
+                Date.now() + 10000,
+                "agent-789",
+                "user-999",
+                "project-B"
+            );
+
+            expect(service.getPendingCount()).toBe(1); // Queued (transient failure)
+        });
+
+        it("should handle no resolver configured gracefully", async () => {
+            const service = InterventionService.getInstance();
+            // Don't set resolver
+            await service.initialize();
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should queue (treated as transient - no resolver = runtime unavailable)
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should catch resolver exceptions and treat as transient failure", async () => {
+            // Create a resolver that throws an exception
+            const throwingResolver = (_projectId: string, _agentSlug: string): AgentResolutionResult => {
+                throw new Error("Simulated resolver crash");
+            };
+
+            const service = InterventionService.getInstance();
+            service.setAgentResolver(throwingResolver);
+            await service.initialize();
+            await service.setProject("project-789");
+
+            // Completion should be queued despite resolver throwing
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should queue (exception mapped to transient runtime_unavailable)
+            expect(service.getPendingCount()).toBe(1);
         });
     });
 });

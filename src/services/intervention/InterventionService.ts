@@ -1,7 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { InterventionPublisher } from "@/nostr/InterventionPublisher";
-import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { config } from "@/services/ConfigService";
 import { PubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
@@ -19,6 +18,23 @@ const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 
 /** Maximum retry attempts before giving up */
 const MAX_RETRY_ATTEMPTS = 5;
+
+/**
+ * Result of attempting to resolve an agent for a project.
+ */
+export type AgentResolutionResult =
+    | { status: "resolved"; pubkey: string }
+    | { status: "runtime_unavailable" }  // Transient: runtime not active yet
+    | { status: "agent_not_found" };     // Permanent: agent slug doesn't exist
+
+/**
+ * Function type for resolving an agent slug to a pubkey for a given project.
+ * Returns resolution result indicating success, transient failure, or permanent failure.
+ *
+ * This abstraction allows InterventionService (Layer 3) to resolve agents
+ * without directly depending on @/daemon (Layer 4).
+ */
+export type AgentResolverFn = (projectId: string, agentSlug: string) => AgentResolutionResult;
 
 /**
  * Represents a pending intervention - an agent completed work
@@ -73,10 +89,11 @@ export class InterventionService {
     private configDir: string;
     private currentProjectId: string | null = null;
 
-    // Lazy agent resolution - store slug and resolve on-demand
+    // Agent slug for resolution (resolved per-project at trigger time)
     private interventionAgentSlug: string | null = null;
-    private interventionAgentPubkey: string | null = null;
-    private agentResolutionAttempted = false;
+
+    // Injected resolver function for Layer 3/4 decoupling
+    private agentResolver: AgentResolverFn | null = null;
 
     private timeoutMs: number = DEFAULT_TIMEOUT_MS;
     private conversationInactivityTimeoutSeconds: number = DEFAULT_CONVERSATION_INACTIVITY_TIMEOUT_SECONDS;
@@ -95,6 +112,18 @@ export class InterventionService {
     private constructor() {
         this.publisher = new InterventionPublisher();
         this.configDir = config.getConfigPath();
+    }
+
+    /**
+     * Set the agent resolver function.
+     * This allows Layer 4 (daemon) to inject its resolver without
+     * creating a compile-time dependency from Layer 3 to Layer 4.
+     *
+     * Must be called before processing any completions.
+     * Typically called during daemon initialization.
+     */
+    public setAgentResolver(resolver: AgentResolverFn): void {
+        this.agentResolver = resolver;
     }
 
     /**
@@ -149,7 +178,7 @@ export class InterventionService {
         }
 
         // Agent slug is required if enabled
-        const agentSlug = interventionConfig.agent;
+        const agentSlug = interventionConfig.agent?.trim();
         if (!agentSlug) {
             logger.error("InterventionService enabled but no agent slug configured (intervention.agent)");
             this.enabled = false;
@@ -157,7 +186,7 @@ export class InterventionService {
             return;
         }
 
-        // Store the slug for lazy resolution (don't resolve yet - ProjectContext may not exist)
+        // Store the trimmed slug for lazy resolution (don't resolve yet - ProjectContext may not exist)
         this.interventionAgentSlug = agentSlug;
         this.timeoutMs = interventionConfig.timeout ?? DEFAULT_TIMEOUT_MS;
 
@@ -254,54 +283,78 @@ export class InterventionService {
     }
 
     /**
-     * Lazily resolve the agent slug to a pubkey.
-     * Called on first completion event when ProjectContext is available.
-     * Returns null if resolution fails, and caches the result.
+     * Resolve the agent slug to a pubkey for a specific project.
+     * Called at trigger time using the target project's agent registry.
+     * Returns a resolution result indicating success, transient failure, or permanent failure.
+     *
+     * This method resolves the agent fresh each time, using the project's
+     * own agent registry. This ensures interventions target the correct
+     * agent even when different projects have different agent configurations.
+     *
+     * @param projectId - The project ID to resolve the agent for
      */
-    private resolveAgentPubkeyLazy(): string | null {
-        // Return cached value if already resolved
-        if (this.interventionAgentPubkey) {
-            return this.interventionAgentPubkey;
-        }
-
-        // Don't retry if we already attempted and failed
-        if (this.agentResolutionAttempted) {
-            return null;
-        }
-
+    private resolveAgentPubkeyForProject(projectId: string): AgentResolutionResult {
         if (!this.interventionAgentSlug) {
-            return null;
+            return { status: "agent_not_found" };
         }
 
-        this.agentResolutionAttempted = true;
+        if (!this.agentResolver) {
+            logger.warn("InterventionService: no agent resolver configured, cannot resolve agent", {
+                projectId: projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+            });
+            return { status: "runtime_unavailable" };
+        }
 
+        // Wrap resolver call in try/catch to handle exceptions from the injected resolver
+        let result: AgentResolutionResult;
         try {
-            const resolution = resolveAgentSlug(this.interventionAgentSlug);
-            if (!resolution.pubkey) {
-                logger.error("InterventionService: configured agent slug not found", {
-                    slug: this.interventionAgentSlug,
-                    availableSlugs: resolution.availableSlugs,
-                });
-                // Disable the service since we can't resolve the agent
-                this.enabled = false;
-                return null;
-            }
-
-            this.interventionAgentPubkey = resolution.pubkey;
-            logger.info("InterventionService: agent resolved on first completion", {
-                slug: this.interventionAgentSlug,
-                pubkey: this.interventionAgentPubkey.substring(0, 8),
-            });
-
-            return this.interventionAgentPubkey;
+            result = this.agentResolver(projectId, this.interventionAgentSlug);
         } catch (error) {
-            logger.error("InterventionService: failed to resolve agent slug", {
+            logger.error("InterventionService: agent resolver threw an exception", {
+                projectId: projectId.substring(0, 12),
                 slug: this.interventionAgentSlug,
-                error,
+                error: error instanceof Error ? error.message : String(error),
             });
-            this.enabled = false;
-            return null;
+            // Map exception to transient failure - runtime may be in a bad state
+            return { status: "runtime_unavailable" };
         }
+
+        if (result.status === "resolved") {
+            logger.debug("InterventionService: resolved agent for project", {
+                projectId: projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+                pubkey: result.pubkey.substring(0, 8),
+            });
+        } else if (result.status === "runtime_unavailable") {
+            logger.warn("InterventionService: runtime temporarily unavailable for agent resolution", {
+                projectId: projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+            });
+        } else {
+            logger.warn("InterventionService: agent slug not found in project", {
+                projectId: projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+            });
+        }
+
+        return result;
+    }
+
+    /**
+     * Check if the intervention agent can be resolved for a given project.
+     * Used during onAgentCompletion to validate before scheduling the timer.
+     *
+     * Returns:
+     * - "can_resolve": Agent exists and can be resolved
+     * - "runtime_unavailable": Runtime temporarily unavailable (transient - should queue)
+     * - "agent_not_found": Agent slug doesn't exist in project (permanent failure)
+     *
+     * @param projectId - The project ID to check
+     */
+    private checkAgentResolution(projectId: string): AgentResolutionResult["status"] {
+        const result = this.resolveAgentPubkeyForProject(projectId);
+        return result.status;
     }
 
     /**
@@ -343,14 +396,22 @@ export class InterventionService {
             return;
         }
 
-        // Lazy resolution: resolve agent pubkey on first completion event
-        // This is when ProjectContext should be available
-        const resolvedPubkey = this.resolveAgentPubkeyLazy();
-        if (!resolvedPubkey) {
-            // Resolution failed, service is now disabled
-            logger.warn("InterventionService: skipping completion, agent resolution failed");
+        // Check if we can resolve the intervention agent for this project
+        // Distinguish between transient (runtime unavailable) and permanent (agent not found) failures
+        const resolutionStatus = this.checkAgentResolution(projectId);
+
+        if (resolutionStatus === "agent_not_found") {
+            // Permanent failure: agent slug doesn't exist in project
+            logger.warn("InterventionService: skipping completion, agent not found in project", {
+                projectId: projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+            });
             return;
         }
+
+        // Note: For "runtime_unavailable" (transient), we proceed with queuing.
+        // The timer will attempt resolution again at trigger time.
+        // This handles startup/restart scenarios where runtime is briefly unavailable.
 
         // CRITICAL: Only trigger interventions for whitelisted user pubkeys
         // Skip if the "user" is actually an agent (agent-to-agent completion)
@@ -507,6 +568,28 @@ export class InterventionService {
             return;
         }
 
+        // If state is still loading, queue this operation to run after
+        // This prevents race conditions where a response arrives during state load
+        // and fails to properly cancel a pending intervention
+        if (this.stateLoadPromise) {
+            this.pendingCompletionOps.push(() => {
+                this.processUserResponse(conversationId, responseAt, userPubkey);
+            });
+            return;
+        }
+
+        this.processUserResponse(conversationId, responseAt, userPubkey);
+    }
+
+    /**
+     * Process a user response after ensuring state is loaded.
+     * Extracted to support queuing during state load.
+     */
+    private processUserResponse(
+        conversationId: string,
+        responseAt: number,
+        userPubkey: string
+    ): void {
         const pending = this.pendingInterventions.get(conversationId);
         if (!pending) {
             // No pending intervention for this conversation
@@ -567,13 +650,67 @@ export class InterventionService {
     /**
      * Trigger an intervention for a pending conversation.
      * Called when the timer expires.
-     * Includes retry logic with exponential backoff on publish failure.
+     * Includes retry logic with exponential backoff on publish failure
+     * and transient runtime unavailability.
      */
     private async triggerIntervention(pending: PendingIntervention): Promise<void> {
-        if (!this.interventionAgentPubkey) {
-            logger.error("Cannot trigger intervention: no agent pubkey configured");
+        // Resolve the intervention agent pubkey for this specific project
+        // This ensures we target the correct agent even when different projects
+        // have different agent configurations
+        const resolution = this.resolveAgentPubkeyForProject(pending.projectId);
+
+        if (resolution.status === "runtime_unavailable") {
+            // Transient failure: runtime temporarily unavailable
+            // Schedule a retry with backoff
+            const retryCount = pending.retryCount ?? 0;
+
+            if (retryCount < MAX_RETRY_ATTEMPTS) {
+                pending.retryCount = retryCount + 1;
+                this.pendingInterventions.set(pending.conversationId, pending);
+                this.saveState();
+
+                const backoffMs = DEFAULT_RETRY_INTERVAL_MS * Math.pow(2, retryCount);
+                this.scheduleRetry(pending, backoffMs);
+
+                logger.info("Runtime unavailable, scheduled retry for intervention", {
+                    conversationId: pending.conversationId.substring(0, 12),
+                    projectId: pending.projectId.substring(0, 12),
+                    retryCount: pending.retryCount,
+                    nextRetryMs: backoffMs,
+                });
+
+                trace.getActiveSpan()?.addEvent("intervention.retry_scheduled_runtime_unavailable", {
+                    "conversation.id": pending.conversationId,
+                    "project.id": pending.projectId.substring(0, 12),
+                    "retry_count": pending.retryCount,
+                    "next_retry_ms": backoffMs,
+                });
+            } else {
+                logger.error("Max retry attempts reached for intervention (runtime unavailable)", {
+                    conversationId: pending.conversationId.substring(0, 12),
+                    projectId: pending.projectId.substring(0, 12),
+                    maxRetries: MAX_RETRY_ATTEMPTS,
+                });
+                // Remove from pending - we've exhausted retries
+                this.pendingInterventions.delete(pending.conversationId);
+                this.saveState();
+            }
             return;
         }
+
+        if (resolution.status === "agent_not_found") {
+            logger.error("Cannot trigger intervention: agent not found in project", {
+                projectId: pending.projectId.substring(0, 12),
+                slug: this.interventionAgentSlug,
+                conversationId: pending.conversationId.substring(0, 12),
+            });
+            // Permanent failure - remove from pending
+            this.pendingInterventions.delete(pending.conversationId);
+            this.saveState();
+            return;
+        }
+
+        const interventionAgentPubkey = resolution.pubkey;
 
         const retryCount = pending.retryCount ?? 0;
 
@@ -581,6 +718,8 @@ export class InterventionService {
             conversationId: pending.conversationId.substring(0, 12),
             userPubkey: pending.userPubkey.substring(0, 8),
             agentPubkey: pending.agentPubkey.substring(0, 8),
+            interventionAgentPubkey: interventionAgentPubkey.substring(0, 8),
+            projectId: pending.projectId.substring(0, 12),
             timeElapsedMs: Date.now() - pending.completedAt,
             retryCount,
         });
@@ -589,6 +728,8 @@ export class InterventionService {
             "conversation.id": pending.conversationId,
             "user.pubkey": pending.userPubkey.substring(0, 8),
             "agent.pubkey": pending.agentPubkey.substring(0, 8),
+            "intervention_agent.pubkey": interventionAgentPubkey.substring(0, 8),
+            "project.id": pending.projectId.substring(0, 12),
             "time_elapsed_ms": Date.now() - pending.completedAt,
             "retry_count": retryCount,
         });
@@ -601,7 +742,7 @@ export class InterventionService {
             const agentName = pubkeyService.getNameSync(pending.agentPubkey);
 
             const eventId = await this.publisher.publishReviewRequest(
-                this.interventionAgentPubkey,
+                interventionAgentPubkey,
                 pending.conversationId,
                 userName,
                 agentName
@@ -963,10 +1104,13 @@ export class InterventionService {
 
     /**
      * Force agent resolution for testing purposes.
-     * This bypasses the lazy resolution and allows tests to verify resolution logic.
+     * Resolves the intervention agent for a specific project.
+     *
+     * @param projectId - The project ID to resolve the agent for
+     * @returns The resolution result
      */
-    public forceAgentResolution(): string | null {
-        return this.resolveAgentPubkeyLazy();
+    public forceAgentResolution(projectId: string): AgentResolutionResult {
+        return this.resolveAgentPubkeyForProject(projectId);
     }
 
     /**
