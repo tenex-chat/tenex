@@ -40,6 +40,13 @@ export interface AgentInstance {
      * Set via agent_configure tool.
      */
     pmOverrides?: Record<string, boolean>;
+    /**
+     * Global PM designation flag.
+     * When true, this agent is designated as PM for ALL projects where it exists.
+     * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag.
+     * Takes precedence over pmOverrides and project tag designations.
+     */
+    isPM?: boolean;
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;
