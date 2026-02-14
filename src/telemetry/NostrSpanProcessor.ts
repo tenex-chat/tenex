@@ -44,6 +44,13 @@ export class NostrSpanProcessor implements SpanProcessor {
     }
 
     onEnd(span: ReadableSpan): void {
+        // Only rewrite spanIDs for tenex.event.process spans
+        // Other spans (tenex.dispatch.chat_message, tenex.delegation.completion_check) share
+        // event.id attribute but should NOT have their spanIDs rewritten to avoid collisions
+        if (span.name !== "tenex.event.process") {
+            return;
+        }
+
         // Only process spans that have event.id attribute (Nostr event processing spans)
         const eventId = span.attributes["event.id"];
         if (typeof eventId !== "string" || !eventId) {
