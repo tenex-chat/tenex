@@ -2757,4 +2757,25 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
     return results;
   }
+
+  /**
+   * Get all active RAL entries for a specific project.
+   * Used by the active-conversations prompt fragment to show concurrent activity.
+   *
+   * @param projectId - The project ID to filter by
+   * @returns Array of active RAL entries for the project
+   */
+  getActiveEntriesForProject(projectId: string): RALRegistryEntry[] {
+    const results: RALRegistryEntry[] = [];
+
+    for (const rals of this.states.values()) {
+      for (const ral of rals.values()) {
+        if (ral.projectId === projectId) {
+          results.push(ral);
+        }
+      }
+    }
+
+    return results;
+  }
 }
