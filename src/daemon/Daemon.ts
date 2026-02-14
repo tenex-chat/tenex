@@ -29,7 +29,7 @@ import { UnixSocketTransport } from "./UnixSocketTransport";
 import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { InterventionService } from "@/services/intervention";
+import { InterventionService, type AgentResolutionResult } from "@/services/intervention";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -164,7 +164,13 @@ export class Daemon {
             // 12. Initialize InterventionService (after projects are loaded)
             // This must happen after subscriptions start so agent slugs can be resolved
             logger.debug("Initializing intervention service");
-            await InterventionService.getInstance().initialize();
+            const interventionService = InterventionService.getInstance();
+
+            // Wire the agent resolver - allows InterventionService (Layer 3) to resolve agents
+            // per-project without depending on @/daemon (Layer 4)
+            interventionService.setAgentResolver(this.createAgentResolver());
+
+            await interventionService.initialize();
 
             // 13. Setup graceful shutdown
             this.setupShutdownHandlers();
@@ -433,7 +439,7 @@ export class Daemon {
             await runtime.handleEvent(event);
 
             // Check for intervention triggers (completion or user response)
-            this.checkInterventionTriggers(event, runtime, projectId);
+            await this.checkInterventionTriggers(event, runtime, projectId);
         } catch (error) {
             logger.error("Project runtime crashed", { projectId, eventId: event.id });
             await this.runtimeLifecycle.handleRuntimeCrash(projectId, runtime);
@@ -455,11 +461,11 @@ export class Daemon {
      * - Event author is a whitelisted user
      * - Event is a reply in an existing conversation
      */
-    private checkInterventionTriggers(
+    private async checkInterventionTriggers(
         event: NDKEvent,
         runtime: ProjectRuntime,
         projectId: string
-    ): void {
+    ): Promise<void> {
         const interventionService = InterventionService.getInstance();
         if (!interventionService.isEnabled()) {
             return;
@@ -495,6 +501,21 @@ export class Daemon {
         const rootAuthorPubkey = conversation.getRootAuthorPubkey();
         if (!rootAuthorPubkey) {
             return;
+        }
+
+        // Set the project context for InterventionService per-event
+        // This ensures the service loads/saves state for the correct project
+        // Must await to prevent race conditions during project switch:
+        // - setProject flushes pending writes before updating currentProjectId
+        // - If not awaited, onUserResponse/onAgentCompletion could run under wrong project
+        try {
+            await interventionService.setProject(projectId);
+        } catch (error) {
+            logger.error("Failed to set intervention project context", {
+                projectId: projectId.substring(0, 12),
+                error: error instanceof Error ? error.message : String(error),
+            });
+            // Continue processing - intervention is optional, don't block event handling
         }
 
         const isUserEvent = this.whitelistedPubkeys.includes(event.pubkey);
@@ -541,6 +562,52 @@ export class Daemon {
                 );
             }
         }
+    }
+
+    /**
+     * Create an agent resolver function for InterventionService.
+     * This allows Layer 3 (InterventionService) to resolve agents per-project
+     * without directly depending on Layer 4 (Daemon).
+     *
+     * Returns a function that:
+     * - Returns { status: "resolved", pubkey } when agent is found
+     * - Returns { status: "runtime_unavailable" } when project runtime not active (transient)
+     * - Returns { status: "agent_not_found" } when agent slug doesn't exist (permanent)
+     */
+    private createAgentResolver(): (projectId: string, agentSlug: string) => AgentResolutionResult {
+        return (projectId: string, agentSlug: string): AgentResolutionResult => {
+            // Get active runtimes
+            const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes();
+            if (!activeRuntimes) {
+                // RuntimeLifecycle not initialized - transient failure
+                return { status: "runtime_unavailable" };
+            }
+
+            // Find the runtime for this project
+            const runtime = activeRuntimes.get(projectId);
+            if (!runtime) {
+                // Runtime not active for this project - transient failure
+                // (Project might not be booted yet, or was stopped)
+                return { status: "runtime_unavailable" };
+            }
+
+            // Get the project context
+            const context = runtime.getContext();
+            if (!context) {
+                // Context not available - transient failure
+                return { status: "runtime_unavailable" };
+            }
+
+            // Look up the agent by slug in the project's agent registry
+            const agent = context.agentRegistry.getAgent(agentSlug);
+            if (!agent) {
+                // Agent slug not found in this project - permanent failure
+                return { status: "agent_not_found" };
+            }
+
+            // Successfully resolved
+            return { status: "resolved", pubkey: agent.pubkey };
+        };
     }
 
     /**
