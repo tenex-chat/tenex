@@ -2578,4 +2578,69 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("getActiveEntriesForProject", () => {
+    it("returns empty array when no active RALs exist", () => {
+      const result = registry.getActiveEntriesForProject("nonexistent-project");
+      expect(result).toEqual([]);
+    });
+
+    it("returns RAL entries for the specified project", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      const result = registry.getActiveEntriesForProject(projectId);
+      expect(result.length).toBe(1);
+      expect(result[0].agentPubkey).toBe(agentPubkey);
+      expect(result[0].conversationId).toBe(conversationId);
+      expect(result[0].projectId).toBe(projectId);
+      expect(result[0].ralNumber).toBe(ralNumber);
+    });
+
+    it("filters by project ID correctly", () => {
+      const project1 = "project-1";
+      const project2 = "project-2";
+      const agent1 = "agent-1";
+      const agent2 = "agent-2";
+
+      registry.create(agent1, "conv-1", project1);
+      registry.create(agent2, "conv-2", project2);
+
+      const project1Results = registry.getActiveEntriesForProject(project1);
+      expect(project1Results.length).toBe(1);
+      expect(project1Results[0].agentPubkey).toBe(agent1);
+
+      const project2Results = registry.getActiveEntriesForProject(project2);
+      expect(project2Results.length).toBe(1);
+      expect(project2Results[0].agentPubkey).toBe(agent2);
+    });
+
+    it("returns multiple RAL entries for the same project", () => {
+      const agent1 = "agent-1";
+      const agent2 = "agent-2";
+
+      registry.create(agent1, "conv-1", projectId);
+      registry.create(agent2, "conv-2", projectId);
+
+      const results = registry.getActiveEntriesForProject(projectId);
+      expect(results.length).toBe(2);
+
+      const pubkeys = results.map(r => r.agentPubkey);
+      expect(pubkeys).toContain(agent1);
+      expect(pubkeys).toContain(agent2);
+    });
+
+    it("excludes cleared RALs", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      // Verify it exists
+      expect(registry.getActiveEntriesForProject(projectId).length).toBe(1);
+
+      // Clear the RAL
+      registry.clear(agentPubkey, conversationId, ralNumber);
+
+      // Should be empty now
+      const results = registry.getActiveEntriesForProject(projectId);
+      expect(results.length).toBe(0);
+    });
+  });
+
 });

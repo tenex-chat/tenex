@@ -13,6 +13,7 @@ import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { relayConfigurationFragment } from "./04-relay-configuration";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { agentTodosFragment } from "./06-agent-todos";
+import { activeConversationsFragment } from "./08-active-conversations";
 import { recentConversationsFragment } from "./09-recent-conversations";
 import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 // 10-referenced-article uses inline registration, no named export
@@ -50,6 +51,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
+    fragmentRegistry.register(activeConversationsFragment);
     fragmentRegistry.register(recentConversationsFragment);
     fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(debugModeFragment);

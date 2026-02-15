@@ -429,6 +429,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add relay configuration context
     systemPromptBuilder.add("relay-configuration", {});
 
+    // Add active conversations context (currently running agents in the project)
+    systemPromptBuilder.add("active-conversations", {
+        agent: agentForFragments,
+        currentConversationId: conversation.getId(),
+        projectId: project.dTag || project.tagValue("d"),
+    });
+
     // Add recent conversations context (short-term memory)
     systemPromptBuilder.add("recent-conversations", {
         agent: agentForFragments,
