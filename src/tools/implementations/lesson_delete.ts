@@ -4,6 +4,8 @@ import { RAGService } from "@/services/rag/RAGService";
 import { createExpectedError } from "@/tools/utils";
 import { logger } from "@/utils/logger";
 import { normalizeLessonEventId } from "@/utils/nostr-entity-parser";
+import { getNDK } from "@/nostr/ndkClient";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -77,9 +79,19 @@ async function executeLessonDelete(
 
     const lessonTitle = lesson.title || "Untitled";
 
-    // Use NDK's delete method (NIP-09) to create a deletion event
-    // Per error handling contract: unexpected failures from delete() should throw
-    await lesson.delete(reason, true);
+    // Create NIP-09 deletion event manually and sign with agent's signer
+    // We can't use lesson.delete() directly because the lesson's NDK instance
+    // doesn't have the agent's signer attached
+    const ndk = getNDK();
+    const deleteEvent = new NDKEvent(ndk);
+    deleteEvent.kind = 5; // NIP-09 deletion event kind
+    deleteEvent.tags = [["e", eventId]]; // Reference the event being deleted
+    deleteEvent.content = reason || "";
+
+    // Sign with the agent's signer and publish
+    // Per error handling contract: unexpected failures should throw
+    await context.agent.sign(deleteEvent);
+    await deleteEvent.publish();
 
     logger.info("✅ Lesson deletion event published", {
         agent: context.agent.name,
