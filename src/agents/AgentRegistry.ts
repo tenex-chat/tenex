@@ -173,7 +173,8 @@ export class AgentRegistry {
 
             // Load this locally-associated agent
             try {
-                const agentInstance = createAgentInstance(storedAgent, this);
+                // Pass projectDTag for project-scoped config resolution
+                const agentInstance = createAgentInstance(storedAgent, this, this.projectDTag);
                 this.addAgent(agentInstance);
                 logger.info(`Loaded locally-associated agent ${storedAgent.slug} into registry`);
             } catch (error) {
@@ -395,7 +396,8 @@ export class AgentRegistry {
         }
 
         // Create and add new instance
-        const instance = createAgentInstance(storedAgent, this);
+        // Pass projectDTag for project-scoped config resolution
+        const instance = createAgentInstance(storedAgent, this, this.projectDTag);
         this.addAgent(instance);
 
         logger.debug(`Reloaded agent ${storedAgent.name} (${storedAgent.slug})`);

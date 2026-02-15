@@ -23,13 +23,31 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  * Create an AgentInstance from stored agent data.
  * This is the hydration step from persistent data to runtime object.
  * Exported for use in agent creation tools (e.g., agents_write).
+ *
+ * @param storedAgent - The stored agent data
+ * @param registry - The agent registry (used for metadata and LLM service creation)
+ * @param projectDTag - Optional project dTag for resolving project-scoped config
  */
-export function createAgentInstance(storedAgent: StoredAgent, registry: AgentRegistry): AgentInstance {
+export function createAgentInstance(
+    storedAgent: StoredAgent,
+    registry: AgentRegistry,
+    projectDTag?: string
+): AgentInstance {
     const signer = new NDKPrivateKeySigner(storedAgent.nsec);
     const pubkey = signer.pubkey;
 
+    // Resolve effective configuration for this project
+    // If projectDTag is provided, check projectConfigs first, then fall back to global
+    const effectiveLLMConfig = projectDTag
+        ? agentStorage.resolveEffectiveLLMConfig(storedAgent, projectDTag)
+        : storedAgent.llmConfig;
+
+    const effectiveTools = projectDTag
+        ? agentStorage.resolveEffectiveTools(storedAgent, projectDTag)
+        : storedAgent.tools;
+
     // Process tools using pure functions
-    const validToolNames = processAgentTools(storedAgent.tools || [], storedAgent.slug);
+    const validToolNames = processAgentTools(effectiveTools || [], storedAgent.slug);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
@@ -47,13 +65,15 @@ export function createAgentInstance(storedAgent: StoredAgent, registry: AgentReg
         description: storedAgent.description,
         instructions: storedAgent.instructions,
         useCriteria: storedAgent.useCriteria,
-        llmConfig: storedAgent.llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+        llmConfig: effectiveLLMConfig || DEFAULT_AGENT_LLM_CONFIG,
         tools: validToolNames,
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,
         pmOverrides: storedAgent.pmOverrides,
         isPM: storedAgent.isPM,
+        // Store project-scoped config for runtime access if needed
+        projectConfigs: storedAgent.projectConfigs,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
@@ -174,7 +194,8 @@ export async function loadAgentIntoRegistry(
     }
 
     // Create instance and add to registry
-    const instance = createAgentInstance(freshAgent, registry);
+    // Pass projectDTag so project-scoped config can be resolved
+    const instance = createAgentInstance(freshAgent, registry, projectDTag);
     registry.addAgent(instance);
 
     // Publish kind:0 profile for this agent now that it's associated with the project

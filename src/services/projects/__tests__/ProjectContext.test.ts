@@ -443,5 +443,121 @@ describe("ProjectContext", () => {
             );
             expect(multiPMWarning).toBeUndefined();
         });
+
+        it("should use project-scoped PM from projectConfigs when no global isPM exists", () => {
+            // Agent with project-scoped PM via kind 24020 with a-tag
+            const agent1 = createMockAgent({ slug: "agent-1" });
+            const agent2: AgentInstance = {
+                ...createMockAgent({ slug: "agent-2" }),
+                projectConfigs: {
+                    "test-project": { isPM: true },
+                },
+            };
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            expect(pm).toBe(agent2);
+        });
+
+        it("should prioritize global isPM over project-scoped projectConfigs.isPM", () => {
+            // Agent1 has global isPM=true, agent2 has project-scoped isPM
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                isPM: true, // Global PM designation
+            });
+            const agent2: AgentInstance = {
+                ...createMockAgent({ slug: "agent-2" }),
+                projectConfigs: {
+                    "test-project": { isPM: true }, // Project-scoped PM
+                },
+            };
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Global isPM should win
+            expect(pm).toBe(agent1);
+        });
+
+        it("should prioritize project-scoped projectConfigs.isPM over legacy pmOverrides", () => {
+            // Agent1 has project-scoped isPM via projectConfigs
+            // Agent2 has legacy pmOverrides
+            const agent1: AgentInstance = {
+                ...createMockAgent({ slug: "agent-1" }),
+                projectConfigs: {
+                    "test-project": { isPM: true },
+                },
+            };
+            const agent2 = createMockAgent({
+                slug: "agent-2",
+                pmOverrides: { "test-project": true },
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            const project = {
+                tags: [],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // projectConfigs.isPM should win over pmOverrides
+            expect(pm).toBe(agent1);
+        });
+
+        it("should only apply project-scoped PM to matching project", () => {
+            // Agent has project-scoped PM for a DIFFERENT project
+            const agent1: AgentInstance = {
+                ...createMockAgent({ slug: "agent-1" }),
+                projectConfigs: {
+                    "other-project": { isPM: true }, // Different project!
+                },
+            };
+            const agent2 = createMockAgent({ slug: "agent-2" });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+                ["agent-2", agent2],
+            ]);
+
+            // Project tags designate agent-2 as first agent
+            const project = {
+                tags: [["agent", "event-agent-2"]],
+                dTag: "test-project", // Not "other-project"
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Should fall through to first agent from tags since projectConfigs.isPM
+            // is for a different project
+            expect(pm).toBe(agent2);
+        });
     });
 });
