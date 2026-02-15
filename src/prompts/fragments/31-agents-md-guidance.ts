@@ -1,11 +1,13 @@
 /**
  * AGENTS.md Guidance Fragment
  *
- * This fragment is conditionally included when the project has an AGENTS.md file
- * at its root. It provides guidance to agents about:
+ * This fragment is ALWAYS included in the system prompt to inform agents about
+ * the AGENTS.md system. It provides guidance to agents about:
  * - What AGENTS.md files are and how they work
  * - How to write and update AGENTS.md files
  * - The hierarchical nature of AGENTS.md inheritance
+ *
+ * When the project has no root AGENTS.md, it explicitly states so.
  */
 
 import { fragmentRegistry } from "../core/FragmentRegistry";
@@ -30,14 +32,20 @@ export const agentsMdGuidanceFragment: PromptFragment<AgentsMdGuidanceArgs> = {
     id: "agents-md-guidance",
     priority: 31, // After worktree context (30)
     template: ({ hasRootAgentsMd, rootAgentsMdContent }) => {
-        // Only include if project has a root AGENTS.md
-        if (!hasRootAgentsMd) {
-            return "";
-        }
-
         const parts: string[] = [];
 
         parts.push("## AGENTS.md Guidelines\n");
+
+        // When no root AGENTS.md exists, explicitly state so
+        if (!hasRootAgentsMd) {
+            parts.push(
+                "No root AGENTS.md file exists for this project. " +
+                    "AGENTS.md files provide contextual guidelines for AI agents working in specific directories. " +
+                    "If you need to establish project-specific conventions, commands, or guidelines, " +
+                    "consider creating an AGENTS.md file at the project root."
+            );
+            return parts.join("\n");
+        }
 
         parts.push(`This project uses AGENTS.md files to provide contextual guidelines for different directories.
 
