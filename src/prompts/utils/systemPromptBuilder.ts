@@ -481,23 +481,33 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         });
     }
 
-    // Add AGENTS.md guidance if project has a root AGENTS.md
-    // This is checked asynchronously but cached for subsequent calls
+    // Add AGENTS.md guidance - always included to inform agents about the AGENTS.md system
+    // When no AGENTS.md exists, the fragment explicitly states so
     if (projectBasePath) {
         try {
             const { agentsMdService } = await import("@/services/agents-md");
             const hasRootAgentsMd = await agentsMdService.hasRootAgentsMd(projectBasePath);
-            if (hasRootAgentsMd) {
-                const rootContent = await agentsMdService.getRootAgentsMdContent(projectBasePath);
-                systemPromptBuilder.add("agents-md-guidance", {
-                    hasRootAgentsMd: true,
-                    rootAgentsMdContent: rootContent || undefined,
-                });
-            }
+            const rootContent = hasRootAgentsMd
+                ? await agentsMdService.getRootAgentsMdContent(projectBasePath)
+                : null;
+            systemPromptBuilder.add("agents-md-guidance", {
+                hasRootAgentsMd,
+                rootAgentsMdContent: rootContent || undefined,
+            });
         } catch (error) {
-            // AGENTS.md service not available or error - skip the fragment
+            // AGENTS.md service not available or error - add fragment with no AGENTS.md state
             logger.debug("Could not check for root AGENTS.md:", error);
+            systemPromptBuilder.add("agents-md-guidance", {
+                hasRootAgentsMd: false,
+                rootAgentsMdContent: undefined,
+            });
         }
+    } else {
+        // No project base path - still add fragment to explain AGENTS.md system
+        systemPromptBuilder.add("agents-md-guidance", {
+            hasRootAgentsMd: false,
+            rootAgentsMdContent: undefined,
+        });
     }
 
     // Add core agent fragments using shared composition
@@ -564,6 +574,13 @@ async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions):
 
     // Add alpha mode warning and bug reporting tools guidance
     systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
+
+    // Add AGENTS.md guidance - always included even in standalone mode
+    // Standalone agents don't have project context, so hasRootAgentsMd is always false
+    systemPromptBuilder.add("agents-md-guidance", {
+        hasRootAgentsMd: false,
+        rootAgentsMdContent: undefined,
+    });
 
     // Add core agent fragments using shared composition
     await addCoreAgentFragments(systemPromptBuilder, agent, conversation);
