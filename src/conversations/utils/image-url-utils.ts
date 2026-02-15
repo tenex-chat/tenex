@@ -29,21 +29,32 @@ const URL_PATTERN = /https?:\/\/[^\s<>"\]()]+/gi;
  * or other non-routable domains that will fail to fetch.
  */
 const SKIP_DOMAINS = new Set([
-    // RFC 2606 reserved example domains
+    // RFC 2606 reserved example domains (only .com, .net, .org are reserved)
     "example.com",
     "example.org",
     "example.net",
-    "example.edu",
     // Localhost variants
     "localhost",
-    "127.0.0.1",
     "0.0.0.0",
+    // IPv6 loopback - URL.hostname returns "[::1]" with brackets in Bun/Node
     "[::1]",
     // Common development/test domains
     "test",
     "invalid",
     "local",
 ]);
+
+/**
+ * Check if a hostname is a loopback address (127.0.0.0/8 range).
+ * This covers all 127.x.x.x addresses, not just 127.0.0.1.
+ *
+ * @param hostname - The hostname to check
+ * @returns true if the hostname is a loopback address
+ */
+function isLoopbackAddress(hostname: string): boolean {
+    // Match any 127.x.x.x address (the entire 127.0.0.0/8 block is reserved for loopback)
+    return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+}
 
 /**
  * Check if a URL should be skipped for image fetching.
@@ -62,6 +73,11 @@ export function shouldSkipImageUrl(url: string): boolean {
 
         // Check exact match against skip domains
         if (SKIP_DOMAINS.has(hostname)) {
+            return true;
+        }
+
+        // Check for any 127.x.x.x loopback address (entire /8 block)
+        if (isLoopbackAddress(hostname)) {
             return true;
         }
 

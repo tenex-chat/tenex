@@ -71,15 +71,13 @@ export function convertToMultimodalContent(content: string): MultimodalContent {
             continue;
         }
 
-        try {
-            parts.push({
-                type: "image",
-                image: new URL(imageUrl),
-            } satisfies ImagePart);
-        } catch {
-            // Skip invalid URLs - log for debugging if needed
-            console.warn(`Skipping invalid image URL: ${imageUrl}`);
-        }
+        // Note: new URL() here should never throw because extractImageUrls
+        // already validates and normalizes URLs. The ImagePart uses URL objects
+        // as per AI SDK spec, allowing the SDK to fetch the images.
+        parts.push({
+            type: "image",
+            image: new URL(imageUrl),
+        } satisfies ImagePart);
     }
 
     // If all image URLs were skipped (non-fetchable domains), return original string

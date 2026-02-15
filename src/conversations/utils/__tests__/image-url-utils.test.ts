@@ -167,15 +167,14 @@ describe("image-url-utils", () => {
         describe("RFC 2606 reserved domains", () => {
             it("should skip URLs with top-level example domains", () => {
                 // Note: Using string concatenation to avoid triggering image URL parsing
+                // RFC 2606 only reserves example.com, example.net, example.org (not example.edu)
                 const exampleCom = "https://" + "example.com" + "/photo.jpg";
                 const exampleOrg = "https://" + "example.org" + "/photo.png";
                 const exampleNet = "https://" + "example.net" + "/image.gif";
-                const exampleEdu = "https://" + "example.edu" + "/banner.webp";
 
                 expect(shouldSkipImageUrl(exampleCom)).toBe(true);
                 expect(shouldSkipImageUrl(exampleOrg)).toBe(true);
                 expect(shouldSkipImageUrl(exampleNet)).toBe(true);
-                expect(shouldSkipImageUrl(exampleEdu)).toBe(true);
             });
 
             it("should skip URLs with subdomains of example domains", () => {
@@ -201,10 +200,19 @@ describe("image-url-utils", () => {
                 expect(shouldSkipImageUrl("https://localhost:8080/banner.gif")).toBe(true);
             });
 
-            it("should skip IPv4 loopback addresses", () => {
+            it("should skip IPv4 loopback addresses (127.0.0.0/8 range)", () => {
+                // 127.0.0.1 is the most common loopback, but entire 127.0.0.0/8 is reserved
                 expect(shouldSkipImageUrl("http://127.0.0.1/image.jpg")).toBe(true);
                 expect(shouldSkipImageUrl("http://127.0.0.1:8000/photo.png")).toBe(true);
+                expect(shouldSkipImageUrl("http://127.0.1.1/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://127.255.255.255/photo.png")).toBe(true);
                 expect(shouldSkipImageUrl("http://0.0.0.0/banner.gif")).toBe(true);
+            });
+
+            it("should skip IPv6 loopback address", () => {
+                // URL.hostname returns "[::1]" with brackets for IPv6 loopback in Bun/Node
+                expect(shouldSkipImageUrl("http://[::1]/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://[::1]:3000/photo.png")).toBe(true);
             });
 
             it("should skip .localhost TLD", () => {
