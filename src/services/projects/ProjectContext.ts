@@ -14,11 +14,12 @@ import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
  * Resolve the Project Manager for a project.
  *
  * Priority order:
- * 1. Global PM designation via kind 24020 event ["pm"] tag (highest priority)
- * 2. Local PM override for this specific project (pmOverrides)
- * 3. Explicit PM designation in 31933 project tags (role="pm")
- * 4. First agent from project tags
- * 5. First agent in registry (fallback for projects with no agent tags)
+ * 1. Global PM designation via kind 24020 event ["pm"] tag without a-tag (highest priority)
+ * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectConfigs[dTag].isPM)
+ * 3. Legacy local PM override for this specific project (pmOverrides) - from agent_configure tool
+ * 4. Explicit PM designation in 31933 project tags (role="pm")
+ * 5. First agent from project tags
+ * 6. First agent in registry (fallback for projects with no agent tags)
  *
  * @param project - The NDKProject event
  * @param agents - Map of agent slug to AgentInstance
@@ -56,11 +57,12 @@ export function resolveProjectManager(
         return globalPMAgents[0];
     }
 
-    // Step 2: Check for local PM override for this specific project
+    // Step 2: Check for project-scoped PM designation via kind 24020 with a-tag
+    // This is the new mechanism: projectConfigs[projectDTag].isPM
     if (projectDTag) {
         for (const agent of agents.values()) {
-            if (agent.pmOverrides?.[projectDTag] === true) {
-                logger.info("Found local PM override for project", {
+            if (agent.projectConfigs?.[projectDTag]?.isPM === true) {
+                logger.info("Found project-scoped PM designation via kind 24020 event", {
                     agentName: agent.name,
                     agentSlug: agent.slug,
                     projectDTag,
@@ -70,7 +72,21 @@ export function resolveProjectManager(
         }
     }
 
-    // Step 3: Check for explicit "pm" role in project tags
+    // Step 3: Check for legacy local PM override for this specific project (pmOverrides)
+    if (projectDTag) {
+        for (const agent of agents.values()) {
+            if (agent.pmOverrides?.[projectDTag] === true) {
+                logger.info("Found legacy PM override for project", {
+                    agentName: agent.name,
+                    agentSlug: agent.slug,
+                    projectDTag,
+                });
+                return agent;
+            }
+        }
+    }
+
+    // Step 4: Check for explicit "pm" role in project tags
     const pmAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "agent" && tag[2] === "pm"
     );
@@ -90,7 +106,7 @@ export function resolveProjectManager(
         );
     }
 
-    // Step 4: Fallback to first agent from project tags
+    // Step 5: Fallback to first agent from project tags
     const firstAgentTag = project.tags.find(
         (tag: string[]) => tag[0] === "agent" && tag[1]
     );
@@ -110,7 +126,7 @@ export function resolveProjectManager(
         );
     }
 
-    // Step 5: No agent tags in project, use first from registry if any exist
+    // Step 6: No agent tags in project, use first from registry if any exist
     if (agents.size > 0) {
         const firstAgent = agents.values().next().value;
         if (firstAgent) {

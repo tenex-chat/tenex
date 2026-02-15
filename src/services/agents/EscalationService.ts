@@ -151,7 +151,8 @@ async function autoAddEscalationAgent(
     }
 
     // Create agent instance and add to registry
-    const agentInstance = createAgentInstance(freshAgent, agentRegistry);
+    // Pass projectDTag for project-scoped config resolution
+    const agentInstance = createAgentInstance(freshAgent, agentRegistry, projectDTag);
     agentRegistry.addAgent(agentInstance);
 
     // Notify the Daemon about the new agent for routing
@@ -256,7 +257,8 @@ export async function loadEscalationAgentIntoRegistry(
         }
 
         // Create agent instance and add to registry
-        const agentInstance = createAgentInstance(freshAgent, agentRegistry);
+        // Pass projectDTag for project-scoped config resolution
+        const agentInstance = createAgentInstance(freshAgent, agentRegistry, projectDTag);
         agentRegistry.addAgent(agentInstance);
 
         logger.info("[EscalationService] Successfully loaded escalation agent into registry", {

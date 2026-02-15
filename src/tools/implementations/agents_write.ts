@@ -146,7 +146,8 @@ async function executeAgentsWrite(
     await agentStorage.saveAgent(storedAgent);
 
     // Create instance and add to registry
-    const agent = createAgentInstance(storedAgent, projectContext.agentRegistry);
+    // Pass projectDTag for project-scoped config resolution
+    const agent = createAgentInstance(storedAgent, projectContext.agentRegistry, projectDTag);
     projectContext.agentRegistry.addAgent(agent);
 
     // Notify context that a new agent was added (for Daemon routing synchronization)
