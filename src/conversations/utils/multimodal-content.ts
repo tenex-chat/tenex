@@ -9,7 +9,7 @@
  */
 
 import type { TextPart, ImagePart } from "ai";
-import { extractImageUrls } from "./image-url-utils";
+import { extractImageUrls, shouldSkipImageUrl } from "./image-url-utils";
 
 /**
  * Type representing multimodal content for user messages.
@@ -63,7 +63,14 @@ export function convertToMultimodalContent(content: string): MultimodalContent {
 
     // Add each image as an ImagePart with URL reference
     // The AI SDK will fetch the images automatically
+    // Skip URLs on non-routable domains (example.com, localhost, etc.) that would fail
     for (const imageUrl of imageUrls) {
+        // Skip URLs that cannot be fetched (example domains, localhost, etc.)
+        // These would cause the AI SDK fetch to fail and crash the agent
+        if (shouldSkipImageUrl(imageUrl)) {
+            continue;
+        }
+
         try {
             parts.push({
                 type: "image",
@@ -73,6 +80,12 @@ export function convertToMultimodalContent(content: string): MultimodalContent {
             // Skip invalid URLs - log for debugging if needed
             console.warn(`Skipping invalid image URL: ${imageUrl}`);
         }
+    }
+
+    // If all image URLs were skipped (non-fetchable domains), return original string
+    // parts[0] is always the TextPart, so if length is 1, no images were added
+    if (parts.length === 1) {
+        return content;
     }
 
     return parts;

@@ -24,6 +24,73 @@ export const IMAGE_EXTENSIONS = [
 const URL_PATTERN = /https?:\/\/[^\s<>"\]()]+/gi;
 
 /**
+ * Domains that should be skipped for image fetching.
+ * These are either reserved example domains (RFC 2606), localhost/development domains,
+ * or other non-routable domains that will fail to fetch.
+ */
+const SKIP_DOMAINS = new Set([
+    // RFC 2606 reserved example domains
+    "example.com",
+    "example.org",
+    "example.net",
+    "example.edu",
+    // Localhost variants
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "[::1]",
+    // Common development/test domains
+    "test",
+    "invalid",
+    "local",
+]);
+
+/**
+ * Check if a URL should be skipped for image fetching.
+ * Returns true for URLs on reserved/example/localhost domains that
+ * will fail to fetch and could crash the agent.
+ *
+ * @param url - The URL string to check
+ * @returns true if the URL should be skipped, false if it can be fetched
+ */
+export function shouldSkipImageUrl(url: string): boolean {
+    if (!url) return true;
+
+    try {
+        const parsedUrl = new URL(url);
+        const hostname = parsedUrl.hostname.toLowerCase();
+
+        // Check exact match against skip domains
+        if (SKIP_DOMAINS.has(hostname)) {
+            return true;
+        }
+
+        // Check for subdomains of example domains (e.g., cdn.example.com, www.example.org)
+        for (const skipDomain of SKIP_DOMAINS) {
+            if (hostname.endsWith(`.${skipDomain}`)) {
+                return true;
+            }
+        }
+
+        // Check for .local, .test, .invalid, .localhost TLDs (RFC 2606 / RFC 6761)
+        if (
+            hostname.endsWith(".local") ||
+            hostname.endsWith(".test") ||
+            hostname.endsWith(".invalid") ||
+            hostname.endsWith(".localhost") ||
+            hostname.endsWith(".example")
+        ) {
+            return true;
+        }
+
+        return false;
+    } catch {
+        // Invalid URL - skip it
+        return true;
+    }
+}
+
+/**
  * Check if a URL string points to an image based on its file extension.
  * Handles URLs with query parameters and fragments.
  *
