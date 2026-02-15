@@ -42,9 +42,26 @@ function getToolResultSize(toolData: ToolResultPart[]): number {
             if (typeof output === "string") {
                 totalSize += output.length;
             } else if (typeof output === "object" && output !== null && "value" in output) {
-                totalSize += String((output as { value: unknown }).value).length;
+                const value = (output as { value: unknown }).value;
+                if (typeof value === "string") {
+                    totalSize += value.length;
+                } else {
+                    try {
+                        totalSize += (JSON.stringify(value) ?? "").length;
+                    } catch {
+                        // Fallback for non-serializable values (BigInt, circular refs, etc.)
+                        // Bias toward truncation when we can't measure - safer for context window
+                        totalSize += LARGE_RESULT_THRESHOLD;
+                    }
+                }
             } else {
-                totalSize += JSON.stringify(output).length;
+                try {
+                    totalSize += (JSON.stringify(output) ?? "").length;
+                } catch {
+                    // Fallback for non-serializable values (BigInt, circular refs, etc.)
+                    // Bias toward truncation when we can't measure - safer for context window
+                    totalSize += LARGE_RESULT_THRESHOLD;
+                }
             }
         }
     }

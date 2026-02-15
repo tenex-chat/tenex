@@ -109,6 +109,36 @@ describe("tool-result-truncator", () => {
 
             expect(shouldTruncateToolResult(toolData, context)).toBe(false);
         });
+
+        it("should correctly calculate size when value is an array (e.g., image content)", () => {
+            // Simulate base64-encoded screenshot in array structure
+            // This was the bug: String([{...}]) returns "[object Object]" = 15 chars
+            // instead of the actual JSON size
+            const base64Content = "x".repeat(500000); // ~500KB like a real screenshot
+            const toolData: ToolResultPart[] = [{
+                type: "tool-result" as const,
+                toolCallId: "screenshot-call",
+                toolName: "screenshot",
+                output: {
+                    type: "json" as const,
+                    value: [{
+                        type: "image",
+                        data: base64Content,
+                        mimeType: "image/png",
+                    }],
+                },
+            }];
+
+            const context: TruncationContext = {
+                currentIndex: 0,
+                totalMessages: 100, // Deeply buried
+                eventId: "test-event-id",
+            };
+
+            // With the fix, this should recognize the ~500KB content and truncate it
+            // Before the fix, it would calculate size as ~15 chars and NOT truncate
+            expect(shouldTruncateToolResult(toolData, context)).toBe(true);
+        });
     });
 
     describe("createTruncatedToolResult", () => {
