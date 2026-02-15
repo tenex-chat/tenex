@@ -10,6 +10,7 @@ import {
     isImageUrl,
     extractImageUrls,
     IMAGE_EXTENSIONS,
+    shouldSkipImageUrl,
 } from "../image-url-utils";
 
 describe("image-url-utils", () => {
@@ -159,6 +160,130 @@ describe("image-url-utils", () => {
             expect(IMAGE_EXTENSIONS).toContain(".gif");
             expect(IMAGE_EXTENSIONS).toContain(".webp");
             expect(IMAGE_EXTENSIONS).toContain(".svg");
+        });
+    });
+
+    describe("shouldSkipImageUrl", () => {
+        describe("RFC 2606 reserved domains", () => {
+            it("should skip URLs with top-level example domains", () => {
+                // Note: Using string concatenation to avoid triggering image URL parsing
+                // RFC 2606 only reserves example.com, example.net, example.org (not example.edu)
+                const exampleCom = "https://" + "example.com" + "/photo.jpg";
+                const exampleOrg = "https://" + "example.org" + "/photo.png";
+                const exampleNet = "https://" + "example.net" + "/image.gif";
+
+                expect(shouldSkipImageUrl(exampleCom)).toBe(true);
+                expect(shouldSkipImageUrl(exampleOrg)).toBe(true);
+                expect(shouldSkipImageUrl(exampleNet)).toBe(true);
+            });
+
+            it("should skip URLs with subdomains of example domains", () => {
+                const cdnExample = "https://cdn." + "example.com" + "/photo.jpg";
+                const wwwExample = "https://www." + "example.org" + "/image.png";
+                const imgExample = "https://img." + "example.net" + "/banner.gif";
+
+                expect(shouldSkipImageUrl(cdnExample)).toBe(true);
+                expect(shouldSkipImageUrl(wwwExample)).toBe(true);
+                expect(shouldSkipImageUrl(imgExample)).toBe(true);
+            });
+
+            it("should skip URLs with .example TLD", () => {
+                expect(shouldSkipImageUrl("https://mysite.example/photo.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("https://test.mysite.example/image.png")).toBe(true);
+            });
+        });
+
+        describe("localhost and loopback addresses", () => {
+            it("should skip localhost URLs", () => {
+                expect(shouldSkipImageUrl("http://localhost/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://localhost:3000/photo.png")).toBe(true);
+                expect(shouldSkipImageUrl("https://localhost:8080/banner.gif")).toBe(true);
+            });
+
+            it("should skip IPv4 loopback addresses (127.0.0.0/8 range)", () => {
+                // 127.0.0.1 is the most common loopback, but entire 127.0.0.0/8 is reserved
+                expect(shouldSkipImageUrl("http://127.0.0.1/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://127.0.0.1:8000/photo.png")).toBe(true);
+                expect(shouldSkipImageUrl("http://127.0.1.1/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://127.255.255.255/photo.png")).toBe(true);
+                expect(shouldSkipImageUrl("http://0.0.0.0/banner.gif")).toBe(true);
+            });
+
+            it("should skip IPv6 loopback address", () => {
+                // URL.hostname returns "[::1]" with brackets for IPv6 loopback in Bun/Node
+                expect(shouldSkipImageUrl("http://[::1]/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://[::1]:3000/photo.png")).toBe(true);
+            });
+
+            it("should skip .localhost TLD", () => {
+                expect(shouldSkipImageUrl("http://myapp.localhost/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://api.myapp.localhost:3000/photo.png")).toBe(true);
+            });
+        });
+
+        describe("other reserved TLDs (RFC 6761)", () => {
+            it("should skip .test TLD", () => {
+                expect(shouldSkipImageUrl("https://mysite.test/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("https://app.mysite.test/photo.png")).toBe(true);
+            });
+
+            it("should skip .invalid TLD", () => {
+                expect(shouldSkipImageUrl("https://broken.invalid/image.jpg")).toBe(true);
+            });
+
+            it("should skip .local TLD", () => {
+                expect(shouldSkipImageUrl("https://printer.local/image.jpg")).toBe(true);
+                expect(shouldSkipImageUrl("http://server.local:8080/photo.png")).toBe(true);
+            });
+        });
+
+        describe("valid fetchable URLs", () => {
+            it("should NOT skip real domain URLs", () => {
+                expect(shouldSkipImageUrl("https://images.unsplash.com/photo.jpg")).toBe(false);
+                expect(shouldSkipImageUrl("https://cdn.jsdelivr.net/image.png")).toBe(false);
+                expect(shouldSkipImageUrl("https://github.com/user/repo/image.gif")).toBe(false);
+                expect(shouldSkipImageUrl("https://i.imgur.com/photo.webp")).toBe(false);
+            });
+
+            it("should NOT skip domains that contain 'example' but are not reserved", () => {
+                // These are real domains that happen to contain 'example' in their name
+                expect(shouldSkipImageUrl("https://myexample.com/photo.jpg")).toBe(false);
+                expect(shouldSkipImageUrl("https://examplesite.io/image.png")).toBe(false);
+            });
+
+            it("should NOT skip domains that contain 'local' but are not .local TLD", () => {
+                expect(shouldSkipImageUrl("https://localstack.io/image.jpg")).toBe(false);
+                expect(shouldSkipImageUrl("https://localhost-cdn.com/photo.png")).toBe(false);
+            });
+        });
+
+        describe("edge cases", () => {
+            it("should skip empty URLs", () => {
+                expect(shouldSkipImageUrl("")).toBe(true);
+            });
+
+            it("should skip invalid URLs", () => {
+                expect(shouldSkipImageUrl("not-a-url")).toBe(true);
+                expect(shouldSkipImageUrl("/path/to/image.jpg")).toBe(true);
+            });
+
+            it("should handle URLs with query parameters and fragments", () => {
+                const exampleWithQuery = "https://" + "example.com" + "/photo.jpg?size=large";
+                const exampleWithFragment = "https://" + "example.com" + "/photo.jpg#section";
+
+                expect(shouldSkipImageUrl(exampleWithQuery)).toBe(true);
+                expect(shouldSkipImageUrl(exampleWithFragment)).toBe(true);
+            });
+
+            it("should be case-insensitive for hostname matching", () => {
+                const upperExample = "https://EXAMPLE.COM/photo.jpg";
+                const mixedExample = "https://Example.Org/image.png";
+                const upperLocalhost = "https://LOCALHOST/banner.gif";
+
+                expect(shouldSkipImageUrl(upperExample)).toBe(true);
+                expect(shouldSkipImageUrl(mixedExample)).toBe(true);
+                expect(shouldSkipImageUrl(upperLocalhost)).toBe(true);
+            });
         });
     });
 });
