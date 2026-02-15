@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { StoredAgentData } from "@/agents/types";
+import type { StoredAgentData, ProjectScopedConfig } from "@/agents/types";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import { ensureDirectory, fileExists } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
@@ -30,10 +30,22 @@ export interface StoredAgent extends StoredAgentData {
     /**
      * Global PM designation flag.
      * When true, this agent is designated as PM for ALL projects where it exists.
-     * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag.
+     * Set via kind 24020 TenexAgentConfigUpdate event with ["pm"] tag (without a-tag).
      * Takes precedence over pmOverrides and project tag designations.
      */
     isPM?: boolean;
+    /**
+     * Project-scoped configuration overrides.
+     * Key is project dTag, value contains project-specific settings.
+     * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
+     *
+     * ## Priority (highest to lowest)
+     * 1. projectConfigs[projectDTag].* (project-scoped from kind 24020 with a-tag)
+     * 2. Global fields (llmConfig, tools, isPM) (global from kind 24020 without a-tag)
+     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
+     * 4. Project tag designations (from kind 31933)
+     */
+    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**
@@ -77,6 +89,7 @@ export function createStoredAgent(config: {
     /** @deprecated Use pmOverrides instead */
     isPMOverride?: boolean;
     pmOverrides?: Record<string, boolean>;
+    projectConfigs?: Record<string, ProjectScopedConfig>;
 }): StoredAgent {
     return {
         eventId: config.eventId,
@@ -92,6 +105,7 @@ export function createStoredAgent(config: {
         projects: config.projects ?? [],
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
+        projectConfigs: config.projectConfigs,
     };
 }
 
@@ -675,6 +689,262 @@ export class AgentStorage {
 
         await this.saveAgent(agent);
         logger.info(`Updated isPM flag for agent ${agent.name}`, { isPM: agent.isPM });
+        return true;
+    }
+
+    // =========================================================================
+    // PROJECT-SCOPED CONFIGURATION METHODS
+    // =========================================================================
+
+    /**
+     * Get project-scoped configuration for an agent.
+     * Returns undefined if no project-scoped config exists.
+     */
+    getProjectConfig(agent: StoredAgent, projectDTag: string): ProjectScopedConfig | undefined {
+        return agent.projectConfigs?.[projectDTag];
+    }
+
+    /**
+     * Set project-scoped configuration for an agent.
+     * Does NOT save the agent - caller must save after making all changes.
+     *
+     * @param agent - The agent to modify
+     * @param projectDTag - The project dTag to set config for
+     * @param config - The configuration to set (partial update - merges with existing)
+     */
+    setProjectConfig(
+        agent: StoredAgent,
+        projectDTag: string,
+        config: Partial<ProjectScopedConfig>
+    ): void {
+        if (!agent.projectConfigs) {
+            agent.projectConfigs = {};
+        }
+
+        const existing = agent.projectConfigs[projectDTag] || {};
+        agent.projectConfigs[projectDTag] = { ...existing, ...config };
+
+        // Clean up undefined values
+        const projectConfig = agent.projectConfigs[projectDTag];
+        if (projectConfig.llmConfig === undefined) delete projectConfig.llmConfig;
+        if (projectConfig.tools === undefined) delete projectConfig.tools;
+        if (projectConfig.isPM === undefined) delete projectConfig.isPM;
+
+        // Clean up empty config
+        if (Object.keys(projectConfig).length === 0) {
+            delete agent.projectConfigs[projectDTag];
+        }
+
+        // Clean up empty projectConfigs
+        if (Object.keys(agent.projectConfigs).length === 0) {
+            delete agent.projectConfigs;
+        }
+    }
+
+    /**
+     * Clear project-scoped configuration for an agent.
+     * Does NOT save the agent - caller must save after making all changes.
+     */
+    clearProjectConfig(agent: StoredAgent, projectDTag: string): void {
+        if (agent.projectConfigs) {
+            delete agent.projectConfigs[projectDTag];
+            if (Object.keys(agent.projectConfigs).length === 0) {
+                delete agent.projectConfigs;
+            }
+        }
+    }
+
+    /**
+     * Resolve the effective LLM config for an agent in a specific project.
+     * Priority: projectConfigs[projectDTag].llmConfig > agent.llmConfig
+     */
+    resolveEffectiveLLMConfig(agent: StoredAgent, projectDTag: string): string | undefined {
+        return agent.projectConfigs?.[projectDTag]?.llmConfig ?? agent.llmConfig;
+    }
+
+    /**
+     * Resolve the effective tools for an agent in a specific project.
+     * Priority: projectConfigs[projectDTag].tools > agent.tools
+     */
+    resolveEffectiveTools(agent: StoredAgent, projectDTag: string): string[] | undefined {
+        return agent.projectConfigs?.[projectDTag]?.tools ?? agent.tools;
+    }
+
+    /**
+     * Resolve the effective PM status for an agent in a specific project.
+     * Priority:
+     * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
+     * 2. projectConfigs[projectDTag].isPM (project-scoped PM via kind 24020 with a-tag)
+     * 3. pmOverrides[projectDTag] (legacy, from agent_configure tool)
+     */
+    resolveEffectiveIsPM(agent: StoredAgent, projectDTag: string): boolean {
+        // Global PM takes highest priority
+        if (agent.isPM === true) {
+            return true;
+        }
+        // Project-scoped PM from kind 24020 with a-tag
+        if (agent.projectConfigs?.[projectDTag]?.isPM === true) {
+            return true;
+        }
+        // Legacy pmOverrides (backward compatibility)
+        return agent.pmOverrides?.[projectDTag] === true;
+    }
+
+    /**
+     * Update an agent's project-scoped LLM configuration.
+     *
+     * @param pubkey - Agent's public key
+     * @param projectDTag - Project dTag to scope the config to
+     * @param llmConfig - New LLM configuration (undefined to clear)
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateProjectScopedLLMConfig(
+        pubkey: string,
+        projectDTag: string,
+        llmConfig: string | undefined
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        this.setProjectConfig(agent, projectDTag, { llmConfig });
+        await this.saveAgent(agent);
+        logger.info(`Updated project-scoped LLM config for agent ${agent.name}`, {
+            projectDTag,
+            llmConfig,
+        });
+        return true;
+    }
+
+    /**
+     * Update an agent's project-scoped tools list.
+     *
+     * @param pubkey - Agent's public key
+     * @param projectDTag - Project dTag to scope the config to
+     * @param tools - New tools array (undefined to clear)
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateProjectScopedTools(
+        pubkey: string,
+        projectDTag: string,
+        tools: string[] | undefined
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        this.setProjectConfig(agent, projectDTag, { tools });
+        await this.saveAgent(agent);
+        logger.info(`Updated project-scoped tools for agent ${agent.name}`, {
+            projectDTag,
+            toolCount: tools?.length,
+        });
+        return true;
+    }
+
+    /**
+     * Update an agent's project-scoped PM designation.
+     *
+     * @param pubkey - Agent's public key
+     * @param projectDTag - Project dTag to scope the config to
+     * @param isPM - PM designation (true/false/undefined to clear)
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateProjectScopedIsPM(
+        pubkey: string,
+        projectDTag: string,
+        isPM: boolean | undefined
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        if (isPM === true) {
+            this.setProjectConfig(agent, projectDTag, { isPM: true });
+        } else {
+            // Clear the project-scoped PM flag
+            const existing = agent.projectConfigs?.[projectDTag];
+            if (existing) {
+                delete existing.isPM;
+                // Clean up if empty
+                if (Object.keys(existing).length === 0) {
+                    delete agent.projectConfigs![projectDTag];
+                    if (Object.keys(agent.projectConfigs!).length === 0) {
+                        delete agent.projectConfigs;
+                    }
+                }
+            }
+        }
+
+        await this.saveAgent(agent);
+        logger.info(`Updated project-scoped PM flag for agent ${agent.name}`, {
+            projectDTag,
+            isPM,
+        });
+        return true;
+    }
+
+    /**
+     * Update an agent's complete project-scoped configuration.
+     * This is an authoritative update - it replaces the entire project config.
+     *
+     * @param pubkey - Agent's public key
+     * @param projectDTag - Project dTag to scope the config to
+     * @param config - Complete configuration for this project
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateProjectScopedConfig(
+        pubkey: string,
+        projectDTag: string,
+        config: ProjectScopedConfig
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        // Initialize projectConfigs if needed
+        if (!agent.projectConfigs) {
+            agent.projectConfigs = {};
+        }
+
+        // Clean the config - remove undefined/false values
+        // NOTE: Empty tools arrays are stripped intentionally. This means there's no way
+        // to specify "no tools at all" for a project - empty array falls back to global tools.
+        // Core tools are always added during agent instance creation (tool normalization).
+        const cleanConfig: ProjectScopedConfig = {};
+        if (config.llmConfig !== undefined) {
+            cleanConfig.llmConfig = config.llmConfig;
+        }
+        if (config.tools !== undefined && config.tools.length > 0) {
+            cleanConfig.tools = config.tools;
+        }
+        if (config.isPM === true) {
+            cleanConfig.isPM = true;
+        }
+
+        // If config is empty, remove the entry entirely
+        if (Object.keys(cleanConfig).length === 0) {
+            delete agent.projectConfigs[projectDTag];
+            if (Object.keys(agent.projectConfigs).length === 0) {
+                delete agent.projectConfigs;
+            }
+        } else {
+            agent.projectConfigs[projectDTag] = cleanConfig;
+        }
+
+        await this.saveAgent(agent);
+        logger.info(`Updated project-scoped config for agent ${agent.name}`, {
+            projectDTag,
+            config: cleanConfig,
+        });
         return true;
     }
 
