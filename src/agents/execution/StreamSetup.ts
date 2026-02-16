@@ -10,6 +10,7 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
+import { SkillService, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
@@ -40,6 +41,10 @@ export interface StreamSetupResult {
     nudges: NudgeData[];
     /** Tool permissions extracted from nudge events */
     nudgeToolPermissions: NudgeToolPermissions;
+    /** Concatenated skill content */
+    skillContent: string;
+    /** Individual skill data for system prompt rendering */
+    skills: SkillData[];
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
@@ -69,6 +74,13 @@ export async function setupStreamExecution(
     const nudgeResult = nudgeEventIds.length > 0
         ? await NudgeService.getInstance().fetchNudgesWithPermissions(nudgeEventIds)
         : { nudges: [], content: "", toolPermissions: {} };
+
+    // === FETCH SKILLS ===
+    // Skills do NOT affect tools, but we fetch them early to download attached files
+    const skillEventIds = AgentEventDecoder.extractSkillEventIds(context.triggeringEvent);
+    const skillResult = skillEventIds.length > 0
+        ? await SkillService.getInstance().fetchSkills(skillEventIds)
+        : { skills: [], content: "" };
 
     // Now get tools with nudge permissions applied
     // IMPORTANT: Always call getToolsObject even with empty base tools,
@@ -244,6 +256,8 @@ export async function setupStreamExecution(
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,
+        skillContent: skillResult.content,
+        skills: skillResult.skills,
         respondingToPubkey: context.triggeringEvent.pubkey,
         pendingDelegations,
         completedDelegations,
@@ -271,6 +285,8 @@ export async function setupStreamExecution(
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,
+        skillContent: skillResult.content,
+        skills: skillResult.skills,
         abortSignal,
         metaModelSystemPrompt,
         variantSystemPrompt,
