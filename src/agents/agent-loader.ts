@@ -79,8 +79,21 @@ export function createAgentInstance(
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
         },
         createLLMService: (options) => {
-            // Merge passed mcpConfig with agent's own mcpConfig (passed config takes precedence)
-            const mergedMcpConfig = options?.mcpConfig || agentMcpConfig;
+            // Merge passed mcpConfig with agent's own mcpConfig
+            // Agent-specific servers override project-level servers on name collision
+            // Project-level enabled flag takes precedence (default to true if not specified)
+            let mergedMcpConfig: MCPConfig | undefined;
+            if (options?.mcpConfig && agentMcpConfig) {
+                mergedMcpConfig = {
+                    enabled: options.mcpConfig.enabled !== false,
+                    servers: {
+                        ...options.mcpConfig.servers, // project-level first
+                        ...agentMcpConfig.servers, // agent-specific overrides
+                    },
+                };
+            } else {
+                mergedMcpConfig = options?.mcpConfig || agentMcpConfig;
+            }
 
             // Use resolved config name if provided (for meta model resolution),
             // otherwise use the agent's default llmConfig
