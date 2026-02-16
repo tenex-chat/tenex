@@ -100,4 +100,34 @@ describe("MCPManager per-project isolation", () => {
         // Verify they're separate objects (not the same reference)
         expect(tools1).not.toBe(tools2);
     });
+
+    it("should return server configs via getServerConfigs()", async () => {
+        const manager = new MCPManager();
+
+        // Before initialization, should return empty object
+        const configsBefore = manager.getServerConfigs();
+        expect(Object.keys(configsBefore).length).toBe(0);
+
+        // After initialization (with mocked config that won't start real servers)
+        await manager.initialize("/project1", "/work/project1");
+
+        // getServerConfigs should return configs from running servers
+        // Since we're mocking and servers won't actually start, it should be empty
+        const configsAfter = manager.getServerConfigs();
+        expect(typeof configsAfter).toBe("object");
+    });
+
+    it("should return separate server configs for different instances", async () => {
+        const manager1 = new MCPManager();
+        const manager2 = new MCPManager();
+
+        await manager1.initialize("/project1", "/work/project1");
+        await manager2.initialize("/project2", "/work/project2");
+
+        const configs1 = manager1.getServerConfigs();
+        const configs2 = manager2.getServerConfigs();
+
+        // Verify they're separate objects (not the same reference)
+        expect(configs1).not.toBe(configs2);
+    });
 });
