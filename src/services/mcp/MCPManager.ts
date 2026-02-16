@@ -284,6 +284,21 @@ export class MCPManager {
     }
 
     /**
+     * Get configuration for all running MCP servers.
+     * Used to pass server configs to LLM providers (like Claude Code)
+     * that need to spawn their own instances of these servers.
+     *
+     * @returns Record of server name to server configuration
+     */
+    getServerConfigs(): Record<string, MCPServerConfig> {
+        const configs: Record<string, MCPServerConfig> = {};
+        for (const [name, entry] of this.clients) {
+            configs[name] = entry.config;
+        }
+        return configs;
+    }
+
+    /**
      * Reload MCP service configuration and restart servers
      * @param metadataPath The project metadata path (~/.tenex/projects/{dTag})
      * @param workingDirectory The project working directory (~/tenex/{dTag})

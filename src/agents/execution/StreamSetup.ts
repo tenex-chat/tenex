@@ -151,6 +151,20 @@ export async function setupStreamExecution(
         throw new Error(`Conversation ${context.conversationId} not found`);
     }
 
+    // Build MCP config from project's running MCP servers
+    // This allows Claude Code-based agents to spawn their own instances of external MCP servers
+    const projectMcpServers = projectContext.mcpManager?.getServerConfigs() ?? {};
+    const mcpConfig = Object.keys(projectMcpServers).length > 0
+        ? { enabled: true, servers: projectMcpServers }
+        : undefined;
+
+    if (mcpConfig) {
+        trace.getActiveSpan()?.addEvent("executor.mcp_config_prepared", {
+            "mcp.server_count": Object.keys(projectMcpServers).length,
+            "mcp.servers": Object.keys(projectMcpServers).join(", "),
+        });
+    }
+
     // Use already-fetched nudge content (fetched at the top of this function)
     const nudgeContent = nudgeResult.content;
 
@@ -200,6 +214,7 @@ export async function setupStreamExecution(
         workingDirectory: context.workingDirectory,
         conversationId: context.conversationId,
         resolvedConfigName,
+        mcpConfig,
         onStreamStart: (injector) => {
             llmOpsRegistry.setMessageInjector(
                 context.agent.pubkey,
