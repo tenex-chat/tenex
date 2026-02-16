@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AgentStorage, createStoredAgent, type StoredAgent } from "../AgentStorage";
+import { AgentStorage, createStoredAgent, isAgentActive, type StoredAgent } from "../AgentStorage";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 describe("AgentStorage", () => {
@@ -88,6 +88,104 @@ describe("AgentStorage", () => {
             });
 
             expect(agent.projects).toEqual([]);
+        });
+
+        it("should set status to 'active' when projects are provided", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            expect(agent.status).toBe("active");
+        });
+
+        it("should set status to 'inactive' when no projects are provided", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: [],
+            });
+
+            expect(agent.status).toBe("inactive");
+        });
+
+        it("should set status to 'inactive' when projects is undefined", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+            });
+
+            expect(agent.status).toBe("inactive");
+        });
+    });
+
+    describe("isAgentActive helper", () => {
+        it("should return true for agents with status 'active'", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            expect(isAgentActive(agent)).toBe(true);
+        });
+
+        it("should return false for agents with status 'inactive'", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: [],
+            });
+
+            expect(isAgentActive(agent)).toBe(false);
+        });
+
+        it("should return true for legacy agents without status field but with projects", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            // Simulate a legacy agent without status field
+            const agent: StoredAgent = {
+                nsec: signer.nsec,
+                slug: "legacy-agent",
+                name: "Legacy Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            };
+            // Explicitly remove status to simulate legacy data
+            delete (agent as Record<string, unknown>).status;
+
+            expect(isAgentActive(agent)).toBe(true);
+        });
+
+        it("should return false for legacy agents without status field and no projects", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            // Simulate a legacy agent without status field
+            const agent: StoredAgent = {
+                nsec: signer.nsec,
+                slug: "legacy-agent",
+                name: "Legacy Agent",
+                role: "assistant",
+                projects: [],
+            };
+            // Explicitly remove status to simulate legacy data
+            delete (agent as Record<string, unknown>).status;
+
+            expect(isAgentActive(agent)).toBe(false);
         });
     });
 
@@ -380,7 +478,7 @@ describe("AgentStorage", () => {
             expect(loaded?.projects).toContain("project-2");
         });
 
-        it("should delete agent when removed from all projects", async () => {
+        it("should set agent to inactive when removed from all projects (identity preservation)", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -394,8 +492,255 @@ describe("AgentStorage", () => {
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
+            // Agent should still exist but be inactive
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded).toBeNull();
+            expect(loaded).not.toBeNull();
+            expect(loaded?.status).toBe("inactive");
+            expect(loaded?.projects).toEqual([]);
+            // Identity should be preserved
+            expect(loaded?.nsec).toBe(signer.nsec);
+            expect(loaded?.slug).toBe("test-agent");
+        });
+
+        it("should reactivate inactive agent when added to project", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Remove from all projects - becomes inactive
+            await storage.removeAgentFromProject(signer.pubkey, "project-1");
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.status).toBe("inactive");
+
+            // Add to new project - should reactivate
+            await storage.addAgentToProject(signer.pubkey, "project-2");
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.status).toBe("active");
+            expect(loaded?.projects).toContain("project-2");
+            // Original identity preserved
+            expect(loaded?.nsec).toBe(signer.nsec);
+        });
+
+        it("should not return inactive agents in getProjectAgents", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+
+            const activeAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "active-agent",
+                name: "Active Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            const inactiveAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "inactive-agent",
+                name: "Inactive Agent",
+                role: "assistant",
+                projects: ["project-1"],
+                // Note: status will be set to inactive after removal
+            });
+
+            await storage.saveAgent(activeAgent);
+            await storage.saveAgent(inactiveAgent);
+
+            // Both agents should be in project initially
+            let projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(2);
+
+            // Remove inactive agent from project (becomes inactive)
+            await storage.removeAgentFromProject(signer2.pubkey, "project-1");
+
+            // Only active agent should be returned
+            projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].slug).toBe("active-agent");
+        });
+
+        it("should keep inactive agent in bySlug index for reactivation", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Remove from all projects - becomes inactive
+            await storage.removeAgentFromProject(signer.pubkey, "project-1");
+
+            // Should still be findable by slug
+            const foundBySlug = await storage.getAgentBySlug("test-agent");
+            expect(foundBySlug).not.toBeNull();
+            expect(foundBySlug?.status).toBe("inactive");
+        });
+
+        it("should preserve active agent visibility when same-slug agent becomes inactive (slug collision bug)", async () => {
+            // This is a regression test for the slug index collision bug
+            // Scenario: Agent in project becomes inactive, then we verify
+            // that after reactivating a different agent with the same slug,
+            // the bySlug index correctly points to the active one.
+            //
+            // The actual bug was: when saveAgent was called on an inactive agent,
+            // it would overwrite bySlug even though another active agent should own it.
+
+            const signer1 = NDKPrivateKeySigner.generate();
+
+            // Create an active agent with "my-agent" slug
+            const agent1 = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "my-agent",
+                name: "Agent 1",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent1);
+
+            // Verify agent is visible
+            let projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].name).toBe("Agent 1");
+
+            // Remove from project - becomes inactive
+            await storage.removeAgentFromProject(signer1.pubkey, "project-1");
+
+            // Agent should still own bySlug for reactivation lookup
+            let bySlug = await storage.getAgentBySlug("my-agent");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.status).toBe("inactive");
+
+            // Reactivate the agent
+            await storage.addAgentToProject(signer1.pubkey, "project-2");
+
+            // Agent should be active and visible again
+            projectAgents = await storage.getProjectAgents("project-2");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].status).toBe("active");
+
+            // bySlug should still point to this agent
+            bySlug = await storage.getAgentBySlug("my-agent");
+            expect(bySlug?.status).toBe("active");
+        });
+
+        it("should handle inactive agent not overwriting active agent slug index on save", async () => {
+            // Direct test of the saveAgent slug index logic
+
+            const activeSigner = NDKPrivateKeySigner.generate();
+            const inactiveSigner = NDKPrivateKeySigner.generate();
+
+            // Create and save active agent first
+            const activeAgent = createStoredAgent({
+                nsec: activeSigner.nsec,
+                slug: "shared-slug",
+                name: "Active Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(activeAgent);
+
+            // Create inactive agent with same slug
+            const inactiveAgent = createStoredAgent({
+                nsec: inactiveSigner.nsec,
+                slug: "shared-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+                projects: [], // No projects = inactive
+            });
+            // Force status to inactive since createStoredAgent now sets it
+            inactiveAgent.status = "inactive";
+            await storage.saveAgent(inactiveAgent);
+
+            // bySlug should still point to the active agent
+            const bySlug = await storage.getAgentBySlug("shared-slug");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.name).toBe("Active Agent");
+        });
+
+        it("should reassign bySlug to active agent when canonical owner becomes inactive", async () => {
+            // Regression test for: canonical slug owner becomes inactive while another
+            // active agent with the same slug exists
+            //
+            // Repro scenario:
+            // 1. Save agent A (active) → bySlug=A
+            // 2. Save agent B (active, same slug) → bySlug=B
+            // 3. Remove B's last project (B becomes inactive) → bySlug should become A, not stay B
+
+            const signerA = NDKPrivateKeySigner.generate();
+            const signerB = NDKPrivateKeySigner.generate();
+
+            // Step 1: Create active agent A with slug "conflict-slug"
+            const agentA = createStoredAgent({
+                nsec: signerA.nsec,
+                slug: "conflict-slug",
+                name: "Agent A",
+                role: "assistant",
+                projects: ["project-a"],
+            });
+            await storage.saveAgent(agentA);
+
+            // Verify A owns bySlug
+            let bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug?.name).toBe("Agent A");
+
+            // Step 2: Create active agent B with same slug (takes over bySlug)
+            const agentB = createStoredAgent({
+                nsec: signerB.nsec,
+                slug: "conflict-slug",
+                name: "Agent B",
+                role: "assistant",
+                projects: ["project-b"],
+            });
+            await storage.saveAgent(agentB);
+
+            // Verify B now owns bySlug
+            bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug?.name).toBe("Agent B");
+
+            // Step 3: Remove B from its project (becomes inactive)
+            await storage.removeAgentFromProject(signerB.pubkey, "project-b");
+
+            // bySlug should now point to A (the remaining active agent with this slug)
+            bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.name).toBe("Agent A");
+            expect(bySlug?.status).toBe("active");
+        });
+
+        it("should handle isAgentActive with null/undefined/junk status values", () => {
+            // Test that isAgentActive properly handles edge cases for status field
+
+            // Explicit 'active' status
+            expect(isAgentActive({ status: "active", projects: [] } as StoredAgent)).toBe(true);
+            expect(isAgentActive({ status: "active", projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // Explicit 'inactive' status
+            expect(isAgentActive({ status: "inactive", projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: "inactive", projects: ["p1"] } as StoredAgent)).toBe(false);
+
+            // Undefined status - falls back to projects check
+            expect(isAgentActive({ status: undefined, projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: undefined, projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // No status field - falls back to projects check
+            expect(isAgentActive({ projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // Junk/invalid status values - should fall back to projects check
+            expect(isAgentActive({ status: null as unknown as string, projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: null as unknown as string, projects: ["p1"] } as StoredAgent)).toBe(true);
+            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: ["p1"] } as StoredAgent)).toBe(true);
         });
     });
 

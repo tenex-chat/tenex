@@ -112,6 +112,40 @@ const { domain, action } = parseToolName("rag_query");
 // domain: "rag", action: "query"
 ```
 
+## Agent Identity Preservation Policy
+
+Agent files (`.tenex/agents/<pubkey>.json`) are **NEVER deleted** when an agent is removed from projects. Instead:
+
+1. **Inactive Status**: Agents removed from all projects get `status: "inactive"`
+2. **Identity Preserved**: The agent's `pubkey` and `nsec` are retained indefinitely
+3. **Reactivation**: When the same agent is added to a project, it reactivates with original keys
+4. **Filtering**: `getProjectAgents()` filters out inactive agents automatically
+
+### Why This Matters
+- Nostr identity (pubkey) is permanent - re-using keys maintains trust/reputation
+- Prevents "identity churn" where the same agent gets different keys over time
+- Enables agent hibernation/reactivation patterns
+
+### Code Implications
+```typescript
+// CORRECT: Use removeAgentFromProject (sets inactive status)
+await agentStorage.removeAgentFromProject(pubkey, projectDTag);
+
+// DEPRECATED: deleteAgent permanently destroys identity
+await agentStorage.deleteAgent(pubkey);  // Logs warning, use sparingly
+```
+
+### Agent Lifecycle States
+```
+┌─────────────┐     removeAgentFromProject()     ┌──────────────┐
+│   ACTIVE    │ ─────────────────────────────────▶│   INACTIVE   │
+│ (in project)│                                  │ (preserved)  │
+└─────────────┘                                  └──────────────┘
+       ▲                                                │
+       │              addAgentToProject()               │
+       └────────────────────────────────────────────────┘
+```
+
 ## Anti-Patterns
 
 ```typescript
@@ -126,6 +160,9 @@ const event = new NDKEvent();  // Use AgentPublisher instead
 
 // REJECT: Inline prompt strings
 const systemPrompt = "You are an agent...";  // Use prompts/
+
+// REJECT: Deleting agents to remove from project
+await agentStorage.deleteAgent(pubkey);  // Use removeAgentFromProject instead
 ```
 
 ## Testing
