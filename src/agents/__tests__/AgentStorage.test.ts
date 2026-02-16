@@ -923,13 +923,15 @@ describe("AgentStorage", () => {
                 const loaded = await newStorage.getAgentBySlug("orphan-agent");
                 expect(loaded).toBeDefined();
 
-                // Verify index is now in new format with empty projects array
+                // Verify index is now in new format
                 const indexContent = await fs.readFile(indexPath, "utf-8");
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("pubkey");
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("projects");
-                // Should have empty projects array since byProject was missing
-                expect(migratedIndex.bySlug["orphan-agent"].projects).toEqual([]);
+                // When byProject is empty/missing, rebuild populates projects from agent file
+                expect(migratedIndex.bySlug["orphan-agent"].projects).toEqual(["project-1"]);
+                // Verify byProject was rebuilt too
+                expect(migratedIndex.byProject["project-1"]).toContain(signer.pubkey);
             } finally {
                 ConfigService.config.getConfigPath = originalGetConfigPath;
             }
@@ -1188,6 +1190,407 @@ describe("AgentStorage", () => {
             const projectAgents = await storage.getProjectAgents("project-1");
             expect(projectAgents).toHaveLength(1);
             expect(projectAgents[0].name).toBe("Agent 1");
+        });
+    });
+
+    describe("getAgentBySlugForProject (project-scoped slug lookup)", () => {
+        it("should return agent when slug exists in specified project", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1", "project-2"],
+            });
+
+            await storage.saveAgent(agent);
+
+            const result1 = await storage.getAgentBySlugForProject("test-agent", "project-1");
+            expect(result1).not.toBeNull();
+            expect(result1?.slug).toBe("test-agent");
+
+            const result2 = await storage.getAgentBySlugForProject("test-agent", "project-2");
+            expect(result2).not.toBeNull();
+            expect(result2?.slug).toBe("test-agent");
+        });
+
+        it("should return null when slug exists but not in specified project", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            const result = await storage.getAgentBySlugForProject("test-agent", "project-2");
+            expect(result).toBeNull();
+        });
+
+        it("should handle same agent using same slug across different projects", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "shared-slug",
+                name: "Multi-Project Agent",
+                role: "assistant",
+                projects: ["project-1", "project-2"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Same agent should be retrievable from both projects
+            const result1 = await storage.getAgentBySlugForProject("shared-slug", "project-1");
+            expect(result1?.name).toBe("Multi-Project Agent");
+            expect(result1?.projects).toContain("project-1");
+            expect(result1?.projects).toContain("project-2");
+
+            const result2 = await storage.getAgentBySlugForProject("shared-slug", "project-2");
+            expect(result2?.name).toBe("Multi-Project Agent");
+            expect(result2?.projects).toContain("project-1");
+            expect(result2?.projects).toContain("project-2");
+        });
+
+        it("should return null when slug does not exist", async () => {
+            const result = await storage.getAgentBySlugForProject("nonexistent", "project-1");
+            expect(result).toBeNull();
+        });
+
+        it("should detect index mismatch and return null", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Manually corrupt the index to claim agent is in project-2
+            const indexPath = path.join(tempDir, "index.json");
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+            index.bySlug["test-agent"].projects.push("project-2");
+            await fs.writeFile(indexPath, JSON.stringify(index, null, 2));
+
+            // Re-initialize storage to load corrupted index
+            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
+            const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
+            (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
+            const newStorage = new AgentStorage();
+            await newStorage.initialize();
+            (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
+
+            // Should detect mismatch and return null for project-2
+            const result = await newStorage.getAgentBySlugForProject("test-agent", "project-2");
+            expect(result).toBeNull();
+        });
+    });
+
+    describe("slug rename cleanup (ghost entry prevention)", () => {
+        it("should clean up old slug when agent renames", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "old-slug",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1", "project-2"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Verify old slug exists
+            const indexPath = path.join(tempDir, "index.json");
+            let indexContent = await fs.readFile(indexPath, "utf-8");
+            let index = JSON.parse(indexContent);
+            expect(index.bySlug["old-slug"]).toBeDefined();
+            expect(index.bySlug["old-slug"].projects).toEqual(["project-1", "project-2"]);
+
+            // Rename the agent
+            agent.slug = "new-slug";
+            await storage.saveAgent(agent);
+
+            // Old slug should be completely removed
+            indexContent = await fs.readFile(indexPath, "utf-8");
+            index = JSON.parse(indexContent);
+            expect(index.bySlug["old-slug"]).toBeUndefined();
+            expect(index.bySlug["new-slug"]).toBeDefined();
+            expect(index.bySlug["new-slug"].projects).toEqual(["project-1", "project-2"]);
+        });
+
+        it("should clean up old slug when agent renames AND changes projects", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "old-slug",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1", "project-2"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Rename AND change projects at the same time
+            agent.slug = "new-slug";
+            agent.projects = ["project-3"];
+            await storage.saveAgent(agent);
+
+            // Old slug should be completely removed (no ghost entries)
+            const indexPath = path.join(tempDir, "index.json");
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+            expect(index.bySlug["old-slug"]).toBeUndefined();
+            expect(index.bySlug["new-slug"]).toBeDefined();
+            expect(index.bySlug["new-slug"].projects).toEqual(["project-3"]);
+        });
+
+        it("should handle partial slug cleanup when multiple agents share old slug", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+
+            // Agent 1 in project-1 and project-2
+            const agent1 = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "Agent 1",
+                role: "assistant",
+                projects: ["project-1", "project-2"],
+            });
+
+            await storage.saveAgent(agent1);
+
+            // Agent 2 in project-3 with same slug (allowed - different project)
+            const agent2 = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Agent 2",
+                role: "assistant",
+                projects: ["project-3"],
+            });
+
+            await storage.saveAgent(agent2);
+
+            // Now agent 1 renames
+            agent1.slug = "new-slug";
+            await storage.saveAgent(agent1);
+
+            // "shared-slug" should still exist but only for agent2/project-3
+            const indexPath = path.join(tempDir, "index.json");
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+            expect(index.bySlug["shared-slug"]).toBeDefined();
+            expect(index.bySlug["shared-slug"].pubkey).toBe(signer2.pubkey);
+            expect(index.bySlug["shared-slug"].projects).toEqual(["project-3"]);
+            expect(index.bySlug["new-slug"]).toBeDefined();
+            expect(index.bySlug["new-slug"].pubkey).toBe(signer1.pubkey);
+        });
+    });
+
+    describe("migration with byProject rebuild", () => {
+        it("should rebuild byProject when migration produces empty byProject", async () => {
+            // Create agents manually
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+
+            const agent1 = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "agent-1",
+                name: "Agent 1",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            const agent2 = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "agent-2",
+                name: "Agent 2",
+                role: "assistant",
+                projects: ["project-2"],
+            });
+
+            // Write agent files manually
+            const agent1Path = path.join(tempDir, `${signer1.pubkey}.json`);
+            const agent2Path = path.join(tempDir, `${signer2.pubkey}.json`);
+            await fs.writeFile(agent1Path, JSON.stringify(agent1, null, 2));
+            await fs.writeFile(agent2Path, JSON.stringify(agent2, null, 2));
+
+            // Create old-format index with EMPTY byProject (simulating corruption)
+            const indexPath = path.join(tempDir, "index.json");
+            const oldIndex = {
+                bySlug: {
+                    "agent-1": signer1.pubkey, // Old flat format
+                    "agent-2": signer2.pubkey,
+                },
+                byEventId: {},
+                byProject: {}, // EMPTY - should trigger rebuild
+            };
+            await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
+
+            // Initialize storage - should migrate and rebuild
+            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
+            const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
+            (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
+            const newStorage = new AgentStorage();
+            await newStorage.initialize();
+            (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
+
+            // Verify byProject was rebuilt correctly
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+
+            expect(index.byProject["project-1"]).toBeDefined();
+            expect(index.byProject["project-1"]).toContain(signer1.pubkey);
+            expect(index.byProject["project-2"]).toBeDefined();
+            expect(index.byProject["project-2"]).toContain(signer2.pubkey);
+        });
+
+        it("should preserve byProject when migration produces valid byProject", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            // Write agent file manually
+            const agentPath = path.join(tempDir, `${signer.pubkey}.json`);
+            await fs.writeFile(agentPath, JSON.stringify(agent, null, 2));
+
+            // Create old-format index with VALID byProject
+            const indexPath = path.join(tempDir, "index.json");
+            const oldIndex = {
+                bySlug: {
+                    "test-agent": signer.pubkey, // Old flat format
+                },
+                byEventId: {},
+                byProject: {
+                    "project-1": [signer.pubkey], // Valid - should be preserved
+                },
+            };
+            await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
+
+            // Initialize storage - should migrate but NOT rebuild
+            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
+            const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
+            (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
+            const newStorage = new AgentStorage();
+            await newStorage.initialize();
+            (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
+
+            // Verify byProject was preserved and slug was migrated
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+
+            expect(index.bySlug["test-agent"]).toBeDefined();
+            expect(index.bySlug["test-agent"].pubkey).toBe(signer.pubkey);
+            expect(index.bySlug["test-agent"].projects).toEqual(["project-1"]);
+            expect(index.byProject["project-1"]).toEqual([signer.pubkey]);
+        });
+    });
+
+    describe("cleanup successfully resolves conflicts", () => {
+        it("should automatically cleanup when different agents conflict on same slug", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+
+            const agent1 = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "conflict-slug",
+                name: "Agent 1",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent1);
+
+            // Verify agent1 is in the index
+            const indexPath = path.join(tempDir, "index.json");
+            let indexContent = await fs.readFile(indexPath, "utf-8");
+            let index = JSON.parse(indexContent);
+            expect(index.bySlug["conflict-slug"].pubkey).toBe(signer1.pubkey);
+
+            // Now save agent2 with same slug in SAME project - should trigger cleanup
+            const agent2 = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "conflict-slug",
+                name: "Agent 2",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent2);
+
+            // Cleanup should have removed agent1 from project-1
+            indexContent = await fs.readFile(indexPath, "utf-8");
+            index = JSON.parse(indexContent);
+
+            // Slug should now point to agent2
+            expect(index.bySlug["conflict-slug"].pubkey).toBe(signer2.pubkey);
+            expect(index.bySlug["conflict-slug"].projects).toEqual(["project-1"]);
+
+            // Agent1 should be completely removed (no projects left)
+            const agent1File = path.join(tempDir, `${signer1.pubkey}.json`);
+            const agent1Exists = await fs.access(agent1File).then(() => true).catch(() => false);
+            expect(agent1Exists).toBe(false);
+        });
+    });
+
+    describe("getAgentBySlug deprecation warning", () => {
+        it("should emit deprecation warning when getAgentBySlug is used", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Call deprecated method - should still work but warn
+            const result = await storage.getAgentBySlug("test-agent");
+            expect(result).not.toBeNull();
+            expect(result?.slug).toBe("test-agent");
+        });
+
+        it("should return last saved agent when multiple agents share slug", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+
+            const agent1 = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "Agent 1",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            const agent2 = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Agent 2",
+                role: "assistant",
+                projects: ["project-2"],
+            });
+
+            await storage.saveAgent(agent1);
+            await storage.saveAgent(agent2);
+
+            // Deprecated method returns last saved (agent2)
+            const result = await storage.getAgentBySlug("shared-slug");
+            expect(result?.name).toBe("Agent 2");
         });
     });
 });
