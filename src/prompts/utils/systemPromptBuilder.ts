@@ -4,6 +4,7 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import type { SkillData } from "@/services/skill";
 import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
 import { ReportService } from "@/services/reports";
@@ -60,6 +61,10 @@ export interface BuildSystemPromptOptions {
     nudges?: NudgeData[];
     /** Tool permissions extracted from nudge events */
     nudgeToolPermissions?: NudgeToolPermissions;
+    /** Concatenated content from kind:4202 skill events (legacy) */
+    skillContent?: string;
+    /** Individual skill data for rendering with files */
+    skills?: SkillData[];
 }
 
 export interface BuildStandalonePromptOptions {
@@ -366,6 +371,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         nudgeContent,
         nudges,
         nudgeToolPermissions,
+        skillContent,
+        skills,
     } = options;
 
     // Check if PromptCompilerService is available for this agent (TIN-10)
@@ -463,6 +470,15 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
             nudgeContent,
             nudges,
             nudgeToolPermissions,
+        });
+    }
+
+    // Add skill content if present (from kind:4202 events referenced by the triggering event)
+    // Skills provide transient capabilities and attached files, but do NOT modify tool permissions
+    if ((skills && skills.length > 0) || (skillContent && skillContent.trim().length > 0)) {
+        systemPromptBuilder.add("skills", {
+            skillContent,
+            skills,
         });
     }
 
