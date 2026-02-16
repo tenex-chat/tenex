@@ -16,6 +16,19 @@ export interface StoredAgent extends StoredAgentData {
     slug: string;
     projects: string[]; // Array of project dTags
     /**
+     * Agent lifecycle status.
+     * - 'active': Agent is assigned to at least one project (default behavior)
+     * - 'inactive': Agent has been removed from all projects but identity preserved
+     *
+     * Optional for backwards compatibility - agents without this field are treated as active
+     * if they have projects, inactive if they don't.
+     *
+     * ## Identity Preservation Policy
+     * Agent files are NEVER deleted when removed from projects. Instead, they become
+     * 'inactive' and retain their pubkey/nsec for potential reactivation.
+     */
+    status?: "active" | "inactive";
+    /**
      * @deprecated Use pmOverrides instead. Kept for backward compatibility.
      * Will be migrated to pmOverrides on first save.
      */
@@ -91,6 +104,7 @@ export function createStoredAgent(config: {
     pmOverrides?: Record<string, boolean>;
     projectConfigs?: Record<string, ProjectScopedConfig>;
 }): StoredAgent {
+    const projects = config.projects ?? [];
     return {
         eventId: config.eventId,
         nsec: config.nsec,
@@ -102,11 +116,36 @@ export function createStoredAgent(config: {
         useCriteria: config.useCriteria ?? undefined,
         llmConfig: config.llmConfig,
         tools: config.tools ?? undefined,
-        projects: config.projects ?? [],
+        projects,
+        // Normalize status: agents with projects are active, those without are inactive
+        status: projects.length > 0 ? "active" : "inactive",
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
         projectConfigs: config.projectConfigs,
     };
+}
+
+/**
+ * Check if an agent is active.
+ *
+ * An agent is considered active if:
+ * - It has `status: 'active'` explicitly set, OR
+ * - It has no status field but has at least one project (backwards compatibility)
+ *
+ * This helper centralizes the logic for determining agent activity status,
+ * handling the case where older agent files may not have the status field.
+ */
+export function isAgentActive(agent: StoredAgent): boolean {
+    // Only treat explicitly 'active' or 'inactive' status as authoritative
+    if (agent.status === "active") {
+        return true;
+    }
+    if (agent.status === "inactive") {
+        return false;
+    }
+    // Backwards compatibility: agents without status field (or with invalid/null values)
+    // are considered active if they have projects
+    return agent.projects.length > 0;
 }
 
 /**
@@ -207,10 +246,17 @@ export class AgentStorage {
     }
 
     /**
-     * Rebuild index by scanning all agent files
+     * Rebuild index by scanning all agent files.
+     *
+     * ## Slug Index Priority
+     * Active agents take precedence over inactive agents for slug ownership.
+     * If multiple agents share a slug, the active one becomes canonical.
+     * If all agents with a slug are inactive, one is chosen arbitrarily.
      */
     async rebuildIndex(): Promise<void> {
         const index: AgentIndex = { bySlug: {}, byEventId: {}, byProject: {} };
+        // Track which slugs are owned by active agents
+        const activeSlugOwners = new Set<string>();
 
         const files = await fs.readdir(this.agentsDir);
         for (const file of files) {
@@ -221,8 +267,16 @@ export class AgentStorage {
                 const agent = await this.loadAgent(pubkey);
                 if (!agent) continue;
 
-                // Update slug index
-                index.bySlug[agent.slug] = pubkey;
+                const isActive = isAgentActive(agent);
+
+                // Update slug index - active agents take precedence
+                if (isActive) {
+                    index.bySlug[agent.slug] = pubkey;
+                    activeSlugOwners.add(agent.slug);
+                } else if (!activeSlugOwners.has(agent.slug)) {
+                    // Only set inactive agent as owner if no active agent owns this slug
+                    index.bySlug[agent.slug] = pubkey;
+                }
 
                 // Update eventId index
                 if (agent.eventId) {
@@ -247,6 +301,38 @@ export class AgentStorage {
             agents: Object.keys(index.bySlug).length,
             projects: Object.keys(index.byProject).length,
         });
+    }
+
+    /**
+     * Find an alternative active agent that can own a slug.
+     * Used when the current slug owner becomes inactive.
+     *
+     * @param slug - The slug to find an alternative owner for
+     * @param excludePubkey - Pubkey to exclude from consideration (the current/transitioning owner)
+     * @returns The pubkey of an active agent with this slug, or null if none exists
+     */
+    private async findAlternativeSlugOwner(slug: string, excludePubkey: string): Promise<string | null> {
+        const files = await fs.readdir(this.agentsDir);
+
+        for (const file of files) {
+            if (!file.endsWith(".json") || file === "index.json") continue;
+
+            const pubkey = file.slice(0, -5); // Remove .json
+            if (pubkey === excludePubkey) continue;
+
+            try {
+                const agent = await this.loadAgent(pubkey);
+                if (!agent) continue;
+
+                if (agent.slug === slug && isAgentActive(agent)) {
+                    return pubkey;
+                }
+            } catch {
+                // Skip agents that fail to load
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -428,7 +514,28 @@ export class AgentStorage {
         }
 
         // Add new index entries
-        this.index.bySlug[agent.slug] = pubkey;
+        // Only update bySlug index for active agents to prevent inactive agents
+        // from hiding active agents with the same slug
+        if (isAgentActive(agent)) {
+            this.index.bySlug[agent.slug] = pubkey;
+        } else {
+            // For inactive agents, handle slug ownership transition
+            const currentOwner = this.index.bySlug[agent.slug];
+            if (currentOwner === pubkey) {
+                // This agent was the canonical owner but is now inactive
+                // Find another active agent with the same slug to take ownership
+                const alternativeOwner = await this.findAlternativeSlugOwner(agent.slug, pubkey);
+                if (alternativeOwner) {
+                    this.index.bySlug[agent.slug] = alternativeOwner;
+                    logger.debug(`Reassigned slug '${agent.slug}' from inactive ${pubkey.substring(0, 8)} to active ${alternativeOwner.substring(0, 8)}`);
+                }
+                // If no alternative found, keep the inactive agent as owner for reactivation lookups
+            } else if (!currentOwner) {
+                // No owner yet - claim it for reactivation lookup purposes
+                this.index.bySlug[agent.slug] = pubkey;
+            }
+            // If another agent owns the slug, don't overwrite
+        }
         if (agent.eventId) {
             this.index.byEventId[agent.eventId] = pubkey;
         }
@@ -448,11 +555,27 @@ export class AgentStorage {
     }
 
     /**
-     * Delete an agent and update index
+     * Delete an agent and update index.
+     *
+     * @deprecated This method permanently deletes agent identity (pubkey/nsec).
+     * Prefer using removeAgentFromProject() which sets agents to 'inactive' status
+     * while preserving their identity for potential reactivation.
+     *
+     * This method is kept for:
+     * - Administrative cleanup of truly orphaned agents
+     * - Test teardown
+     * - Explicit user-requested deletion
+     *
+     * @param pubkey - Agent's public key to delete
      */
     async deleteAgent(pubkey: string): Promise<void> {
         const agent = await this.loadAgent(pubkey);
         if (!agent) return;
+
+        logger.warn(
+            `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - ` +
+            `this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
+        );
 
         // Delete file
         const filePath = path.join(this.agentsDir, `${pubkey}.json`);
@@ -516,6 +639,9 @@ export class AgentStorage {
     /**
      * Get all agents for a project (uses index for O(1) lookup).
      * Deduplicates by slug, keeping only the agent currently in bySlug index.
+     *
+     * Only returns active agents - inactive agents (removed from all projects
+     * but identity preserved) are filtered out.
      */
     async getProjectAgents(projectDTag: string): Promise<StoredAgent[]> {
         if (!this.index) await this.loadIndex();
@@ -528,6 +654,9 @@ export class AgentStorage {
         for (const pubkey of pubkeys) {
             const agent = await this.loadAgent(pubkey);
             if (!agent) continue;
+
+            // Skip inactive agents - they shouldn't appear in project listings
+            if (!isAgentActive(agent)) continue;
 
             // Skip if we've already seen this slug - keep only the canonical one
             if (seenSlugs.has(agent.slug)) continue;
@@ -551,7 +680,10 @@ export class AgentStorage {
     }
 
     /**
-     * Add an agent to a project
+     * Add an agent to a project.
+     *
+     * If the agent was previously inactive (removed from all projects), this
+     * reactivates the agent, preserving its original identity (pubkey/nsec).
      */
     async addAgentToProject(pubkey: string, projectDTag: string): Promise<void> {
         const agent = await this.loadAgent(pubkey);
@@ -559,14 +691,33 @@ export class AgentStorage {
             throw new Error(`Agent ${pubkey} not found`);
         }
 
+        const wasInactive = !isAgentActive(agent);
+
         if (!agent.projects.includes(projectDTag)) {
             agent.projects.push(projectDTag);
-            await this.saveAgent(agent);
+        }
+
+        // Reactivate if agent was inactive
+        agent.status = "active";
+        await this.saveAgent(agent);
+
+        if (wasInactive) {
+            logger.info(`Reactivated agent ${agent.slug} (${pubkey.substring(0, 8)}) for project ${projectDTag}`);
         }
     }
 
     /**
-     * Remove an agent from a project
+     * Remove an agent from a project.
+     *
+     * ## Identity Preservation Policy
+     * When an agent is removed from all projects, it becomes 'inactive' rather than
+     * being deleted. This preserves the agent's identity (pubkey/nsec) so that if
+     * the same agent is later assigned to a project, it retains its original keys.
+     *
+     * Inactive agents:
+     * - Are NOT returned by getProjectAgents()
+     * - Retain their pubkey, nsec, slug, and all configuration
+     * - Can be reactivated by addAgentToProject()
      */
     async removeAgentFromProject(pubkey: string, projectDTag: string): Promise<void> {
         const agent = await this.loadAgent(pubkey);
@@ -574,11 +725,12 @@ export class AgentStorage {
 
         agent.projects = agent.projects.filter((p) => p !== projectDTag);
 
-        if (agent.projects.length === 0) {
-            // No projects left, delete the agent
-            await this.deleteAgent(pubkey);
-        } else {
-            await this.saveAgent(agent);
+        // Set status based on remaining projects - NEVER delete agent files
+        agent.status = agent.projects.length === 0 ? "inactive" : "active";
+        await this.saveAgent(agent);
+
+        if (agent.status === "inactive") {
+            logger.info(`Agent ${agent.slug} (${pubkey.substring(0, 8)}) marked inactive - identity preserved`);
         }
     }
 
