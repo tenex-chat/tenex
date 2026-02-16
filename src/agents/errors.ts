@@ -25,15 +25,17 @@ export class AgentNotFoundError extends AgentError {
 export class AgentSlugConflictError extends AgentError {
     constructor(
         public readonly slug: string,
-        public readonly existingEventId?: string,
-        public readonly newEventId?: string
+        public readonly existingPubkey?: string,
+        public readonly attemptedPubkey?: string
     ) {
-        super(
-            `Agent with slug "${slug}" already exists` +
-                (existingEventId && newEventId && existingEventId !== newEventId
-                    ? ` with different event ID (existing: ${existingEventId}, new: ${newEventId})`
-                    : "")
-        );
+        const message = `Agent slug conflict: slug "${slug}" already claimed by different agent`;
+        const details = existingPubkey && attemptedPubkey
+            ? `\nExisting agent: ${existingPubkey.substring(0, 12)}...` +
+              `\nAttempted agent: ${attemptedPubkey.substring(0, 12)}...` +
+              `\n\nSuggestion: Remove the existing agent from overlapping projects or use a different slug.`
+            : "";
+
+        super(message + details);
         this.name = "AgentSlugConflictError";
     }
 }
