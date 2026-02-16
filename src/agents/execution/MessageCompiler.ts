@@ -10,6 +10,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import type { SkillData } from "@/services/skill";
 import { combineSystemReminders } from "@/services/system-reminder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage, TextPart } from "ai";
@@ -57,6 +58,10 @@ export interface MessageCompilerContext {
     nudges?: NudgeData[];
     /** Tool permissions extracted from nudge events */
     nudgeToolPermissions?: NudgeToolPermissions;
+    /** Concatenated skill content */
+    skillContent?: string;
+    /** Individual skill data for rendering in fragments */
+    skills?: SkillData[];
     respondingToPubkey: string;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
