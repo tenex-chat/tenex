@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { StoredAgentData, ProjectScopedConfig } from "@/agents/types";
+import type { StoredAgentData, ProjectScopedConfig, AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import { ensureDirectory, fileExists } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
@@ -8,9 +8,25 @@ import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentSlugConflictError } from "@/agents/errors";
+import {
+    resolveEffectiveConfig,
+    deduplicateProjectConfig,
+    type ResolvedAgentConfig,
+} from "@/agents/ConfigResolver";
 
 /**
  * Agent data stored in ~/.tenex/agents/<pubkey>.json
+ *
+ * ## New Configuration Schema (v1)
+ * Agent config is split into:
+ * - `default`: Global defaults (model, tools). Written by 24020 without a-tag.
+ * - `projects`: Per-project overrides map. Written by 24020 with a-tag.
+ *   Tools can use delta syntax (+tool / -tool) or full replacement.
+ *
+ * ## Legacy Fields (kept for migration compatibility)
+ * - `llmConfig`: Old global model field → migrated to `default.model`
+ * - `tools` (on StoredAgentData): Old global tools field → migrated to `default.tools`
+ * - `projectConfigs`: Old per-project config → migrated to `projects`
  */
 export interface StoredAgent extends StoredAgentData {
     eventId?: string;
@@ -37,17 +53,19 @@ export interface StoredAgent extends StoredAgentData {
      */
     isPM?: boolean;
     /**
-     * Project-scoped configuration overrides.
-     * Key is project dTag, value contains project-specific settings.
-     * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
-     *
-     * ## Priority (highest to lowest)
-     * 1. projectConfigs[projectDTag].* (project-scoped from kind 24020 with a-tag)
-     * 2. Global fields (llmConfig, tools, isPM) (global from kind 24020 without a-tag)
-     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
-     * 4. Project tag designations (from kind 31933)
+     * @deprecated Use `projects` map instead. Kept for backward compatibility / migration.
+     * Project-scoped configuration overrides (old schema).
+     * Migrated to `projects` on first load.
      */
     projectConfigs?: Record<string, ProjectScopedConfig>;
+
+    // NOTE: `default` and `projectOverrides` are defined in StoredAgentData (new schema v1).
+    // They are listed here as documentation of the priority chain:
+    //
+    // ## Configuration Priority
+    // 1. projectOverrides[projectDTag].* (project-scoped override, new schema)
+    // 2. default.* (global defaults, new schema)
+    // 3. StoredAgentData top-level llmConfig/tools (legacy, deprecated)
 }
 
 /**
@@ -83,7 +101,9 @@ export function createStoredAgent(config: {
     description?: string | null;
     instructions?: string | null;
     useCriteria?: string | null;
+    /** @deprecated Use defaultConfig.model instead */
     llmConfig?: string;
+    /** @deprecated Use defaultConfig.tools instead */
     tools?: string[] | null;
     eventId?: string;
     projects?: string[];
@@ -91,8 +111,23 @@ export function createStoredAgent(config: {
     /** @deprecated Use pmOverrides instead */
     isPMOverride?: boolean;
     pmOverrides?: Record<string, boolean>;
+    /** @deprecated Use projectOverrides instead */
     projectConfigs?: Record<string, ProjectScopedConfig>;
+    /** New: default config block */
+    defaultConfig?: AgentDefaultConfig;
+    /** New: per-project overrides map */
+    projectOverrides?: Record<string, AgentProjectConfig>;
 }): StoredAgent {
+    // Build default config block - prefer new defaultConfig, fall back to legacy llmConfig/tools
+    const defaultConfig: AgentDefaultConfig | undefined =
+        config.defaultConfig ??
+        (config.llmConfig || config.tools
+            ? {
+                  model: config.llmConfig,
+                  tools: config.tools ?? undefined,
+              }
+            : undefined);
+
     return {
         eventId: config.eventId,
         nsec: config.nsec,
@@ -102,12 +137,16 @@ export function createStoredAgent(config: {
         description: config.description ?? undefined,
         instructions: config.instructions ?? undefined,
         useCriteria: config.useCriteria ?? undefined,
+        // Keep legacy fields for backward compat (will be migrated on load)
         llmConfig: config.llmConfig,
         tools: config.tools ?? undefined,
         projects: config.projects ?? [],
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
         projectConfigs: config.projectConfigs,
+        // New schema fields
+        default: defaultConfig,
+        projectOverrides: config.projectOverrides,
     };
 }
 
@@ -346,7 +385,9 @@ export class AgentStorage {
             const content = await fs.readFile(filePath, "utf-8");
             const agent: StoredAgent = JSON.parse(content);
 
-            // Migrate legacy isPMOverride to pmOverrides
+            let needsSave = false;
+
+            // Migration 1: legacy isPMOverride -> pmOverrides
             if (agent.isPMOverride !== undefined && !agent.pmOverrides) {
                 // If the agent had a global PM override, apply it to all their projects
                 if (agent.isPMOverride && agent.projects.length > 0) {
@@ -360,7 +401,65 @@ export class AgentStorage {
                 }
                 // Clear legacy field
                 delete agent.isPMOverride;
-                // Save the migrated agent
+                needsSave = true;
+            }
+
+            // Migration 2: top-level llmConfig/tools -> default block
+            // Also migrate projectConfigs -> projectOverrides
+            if (!agent.default) {
+                const oldLlmConfig = agent.llmConfig;
+                const oldTools = agent.tools;
+
+                if (oldLlmConfig || oldTools) {
+                    agent.default = {};
+                    if (oldLlmConfig) agent.default.model = oldLlmConfig;
+                    if (oldTools) agent.default.tools = oldTools;
+                    logger.info(`Migrated legacy llmConfig/tools to default block for agent ${agent.slug}`);
+                    needsSave = true;
+                }
+            }
+
+            // Migration 3: projectConfigs -> projectOverrides
+            // Only migrate llmConfig and tools; isPM stays in projectConfigs since it's not in AgentProjectConfig
+            if (agent.projectConfigs && !agent.projectOverrides) {
+                agent.projectOverrides = {};
+                const remainingProjectConfigs: Record<string, ProjectScopedConfig> = {};
+
+                for (const [projectDTag, oldConfig] of Object.entries(agent.projectConfigs)) {
+                    const newConfig: AgentProjectConfig = {};
+                    if (oldConfig.llmConfig) newConfig.model = oldConfig.llmConfig;
+                    if (oldConfig.tools && oldConfig.tools.length > 0) newConfig.tools = oldConfig.tools;
+                    if (Object.keys(newConfig).length > 0) {
+                        agent.projectOverrides[projectDTag] = newConfig;
+                    }
+                    // Keep isPM in projectConfigs (it's not part of AgentProjectConfig)
+                    if (oldConfig.isPM === true) {
+                        remainingProjectConfigs[projectDTag] = { isPM: true };
+                    }
+                }
+
+                if (Object.keys(agent.projectOverrides).length === 0) {
+                    delete agent.projectOverrides;
+                }
+
+                // Replace projectConfigs with only the isPM entries (if any)
+                if (Object.keys(remainingProjectConfigs).length > 0) {
+                    agent.projectConfigs = remainingProjectConfigs;
+                } else {
+                    delete agent.projectConfigs;
+                }
+
+                logger.info(`Migrated projectConfigs to projectOverrides for agent ${agent.slug}`);
+                needsSave = true;
+            }
+
+            if (needsSave) {
+                // Back up original before first migration save
+                const backupPath = filePath + ".bak";
+                if (!(await fileExists(backupPath))) {
+                    await fs.copyFile(filePath, backupPath);
+                    logger.info(`Backed up agent file before migration: ${agent.slug}`);
+                }
                 await fs.writeFile(filePath, JSON.stringify(agent, null, 2));
             }
 
@@ -934,19 +1033,50 @@ export class AgentStorage {
     }
 
     /**
+     * Get the effective (resolved) config for an agent, optionally scoped to a project.
+     *
+     * Merges default config with project override (using delta tool logic if needed).
+     *
+     * @param agent - The stored agent
+     * @param projectDTag - Optional project dTag for project-scoped resolution
+     * @returns ResolvedAgentConfig with effective model and tools
+     */
+    getEffectiveConfig(agent: StoredAgent, projectDTag?: string): ResolvedAgentConfig {
+        // Build default config - prefer new `default` block, fall back to legacy fields
+        const defaultConfig: AgentDefaultConfig = {
+            model: agent.default?.model ?? agent.llmConfig,
+            tools: agent.default?.tools ?? agent.tools,
+        };
+
+        const projectConfig = projectDTag
+            ? (agent.projectOverrides?.[projectDTag] ??
+               // Also check legacy projectConfigs for backward compat
+               (agent.projectConfigs?.[projectDTag]
+                   ? {
+                         model: agent.projectConfigs[projectDTag].llmConfig,
+                         tools: agent.projectConfigs[projectDTag].tools,
+                     }
+                   : undefined))
+            : undefined;
+
+        return resolveEffectiveConfig(defaultConfig, projectConfig);
+    }
+
+    /**
      * Resolve the effective LLM config for an agent in a specific project.
-     * Priority: projectConfigs[projectDTag].llmConfig > agent.llmConfig
+     * Priority: projectOverrides[projectDTag].model > default.model > legacy llmConfig
      */
     resolveEffectiveLLMConfig(agent: StoredAgent, projectDTag: string): string | undefined {
-        return agent.projectConfigs?.[projectDTag]?.llmConfig ?? agent.llmConfig;
+        return this.getEffectiveConfig(agent, projectDTag).model;
     }
 
     /**
      * Resolve the effective tools for an agent in a specific project.
-     * Priority: projectConfigs[projectDTag].tools > agent.tools
+     * Priority: projectOverrides[projectDTag].tools > default.tools > legacy tools
+     * Supports delta syntax in projectOverrides (+tool / -tool).
      */
     resolveEffectiveTools(agent: StoredAgent, projectDTag: string): string[] | undefined {
-        return agent.projectConfigs?.[projectDTag]?.tools ?? agent.tools;
+        return this.getEffectiveConfig(agent, projectDTag).tools;
     }
 
     /**
@@ -961,12 +1091,144 @@ export class AgentStorage {
         if (agent.isPM === true) {
             return true;
         }
-        // Project-scoped PM from kind 24020 with a-tag
+        // Project-scoped PM from kind 24020 with a-tag (legacy projectConfigs)
         if (agent.projectConfigs?.[projectDTag]?.isPM === true) {
             return true;
         }
         // Legacy pmOverrides (backward compatibility)
         return agent.pmOverrides?.[projectDTag] === true;
+    }
+
+    // =========================================================================
+    // NEW SCHEMA METHODS
+    // =========================================================================
+
+    /**
+     * Update an agent's default configuration block.
+     *
+     * A 24020 event with NO a-tag should call this method.
+     * Writes to the `default` block in the agent file.
+     *
+     * @param pubkey - Agent's public key
+     * @param updates - Fields to update. Only defined fields are applied:
+     *   - model: updated when defined; ignored (no change) when undefined
+     *   - tools: updated when defined; empty array clears the tools list; ignored when undefined
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateDefaultConfig(
+        pubkey: string,
+        updates: AgentDefaultConfig
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        if (!agent.default) {
+            agent.default = {};
+        }
+
+        if (updates.model !== undefined) {
+            agent.default.model = updates.model;
+            // Keep legacy field in sync for backward compat
+            agent.llmConfig = updates.model;
+        }
+
+        if (updates.tools !== undefined) {
+            if (updates.tools.length > 0) {
+                agent.default.tools = updates.tools;
+                // Keep legacy field in sync for backward compat
+                agent.tools = updates.tools;
+            } else {
+                // Empty list clears the default
+                delete agent.default.tools;
+                delete agent.tools;
+            }
+        }
+
+        // Clean up empty default block
+        if (agent.default && Object.keys(agent.default).length === 0) {
+            delete agent.default;
+        }
+
+        await this.saveAgent(agent);
+        logger.info(`Updated default config for agent ${agent.name}`, { updates });
+        return true;
+    }
+
+    /**
+     * Update an agent's per-project override configuration.
+     *
+     * A 24020 event WITH an a-tag should call this method.
+     * Writes to `projectOverrides[projectDTag]`.
+     *
+     * If any provided values equal the defaults after resolution, they are cleared
+     * from the override (dedup logic) to keep overrides minimal.
+     *
+     * If `reset` is true, clears the entire project override.
+     *
+     * @param pubkey - Agent's public key
+     * @param projectDTag - Project dTag to scope the config to
+     * @param override - The new project override (full replacement, not merge)
+     * @param reset - If true, clear the entire project override instead of setting it
+     * @returns true if updated successfully, false if agent not found
+     */
+    async updateProjectOverride(
+        pubkey: string,
+        projectDTag: string,
+        override: AgentProjectConfig,
+        reset = false
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        if (reset) {
+            // Clear the entire project override
+            if (agent.projectOverrides) {
+                delete agent.projectOverrides[projectDTag];
+                if (Object.keys(agent.projectOverrides).length === 0) {
+                    delete agent.projectOverrides;
+                }
+            }
+            logger.info(`Cleared project override for agent ${agent.name}`, { projectDTag });
+        } else {
+            // Build the effective default for dedup comparison
+            const defaultConfig: AgentDefaultConfig = {
+                model: agent.default?.model ?? agent.llmConfig,
+                tools: agent.default?.tools ?? agent.tools,
+            };
+
+            // Run dedup: remove fields that are identical to defaults
+            const deduplicated = deduplicateProjectConfig(defaultConfig, override);
+
+            if (!agent.projectOverrides) {
+                agent.projectOverrides = {};
+            }
+
+            if (Object.keys(deduplicated).length === 0) {
+                // All fields equal defaults - remove the override entirely
+                delete agent.projectOverrides[projectDTag];
+                if (Object.keys(agent.projectOverrides).length === 0) {
+                    delete agent.projectOverrides;
+                }
+                logger.info(`Project override for ${projectDTag} cleared (all fields match defaults)`, {
+                    agentSlug: agent.slug,
+                });
+            } else {
+                agent.projectOverrides[projectDTag] = deduplicated;
+                logger.info(`Updated project override for agent ${agent.name}`, {
+                    projectDTag,
+                    override: deduplicated,
+                });
+            }
+        }
+
+        await this.saveAgent(agent);
+        return true;
     }
 
     /**
@@ -988,7 +1250,25 @@ export class AgentStorage {
             return false;
         }
 
-        this.setProjectConfig(agent, projectDTag, { llmConfig });
+        // Write to new schema (projectOverrides)
+        if (!agent.projectOverrides) {
+            agent.projectOverrides = {};
+        }
+        const existing = agent.projectOverrides[projectDTag] ?? {};
+        if (llmConfig !== undefined) {
+            existing.model = llmConfig;
+        } else {
+            delete existing.model;
+        }
+        if (Object.keys(existing).length > 0) {
+            agent.projectOverrides[projectDTag] = existing;
+        } else {
+            delete agent.projectOverrides[projectDTag];
+            if (Object.keys(agent.projectOverrides).length === 0) {
+                delete agent.projectOverrides;
+            }
+        }
+
         await this.saveAgent(agent);
         logger.info(`Updated project-scoped LLM config for agent ${agent.name}`, {
             projectDTag,
@@ -1016,7 +1296,25 @@ export class AgentStorage {
             return false;
         }
 
-        this.setProjectConfig(agent, projectDTag, { tools });
+        // Write to new schema (projectOverrides)
+        if (!agent.projectOverrides) {
+            agent.projectOverrides = {};
+        }
+        const existing = agent.projectOverrides[projectDTag] ?? {};
+        if (tools !== undefined && tools.length > 0) {
+            existing.tools = tools;
+        } else {
+            delete existing.tools;
+        }
+        if (Object.keys(existing).length > 0) {
+            agent.projectOverrides[projectDTag] = existing;
+        } else {
+            delete agent.projectOverrides[projectDTag];
+            if (Object.keys(agent.projectOverrides).length === 0) {
+                delete agent.projectOverrides;
+            }
+        }
+
         await this.saveAgent(agent);
         logger.info(`Updated project-scoped tools for agent ${agent.name}`, {
             projectDTag,
@@ -1073,9 +1371,12 @@ export class AgentStorage {
      * Update an agent's complete project-scoped configuration.
      * This is an authoritative update - it replaces the entire project config.
      *
+     * @deprecated Prefer using `updateProjectOverride()` which uses the new schema.
+     * This method is kept for backward compatibility and migrates to projectOverrides.
+     *
      * @param pubkey - Agent's public key
      * @param projectDTag - Project dTag to scope the config to
-     * @param config - Complete configuration for this project
+     * @param config - Complete configuration for this project (old ProjectScopedConfig format)
      * @returns true if updated successfully, false if agent not found
      */
     async updateProjectScopedConfig(
@@ -1089,40 +1390,59 @@ export class AgentStorage {
             return false;
         }
 
-        // Initialize projectConfigs if needed
+        // Build new-schema override from legacy config
+        const newOverride: AgentProjectConfig = {};
+        if (config.llmConfig !== undefined) {
+            newOverride.model = config.llmConfig;
+        }
+        if (config.tools !== undefined && config.tools.length > 0) {
+            newOverride.tools = config.tools;
+        }
+
+        // isPM is still stored in legacy projectConfigs since it's not in AgentProjectConfig
         if (!agent.projectConfigs) {
             agent.projectConfigs = {};
         }
 
-        // Clean the config - remove undefined/false values
-        // NOTE: Empty tools arrays are stripped intentionally. This means there's no way
-        // to specify "no tools at all" for a project - empty array falls back to global tools.
-        // Core tools are always added during agent instance creation (tool normalization).
-        const cleanConfig: ProjectScopedConfig = {};
-        if (config.llmConfig !== undefined) {
-            cleanConfig.llmConfig = config.llmConfig;
-        }
-        if (config.tools !== undefined && config.tools.length > 0) {
-            cleanConfig.tools = config.tools;
-        }
-        if (config.isPM === true) {
-            cleanConfig.isPM = true;
+        // Write model/tools to new projectOverrides
+        if (!agent.projectOverrides) {
+            agent.projectOverrides = {};
         }
 
-        // If config is empty, remove the entry entirely
-        if (Object.keys(cleanConfig).length === 0) {
-            delete agent.projectConfigs[projectDTag];
-            if (Object.keys(agent.projectConfigs).length === 0) {
-                delete agent.projectConfigs;
+        if (Object.keys(newOverride).length === 0) {
+            delete agent.projectOverrides[projectDTag];
+            if (Object.keys(agent.projectOverrides).length === 0) {
+                delete agent.projectOverrides;
             }
         } else {
-            agent.projectConfigs[projectDTag] = cleanConfig;
+            agent.projectOverrides[projectDTag] = newOverride;
+        }
+
+        // Handle isPM separately in legacy projectConfigs
+        if (config.isPM === true) {
+            const legacyConfig = agent.projectConfigs[projectDTag] ?? {};
+            legacyConfig.isPM = true;
+            agent.projectConfigs[projectDTag] = legacyConfig;
+        } else {
+            // Clear isPM from legacy config when not set
+            const legacyConfig = agent.projectConfigs[projectDTag];
+            if (legacyConfig) {
+                delete legacyConfig.isPM;
+                if (Object.keys(legacyConfig).length === 0) {
+                    delete agent.projectConfigs[projectDTag];
+                }
+            }
+        }
+
+        // Clean up empty projectConfigs
+        if (agent.projectConfigs && Object.keys(agent.projectConfigs).length === 0) {
+            delete agent.projectConfigs;
         }
 
         await this.saveAgent(agent);
         logger.info(`Updated project-scoped config for agent ${agent.name}`, {
             projectDTag,
-            config: cleanConfig,
+            config,
         });
         return true;
     }

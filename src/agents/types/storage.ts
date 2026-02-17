@@ -16,6 +16,9 @@ import type { MCPServerConfig } from "@/llm/providers/types";
  * An agent might have:
  * - Global llmConfig: "anthropic:claude-sonnet-4" (default for all projects)
  * - projectConfigs["project-a"].llmConfig: "anthropic:claude-opus-4" (override for project-a)
+ *
+ * @deprecated Use AgentDefaultConfig/AgentProjectConfig via the new schema.
+ * Kept for migration purposes. See StoredAgent for the new structure.
  */
 export interface ProjectScopedConfig {
     /**
@@ -43,6 +46,40 @@ export interface ProjectScopedConfig {
 }
 
 /**
+ * Default agent configuration block.
+ * Stored under the `default` key in agent JSON files.
+ * A 24020 event with no a-tag writes to this block.
+ */
+export interface AgentDefaultConfig {
+    /** Default LLM model configuration string (e.g., "anthropic:claude-sonnet-4") */
+    model?: string;
+    /** Default tools list for this agent */
+    tools?: string[];
+}
+
+/**
+ * Per-project configuration override block.
+ * Stored under `projectOverrides[projectDTag]` in agent JSON files.
+ * A 24020 event with an a-tag writes to this block.
+ *
+ * Tools can use delta syntax:
+ * - "+tool" adds a tool on top of defaults
+ * - "-tool" removes a tool from defaults
+ * - Plain "tool" (no prefix) = full replacement list
+ */
+export interface AgentProjectConfig {
+    /** Project-specific model override (when set, overrides default.model) */
+    model?: string;
+    /**
+     * Project-specific tools.
+     * Can be a full replacement list or a delta (using +/- prefix).
+     * If any entry has +/- prefix, treated as delta applied to default tools.
+     * Empty array or undefined means: use defaults.
+     */
+    tools?: string[];
+}
+
+/**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
 export interface StoredAgentData {
@@ -51,10 +88,35 @@ export interface StoredAgentData {
     description?: string;
     instructions?: string;
     useCriteria?: string;
+    /**
+     * @deprecated Use `default.model` instead.
+     * Kept for backward compatibility during migration.
+     */
     llmConfig?: string;
+    /**
+     * @deprecated Use `default.tools` instead.
+     * Kept for backward compatibility during migration.
+     */
     tools?: string[];
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
+
+    /**
+     * Default configuration block (new schema v1).
+     * Written by kind 24020 events WITHOUT an a-tag.
+     * Fields here are the global fallback when no project-specific override exists.
+     */
+    default?: AgentDefaultConfig;
+
+    /**
+     * Per-project configuration overrides (new schema v1).
+     * Key is project dTag, value is the project-specific delta override.
+     * Written by kind 24020 events WITH an a-tag.
+     *
+     * Tools stored here use delta syntax ("+tool" / "-tool") or full replacement.
+     * See ConfigResolver for resolution logic.
+     */
+    projectOverrides?: Record<string, AgentProjectConfig>;
 }
 
 /**
