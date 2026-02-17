@@ -203,6 +203,79 @@ describe("CompressionService", () => {
     });
   });
 
+  describe("budget check uses compressed view of entries", () => {
+    it("should skip compression when existing segments bring token count under budget", async () => {
+      // Setup: 100 entries × ~70 chars each ≈ 1750 tokens (raw), well above the budget of 500.
+      // After applying segments that cover entries 0-89, only 10 entries remain as individual
+      // messages plus 1 compressed summary (~11 tokens), giving ~186 tokens — under budget.
+      // The bug would check raw tokens (1750 > 500) and still attempt compression.
+      // The fix checks the compressed view (186 <= 500) and correctly skips compression.
+      const entries = createEntries(100);
+      conversationStore.getAllMessages = mock(() => entries);
+
+      // Provide a compression segment that covers entries 0-89 (most of them)
+      const existingSegments: CompressionSegment[] = [
+        {
+          fromEventId: "event-0",
+          toEventId: "event-89",
+          compressed: "Compressed summary of the first 90 messages.",
+          createdAt: Date.now(),
+          model: "test-model",
+        },
+      ];
+      conversationStore.loadCompressionLog = mock(async () => existingSegments);
+
+      // Budget of 500 tokens: raw entries (≈1750) exceed it, but the compressed view (≈186) does not.
+      // Without the fix the early-exit check uses raw tokens and would NOT exit, calling appendCompressionSegments.
+      // With the fix the early-exit check uses the effective (compressed) tokens and DOES exit.
+      await service.ensureUnderLimit("test-conv", 500);
+
+      // Should NOT call appendCompressionSegments because effective tokens are under budget
+      expect(conversationStore.appendCompressionSegments).not.toHaveBeenCalled();
+    });
+
+    it("should skip proactive compression when existing segments bring token count under threshold", async () => {
+      // Same token arithmetic as the blocking test above:
+      // raw ≈ 1750 tokens, compressed view ≈ 186 tokens.
+      // tokenThreshold is set to 500 so that: raw > threshold but compressed < threshold.
+      // The bug would compare raw tokens (1750 > 500) and proceed to attempt compression.
+      // The fix compares the compressed-view tokens (186 < 500) and correctly skips.
+      config.getConfig = mock(() => ({
+        compression: {
+          enabled: true,
+          tokenThreshold: 500,
+          tokenBudget: 400,
+          slidingWindowSize: 50,
+        },
+      })) as any;
+      service = new CompressionService(conversationStore, llmService);
+
+      const entries = createEntries(100);
+      conversationStore.getAllMessages = mock(() => entries);
+
+      // Provide segments covering most entries
+      const existingSegments: CompressionSegment[] = [
+        {
+          fromEventId: "event-0",
+          toEventId: "event-89",
+          compressed: "Compressed summary.",
+          createdAt: Date.now(),
+          model: "test-model",
+        },
+      ];
+      conversationStore.loadCompressionLog = mock(async () => existingSegments);
+
+      // maybeCompressAsync is fire-and-forget; await the returned promise (which resolves
+      // immediately after the internal async call is launched) and then flush microtasks so
+      // the inner async path has a chance to run before we assert.
+      await service.maybeCompressAsync("test-conv");
+      await Promise.resolve();
+
+      // Should NOT compress because effective tokens are under threshold
+      expect(conversationStore.appendCompressionSegments).not.toHaveBeenCalled();
+    });
+  });
+
   describe("getSegments", () => {
     it("should return existing segments from store", async () => {
       const mockSegments: CompressionSegment[] = [

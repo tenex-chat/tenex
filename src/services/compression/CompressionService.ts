@@ -111,7 +111,10 @@ export class CompressionService {
     }
 
     const effectiveBudget = tokenBudget ?? compressionConfig.tokenBudget;
-    const currentTokens = estimateTokensFromEntries(entries);
+    // Apply existing compressions before checking token count so we don't
+    // trigger unnecessary LLM calls when existing segments already cover old history.
+    const effectiveEntries = applySegmentsToEntries(entries, existingSegments);
+    const currentTokens = estimateTokensFromEntries(effectiveEntries);
 
     // Check if compression is needed - exit early without creating span
     if (
