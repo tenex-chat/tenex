@@ -355,11 +355,19 @@ export class EventHandler {
 
                     // Tool tags represent the exhaustive desired list for this project.
                     // We convert it to a delta against the agent's default tools for compact storage.
-                    if (newToolNames.length > 0) {
+                    // Use RAW TAG PRESENCE (event.tags.some) not TagExtractor output length:
+                    // TagExtractor.getToolTags() filters out empty tool names, so when an event
+                    // carries ["tool", ""] to "clear all tools", toolTags.length would be 0 and
+                    // the guard would silently skip delta computation. By checking the raw event
+                    // tags we correctly detect "tool tag is present" regardless of the name value.
+                    const hasRawToolTags = event.tags.some((tag) => tag[0] === "tool");
+                    if (hasRawToolTags) {
                         const storedAgent = await agentStorage.loadAgent(agentPubkey);
                         const defaultTools = storedAgent?.default?.tools ?? storedAgent?.tools ?? [];
                         const toolsDelta = computeToolsDelta(defaultTools, newToolNames);
-                        // If delta is empty, the tools match defaults exactly — no override needed
+                        // If delta is non-empty, store it. An empty delta means desired == defaults,
+                        // so no override is needed. Note: "desired = empty list" with non-empty
+                        // defaults produces removal entries (non-empty delta), so that IS stored.
                         if (toolsDelta.length > 0) {
                             projectOverride.tools = toolsDelta;
                         }
@@ -415,15 +423,15 @@ export class EventHandler {
                 // because it's a boolean flag, not a config value.
                 const defaultUpdates: AgentDefaultConfig = {};
 
-                // Only update model if a model tag is explicitly present in the event
+                // Only update model if a model tag is explicitly present AND has a non-empty value.
+                // event.tagValue("model") returns "" for ["model", ""], which would persist an
+                // empty string into agent.default.model if not guarded. We treat an empty model
+                // tag as a no-op so clients can safely omit/blank the model without clearing it.
                 const hasModelTag = event.tags.some((tag) => tag[0] === "model");
-                if (hasModelTag) {
-                    // newModel is the tag value (may be undefined if tag has no value).
-                    // updateDefaultConfig only applies the change when model !== undefined,
-                    // so an empty model tag is effectively a no-op (does not clear the model).
+                if (hasModelTag && newModel) {
                     defaultUpdates.model = newModel;
                 }
-                // If no model tag, leave defaultUpdates.model unset → no change
+                // If no model tag (or empty value), leave defaultUpdates.model unset → no change
 
                 // Only update tools if tool tags are explicitly present in the event
                 const hasToolTags = event.tags.some((tag) => tag[0] === "tool");

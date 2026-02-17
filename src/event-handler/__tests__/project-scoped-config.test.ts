@@ -103,10 +103,14 @@ mock.module("@/services/projects", () => ({
 
 mock.module("@/nostr/TagExtractor", () => ({
     TagExtractor: {
+        // Mirrors actual TagExtractor.getToolTags() which filters out empty tool names.
+        // This ensures tests reflect the production behavior where ["tool", ""] tags are
+        // excluded from the returned array — exercising the raw-tag-presence guard.
         getToolTags: (event: NDKEvent) => {
             return event.tags
                 .filter((tag) => tag[0] === "tool")
-                .map((tag) => ({ name: tag[1] }));
+                .map((tag) => ({ name: tag[1] }))
+                .filter((tool): tool is { name: string } => !!tool.name);
         },
     },
 }));
@@ -604,6 +608,82 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
         } finally {
             agentStorage.loadAgent = originalLoadAgent;
         }
+    });
+
+    it('should clear all project-scoped tools when tool tags are present with empty values ("clear all" intent)', async () => {
+        // Regression test for the "clear all tools" bug:
+        // TagExtractor.getToolTags() filters out empty tool names, so ["tool", ""] events
+        // produce newToolNames=[] AND toolTags.length=0, making the guard skip delta computation.
+        // The fix uses event.tags.some() to detect tool tag PRESENCE regardless of value.
+        const agentPubkey = "abc123def456";
+
+        // Agent has non-empty defaults that should be cleared
+        const originalLoadAgent = agentStorage.loadAgent;
+        agentStorage.loadAgent = async (_pubkey: string) => ({
+            slug: "test-agent",
+            name: "Test Agent",
+            role: "assistant",
+            nsec: "nsec1abc",
+            projects: ["my-project"],
+            default: { tools: ["fs_read", "shell"] },
+        });
+
+        try {
+            // Event with ["tool", ""] — signals "clear all tools for this project"
+            // TagExtractor filters this to empty array, but raw tag IS present
+            const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+                ["p", agentPubkey],
+                ["a", "31990:owner-pubkey:my-project"],
+                ["tool", ""],
+            ]);
+
+            await eventHandler.handleEvent(mockEvent);
+
+            expect(updateProjectOverrideCalls.length).toBe(1);
+            // newToolNames = [] (empty after filtering), defaults = ["fs_read", "shell"]
+            // Delta = ["-fs_read", "-shell"] — removals for all default tools
+            const storedTools = updateProjectOverrideCalls[0].override.tools ?? [];
+            expect(storedTools).toContain("-fs_read");
+            expect(storedTools).toContain("-shell");
+        } finally {
+            agentStorage.loadAgent = originalLoadAgent;
+        }
+    });
+});
+
+describe("Global (non-a-tag) 24020 - Empty Model Tag Guard", () => {
+    let eventHandler: EventHandler;
+
+    beforeEach(async () => {
+        updateProjectOverrideCalls = [];
+        updateDefaultConfigCalls = [];
+        updateGlobalIsPMCalls = [];
+        updateProjectScopedIsPMCalls = [];
+        reloadAgentCalls = [];
+
+        eventHandler = new EventHandler();
+        await eventHandler.initialize();
+    });
+
+    it("should NOT persist an empty model string when model tag has empty value", async () => {
+        // Regression test for the empty model guard:
+        // event.tagValue("model") returns "" for ["model", ""] tags.
+        // Without the guard, defaultUpdates.model = "" would be stored, overwriting the model.
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["model", ""], // Empty model tag — should be treated as no-op
+            ["tool", "fs_read"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        // model should NOT be set — empty tag value is a no-op, not a clear
+        expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
+        // tools should still be updated normally
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
     });
 });
 

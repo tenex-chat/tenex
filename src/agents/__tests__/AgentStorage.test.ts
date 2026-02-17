@@ -909,6 +909,104 @@ describe("AgentStorage", () => {
             expect(storage.resolveEffectiveLLMConfig(updated!, "project-a")).toBe("modelB");
         });
 
+        it("should NOT clear model or tools when only isPM is updated (PM-only update behavior)", async () => {
+            // DESIGN: A PM-only 24020 event (no model/tools tags) uses PARTIAL-UPDATE semantics.
+            // Only fields explicitly present in the event are updated; absent fields are unchanged.
+            // This means updateDefaultConfig({}) must NOT clear existing model or tools.
+            // Clearing would require an explicit reset tag or explicit empty-value fields.
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "anthropic:claude-sonnet-4", tools: ["fs_read", "shell"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            // Step 1: Simulate PM designation (updateAgentIsPM is called separately)
+            const pmSuccess = await storage.updateAgentIsPM(signer.pubkey, true);
+            expect(pmSuccess).toBe(true);
+
+            // Step 2: Simulate the updateDefaultConfig call with no model/tools
+            // This is what the event handler does when a 24020 has only a ["pm"] tag
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                // No model, no tools - only pm is being changed via updateAgentIsPM above
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            // PM should now be true
+            expect(loaded?.isPM).toBe(true);
+            // Model and tools should be UNCHANGED - PM-only update must not clear them
+            expect(loaded?.default?.model).toBe("anthropic:claude-sonnet-4");
+            expect(loaded?.default?.tools).toEqual(["fs_read", "shell"]);
+        });
+
+        it("should deduplicate no-op delta: +tool where tool already in defaults is a no-op", async () => {
+            // Issue 3: If a project override delta becomes a no-op (e.g., +tool that's already
+            // in defaults), it should be cleaned up - user is confirming availability.
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["fs_read", "shell"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            // Pass a delta where "+fs_read" is already in defaults - resolves to same as defaults
+            // resolves to: apply +fs_read to [fs_read, shell] → [fs_read, shell] = same as defaults
+            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                tools: ["+fs_read"], // fs_read is already in defaults, so this is a no-op
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            // No-op delta: resolved tools equal defaults → override should be cleared
+            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+        });
+
+        it("should preserve useful part of delta when only some entries are no-ops", async () => {
+            // If a delta has mixed entries (some no-op, some actual changes), only the
+            // effective difference should be stored.
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["fs_read", "shell"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            // Delta: +fs_read (already there = no-op), +agents_write (new = actual change)
+            // Resolved: [fs_read, shell, agents_write] ≠ defaults [fs_read, shell]
+            // So override should NOT be cleared - it represents a real difference
+            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                tools: ["+fs_read", "+agents_write"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            // Override should still exist because resolved result differs from defaults
+            expect(loaded?.projectOverrides?.["project-1"]).toBeDefined();
+            // The STORED delta should be normalized: "+fs_read" is a no-op (fs_read is already
+            // in defaults), so it should be removed from the stored delta. Only "+agents_write"
+            // represents a real change and should remain.
+            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["+agents_write"]);
+            // The effective tools should be [fs_read, shell, agents_write]
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual([
+                "fs_read",
+                "shell",
+                "agents_write",
+            ]);
+        });
+
         it("should migrate legacy agent file on load (llmConfig -> default.model)", async () => {
             const signer = NDKPrivateKeySigner.generate();
             // Create agent with old schema (llmConfig directly on agent)
