@@ -84,11 +84,13 @@ export class DaemonRouter {
 
         // For other events, we need to determine if we'd actually process them.
         // This balances two concerns:
-        // 1. Boot events (kind:24000) must be able to start projects
+        // 1. Boot events (kind:24000 and kind:1) must be able to start projects
         // 2. Regular events should only trace if we have an active runtime (prevents "other backend" noise)
 
         // kind:24000 (TenexBootProject) is an EXPLICIT boot request - always allow if project is known
+        // kind:1 (Text) can also boot projects (per routeEventToProject logic)
         const isExplicitBootRequest = event.kind === 24000;
+        const canBootProject = event.kind === 1 || event.kind === 24000;
 
         if (isExplicitBootRequest) {
             logger.debug("shouldTraceEvent: boot request event", {
@@ -121,18 +123,20 @@ export class DaemonRouter {
             if (aTagValue && knownProjects.has(aTagValue)) {
                 // Project is known - trace if:
                 // 1. We have an active runtime, OR
-                // 2. This is an explicit boot request (kind:24000)
+                // 2. This event can boot projects (kind:1 or kind:24000)
+                // CRITICAL: kind:1 events with explicit A-tags MUST trace even without runtime
+                // to prevent cross-project routing bugs when agents exist in multiple projects
                 const hasRuntime = activeRuntimes.has(aTagValue);
-                if (hasRuntime || isExplicitBootRequest) {
+                if (hasRuntime || canBootProject) {
                     logger.debug("shouldTraceEvent: accepting via A-tag", {
                         kind: event.kind,
                         projectId: aTagValue.slice(0, 30),
                         hasRuntime,
-                        isExplicitBootRequest,
+                        canBootProject,
                     });
                     return true;
                 }
-                // Known project but no active runtime and not a boot request - don't trace
+                // Known project but no active runtime and cannot boot - don't trace
                 logger.debug("shouldTraceEvent: rejecting - known project but no runtime", {
                     kind: event.kind,
                     projectId: aTagValue.slice(0, 30),
@@ -295,6 +299,12 @@ export class DaemonRouter {
 
     /**
      * Route event based on P-tags (agent pubkey references)
+     *
+     * IMPORTANT: P-tag routing is fallback behavior when A-tag routing fails.
+     * When an agent exists in multiple projects, we ONLY route via P-tag if
+     * exactly one of those projects has an active runtime. This prevents
+     * cross-project routing bugs where an event intended for project A gets
+     * routed to project B because B happened to be running.
      */
     private static routeByPTag(
         event: NDKEvent,
@@ -316,55 +326,99 @@ export class DaemonRouter {
                 continue;
             }
 
-            // Check if this pubkey belongs to any active project's agents
+            // Check if this pubkey belongs to any project's agents
             const projectIds = agentPubkeyToProjects.get(pubkey as Hexpubkey);
-            if (projectIds && projectIds.size > 0) {
-                // Use the first project (in practice, agents should belong to one project)
-                const projectId = Array.from(projectIds)[0];
+            if (!projectIds || projectIds.size === 0) {
+                continue;
+            }
+
+            // Find which of this agent's projects have active runtimes
+            const activeProjectsForAgent: Array<{
+                projectId: string;
+                project: NDKProject;
+                runtime: ProjectRuntime;
+                agent: { slug: string; pubkey: string };
+            }> = [];
+
+            for (const projectId of projectIds) {
+                const runtime = activeRuntimes.get(projectId);
+                if (!runtime) {
+                    continue; // Project not running - skip
+                }
 
                 const project = knownProjects.get(projectId);
                 if (!project) {
-                    throw new Error(
-                        `Project ${projectId} not found in knownProjects despite being in agentPubkeyToProjects mapping`
-                    );
+                    logger.warn("routeByPTag: project in agentPubkeyToProjects but not in knownProjects", {
+                        projectId: projectId.slice(0, 20),
+                        agentPubkey: pubkey.slice(0, 8),
+                    });
+                    continue;
                 }
 
-                const runtime = activeRuntimes.get(projectId);
-                if (!runtime) {
-                    throw new Error(
-                        `Runtime for project ${projectId} not found in activeRuntimes despite being in agentPubkeyToProjects mapping`
-                    );
-                }
-
-                // Get agent from runtime - it MUST exist since we found it in agentPubkeyToProjects
                 const context = runtime.getContext();
                 if (!context) {
-                    throw new Error(`Runtime for project ${projectId} has no context`);
+                    logger.warn("routeByPTag: runtime has no context", {
+                        projectId: projectId.slice(0, 20),
+                    });
+                    continue;
                 }
 
                 const agent = context.agentRegistry.getAllAgents().find((a) => a.pubkey === pubkey);
                 if (!agent) {
-                    throw new Error(
-                        `Agent ${pubkey.slice(0, 8)} not found in project ${projectId} despite being in agentPubkeyToProjects mapping`
-                    );
+                    // Agent might have been removed from this project after mapping was created
+                    logger.debug("routeByPTag: agent not found in project registry", {
+                        projectId: projectId.slice(0, 20),
+                        agentPubkey: pubkey.slice(0, 8),
+                    });
+                    continue;
                 }
 
-                logger.info("Routing event to project via agent P-tag", {
-                    eventId: event.id.slice(0, 8),
-                    eventKind: event.kind,
-                    projectId,
-                    projectTitle: project.tagValue("title"),
-                    agentPubkey: pubkey.slice(0, 8),
-                    agentSlug: agent.slug,
-                });
-
-                return {
-                    projectId,
-                    method: "p_tag_agent",
-                    matchedTags: [pubkey],
-                    reason: `Matched agent P-tag: ${pubkey.slice(0, 8)}`,
-                };
+                activeProjectsForAgent.push({ projectId, project, runtime, agent });
             }
+
+            // If no active projects found for this agent, skip to next P-tag
+            if (activeProjectsForAgent.length === 0) {
+                logger.debug("routeByPTag: no active projects for agent", {
+                    agentPubkey: pubkey.slice(0, 8),
+                    knownProjectCount: projectIds.size,
+                });
+                continue;
+            }
+
+            // CRITICAL: Only route via P-tag if there's exactly ONE active project
+            // If multiple projects are active with this agent, we can't determine
+            // the correct target - the event should have used an A-tag for disambiguation
+            if (activeProjectsForAgent.length > 1) {
+                logger.warn("routeByPTag: agent exists in multiple active projects - cannot disambiguate without A-tag", {
+                    eventId: event.id?.slice(0, 8),
+                    agentPubkey: pubkey.slice(0, 8),
+                    activeProjects: activeProjectsForAgent.map(p => ({
+                        projectId: p.projectId.slice(0, 20),
+                        projectTitle: p.project.tagValue("title"),
+                    })),
+                });
+                // Return null to indicate we couldn't route definitively
+                return null;
+            }
+
+            // Exactly one active project - safe to route
+            const { projectId, project, agent } = activeProjectsForAgent[0];
+
+            logger.info("Routing event to project via agent P-tag", {
+                eventId: event.id.slice(0, 8),
+                eventKind: event.kind,
+                projectId,
+                projectTitle: project.tagValue("title"),
+                agentPubkey: pubkey.slice(0, 8),
+                agentSlug: agent.slug,
+            });
+
+            return {
+                projectId,
+                method: "p_tag_agent",
+                matchedTags: [pubkey],
+                reason: `Matched agent P-tag: ${pubkey.slice(0, 8)}`,
+            };
         }
 
         return null;
