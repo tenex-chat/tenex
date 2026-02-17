@@ -59,7 +59,7 @@ export interface AgentDefaultConfig {
 
 /**
  * Per-project configuration override block.
- * Stored under `projects[projectDTag]` in agent JSON files.
+ * Stored under `projectOverrides[projectDTag]` in agent JSON files.
  * A 24020 event with an a-tag writes to this block.
  *
  * Tools can use delta syntax:
@@ -100,6 +100,23 @@ export interface StoredAgentData {
     tools?: string[];
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
+
+    /**
+     * Default configuration block (new schema v1).
+     * Written by kind 24020 events WITHOUT an a-tag.
+     * Fields here are the global fallback when no project-specific override exists.
+     */
+    default?: AgentDefaultConfig;
+
+    /**
+     * Per-project configuration overrides (new schema v1).
+     * Key is project dTag, value is the project-specific delta override.
+     * Written by kind 24020 events WITH an a-tag.
+     *
+     * Tools stored here use delta syntax ("+tool" / "-tool") or full replacement.
+     * See ConfigResolver for resolution logic.
+     */
+    projectOverrides?: Record<string, AgentProjectConfig>;
 }
 
 /**

@@ -6,6 +6,8 @@ import {
     resolveEffectiveModel,
     resolveEffectiveConfig,
     deduplicateProjectConfig,
+    computeToolsDelta,
+    arraysEqualUnordered,
 } from "../ConfigResolver";
 
 describe("ConfigResolver", () => {
@@ -258,6 +260,122 @@ describe("ConfigResolver", () => {
             expect(result.model).toBeUndefined();
             expect(result.tools).toBeUndefined();
             expect(Object.keys(result)).toHaveLength(0);
+        });
+
+        it("should clean up no-op +tool delta when tool already in defaults", () => {
+            // Behavioral clarification Issue 3: If a project override delta becomes a no-op
+            // against the current defaults (e.g., +tool that's already in defaults), it should
+            // be cleaned up since the user is explicitly confirming the tool should be available.
+            const defaultConfig = { tools: ["tool1", "tool2"] };
+            // Sending a delta that adds tool1 (already in defaults) - should be a no-op
+            const projectConfig = { tools: ["+tool1"] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            // +tool1 resolves to [tool1, tool2] which equals defaults → clear override
+            expect(result.tools).toBeUndefined();
+        });
+
+        it("should keep override when delta changes are meaningful (not all no-ops)", () => {
+            // If delta adds a tool not in defaults, it should be kept
+            const defaultConfig = { tools: ["tool1", "tool2"] };
+            const projectConfig = { tools: ["+tool3"] };
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            // +tool3 resolves to [tool1, tool2, tool3] which differs from defaults
+            expect(result.tools).toEqual(["+tool3"]);
+        });
+
+        it("should use unordered comparison (order of tools should not matter)", () => {
+            // Tools are sets — order should not matter for dedup
+            const defaultConfig = { tools: ["tool1", "tool2", "tool3"] };
+            const projectConfig = { tools: ["tool3", "tool1", "tool2"] }; // different order
+            const result = deduplicateProjectConfig(defaultConfig, projectConfig);
+            // Same set of tools as defaults → clear override
+            expect(result.tools).toBeUndefined();
+        });
+    });
+
+    describe("computeToolsDelta", () => {
+        it("should return empty array when desired matches defaults exactly", () => {
+            const defaults = ["tool1", "tool2"];
+            const desired = ["tool1", "tool2"];
+            expect(computeToolsDelta(defaults, desired)).toEqual([]);
+        });
+
+        it("should return additions when desired has tools not in defaults", () => {
+            const defaults = ["tool1", "tool2"];
+            const desired = ["tool1", "tool2", "tool3"];
+            const delta = computeToolsDelta(defaults, desired);
+            expect(delta).toContain("+tool3");
+            expect(delta).not.toContain("+tool1");
+            expect(delta).not.toContain("+tool2");
+        });
+
+        it("should return removals when defaults have tools not in desired", () => {
+            const defaults = ["tool1", "tool2", "tool3"];
+            const desired = ["tool1", "tool2"];
+            const delta = computeToolsDelta(defaults, desired);
+            expect(delta).toContain("-tool3");
+            expect(delta).not.toContain("-tool1");
+            expect(delta).not.toContain("-tool2");
+        });
+
+        it("should return both additions and removals", () => {
+            const defaults = ["tool1", "tool2"];
+            const desired = ["tool2", "tool3"]; // remove tool1, add tool3
+            const delta = computeToolsDelta(defaults, desired);
+            expect(delta).toContain("-tool1");
+            expect(delta).toContain("+tool3");
+            expect(delta).not.toContain("-tool2");
+        });
+
+        it("should return empty when desired is empty and defaults are empty", () => {
+            expect(computeToolsDelta([], [])).toEqual([]);
+        });
+
+        it("should handle removing all default tools", () => {
+            const defaults = ["tool1", "tool2"];
+            const desired: string[] = [];
+            const delta = computeToolsDelta(defaults, desired);
+            expect(delta).toContain("-tool1");
+            expect(delta).toContain("-tool2");
+        });
+
+        it("should handle adding tools when defaults are empty", () => {
+            const defaults: string[] = [];
+            const desired = ["tool1", "tool2"];
+            const delta = computeToolsDelta(defaults, desired);
+            expect(delta).toContain("+tool1");
+            expect(delta).toContain("+tool2");
+        });
+
+        it("should round-trip correctly: applyToolsDelta(defaults, computeToolsDelta(defaults, desired)) = desired", () => {
+            const defaults = ["fs_read", "fs_write", "shell"];
+            const desired = ["fs_read", "fs_edit", "shell", "agents_write"];
+            const delta = computeToolsDelta(defaults, desired);
+            // Verify the delta, when applied, gives back the desired set
+            const applied = applyToolsDelta(defaults, delta);
+            expect(new Set(applied)).toEqual(new Set(desired));
+        });
+    });
+
+    describe("arraysEqualUnordered", () => {
+        it("should return true for same elements in same order", () => {
+            expect(arraysEqualUnordered(["a", "b", "c"], ["a", "b", "c"])).toBe(true);
+        });
+
+        it("should return true for same elements in different order", () => {
+            expect(arraysEqualUnordered(["a", "b", "c"], ["c", "a", "b"])).toBe(true);
+        });
+
+        it("should return false for different lengths", () => {
+            expect(arraysEqualUnordered(["a", "b"], ["a", "b", "c"])).toBe(false);
+        });
+
+        it("should return false for different elements", () => {
+            expect(arraysEqualUnordered(["a", "b"], ["a", "c"])).toBe(false);
+        });
+
+        it("should return true for empty arrays", () => {
+            expect(arraysEqualUnordered([], [])).toBe(true);
         });
     });
 });

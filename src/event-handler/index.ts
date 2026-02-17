@@ -2,6 +2,8 @@ import { NDKKind } from "@/nostr/kinds";
 import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
+import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
+import { computeToolsDelta } from "@/agents/ConfigResolver";
 import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationStore } from "../conversations/ConversationStore";
@@ -341,17 +343,26 @@ export class EventHandler {
                         true // reset=true
                     );
                 } else {
-                    // Build the project-scoped override
-                    // Kind 24020 events are authoritative snapshots - full replacement (not merge)
-                    const projectOverride: import("@/agents/types").AgentProjectConfig = {};
+                    // Build the project-scoped override.
+                    // Kind 24020 events carry a FULL tool list (no delta notation in events).
+                    // The storage layer stores DELTA notation for project overrides.
+                    // We must convert the full list from the event into a delta against defaults.
+                    const projectOverride: AgentProjectConfig = {};
 
                     if (newModel) {
                         projectOverride.model = newModel;
                     }
 
-                    // Tool tags represent the exhaustive list (or delta) for this project
+                    // Tool tags represent the exhaustive desired list for this project.
+                    // We convert it to a delta against the agent's default tools for compact storage.
                     if (newToolNames.length > 0) {
-                        projectOverride.tools = newToolNames;
+                        const storedAgent = await agentStorage.loadAgent(agentPubkey);
+                        const defaultTools = storedAgent?.default?.tools ?? storedAgent?.tools ?? [];
+                        const toolsDelta = computeToolsDelta(defaultTools, newToolNames);
+                        // If delta is empty, the tools match defaults exactly — no override needed
+                        if (toolsDelta.length > 0) {
+                            projectOverride.tools = toolsDelta;
+                        }
                     }
 
                     updated = await agentStorage.updateProjectOverride(
@@ -402,7 +413,7 @@ export class EventHandler {
                 // This is consistent with how project-scoped overrides work.
                 // Note: PM designation uses authoritative snapshot semantics (absence clears it)
                 // because it's a boolean flag, not a config value.
-                const defaultUpdates: import("@/agents/types").AgentDefaultConfig = {};
+                const defaultUpdates: AgentDefaultConfig = {};
 
                 // Only update model if a model tag is explicitly present in the event
                 const hasModelTag = event.tags.some((tag) => tag[0] === "model");
