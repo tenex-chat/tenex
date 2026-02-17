@@ -200,15 +200,21 @@ export function deduplicateProjectConfig(
         delete cleaned.model;
     }
 
-    // Dedup tools: resolve and compare
+    // Dedup tools: resolve, normalize delta, and compare
     if (cleaned.tools !== undefined) {
-        const resolvedProjectTools = resolveEffectiveTools(defaultConfig.tools, cleaned.tools);
         const defaultToolsResolved = defaultConfig.tools ?? [];
+        const resolvedProjectTools = resolveEffectiveTools(defaultConfig.tools, cleaned.tools);
 
         // Compare resolved tools to default tools (order-insensitive)
         if (arraysEqualUnordered(resolvedProjectTools ?? [], defaultToolsResolved)) {
-            // Resolved tools are identical to defaults - clear the override
+            // Resolved tools are identical to defaults - clear the override entirely
             delete cleaned.tools;
+        } else if (isToolsDelta(cleaned.tools)) {
+            // The delta represents a real change, but may contain redundant entries.
+            // Normalize: recompute the minimal delta from the fully-resolved tool list.
+            // e.g., ["+fs_read", "+agents_write"] where fs_read is already in defaults
+            // becomes ["+agents_write"] — the minimal equivalent delta.
+            cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
         }
     }
 
