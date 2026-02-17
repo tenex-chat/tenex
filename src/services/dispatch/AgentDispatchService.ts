@@ -404,23 +404,36 @@ export class AgentDispatchService {
                     currentRal.ralNumber
                 );
 
-                // Insert markers into the parent conversation
+                // Update markers in the parent conversation (or create if not found)
                 const parentStore = ConversationStore.get(delegationTarget.conversationId);
                 if (parentStore && completedDelegations.length > 0) {
                     for (const completion of completedDelegations) {
-                        const marker: DelegationMarker = {
-                            delegationConversationId: completion.delegationConversationId,
-                            recipientPubkey: completion.recipientPubkey,
-                            parentConversationId: delegationTarget.conversationId,
-                            completedAt: completion.completedAt,
-                            status: completion.status,
-                            abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
-                        };
-                        parentStore.addDelegationMarker(
-                            marker,
-                            delegationTarget.agent.pubkey,
-                            currentRal.ralNumber
+                        // Try to update existing pending marker first
+                        const updated = parentStore.updateDelegationMarker(
+                            completion.delegationConversationId,
+                            {
+                                status: completion.status,
+                                completedAt: completion.completedAt,
+                                abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                            }
                         );
+
+                        // If no pending marker found, create a new one (backward compatibility)
+                        if (!updated) {
+                            const marker: DelegationMarker = {
+                                delegationConversationId: completion.delegationConversationId,
+                                recipientPubkey: completion.recipientPubkey,
+                                parentConversationId: delegationTarget.conversationId,
+                                completedAt: completion.completedAt,
+                                status: completion.status,
+                                abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                            };
+                            parentStore.addDelegationMarker(
+                                marker,
+                                delegationTarget.agent.pubkey,
+                                currentRal.ralNumber
+                            );
+                        }
                     }
                     await parentStore.save();
 

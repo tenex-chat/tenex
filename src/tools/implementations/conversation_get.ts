@@ -424,9 +424,19 @@ function serializeConversation(
             const shortConversationId = marker.delegationConversationId.slice(0, PREFIX_LENGTH);
             const recipientName = pubkeyService.getNameSync(marker.recipientPubkey);
 
-            // Format: ✅/⚠️ Delegation <shortId> → <recipient> completed/aborted
-            const emoji = marker.status === "completed" ? "✅" : "⚠️";
-            const statusText = marker.status === "completed" ? "completed" : "aborted";
+            // Format based on status
+            let emoji: string;
+            let statusText: string;
+            if (marker.status === "pending") {
+                emoji = "⏳";
+                statusText = "in progress";
+            } else if (marker.status === "completed") {
+                emoji = "✅";
+                statusText = "completed";
+            } else {
+                emoji = "⚠️";
+                statusText = "aborted";
+            }
             const content = `${emoji} Delegation ${shortConversationId} → ${recipientName} ${statusText}`;
 
             formattedLines.push(formatLine(relativeSeconds, from, targets, content));

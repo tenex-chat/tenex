@@ -123,7 +123,7 @@ export async function handleDelegationCompletion(
                 delegationConversationId: eTag,
                 recipientPubkey: event.pubkey,
                 response: event.content,
-                completedAt: Date.now(),
+                completedAt: Math.floor(Date.now() / 1000), // Use seconds to match pending markers
             });
 
             if (result) {

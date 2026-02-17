@@ -12,6 +12,7 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegationIntent,
+    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     InterventionReviewIntent,
@@ -606,6 +607,69 @@ export class AgentEventEncoder {
             conversationId: shortConversationId,
             userName: intent.userName,
             agentName: intent.agentName,
+        });
+
+        return event;
+    }
+
+    /**
+     * Encode a delegation marker event.
+     * Delegation markers track the lifecycle of delegation conversations.
+     *
+     * Event structure:
+     * - kind: 4203 (DelegationMarker) - custom kind for delegation lifecycle tracking
+     * - content: Empty string (markers have no text content)
+     * - tags:
+     *   - ["delegation-marker", status] - Marker type and status
+     *   - ["e", delegationConversationId] - Reference to the delegation conversation
+     *   - ["e", parentConversationId] - Reference to the parent conversation
+     *   - ["p", recipientPubkey] - The agent that received the delegation
+     *   - ["initiated-at", timestamp] - When delegation was initiated (optional)
+     *   - ["completed-at", timestamp] - When delegation completed (optional, for completed/aborted)
+     *   - ["abort-reason", reason] - Abort reason (optional, for aborted)
+     *   - ["a", projectTag] - Project reference (added internally via aTagProject)
+     */
+    encodeDelegationMarker(intent: DelegationMarkerIntent): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.DelegationMarker; // kind:4203 - dedicated kind prevents spam filtering
+
+        // Markers have no text content
+        event.content = "";
+
+        // Add delegation marker tag with status
+        event.tag(["delegation-marker", intent.status]);
+
+        // Add delegation conversation reference
+        event.tag(["e", intent.delegationConversationId]);
+
+        // Add parent conversation reference
+        event.tag(["e", intent.parentConversationId]);
+
+        // Add recipient agent pubkey
+        event.tag(["p", intent.recipientPubkey]);
+
+        // Add timestamp tags
+        if (intent.initiatedAt !== undefined) {
+            event.tag(["initiated-at", intent.initiatedAt.toString()]);
+        }
+
+        if (intent.completedAt !== undefined) {
+            event.tag(["completed-at", intent.completedAt.toString()]);
+        }
+
+        // Add abort reason if present
+        if (intent.abortReason) {
+            event.tag(["abort-reason", intent.abortReason]);
+        }
+
+        // Add project tag
+        this.aTagProject(event);
+
+        logger.debug("Encoded delegation marker event", {
+            delegationConversationId: intent.delegationConversationId.substring(0, 12),
+            parentConversationId: intent.parentConversationId.substring(0, 12),
+            recipientPubkey: intent.recipientPubkey.substring(0, 8),
+            status: intent.status,
         });
 
         return event;

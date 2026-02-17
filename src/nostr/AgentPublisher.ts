@@ -12,6 +12,7 @@ import type {
     CompletionIntent,
     ConversationIntent,
     DelegateConfig,
+    DelegationMarkerIntent,
     ErrorIntent,
     EventContext,
     LessonIntent,
@@ -70,8 +71,8 @@ export class AgentPublisher {
     }
 
     /**
-     * Safely publish an event with error handling.
-     * Logs warnings on publish failure or 0-relay success.
+     * Safely publish an event with error handling and comprehensive logging.
+     * Throws an error if no relays accept the event.
      */
     private async safePublish(event: NDKEvent, eventType: string): Promise<void> {
         try {
@@ -81,23 +82,48 @@ export class AgentPublisher {
             const successRelays: string[] = [];
             for (const relay of relaySet) {
                 successRelays.push(relay.url);
+                logger.debug(`Relay accepted ${eventType} event`, {
+                    eventId: event.id?.substring(0, 8),
+                    eventType,
+                    relayUrl: relay.url,
+                    agent: this.agent.slug,
+                });
             }
 
+            // Fail explicitly when no relays accept the event
             if (successRelays.length === 0) {
-                logger.warn("Event published to 0 relays", {
+                const error = new Error(
+                    `Event published to 0 relays - all relays rejected the ${eventType} event`
+                );
+                logger.error("Event published to 0 relays", {
                     eventId: event.id?.substring(0, 8),
                     eventType,
                     agent: this.agent.slug,
+                    kind: event.kind,
+                    contentLength: event.content?.length || 0,
+                    tagCount: event.tags?.length || 0,
                     rawEvent: JSON.stringify(event.rawEvent()),
                 });
+                throw error;
             }
+
+            logger.info(`Published ${eventType} event to ${successRelays.length} relay(s)`, {
+                eventId: event.id?.substring(0, 8),
+                eventType,
+                agent: this.agent.slug,
+                relays: successRelays,
+            });
         } catch (error) {
-            logger.warn(`Failed to publish ${eventType}`, {
+            logger.error(`Failed to publish ${eventType}`, {
                 error,
                 eventId: event.id?.substring(0, 8),
                 agent: this.agent.slug,
+                kind: event.kind,
+                contentLength: event.content?.length || 0,
+                tagCount: event.tags?.length || 0,
                 rawEvent: JSON.stringify(event.rawEvent()),
             });
+            throw error;
         }
     }
 
@@ -380,6 +406,23 @@ export class AgentPublisher {
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, `tool:${intent.toolName}`);
+
+        return event;
+    }
+
+    /**
+     * Publish a delegation marker event.
+     * Delegation markers track the lifecycle of delegation conversations.
+     *
+     * Note: This does NOT consume runtime from RAL since markers are not part of
+     * the agent's reasoning/action loop. They are metadata events for tracking.
+     */
+    async delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent> {
+        const event = this.encoder.encodeDelegationMarker(intent);
+
+        injectTraceContext(event);
+        await this.agent.sign(event);
+        await this.safePublish(event, `delegation-marker:${intent.status}`);
 
         return event;
     }

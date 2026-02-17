@@ -19,6 +19,7 @@ const mockAgentPubkeyToSlug: Map<string, string> = new Map([
     ["agent-pubkey-claude-code", "claude-code"],
     ["agent-pubkey-architect", "architect-orchestrator"],
     ["agent-pubkey-debugger", "debugger"],
+    ["agent-pubkey-explore-agent", "explore-agent"],
 ]);
 
 // Mock PubkeyService - returns agent slug for known agents, truncated pubkey otherwise
@@ -1903,6 +1904,48 @@ describe("conversation_get Tool", () => {
             expect(lines[0]).toBe("[+0] [@claude-code] Starting delegation");
             // Aborted delegation: should show ⚠️ and "aborted"
             expect(lines[1]).toBe("[+10] [@claude-code] ⚠️ Delegation c45f789b3ef9 → debugger aborted");
+        });
+
+        it("should display pending delegation markers with hourglass emoji", async () => {
+            mockConversationData = {
+                id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                messages: [
+                    {
+                        messageType: "text",
+                        content: "Delegating task now",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                    {
+                        messageType: "delegation-marker",
+                        content: "",
+                        pubkey: "agent-pubkey-claude-code",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000005,
+                        delegationMarker: {
+                            delegationConversationId: "f78g012e3gh4abcdef0123456789abcdef0123456789abcdef0123456789ab",
+                            recipientPubkey: "agent-pubkey-explore-agent",
+                            parentConversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                            initiatedAt: 1700000005,
+                            status: "pending",
+                        },
+                    },
+                ],
+            };
+
+            const tool = createConversationGetTool(mockContext);
+            const result = await tool.execute({
+                conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            });
+
+            const messages = (result.conversation as any).messages;
+            const lines = messages.split("\n");
+
+            expect(lines).toHaveLength(2);
+            expect(lines[0]).toBe("[+0] [@claude-code] Delegating task now");
+            // Delegation marker: should show ⏳, short ID (12 chars), recipient name, and "in progress"
+            expect(lines[1]).toBe("[+5] [@claude-code] ⏳ Delegation f78g012e3gh4 → explore-agent in progress");
         });
 
         it("should display delegation markers regardless of includeToolResults setting", async () => {
