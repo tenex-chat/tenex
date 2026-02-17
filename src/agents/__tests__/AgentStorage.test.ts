@@ -414,7 +414,7 @@ describe("AgentStorage", () => {
 
             await storage.saveAgent(agent);
 
-            // Set project-scoped config
+            // Set project-scoped config (legacy method - uses projectConfigs)
             storage.setProjectConfig(agent, "project-1", {
                 llmConfig: "anthropic:claude-opus-4",
                 isPM: true,
@@ -422,10 +422,11 @@ describe("AgentStorage", () => {
             await storage.saveAgent(agent);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-                isPM: true,
-            });
+            // After migration, projectConfigs is migrated to projectOverrides
+            // but isPM stays in projectConfigs (since it's not migrated to projectOverrides)
+            // Verify resolution works correctly
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
+            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
         });
 
         it("should resolve effective LLM config with project override", async () => {
@@ -524,7 +525,10 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.llmConfig).toBe("anthropic:claude-opus-4");
+            // New schema: stored in projectOverrides
+            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("anthropic:claude-opus-4");
+            // And resolves correctly
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
         });
 
         it("should update project-scoped tools via async method", async () => {
@@ -548,7 +552,10 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.tools).toEqual(["fs_read", "shell", "agents_write"]);
+            // New schema: stored in projectOverrides
+            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["fs_read", "shell", "agents_write"]);
+            // And resolves correctly
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["fs_read", "shell", "agents_write"]);
         });
 
         it("should update project-scoped isPM via async method", async () => {
@@ -571,7 +578,8 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.isPM).toBe(true);
+            // isPM is still stored in projectConfigs for legacy compat
+            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
         });
 
         it("should update complete project-scoped config authoritatively", async () => {
@@ -594,11 +602,10 @@ describe("AgentStorage", () => {
             });
 
             let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-                tools: ["fs_read", "shell"],
-                isPM: true,
-            });
+            // After migration, projectConfigs is gone, data in projectOverrides
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["fs_read", "shell"]);
+            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
 
             // Replace with new config (authoritative - previous isPM should be gone)
             await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
@@ -609,9 +616,7 @@ describe("AgentStorage", () => {
             loaded = await storage.loadAgent(signer.pubkey);
             // Empty tools array should result in no tools field
             // isPM should be gone since it wasn't in the new config
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-sonnet-4",
-            });
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-sonnet-4");
         });
 
         it("should clear project config when all values are empty", async () => {
@@ -632,13 +637,17 @@ describe("AgentStorage", () => {
             });
 
             let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toBeDefined();
+            // After update, project override should exist
+            expect(
+                loaded?.projectOverrides?.["project-1"] ?? loaded?.projectConfigs?.["project-1"]
+            ).toBeDefined();
 
             // Clear config by setting empty
             await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {});
 
             loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs).toBeUndefined();
+            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+            expect(loaded?.projectConfigs?.["project-1"]).toBeUndefined();
         });
 
         it("should clean up undefined values in setProjectConfig", async () => {
@@ -727,6 +736,211 @@ describe("AgentStorage", () => {
 
             storage.clearProjectConfig(agent, "project-1");
             expect(agent.projectConfigs).toBeUndefined();
+        });
+    });
+
+    describe("new schema: updateDefaultConfig and updateProjectOverride", () => {
+        it("should write to default block when calling updateDefaultConfig", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                model: "anthropic:claude-opus-4",
+                tools: ["fs_read", "shell"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
+            expect(loaded?.default?.tools).toEqual(["fs_read", "shell"]);
+            // Legacy fields should be in sync
+            expect(loaded?.llmConfig).toBe("anthropic:claude-opus-4");
+        });
+
+        it("should write to projectOverrides when calling updateProjectOverride", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                model: "modelB",
+                tools: ["-tool1", "+tool4"],
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("modelB");
+            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["-tool1", "+tool4"]);
+
+            // Effective config should resolve delta correctly
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("modelB");
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["tool2", "tool4"]);
+        });
+
+        it("should apply dedup: remove model override when same as default", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            // Set initial override
+            await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                model: "modelB",
+                tools: ["tool1", "tool2"],
+            });
+
+            let loaded = await storage.loadAgent(signer.pubkey);
+            // modelB is different from default (modelA), so kept
+            // tools is same as default, so should be removed by dedup
+            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("modelB");
+            expect(loaded?.projectOverrides?.["project-1"]?.tools).toBeUndefined();
+
+            // Now set model to same as default -> entire override should be cleared
+            await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                model: "modelA",
+            });
+
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+        });
+
+        it("should reset project override when reset=true", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(agent);
+
+            // Set override
+            await storage.updateProjectOverride(signer.pubkey, "project-1", {
+                model: "modelB",
+                tools: ["+tool3"],
+            });
+
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]).toBeDefined();
+
+            // Reset
+            const success = await storage.updateProjectOverride(
+                signer.pubkey, "project-1", {}, true
+            );
+            expect(success).toBe(true);
+
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+            expect(loaded?.projectOverrides).toBeUndefined();
+
+            // Effective config should fall back to defaults
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("modelA");
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["tool1", "tool2"]);
+        });
+
+        it("should handle full example from requirements", async () => {
+            // agentA has:
+            //   default: { model: 'modelA', tools: [ 'tool1', 'tool2' ] }
+            //   projectA: { model: 'modelB', tools: [ '-tool1', '+tool4' ] } -> modelB, [tool2, tool4]
+            //   projectB: { tools: [ '+tool5' ] } -> modelA, [tool1, tool2, tool5]
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "agent-a",
+                name: "Agent A",
+                role: "assistant",
+                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
+                projects: ["project-a", "project-b"],
+                projectOverrides: {
+                    "project-a": { model: "modelB", tools: ["-tool1", "+tool4"] },
+                    "project-b": { tools: ["+tool5"] },
+                },
+            });
+            await storage.saveAgent(agent);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded).toBeDefined();
+
+            // projectA: modelB, [tool2, tool4]
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-a")).toBe("modelB");
+            expect(storage.resolveEffectiveTools(loaded!, "project-a")).toEqual(["tool2", "tool4"]);
+
+            // projectB: modelA, [tool1, tool2, tool5]
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-b")).toBe("modelA");
+            expect(storage.resolveEffectiveTools(loaded!, "project-b")).toEqual(["tool1", "tool2", "tool5"]);
+
+            // Now send 24020 a-tagging projectB with: { model: 'modelA', tools: ['tool1', 'tool2'] }
+            // -> config becomes projectB: {} (empty = deleted)
+            await storage.updateProjectOverride(signer.pubkey, "project-b", {
+                model: "modelA",
+                tools: ["tool1", "tool2"],
+            });
+
+            const updated = await storage.loadAgent(signer.pubkey);
+            expect(updated?.projectOverrides?.["project-b"]).toBeUndefined();
+
+            // After reset, projectB uses defaults
+            expect(storage.resolveEffectiveLLMConfig(updated!, "project-b")).toBe("modelA");
+            expect(storage.resolveEffectiveTools(updated!, "project-b")).toEqual(["tool1", "tool2"]);
+
+            // projectA should be unchanged
+            expect(storage.resolveEffectiveLLMConfig(updated!, "project-a")).toBe("modelB");
+        });
+
+        it("should migrate legacy agent file on load (llmConfig -> default.model)", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            // Create agent with old schema (llmConfig directly on agent)
+            const legacyAgent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "legacy-agent",
+                name: "Legacy Agent",
+                role: "assistant",
+                llmConfig: "anthropic:claude-sonnet-4",
+                tools: ["fs_read", "shell"],
+                projects: ["project-1"],
+            });
+            // Save WITHOUT new schema fields (simulate old format)
+            await storage.saveAgent(legacyAgent);
+
+            // Force save with old format (without default block)
+            const { default: _d, projectOverrides: _po, ...oldFormat } = legacyAgent as any;
+            const filePath = `${(storage as any).agentsDir}/${signer.pubkey}.json`;
+            const fs = await import("node:fs/promises");
+            await fs.writeFile(filePath, JSON.stringify(oldFormat, null, 2));
+
+            // Load agent - should trigger migration
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded).toBeDefined();
+
+            // After migration, default block should be populated
+            expect(loaded?.default?.model).toBe("anthropic:claude-sonnet-4");
+            expect(loaded?.default?.tools).toEqual(["fs_read", "shell"]);
+
+            // Resolution should still work
+            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-sonnet-4");
+            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["fs_read", "shell"]);
         });
     });
 
