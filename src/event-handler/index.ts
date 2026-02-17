@@ -316,42 +316,50 @@ export class EventHandler {
             const toolTags = TagExtractor.getToolTags(event);
             const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
             const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
+            const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
             if (isProjectScoped) {
-                // PROJECT-SCOPED CONFIG UPDATE
-                // Store in projectConfigs[projectDTag] instead of global fields
+                // PROJECT-SCOPED CONFIG UPDATE (new schema)
+                // Uses updateProjectOverride() which handles dedup and delta tools
                 logger.info("Processing project-scoped agent config update", {
                     agentSlug: agent.slug,
                     projectDTag,
                     hasModel: !!newModel,
                     toolCount: newToolNames.length,
                     hasPM: hasPMTag,
+                    hasReset: hasResetTag,
                 });
 
-                // Build the project-scoped config
-                // Kind 24020 events are authoritative snapshots - we replace the entire project config
-                const projectConfig: import("@/agents/types").ProjectScopedConfig = {};
+                let updated: boolean;
 
-                if (newModel) {
-                    projectConfig.llmConfig = newModel;
+                if (hasResetTag) {
+                    // Reset tag: clear entire project override
+                    updated = await agentStorage.updateProjectOverride(
+                        agentPubkey,
+                        projectDTag!,
+                        {},
+                        true // reset=true
+                    );
+                } else {
+                    // Build the project-scoped override
+                    // Kind 24020 events are authoritative snapshots - full replacement (not merge)
+                    const projectOverride: import("@/agents/types").AgentProjectConfig = {};
+
+                    if (newModel) {
+                        projectOverride.model = newModel;
+                    }
+
+                    // Tool tags represent the exhaustive list (or delta) for this project
+                    if (newToolNames.length > 0) {
+                        projectOverride.tools = newToolNames;
+                    }
+
+                    updated = await agentStorage.updateProjectOverride(
+                        agentPubkey,
+                        projectDTag!,
+                        projectOverride
+                    );
                 }
-
-                // Only set tools if there are actual tool tags
-                // Empty/missing tool tags means fall back to global tools (undefined)
-                if (newToolNames.length > 0) {
-                    projectConfig.tools = newToolNames;
-                }
-
-                if (hasPMTag) {
-                    projectConfig.isPM = true;
-                }
-
-                // Update the project-scoped config (this replaces the entire project config)
-                const updated = await agentStorage.updateProjectScopedConfig(
-                    agentPubkey,
-                    projectDTag!,
-                    projectConfig
-                );
 
                 if (updated) {
                     await agentRegistry.reloadAgent(agentPubkey);
@@ -359,47 +367,76 @@ export class EventHandler {
                     logger.info("Updated project-scoped config for agent", {
                         agentSlug: agent.slug,
                         projectDTag,
-                        config: projectConfig,
+                        reset: hasResetTag,
                     });
                 }
-            } else {
-                // GLOBAL CONFIG UPDATE (backward compatible behavior)
-                // Check for model configuration change
-                if (newModel) {
-                    // Update in storage then reload into registry
-                    const updated = await agentStorage.updateAgentLLMConfig(agentPubkey, newModel);
 
-                    if (updated) {
-                        // Reload agent to pick up changes
-                        await agentRegistry.reloadAgent(agentPubkey);
-                        configUpdated = true;
-                    } else {
-                        logger.warn("Failed to update model configuration", {
-                            agentName: agent.slug,
-                            agentPubkey: agent.pubkey,
-                            newModel,
-                        });
-                    }
+                // PM designation is handled separately from projectOverrides.
+                // - reset tag: always clears project-scoped PM (full project config wipe)
+                // - pm tag present: sets project-scoped PM to true
+                // - no pm tag (and no reset): no change to PM
+                if (hasResetTag) {
+                    // A reset clears ALL project config including PM designation
+                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag!, undefined);
+                    await agentRegistry.reloadAgent(agentPubkey);
+                    configUpdated = true;
+                } else if (hasPMTag) {
+                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag!, true);
+                    await agentRegistry.reloadAgent(agentPubkey);
+                    configUpdated = true;
                 }
+            } else {
+                // GLOBAL (DEFAULT) CONFIG UPDATE
+                // A 24020 with no a-tag writes to the agent's default config block
+                logger.info("Processing global agent config update", {
+                    agentSlug: agent.slug,
+                    hasModel: !!newModel,
+                    toolCount: newToolNames.length,
+                    hasPM: hasPMTag,
+                });
 
-                // Update tools configuration
-                // Extract all tool tags - these represent the exhaustive list of tools the agent should have
-                // Empty list means agent should have no tools (beyond core/delegate tools added during normalization)
-                const toolsUpdated = await agentStorage.updateAgentTools(agentPubkey, newToolNames);
+                // Build the default config to write.
+                // Non-a-tagged 24020 events use PARTIAL UPDATE semantics:
+                // - Only fields explicitly present in the event are updated
+                // - Omitting a field means "no change" (not "clear")
+                // This is consistent with how project-scoped overrides work.
+                // Note: PM designation uses authoritative snapshot semantics (absence clears it)
+                // because it's a boolean flag, not a config value.
+                const defaultUpdates: import("@/agents/types").AgentDefaultConfig = {};
 
-                if (toolsUpdated) {
+                // Only update model if a model tag is explicitly present in the event
+                const hasModelTag = event.tags.some((tag) => tag[0] === "model");
+                if (hasModelTag) {
+                    // newModel is the tag value (may be undefined if tag has no value).
+                    // updateDefaultConfig only applies the change when model !== undefined,
+                    // so an empty model tag is effectively a no-op (does not clear the model).
+                    defaultUpdates.model = newModel;
+                }
+                // If no model tag, leave defaultUpdates.model unset → no change
+
+                // Only update tools if tool tags are explicitly present in the event
+                const hasToolTags = event.tags.some((tag) => tag[0] === "tool");
+                if (hasToolTags) {
+                    // newToolNames may be empty (e.g. tool tags with no values), which clears defaults
+                    defaultUpdates.tools = newToolNames;
+                }
+                // If no tool tags, leave defaultUpdates.tools unset → no change
+
+                const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates);
+
+                if (defaultUpdated) {
                     await agentRegistry.reloadAgent(agentPubkey);
                     configUpdated = true;
                 } else {
-                    logger.warn("Failed to update tools configuration", {
-                        agent: agent.slug,
-                        reason: "update returned false",
+                    logger.warn("Failed to update default config", {
+                        agentName: agent.slug,
+                        agentPubkey: agent.pubkey,
                     });
                 }
 
                 // Check for PM designation tag: ["pm"] (no value, just the tag itself)
                 // Kind 24020 events are authoritative snapshots - presence of ["pm"] tag sets isPM=true,
-                // absence clears it (sets isPM=false). This matches how tools are handled (replace entirely).
+                // absence clears it (sets isPM=false).
                 const pmUpdated = await agentStorage.updateAgentIsPM(agentPubkey, hasPMTag);
 
                 if (pmUpdated) {

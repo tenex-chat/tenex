@@ -1,24 +1,31 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
-import type { ProjectScopedConfig } from "@/agents/types";
+import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
 
 /**
  * Tests for project-scoped agent configuration via kind 24020 TenexAgentConfigUpdate events.
  *
  * When an event contains an a-tag referencing a project, the configuration
- * should be stored in projectConfigs[projectDTag] instead of global fields.
+ * should be stored in projectOverrides[projectDTag] (new schema) via updateProjectOverride().
+ *
+ * When the event has no a-tag, it writes to the default config block via updateDefaultConfig().
  */
 
 // Track calls to storage methods
-let updateProjectScopedConfigCalls: Array<{
+let updateProjectOverrideCalls: Array<{
     pubkey: string;
     projectDTag: string;
-    config: ProjectScopedConfig;
+    override: AgentProjectConfig;
+    reset: boolean;
 }> = [];
-let updateGlobalLLMConfigCalls: Array<{ pubkey: string; llmConfig: string }> = [];
-let updateGlobalToolsCalls: Array<{ pubkey: string; tools: string[] }> = [];
+let updateDefaultConfigCalls: Array<{ pubkey: string; updates: AgentDefaultConfig }> = [];
 let updateGlobalIsPMCalls: Array<{ pubkey: string; isPM: boolean | undefined }> = [];
+let updateProjectScopedIsPMCalls: Array<{
+    pubkey: string;
+    projectDTag: string;
+    isPM: boolean | undefined;
+}> = [];
 let reloadAgentCalls: string[] = [];
 
 // Mock modules before importing
@@ -33,24 +40,29 @@ mock.module("@/utils/logger", () => ({
 
 mock.module("@/agents/AgentStorage", () => ({
     agentStorage: {
-        updateAgentLLMConfig: async (pubkey: string, llmConfig: string) => {
-            updateGlobalLLMConfigCalls.push({ pubkey, llmConfig });
+        updateProjectOverride: async (
+            pubkey: string,
+            projectDTag: string,
+            override: AgentProjectConfig,
+            reset = false
+        ) => {
+            updateProjectOverrideCalls.push({ pubkey, projectDTag, override, reset });
             return true;
         },
-        updateAgentTools: async (pubkey: string, tools: string[]) => {
-            updateGlobalToolsCalls.push({ pubkey, tools });
+        updateDefaultConfig: async (pubkey: string, updates: AgentDefaultConfig) => {
+            updateDefaultConfigCalls.push({ pubkey, updates });
             return true;
         },
         updateAgentIsPM: async (pubkey: string, isPM: boolean | undefined) => {
             updateGlobalIsPMCalls.push({ pubkey, isPM });
             return true;
         },
-        updateProjectScopedConfig: async (
+        updateProjectScopedIsPM: async (
             pubkey: string,
             projectDTag: string,
-            config: ProjectScopedConfig
+            isPM: boolean | undefined
         ) => {
-            updateProjectScopedConfigCalls.push({ pubkey, projectDTag, config });
+            updateProjectScopedIsPMCalls.push({ pubkey, projectDTag, isPM });
             return true;
         },
     },
@@ -98,10 +110,10 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
     beforeEach(async () => {
         // Reset tracking
-        updateProjectScopedConfigCalls = [];
-        updateGlobalLLMConfigCalls = [];
-        updateGlobalToolsCalls = [];
+        updateProjectOverrideCalls = [];
+        updateDefaultConfigCalls = [];
         updateGlobalIsPMCalls = [];
+        updateProjectScopedIsPMCalls = [];
         reloadAgentCalls = [];
 
         eventHandler = new EventHandler();
@@ -123,29 +135,34 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        // Should use project-scoped config, NOT global methods
-        expect(updateProjectScopedConfigCalls.length).toBe(1);
-        expect(updateProjectScopedConfigCalls[0].pubkey).toBe(agentPubkey);
-        expect(updateProjectScopedConfigCalls[0].projectDTag).toBe("my-project");
-        expect(updateProjectScopedConfigCalls[0].config).toEqual({
-            llmConfig: "anthropic:claude-opus-4",
+        // Should use project override method
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].pubkey).toBe(agentPubkey);
+        expect(updateProjectOverrideCalls[0].projectDTag).toBe("my-project");
+        expect(updateProjectOverrideCalls[0].override).toEqual({
+            model: "anthropic:claude-opus-4",
             tools: ["fs_read", "shell"],
-            isPM: true,
         });
+        expect(updateProjectOverrideCalls[0].reset).toBe(false);
+
+        // PM should be handled via project-scoped isPM
+        expect(updateProjectScopedIsPMCalls.length).toBe(1);
+        expect(updateProjectScopedIsPMCalls[0].pubkey).toBe(agentPubkey);
+        expect(updateProjectScopedIsPMCalls[0].projectDTag).toBe("my-project");
+        expect(updateProjectScopedIsPMCalls[0].isPM).toBe(true);
 
         // Global methods should NOT be called
-        expect(updateGlobalLLMConfigCalls.length).toBe(0);
-        expect(updateGlobalToolsCalls.length).toBe(0);
+        expect(updateDefaultConfigCalls.length).toBe(0);
         expect(updateGlobalIsPMCalls.length).toBe(0);
 
         // Agent should be reloaded
         expect(reloadAgentCalls).toContain(agentPubkey);
     });
 
-    it("should use global storage when a-tag is absent (backward compatibility)", async () => {
+    it("should use global (default) storage when a-tag is absent", async () => {
         const agentPubkey = "abc123def456";
 
-        // Create a mock kind 24020 event WITHOUT a-tag (global config)
+        // Create a mock kind 24020 event WITHOUT a-tag (global/default config)
         const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
             ["p", agentPubkey],
             ["model", "anthropic:claude-opus-4"],
@@ -155,15 +172,14 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        // Should use global methods, NOT project-scoped
-        expect(updateProjectScopedConfigCalls.length).toBe(0);
+        // Should use default config method, NOT project-scoped
+        expect(updateProjectOverrideCalls.length).toBe(0);
 
-        expect(updateGlobalLLMConfigCalls.length).toBe(1);
-        expect(updateGlobalLLMConfigCalls[0].llmConfig).toBe("anthropic:claude-opus-4");
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-opus-4");
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
 
-        expect(updateGlobalToolsCalls.length).toBe(1);
-        expect(updateGlobalToolsCalls[0].tools).toEqual(["fs_read"]);
-
+        // PM should be handled via global isPM
         expect(updateGlobalIsPMCalls.length).toBe(1);
         expect(updateGlobalIsPMCalls[0].isPM).toBe(true);
     });
@@ -181,8 +197,8 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        expect(updateProjectScopedConfigCalls.length).toBe(1);
-        expect(updateProjectScopedConfigCalls[0].projectDTag).toBe("my-project");
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].projectDTag).toBe("my-project");
     });
 
     it("should ignore a-tag for different project (validation)", async () => {
@@ -198,13 +214,12 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
         await eventHandler.handleEvent(mockEvent);
 
         // Should NOT process config for a different project
-        expect(updateProjectScopedConfigCalls.length).toBe(0);
-        expect(updateGlobalLLMConfigCalls.length).toBe(0);
-        expect(updateGlobalToolsCalls.length).toBe(0);
+        expect(updateProjectOverrideCalls.length).toBe(0);
+        expect(updateDefaultConfigCalls.length).toBe(0);
         expect(updateGlobalIsPMCalls.length).toBe(0);
     });
 
-    it("should not include tools in project config when no tool tags present", async () => {
+    it("should not include tools in project override when no tool tags present", async () => {
         const agentPubkey = "abc123def456";
 
         // Create a mock kind 24020 event with a-tag but no tool tags
@@ -216,14 +231,14 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        expect(updateProjectScopedConfigCalls.length).toBe(1);
-        // Config should only have llmConfig, not tools
-        expect(updateProjectScopedConfigCalls[0].config).toEqual({
-            llmConfig: "anthropic:claude-opus-4",
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // Override should only have model, not tools
+        expect(updateProjectOverrideCalls[0].override).toEqual({
+            model: "anthropic:claude-opus-4",
         });
     });
 
-    it("should not include isPM in project config when pm tag is absent", async () => {
+    it("should not call updateProjectScopedIsPM when pm tag is absent", async () => {
         const agentPubkey = "abc123def456";
 
         // Create a mock kind 24020 event with a-tag but no pm tag
@@ -235,14 +250,27 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        expect(updateProjectScopedConfigCalls.length).toBe(1);
-        // Config should only have tools, not isPM
-        expect(updateProjectScopedConfigCalls[0].config).toEqual({
-            tools: ["fs_read"],
-        });
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // PM should not be called
+        expect(updateProjectScopedIsPMCalls.length).toBe(0);
     });
 
-    it("should store empty project config when only a-tag is present with no config values", async () => {
+    it("should call updateProjectOverride with reset when reset tag is present", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["reset"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].reset).toBe(true);
+    });
+
+    it("should send empty override when only a-tag is present with no config values", async () => {
         const agentPubkey = "abc123def456";
 
         // Create a mock kind 24020 event with a-tag but no model/tools/pm
@@ -253,9 +281,137 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         await eventHandler.handleEvent(mockEvent);
 
-        expect(updateProjectScopedConfigCalls.length).toBe(1);
-        // Config should be empty (effectively clearing project-scoped overrides)
-        expect(updateProjectScopedConfigCalls[0].config).toEqual({});
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // Override should be empty (dedup will clear it)
+        expect(updateProjectOverrideCalls[0].override).toEqual({});
+    });
+
+    it("should clear project-scoped PM when reset tag is present (Issue 1)", async () => {
+        const agentPubkey = "abc123def456";
+
+        // A reset tag must clear ALL project config including PM designation
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["reset"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        // projectOverride should be reset
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        expect(updateProjectOverrideCalls[0].reset).toBe(true);
+
+        // Project-scoped PM must also be cleared
+        expect(updateProjectScopedIsPMCalls.length).toBe(1);
+        expect(updateProjectScopedIsPMCalls[0].pubkey).toBe(agentPubkey);
+        expect(updateProjectScopedIsPMCalls[0].projectDTag).toBe("my-project");
+        // undefined clears the PM designation
+        expect(updateProjectScopedIsPMCalls[0].isPM).toBeUndefined();
+    });
+
+    it("should NOT call updateProjectScopedIsPM on reset when there is no a-tag (global reset would be different)", async () => {
+        // This ensures reset without a-tag doesn't accidentally clear project PM
+        const agentPubkey = "abc123def456";
+
+        // Reset with no a-tag - handled by global path, not project-scoped path
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["reset"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        // Global path should not call project-scoped PM
+        expect(updateProjectScopedIsPMCalls.length).toBe(0);
+    });
+});
+
+describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
+    let eventHandler: EventHandler;
+
+    beforeEach(async () => {
+        updateProjectOverrideCalls = [];
+        updateDefaultConfigCalls = [];
+        updateGlobalIsPMCalls = [];
+        updateProjectScopedIsPMCalls = [];
+        reloadAgentCalls = [];
+
+        eventHandler = new EventHandler();
+        await eventHandler.initialize();
+    });
+
+    it("should NOT update model when no model tag is present (Issue 2: partial update)", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Event with only tool tags - no model tag
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["tool", "fs_read"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        // model should NOT be present in updates - no model tag means no change to model
+        expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
+        // tools should be present since tool tags were explicitly provided
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+    });
+
+    it("should NOT update tools when no tool tags are present (Issue 3: no unexpected clear)", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Event with only a model tag - no tool tags
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["model", "anthropic:claude-opus-4"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        // model should be updated since model tag was explicitly provided
+        expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-opus-4");
+        // tools should NOT be present - no tool tags means no change to tools
+        expect(updateDefaultConfigCalls[0].updates.tools).toBeUndefined();
+    });
+
+    it("should update both model and tools when both tags are present", async () => {
+        const agentPubkey = "abc123def456";
+
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["model", "anthropic:claude-sonnet-4"],
+            ["tool", "fs_read"],
+            ["tool", "shell"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-sonnet-4");
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read", "shell"]);
+    });
+
+    it("should update neither model nor tools when only pm tag is present", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Event with only pm tag - neither model nor tools
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["pm"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        // Neither model nor tools should be in updates
+        expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
+        expect(updateDefaultConfigCalls[0].updates.tools).toBeUndefined();
+        // PM should still be set
+        expect(updateGlobalIsPMCalls.length).toBe(1);
+        expect(updateGlobalIsPMCalls[0].isPM).toBe(true);
     });
 });
 

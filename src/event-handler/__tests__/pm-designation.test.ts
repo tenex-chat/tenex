@@ -25,12 +25,13 @@ mock.module("@/utils/logger", () => ({
 
 mock.module("@/agents/AgentStorage", () => ({
     agentStorage: {
-        updateAgentLLMConfig: async () => true,
-        updateAgentTools: async () => true,
+        updateDefaultConfig: async () => true,
         updateAgentIsPM: async (pubkey: string, isPM: boolean | undefined) => {
             updateIsPMCalls.push({ pubkey, isPM });
             return true;
         },
+        updateProjectOverride: async () => true,
+        updateProjectScopedIsPM: async () => true,
     },
 }));
 
@@ -47,6 +48,13 @@ mock.module("@/services/projects", () => ({
             },
         },
         statusPublisher: null,
+        project: {
+            dTag: "my-project",
+            tagValue: (tag: string) => {
+                if (tag === "d") return "my-project";
+                return undefined;
+            },
+        },
     }),
 }));
 
