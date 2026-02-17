@@ -23,6 +23,15 @@ export interface RALResolutionContext {
 export interface RALResolutionResult {
     ralNumber: number;
     isResumption: boolean;
+    /** Delegation markers that need to be published to Nostr */
+    markersToPublish?: Array<{
+        delegationConversationId: string;
+        recipientPubkey: string;
+        parentConversationId: string;
+        status: "completed" | "aborted";
+        completedAt: number;
+        abortReason?: string;
+    }>;
 }
 
 /**
@@ -47,6 +56,14 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
 
     let ralNumber: number;
     let isResumption = false;
+    let markersToPublish: Array<{
+        delegationConversationId: string;
+        recipientPubkey: string;
+        parentConversationId: string;
+        status: "completed" | "aborted";
+        completedAt: number;
+        abortReason?: string;
+    }> = [];
 
     if (resumableRal) {
         // Resume existing RAL instead of creating a new one
@@ -61,25 +78,48 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
             agentPubkey, conversationId, resumableRal.ralNumber
         );
 
-        // Get the parent conversation store to insert markers
+        // Get the parent conversation store to update/insert markers
         const parentStore = ConversationStore.get(conversationId);
 
-        // Insert delegation markers for each completed delegation
+        // Update delegation markers for each completed delegation (or create if not found)
         // Markers are expanded lazily when building messages
         if (parentStore) {
             for (const completion of completedDelegations) {
-                const marker: DelegationMarker = {
+                // Try to update existing pending marker first
+                const updated = parentStore.updateDelegationMarker(
+                    completion.delegationConversationId,
+                    {
+                        status: completion.status,
+                        completedAt: completion.completedAt,
+                        abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                    }
+                );
+
+                // If no pending marker found, create a new one (backward compatibility)
+                if (!updated) {
+                    const marker: DelegationMarker = {
+                        delegationConversationId: completion.delegationConversationId,
+                        recipientPubkey: completion.recipientPubkey,
+                        parentConversationId: conversationId,
+                        completedAt: completion.completedAt,
+                        status: completion.status,
+                        abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                    };
+                    parentStore.addDelegationMarker(marker, agentPubkey, ralNumber);
+                }
+
+                // Collect markers to publish to Nostr
+                markersToPublish.push({
                     delegationConversationId: completion.delegationConversationId,
                     recipientPubkey: completion.recipientPubkey,
                     parentConversationId: conversationId,
-                    completedAt: completion.completedAt,
                     status: completion.status,
+                    completedAt: completion.completedAt,
                     abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
-                };
-                parentStore.addDelegationMarker(marker, agentPubkey, ralNumber);
+                });
             }
 
-            // Save the store after adding markers
+            // Save the store after adding/updating markers
             await parentStore.save();
         }
 
@@ -129,5 +169,9 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
         "ral.is_resumption": isResumption,
     });
 
-    return { ralNumber, isResumption };
+    return {
+        ralNumber,
+        isResumption,
+        markersToPublish: markersToPublish.length > 0 ? markersToPublish : undefined,
+    };
 }

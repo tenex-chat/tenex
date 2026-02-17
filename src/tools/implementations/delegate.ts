@@ -22,6 +22,7 @@ import { createEventContext } from "@/services/event-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { DelegationMarker } from "@/conversations/types";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -176,6 +177,36 @@ async function executeDelegate(
       context.ralNumber,
       [pendingDelegation]
     );
+
+    // Create pending marker immediately to show delegation in real-time
+    const parentStore = ConversationStore.get(context.conversationId);
+    if (parentStore) {
+      const initiatedAt = Math.floor(Date.now() / 1000);
+      const marker: DelegationMarker = {
+        delegationConversationId: eventId,
+        recipientPubkey: pubkey,
+        parentConversationId: context.conversationId,
+        initiatedAt,
+        status: "pending",
+      };
+
+      // Store marker locally
+      parentStore.addDelegationMarker(
+        marker,
+        context.agent.pubkey,
+        context.ralNumber
+      );
+      await parentStore.save();
+
+      // Publish marker to Nostr for verification by other agents
+      await context.agentPublisher.delegationMarker({
+        delegationConversationId: eventId,
+        recipientPubkey: pubkey,
+        parentConversationId: context.conversationId,
+        status: "pending",
+        initiatedAt,
+      });
+    }
   }
 
   const delegationConversationIds = pendingDelegations.map(d => shortenConversationId(d.delegationConversationId));

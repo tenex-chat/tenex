@@ -293,6 +293,22 @@ async function expandDelegationMarker(
 ): Promise<ModelMessage> {
     const pubkeyService = getPubkeyService();
 
+    // Handle pending delegations - show that work is in progress
+    if (marker.status === "pending") {
+        try {
+            const recipientName = await pubkeyService.getName(marker.recipientPubkey);
+            return {
+                role: "user",
+                content: `# DELEGATION IN PROGRESS\n\n@${recipientName} is currently working on this task.`,
+            };
+        } catch {
+            return {
+                role: "user",
+                content: `# DELEGATION IN PROGRESS\n\nAgent ${marker.recipientPubkey.substring(0, 12)} is currently working on this task.`,
+            };
+        }
+    }
+
     if (!delegationMessages) {
         // Delegation conversation not found - return placeholder
         try {
@@ -392,9 +408,14 @@ async function formatNestedDelegationMarker(
     const shortConversationId = marker.delegationConversationId.substring(0, 12);
 
     // Simple one-line format: [Delegation to @recipient (conv: abc123...) - status]
-    const statusSuffix = marker.status === "aborted"
-        ? ` - aborted${marker.abortReason ? `: ${marker.abortReason}` : ""}`
-        : " - completed";
+    let statusSuffix: string;
+    if (marker.status === "aborted") {
+        statusSuffix = ` - aborted${marker.abortReason ? `: ${marker.abortReason}` : ""}`;
+    } else if (marker.status === "pending") {
+        statusSuffix = " - pending";
+    } else {
+        statusSuffix = " - completed";
+    }
 
     return {
         role: "user",

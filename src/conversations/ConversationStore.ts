@@ -493,11 +493,64 @@ export class ConversationStore {
             ral: ralNumber,
             content: "", // Markers have no text content
             messageType: "delegation-marker",
-            timestamp: Math.floor(marker.completedAt / 1000), // Convert ms to seconds
+            timestamp: marker.completedAt ?? marker.initiatedAt ?? Math.floor(Date.now() / 1000),
             targetedPubkeys: [agentPubkey], // Target the delegator
             delegationMarker: marker,
         };
         return this.addMessage(entry);
+    }
+
+    /**
+     * Update an existing delegation marker to mark it as completed or aborted.
+     * Returns true if marker was found and updated, false otherwise.
+     *
+     * Idempotent: Returns true if marker is already in the target state.
+     */
+    updateDelegationMarker(
+        delegationConversationId: string,
+        updates: {
+            status: "completed" | "aborted";
+            completedAt: number;
+            abortReason?: string;
+        }
+    ): boolean {
+        // Find the marker in messages (try pending first, then any status for idempotency)
+        let markerEntry = this.state.messages.find(
+            msg =>
+                msg.messageType === "delegation-marker" &&
+                msg.delegationMarker?.delegationConversationId === delegationConversationId &&
+                msg.delegationMarker?.status === "pending"
+        );
+
+        // If no pending marker found, check if it's already completed with the same status (idempotency)
+        if (!markerEntry) {
+            markerEntry = this.state.messages.find(
+                msg =>
+                    msg.messageType === "delegation-marker" &&
+                    msg.delegationMarker?.delegationConversationId === delegationConversationId &&
+                    msg.delegationMarker?.status === updates.status
+            );
+
+            // If found and already in target state, return true (idempotent)
+            if (markerEntry) {
+                return true;
+            }
+
+            // Otherwise, no marker found at all
+            return false;
+        }
+
+        // Update the marker (delegationMarker is guaranteed present since messageType === "delegation-marker")
+        const dm = markerEntry.delegationMarker!;
+        dm.status = updates.status;
+        dm.completedAt = updates.completedAt;
+        if (updates.abortReason) {
+            dm.abortReason = updates.abortReason;
+        }
+        // DON'T update entry.timestamp - it should remain the initiation time
+        // Only the delegationMarker.completedAt changes
+
+        return true;
     }
 
     // Injection Operations

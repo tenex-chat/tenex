@@ -4,7 +4,9 @@ import type { TodoItem } from "@/services/ral/types";
 export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
 
 /**
- * Marker stored in conversation history when a delegation completes.
+ * Marker stored in conversation history to track delegation lifecycle.
+ * Markers are created immediately when a delegation is initiated (status: "pending"),
+ * and updated when the delegation completes or is aborted.
  * Instead of embedding the full transcript inline, we store a reference
  * and lazily expand it when building messages.
  */
@@ -15,10 +17,12 @@ export interface DelegationMarker {
     recipientPubkey: string;
     /** The conversation ID of the parent (delegator) - for direct-child validation */
     parentConversationId: string;
-    /** When the delegation completed */
-    completedAt: number;
-    /** Whether the delegation completed successfully or was aborted */
-    status: "completed" | "aborted";
+    /** When the delegation was initiated (Unix timestamp in seconds) */
+    initiatedAt?: number;
+    /** When the delegation completed (Unix timestamp in seconds) - only set when completed/aborted */
+    completedAt?: number;
+    /** Delegation status: pending (in progress), completed (successful), or aborted */
+    status: "pending" | "completed" | "aborted";
     /** If aborted, the reason for the abort */
     abortReason?: string;
 }
