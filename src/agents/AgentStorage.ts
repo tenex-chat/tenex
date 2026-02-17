@@ -59,29 +59,13 @@ export interface StoredAgent extends StoredAgentData {
      */
     projectConfigs?: Record<string, ProjectScopedConfig>;
 
-    /**
-     * Default configuration block (new schema).
-     * A 24020 event with no a-tag writes to this block.
-     * Fields here are the fallback when no project-specific override exists.
-     */
-    default?: AgentDefaultConfig;
-
-    /**
-     * Per-project configuration overrides (new schema).
-     * Key is project dTag, value is the project-specific override.
-     * A 24020 event with an a-tag writes to projects[projectDTag].
-     *
-     * Tools can use delta syntax:
-     * - "+tool" adds on top of defaults
-     * - "-tool" removes from defaults
-     * - Plain entries = full replacement list
-     *
-     * ## Priority
-     * 1. projects[projectDTag].* (project-scoped override)
-     * 2. default.* (global defaults)
-     * 3. StoredAgentData top-level fields (legacy, deprecated)
-     */
-    projectOverrides?: Record<string, AgentProjectConfig>;
+    // NOTE: `default` and `projectOverrides` are defined in StoredAgentData (new schema v1).
+    // They are listed here as documentation of the priority chain:
+    //
+    // ## Configuration Priority
+    // 1. projectOverrides[projectDTag].* (project-scoped override, new schema)
+    // 2. default.* (global defaults, new schema)
+    // 3. StoredAgentData top-level llmConfig/tools (legacy, deprecated)
 }
 
 /**
@@ -1059,7 +1043,7 @@ export class AgentStorage {
      */
     getEffectiveConfig(agent: StoredAgent, projectDTag?: string): ResolvedAgentConfig {
         // Build default config - prefer new `default` block, fall back to legacy fields
-        const defaultConfig: import("@/agents/ConfigResolver").AgentDefaultConfig = {
+        const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model ?? agent.llmConfig,
             tools: agent.default?.tools ?? agent.tools,
         };
@@ -1213,7 +1197,7 @@ export class AgentStorage {
             logger.info(`Cleared project override for agent ${agent.name}`, { projectDTag });
         } else {
             // Build the effective default for dedup comparison
-            const defaultConfig: import("@/agents/ConfigResolver").AgentDefaultConfig = {
+            const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model ?? agent.llmConfig,
                 tools: agent.default?.tools ?? agent.tools,
             };

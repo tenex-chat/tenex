@@ -32,19 +32,8 @@
  * resolver.resolveEffectiveConfig('projectB');
  */
 
-export interface AgentDefaultConfig {
-    /** Default LLM model configuration string */
-    model?: string;
-    /** Default tools list */
-    tools?: string[];
-}
-
-export interface AgentProjectConfig {
-    /** Project-specific model override (or undefined to inherit default) */
-    model?: string;
-    /** Project-specific tools - can be full replacement or delta (+/-) */
-    tools?: string[];
-}
+import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+export type { AgentDefaultConfig, AgentProjectConfig };
 
 export interface ResolvedAgentConfig {
     /** The effective model for this project context */
@@ -143,6 +132,47 @@ export function resolveEffectiveConfig(
 }
 
 /**
+ * Compute the minimal delta representation of a full tool list relative to a set of defaults.
+ *
+ * This is the inverse of applyToolsDelta: given a desired full list and the current defaults,
+ * produce the smallest delta (+tool/-tool) that when applied to defaults yields the desired list.
+ *
+ * Used when storing project-scoped tool overrides: kind 24020 events carry a full list,
+ * but the storage layer stores deltas for project overrides.
+ *
+ * ## Algorithm
+ * - Tools in desired but NOT in defaults → "+tool" additions
+ * - Tools in defaults but NOT in desired → "-tool" removals
+ * - Tools in both → no entry needed (they're already in defaults)
+ *
+ * @param defaultTools - The agent's default tools list
+ * @param desiredTools - The full tool list to achieve
+ * @returns Delta array (may contain "+tool" and "-tool" entries), or empty array if no change
+ */
+export function computeToolsDelta(defaultTools: string[], desiredTools: string[]): string[] {
+    const defaultSet = new Set(defaultTools);
+    const desiredSet = new Set(desiredTools);
+
+    const delta: string[] = [];
+
+    // Tools to remove: in defaults but not in desired
+    for (const tool of defaultTools) {
+        if (!desiredSet.has(tool)) {
+            delta.push(`-${tool}`);
+        }
+    }
+
+    // Tools to add: in desired but not in defaults
+    for (const tool of desiredTools) {
+        if (!defaultSet.has(tool)) {
+            delta.push(`+${tool}`);
+        }
+    }
+
+    return delta;
+}
+
+/**
  * Deduplicate a project config against the default config.
  *
  * If a project override value is identical to the effective default, remove it
@@ -150,6 +180,10 @@ export function resolveEffectiveConfig(
  *
  * For tools: we compare the fully-resolved tool list. If the resolved tools
  * equal the default tools, clear the project override.
+ *
+ * Also handles no-op delta dedup: if a stored delta becomes a no-op against
+ * the current defaults (e.g., "+tool" where tool is already in defaults),
+ * it is cleaned up since the user is explicitly confirming the tool should be available.
  *
  * @param defaultConfig - Agent's default config
  * @param projectConfig - Project override config to deduplicate
@@ -171,8 +205,8 @@ export function deduplicateProjectConfig(
         const resolvedProjectTools = resolveEffectiveTools(defaultConfig.tools, cleaned.tools);
         const defaultToolsResolved = defaultConfig.tools ?? [];
 
-        // Compare resolved tools to default tools
-        if (arraysEqual(resolvedProjectTools ?? [], defaultToolsResolved)) {
+        // Compare resolved tools to default tools (order-insensitive)
+        if (arraysEqualUnordered(resolvedProjectTools ?? [], defaultToolsResolved)) {
             // Resolved tools are identical to defaults - clear the override
             delete cleaned.tools;
         }
@@ -184,10 +218,25 @@ export function deduplicateProjectConfig(
 /**
  * Check if two arrays contain the same elements in the same order.
  */
-function arraysEqual<T>(a: T[], b: T[]): boolean {
+export function arraysEqual<T>(a: T[], b: T[]): boolean {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
         if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+/**
+ * Check if two arrays contain the same elements (order-independent).
+ * Used for tool list comparison where order doesn't matter for dedup.
+ */
+export function arraysEqualUnordered<T>(a: T[], b: T[]): boolean {
+    if (a.length !== b.length) return false;
+    const setA = new Set(a);
+    const setB = new Set(b);
+    if (setA.size !== setB.size) return false;
+    for (const item of setA) {
+        if (!setB.has(item)) return false;
     }
     return true;
 }

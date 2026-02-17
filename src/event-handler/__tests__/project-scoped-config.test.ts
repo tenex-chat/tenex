@@ -40,6 +40,15 @@ mock.module("@/utils/logger", () => ({
 
 mock.module("@/agents/AgentStorage", () => ({
     agentStorage: {
+        // loadAgent returns a mock agent with empty defaults (so delta = full list as additions)
+        loadAgent: async (_pubkey: string) => ({
+            slug: "test-agent",
+            name: "Test Agent",
+            role: "assistant",
+            nsec: "nsec1abc",
+            projects: ["my-project"],
+            default: { tools: [] }, // Empty defaults so all tools from event become additions
+        }),
         updateProjectOverride: async (
             pubkey: string,
             projectDTag: string,
@@ -102,8 +111,9 @@ mock.module("@/nostr/TagExtractor", () => ({
     },
 }));
 
-// Now import the EventHandler
+// Now import the EventHandler and the mocked agentStorage
 import { EventHandler } from "../index";
+import { agentStorage } from "@/agents/AgentStorage";
 
 describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
     let eventHandler: EventHandler;
@@ -139,9 +149,11 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
         expect(updateProjectOverrideCalls.length).toBe(1);
         expect(updateProjectOverrideCalls[0].pubkey).toBe(agentPubkey);
         expect(updateProjectOverrideCalls[0].projectDTag).toBe("my-project");
+        // Tools are stored as delta against defaults.
+        // Mock agent has empty defaults [], so all tools from the event become additions (+)
         expect(updateProjectOverrideCalls[0].override).toEqual({
             model: "anthropic:claude-opus-4",
-            tools: ["fs_read", "shell"],
+            tools: ["+fs_read", "+shell"],
         });
         expect(updateProjectOverrideCalls[0].reset).toBe(false);
 
@@ -412,6 +424,186 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         // PM should still be set
         expect(updateGlobalIsPMCalls.length).toBe(1);
         expect(updateGlobalIsPMCalls[0].isPM).toBe(true);
+    });
+});
+
+describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta storage)", () => {
+    /**
+     * These tests verify the correct behavior per behavioral clarification:
+     * - 24020 events ALWAYS carry a FULL tool list (no delta notation in events)
+     * - Delta notation is a STORAGE-LAYER ONLY concept
+     * - The implementation must convert the event's full list into a storage delta
+     *
+     * The mock agent has empty defaults [], so all tools from the event become additions (+).
+     * For testing with non-empty defaults, the mock `loadAgent` needs to be overridden.
+     */
+
+    let eventHandler: EventHandler;
+
+    beforeEach(async () => {
+        updateProjectOverrideCalls = [];
+        updateDefaultConfigCalls = [];
+        updateGlobalIsPMCalls = [];
+        updateProjectScopedIsPMCalls = [];
+        reloadAgentCalls = [];
+
+        eventHandler = new EventHandler();
+        await eventHandler.initialize();
+    });
+
+    it("should convert full tool list to delta additions when defaults are empty", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Agent has empty defaults (set by mock loadAgent)
+        // Event sends a full list: [fs_read, shell]
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["tool", "fs_read"],
+            ["tool", "shell"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // Tools stored as delta: [+fs_read, +shell] (all additions relative to empty defaults)
+        expect(updateProjectOverrideCalls[0].override.tools).toEqual(["+fs_read", "+shell"]);
+    });
+
+    it("should produce empty delta (no tools override) when full list matches defaults", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Agent has empty defaults, event sends empty tool list
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            // No tool tags → newToolNames is empty → no tools in override
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // No tool override when no tools specified in event
+        expect(updateProjectOverrideCalls[0].override.tools).toBeUndefined();
+    });
+
+    it("should NOT store delta notation in default config (full list for defaults)", async () => {
+        const agentPubkey = "abc123def456";
+
+        // Global (no a-tag) 24020 event - should store full list, not delta
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["tool", "fs_read"],
+            ["tool", "shell"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateDefaultConfigCalls.length).toBe(1);
+        // Default config stores the FULL list (no + or - prefixes)
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read", "shell"]);
+        // Verify no delta notation in the stored defaults
+        const tools = updateDefaultConfigCalls[0].updates.tools ?? [];
+        for (const tool of tools) {
+            expect(tool.startsWith("+")).toBe(false);
+            expect(tool.startsWith("-")).toBe(false);
+        }
+    });
+
+    it("should not include tools in override when delta would be empty (tools match defaults)", async () => {
+        // This tests the optimization: if computing delta yields [], no tools override is needed
+        const agentPubkey = "abc123def456";
+
+        // Agent has empty defaults, event sends no tools (empty list)
+        // → delta is empty → no tools key in override
+        const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+            ["p", agentPubkey],
+            ["a", "31990:owner-pubkey:my-project"],
+            ["model", "anthropic:claude-opus-4"],
+        ]);
+
+        await eventHandler.handleEvent(mockEvent);
+
+        expect(updateProjectOverrideCalls.length).toBe(1);
+        // Only model, no tools
+        expect(updateProjectOverrideCalls[0].override).toEqual({
+            model: "anthropic:claude-opus-4",
+        });
+        expect(updateProjectOverrideCalls[0].override.tools).toBeUndefined();
+    });
+
+    it("should produce removal delta when desired list omits a tool from non-empty defaults", async () => {
+        // Exercise the removal path: a tool in defaults that is NOT in the desired list
+        // should produce a "-tool" entry in the stored delta.
+        const agentPubkey = "abc123def456";
+
+        // Override loadAgent to return an agent with non-empty defaults
+        const originalLoadAgent = agentStorage.loadAgent;
+        agentStorage.loadAgent = async (_pubkey: string) => ({
+            slug: "test-agent",
+            name: "Test Agent",
+            role: "assistant",
+            nsec: "nsec1abc",
+            projects: ["my-project"],
+            default: { tools: ["fs_read", "shell", "agents_write"] },
+        });
+
+        try {
+            // Event sends desired list that drops "agents_write" and keeps "fs_read" + "shell"
+            const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+                ["p", agentPubkey],
+                ["a", "31990:owner-pubkey:my-project"],
+                ["tool", "fs_read"],
+                ["tool", "shell"],
+            ]);
+
+            await eventHandler.handleEvent(mockEvent);
+
+            expect(updateProjectOverrideCalls.length).toBe(1);
+            const storedTools = updateProjectOverrideCalls[0].override.tools ?? [];
+            // "agents_write" was in defaults but not in the desired list → removal entry
+            expect(storedTools).toContain("-agents_write");
+            // "fs_read" and "shell" match defaults → no addition entries needed
+            expect(storedTools).not.toContain("+fs_read");
+            expect(storedTools).not.toContain("+shell");
+        } finally {
+            agentStorage.loadAgent = originalLoadAgent;
+        }
+    });
+
+    it("should produce no tools delta when desired list exactly matches non-empty defaults", async () => {
+        // Exercise the "tool matches defaults" path: when the desired list equals the
+        // defaults exactly, no delta is needed and tools should be omitted from the override.
+        const agentPubkey = "abc123def456";
+
+        // Override loadAgent to return an agent with non-empty defaults
+        const originalLoadAgent = agentStorage.loadAgent;
+        agentStorage.loadAgent = async (_pubkey: string) => ({
+            slug: "test-agent",
+            name: "Test Agent",
+            role: "assistant",
+            nsec: "nsec1abc",
+            projects: ["my-project"],
+            default: { tools: ["fs_read", "shell"] },
+        });
+
+        try {
+            // Event sends exactly the same tool list as the defaults
+            const mockEvent = createMockConfigUpdateEvent(agentPubkey, [
+                ["p", agentPubkey],
+                ["a", "31990:owner-pubkey:my-project"],
+                ["tool", "fs_read"],
+                ["tool", "shell"],
+            ]);
+
+            await eventHandler.handleEvent(mockEvent);
+
+            expect(updateProjectOverrideCalls.length).toBe(1);
+            // Delta is empty → no tools override stored
+            expect(updateProjectOverrideCalls[0].override.tools).toBeUndefined();
+        } finally {
+            agentStorage.loadAgent = originalLoadAgent;
+        }
     });
 });
 
