@@ -46,7 +46,6 @@ mock.module("@/agents/AgentStorage", () => ({
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            projects: ["my-project"],
             default: { tools: [] }, // Empty defaults so all tools from event become additions
         }),
         updateProjectOverride: async (
@@ -548,7 +547,6 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            projects: ["my-project"],
             default: { tools: ["fs_read", "shell", "agents_write"] },
         });
 
@@ -587,7 +585,6 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            projects: ["my-project"],
             default: { tools: ["fs_read", "shell"] },
         });
 
@@ -624,7 +621,6 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            projects: ["my-project"],
             default: { tools: ["fs_read", "shell"] },
         });
 

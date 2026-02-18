@@ -72,7 +72,18 @@ function validateAgentEvent(agentDef: NDKAgentDefinition): void {
 /**
  * Parse an NDK agent definition event into StoredAgent data structure
  */
-function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec" | "projects"> {
+interface ParsedAgentEvent {
+    eventId: string;
+    slug: string;
+    name: string;
+    role: string;
+    description: string;
+    instructions: string;
+    useCriteria: string;
+    defaultConfig: { model: string; tools?: string[] };
+}
+
+function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
     // Wrap in NDKAgentDefinition to use proper accessors
     const agentDef = NDKAgentDefinition.from(event);
 
@@ -102,8 +113,10 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
         description,
         instructions,
         useCriteria,
-        llmConfig: DEFAULT_AGENT_LLM_CONFIG,
-        tools: toolTags.length > 0 ? toolTags : [],
+        defaultConfig: {
+            model: DEFAULT_AGENT_LLM_CONFIG,
+            tools: toolTags.length > 0 ? toolTags : undefined,
+        },
     };
 }
 
@@ -124,10 +137,9 @@ function parseAgentEvent(event: NDKEvent, slug: string): Omit<StoredAgent, "nsec
  *
  * ## Configuration Preservation
  * If an agent with the same eventId already exists, this function preserves:
- * - llmConfig: User's custom LLM model assignment
+ * - default.model: User's custom LLM model assignment
  * - pmOverrides: Project-scoped PM override settings
  * - nsec: The agent's private key (identity)
- * - projects: Existing project associations
  *
  * This prevents re-adding an agent to a new project from resetting its
  * configuration across all projects that share the same agent definition.
@@ -222,10 +234,8 @@ export async function installAgentFromNostr(
         description: agentData.description,
         instructions: agentData.instructions,
         useCriteria: agentData.useCriteria,
-        llmConfig: agentData.llmConfig,
-        tools: agentData.tools,
+        defaultConfig: agentData.defaultConfig,
         eventId: agentData.eventId,
-        projects: [], // Projects are managed by agent-loader
     });
 
     // Save to storage

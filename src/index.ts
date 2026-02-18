@@ -61,12 +61,14 @@ async function main(): Promise<void> {
         { getHeuristicEngine, getDefaultHeuristics },
         { daemonCommand },
         { setupCommand },
+        { doctorCommand },
         { handleCliError },
     ] = await Promise.all([
         import("commander"),
         import("@/services/heuristics"),
         import("@/commands/daemon"),
         import("@/commands/setup/index"),
+        import("@/commands/doctor"),
         import("@/utils/cli-error"),
     ]);
 
@@ -90,6 +92,7 @@ async function main(): Promise<void> {
     // Register subcommands
     program.addCommand(daemonCommand);
     program.addCommand(setupCommand);
+    program.addCommand(doctorCommand);
 
     // Issue #2: Enable exitOverride so errors are thrown instead of calling process.exit
     program.exitOverride();

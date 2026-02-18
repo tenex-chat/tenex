@@ -37,14 +37,13 @@ export function createAgentInstance(
     const pubkey = signer.pubkey;
 
     // Resolve effective configuration for this project
-    // If projectDTag is provided, check projectConfigs first, then fall back to global
     const effectiveLLMConfig = projectDTag
         ? agentStorage.resolveEffectiveLLMConfig(storedAgent, projectDTag)
-        : storedAgent.llmConfig;
+        : storedAgent.default?.model;
 
     const effectiveTools = projectDTag
         ? agentStorage.resolveEffectiveTools(storedAgent, projectDTag)
-        : storedAgent.tools;
+        : storedAgent.default?.tools;
 
     // Process tools using pure functions
     const validToolNames = processAgentTools(effectiveTools || [], storedAgent.slug);
@@ -72,8 +71,7 @@ export function createAgentInstance(
         mcpServers: storedAgent.mcpServers,
         pmOverrides: storedAgent.pmOverrides,
         isPM: storedAgent.isPM,
-        // Store project-scoped config for runtime access if needed
-        projectConfigs: storedAgent.projectConfigs,
+        projectOverrides: storedAgent.projectOverrides,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);
@@ -96,7 +94,7 @@ export function createAgentInstance(
             }
 
             // Use resolved config name if provided (for meta model resolution),
-            // otherwise use the agent's default llmConfig
+            // otherwise use the agent's llmConfig
             const configName = options?.resolvedConfigName || agent.llmConfig || DEFAULT_AGENT_LLM_CONFIG;
 
             return config.createLLMService(
