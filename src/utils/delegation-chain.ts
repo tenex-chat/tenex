@@ -32,7 +32,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationChainEntry } from "@/conversations/types";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
@@ -74,14 +74,7 @@ export function buildDelegationChain(
     const chain: DelegationChainEntry[] = [];
 
     // Get project context for agent resolution
-    let projectContext: ReturnType<typeof getProjectContext> | undefined;
-    try {
-        if (isProjectContextInitialized()) {
-            projectContext = getProjectContext();
-        }
-    } catch {
-        // Project context not available - will use fallback resolution
-    }
+    const projectContext = getProjectContext();
 
     /**
      * Helper to resolve a pubkey to a display name.
@@ -95,11 +88,9 @@ export function buildDelegationChain(
             return { displayName, isUser: true };
         }
 
-        if (projectContext) {
-            const agent = projectContext.getAgentByPubkey(pubkey);
-            if (agent) {
-                return { displayName: agent.slug, isUser: false };
-            }
+        const agent = projectContext.getAgentByPubkey(pubkey);
+        if (agent) {
+            return { displayName: agent.slug, isUser: false };
         }
 
         // Unknown pubkey - use truncated version

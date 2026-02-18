@@ -31,7 +31,7 @@ import { createAgentInstance } from "@/agents/agent-loader";
 import { pubkeyFromNsec } from "@/nostr";
 import { resolveRecipientToPubkey } from "@/services/agents/AgentResolution";
 import { config as configService } from "@/services/ConfigService";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 
 export interface EscalationResolutionResult {
@@ -110,12 +110,6 @@ async function autoAddEscalationAgent(
         logger.warn("[EscalationService] Escalation agent configured but not found in system", {
             escalationAgentSlug,
         });
-        return null;
-    }
-
-    // Verify project context is available
-    if (!isProjectContextInitialized()) {
-        logger.warn("[EscalationService] Cannot auto-add escalation agent: project context not initialized");
         return null;
     }
 

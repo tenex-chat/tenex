@@ -163,8 +163,12 @@ export class ProjectRuntime {
 
             // Warm user profile cache for whitelisted pubkeys and project owner
             // This ensures getNameSync() returns real names instead of shortened pubkeys
-            // for message attribution in delegations
-            await this.warmUserProfileCache();
+            // for message attribution in delegations.
+            // Must run within projectContextStore.run() since PubkeyService.getAgentSlug
+            // needs project context to filter out agent pubkeys.
+            await projectContextStore.run(this.context, async () => {
+                await this.warmUserProfileCache();
+            });
 
             // Initialize event handler
             this.eventHandler = new EventHandler();
@@ -172,11 +176,12 @@ export class ProjectRuntime {
 
             // Start status publisher
             this.statusPublisher = new ProjectStatusService();
-            this.context.statusPublisher = this.statusPublisher;
-            await projectContextStore.run(this.context, async () => {
+            const context = this.context;
+            context.statusPublisher = this.statusPublisher;
+            await projectContextStore.run(context, async () => {
                 await this.statusPublisher?.startPublishing(
                     this.projectBasePath,
-                    this.context ?? undefined
+                    context
                 );
             });
 
