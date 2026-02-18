@@ -1,4 +1,4 @@
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
@@ -7,11 +7,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
  * @returns true if the event is from an agent, false if from a user
  */
 export function isEventFromAgent(event: NDKEvent): boolean {
-    if (!isProjectContextInitialized()) {
-        // If no project context, we can't determine if it's from an agent
-        return false;
-    }
-
     const projectCtx = getProjectContext();
 
     // Check if it's from the project manager
@@ -46,11 +41,6 @@ export function isEventFromUser(event: NDKEvent): boolean {
 export function getAgentSlugFromEvent(event: NDKEvent): string | undefined {
     if (!event.pubkey) return undefined;
 
-    if (!isProjectContextInitialized()) {
-        // Project context not initialized
-        return undefined;
-    }
-
     const projectCtx = getProjectContext();
     for (const [slug, agent] of projectCtx.agents) {
         if (agent.pubkey === event.pubkey) {
@@ -67,10 +57,6 @@ export function getAgentSlugFromEvent(event: NDKEvent): string | undefined {
  * @returns Array of agent pubkeys that are targeted by this event
  */
 export function getTargetedAgentPubkeys(event: NDKEvent): string[] {
-    if (!isProjectContextInitialized()) {
-        return [];
-    }
-
     const projectCtx = getProjectContext();
     const targetedPubkeys: string[] = [];
 

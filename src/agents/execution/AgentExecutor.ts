@@ -40,14 +40,13 @@ import type {
     ExecutionContext,
     FullRuntimeContext,
     LLMCompletionRequest,
-    StandaloneAgentContext,
     StreamExecutionResult,
 } from "./types";
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
 export class AgentExecutor {
-    constructor(private standaloneContext?: StandaloneAgentContext) {
+    constructor() {
         // Centralized supervision health check - ensures both total registry size AND
         // post-completion heuristic count are validated (fail-closed semantics)
         assertSupervisionHealth("AgentExecutor");
@@ -86,8 +85,8 @@ export class AgentExecutor {
             agent: agent as ToolRegistryContext["agent"],
             triggeringEvent: originalEvent,
             conversationId: originalEvent.id,
-            projectBasePath: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
-            workingDirectory: projectPath || this.standaloneContext?.project?.tagValue("d") || "",
+            projectBasePath: projectPath || "",
+            workingDirectory: projectPath || "",
             currentBranch: "main",
             agentPublisher: {} as AgentPublisher,
             ralNumber: 0,

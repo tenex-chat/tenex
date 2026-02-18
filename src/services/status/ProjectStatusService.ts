@@ -6,12 +6,7 @@ import type { StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import {
-    type ProjectContext,
-    getProjectContext,
-    isProjectContextInitialized,
-} from "@/services/projects";
-import { projectContextStore } from "@/services/projects";
+import { type ProjectContext, projectContextStore } from "@/services/projects";
 import { getAllToolNames } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
 import { formatAnyError } from "@/lib/error-formatter";
@@ -36,32 +31,27 @@ import { join } from "path";
  *
  * @example
  * ```typescript
- * const publisher = new StatusPublisher();
- * await publisher.startPublishing('/path/to/project');
+ * const service = new ProjectStatusService();
+ * await service.startPublishing('/path/to/project', projectContext);
  * // ... later
- * publisher.stopPublishing();
+ * service.stopPublishing();
  * ```
  */
 export class ProjectStatusService {
     private statusInterval?: NodeJS.Timeout;
-    private projectContext?: ProjectContext;
+    private projectContext!: ProjectContext;
 
-    async startPublishing(projectPath: string, projectContext?: ProjectContext): Promise<void> {
-        // Store the project context if provided (for daemon mode)
+    async startPublishing(projectPath: string, projectContext: ProjectContext): Promise<void> {
+        // Store the project context (required for daemon mode)
         this.projectContext = projectContext;
 
         await this.publishStatusEvent(projectPath);
 
         this.statusInterval = setInterval(async () => {
-            // If we have a stored context, wrap the publish in AsyncLocalStorage
-            if (this.projectContext) {
-                await projectContextStore.run(this.projectContext, async () => {
-                    await this.publishStatusEvent(projectPath);
-                });
-            } else {
-                // Single project mode - just publish directly
+            // Wrap the publish in AsyncLocalStorage to ensure context is available
+            await projectContextStore.run(this.projectContext, async () => {
                 await this.publishStatusEvent(projectPath);
-            }
+            });
         }, STATUS_INTERVAL_MS);
     }
 
@@ -108,8 +98,8 @@ export class ProjectStatusService {
         event.kind = NDKKind.TenexProjectStatus;
         event.content = "";
 
-        // Use stored context or fall back to global
-        const projectCtx = this.projectContext || getProjectContext();
+        // Use stored context (this.projectContext is always set when publishing)
+        const projectCtx = this.projectContext;
 
         // Add project tag
         event.tag(projectCtx.project.tagReference());
@@ -161,8 +151,8 @@ export class ProjectStatusService {
 
     private async publishStatusEvent(projectPath: string): Promise<void> {
         try {
-            // Use stored context or fall back to global
-            const projectCtx = this.projectContext || getProjectContext();
+            // Use stored context (this.projectContext is always set when publishing)
+            const projectCtx = this.projectContext;
 
             // Build status intent
             const intent: StatusIntent = {
@@ -173,7 +163,7 @@ export class ProjectStatusService {
             };
 
             // Gather agent info - preserve order from NDKProject
-            if (this.projectContext || isProjectContextInitialized()) {
+            {
                 // Get agent tags from project in their original order
                 const projectAgentTags = projectCtx.project.tags.filter(
                     (tag) => tag[0] === "agent" && tag[1]
@@ -264,8 +254,8 @@ export class ProjectStatusService {
             logger.debug(`Global default configuration: ${llms.default || "none"}`);
 
             // Process agent-specific configurations
-            if (this.projectContext || isProjectContextInitialized()) {
-                const projectCtx = this.projectContext || getProjectContext();
+            if (this.projectContext) {
+                const projectCtx = this.projectContext;
 
                 // Get the global default configuration name
                 const globalDefault = llms.default;
@@ -298,10 +288,6 @@ export class ProjectStatusService {
                         );
                     }
                 }
-            } else {
-                if (!this.projectContext && !isProjectContextInitialized()) {
-                    logger.debug("Project context not initialized for agent mapping");
-                }
             }
 
             // Add models to intent
@@ -324,12 +310,12 @@ export class ProjectStatusService {
 
     private async gatherToolInfo(intent: StatusIntent): Promise<void> {
         try {
-            if (!this.projectContext && !isProjectContextInitialized()) {
+            if (!this.projectContext) {
                 logger.warn("ProjectContext not initialized for tool tags");
                 return;
             }
 
-            const projectCtx = this.projectContext || getProjectContext();
+            const projectCtx = this.projectContext;
             const toolAgentMap = new Map<string, Set<string>>();
 
             // First, add ALL tool names from the registry (except excluded tools)

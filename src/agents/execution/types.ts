@@ -41,16 +41,6 @@ export interface ExecutionContext {
     mcpManager?: MCPManager;
 }
 
-/**
- * Minimal context for standalone agent execution
- */
-export interface StandaloneAgentContext {
-    agents: Map<string, AgentInstance>;
-    pubkey: string;
-    signer: NDKPrivateKeySigner;
-    project?: NDKProject;
-    getLessonsForAgent?: (pubkey: string) => NDKAgentLesson[];
-}
 
 /**
  * Result of executeStreaming - discriminated union for clear error handling.

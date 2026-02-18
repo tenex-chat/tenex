@@ -5,7 +5,7 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
-import { isProjectContextInitialized, getProjectContext } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import type { PromptCompilerService } from "@/services/prompt-compiler";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
@@ -67,17 +67,6 @@ export interface BuildSystemPromptOptions {
     skills?: SkillData[];
 }
 
-export interface BuildStandalonePromptOptions {
-    // Required data
-    agent: AgentInstance;
-
-    // Optional runtime data
-    availableAgents?: AgentInstance[];
-    conversation?: ConversationStore;
-    agentLessons?: Map<string, NDKAgentLesson[]>;
-    projectManagerPubkey?: string; // Pubkey of the project manager
-    alphaMode?: boolean; // True when running in alpha mode
-}
 
 export interface SystemMessage {
     message: ModelMessage;
@@ -88,7 +77,7 @@ export interface SystemMessage {
 
 /**
  * Add lessons to the prompt using the simple fragment approach.
- * Called when PromptCompilerService is NOT available.
+ * Called when PromptCompilerService is not yet ready (still compiling).
  */
 function addLessonsViaFragment(
     builder: PromptBuilder,
@@ -102,10 +91,10 @@ function addLessonsViaFragment(
 }
 
 /**
- * Add core agent fragments that are common to both project and standalone modes.
+ * Add core agent fragments.
  * NOTE: Lessons are NOT included here - they are handled separately via either:
- *   1. addLessonsViaFragment() - simple fragment approach
- *   2. compileLessonsIntoPrompt() - PromptCompilerService approach (TIN-10)
+ *   1. addLessonsViaFragment() - fallback when compiler not ready
+ *   2. PromptCompilerService (TIN-10) - compiled into Effective Agent Instructions
  */
 async function addCoreAgentFragments(
     builder: PromptBuilder,
@@ -376,16 +365,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     } = options;
 
     // Check if PromptCompilerService is available for this agent (TIN-10)
-    let promptCompiler: PromptCompilerService | undefined;
-    if (isProjectContextInitialized()) {
-        try {
-            const context = getProjectContext();
-            promptCompiler = context.getPromptCompiler(agent.pubkey);
-        } catch {
-            // Project context not available - will fall back to simple lessons formatting
-        }
-    }
-
+    const context = getProjectContext();
+    const promptCompiler = context.getPromptCompiler(agent.pubkey);
     const usePromptCompiler = !!promptCompiler;
 
     // If PromptCompilerService is available, get effective instructions SYNCHRONOUSLY
@@ -543,76 +524,3 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     return systemPromptBuilder.build();
 }
 
-/**
- * Builds system prompt messages for standalone agents (without project context).
- * Includes most fragments except project-specific ones.
- */
-export async function buildStandaloneSystemPromptMessages(
-    options: BuildStandalonePromptOptions
-): Promise<SystemMessage[]> {
-    const messages: SystemMessage[] = [];
-
-    // Build the main system prompt
-    const mainPrompt = await buildStandaloneMainPrompt(options);
-    messages.push({
-        message: { role: "system", content: mainPrompt },
-        metadata: {
-            description: "Main standalone system prompt",
-        },
-    });
-
-    return messages;
-}
-
-/**
- * Builds the main system prompt for standalone agents
- */
-async function buildStandaloneMainPrompt(options: BuildStandalonePromptOptions): Promise<string> {
-    const { agent, availableAgents = [], conversation, agentLessons, alphaMode } = options;
-
-    const systemPromptBuilder = new PromptBuilder();
-
-    // For standalone agents, use a simplified identity without project references
-    systemPromptBuilder.add("agent-identity", {
-        agent,
-        projectTitle: "Standalone Mode",
-        projectOwnerPubkey: agent.pubkey, // Use agent's own pubkey as owner
-    });
-
-    // Add agent home directory context
-    systemPromptBuilder.add("agent-home-directory", { agent });
-
-    // Add global system prompt if configured (ordered by fragment priority)
-    systemPromptBuilder.add("global-system-prompt", {});
-
-    // Add relay configuration context
-    systemPromptBuilder.add("relay-configuration", {});
-
-    // Add alpha mode warning and bug reporting tools guidance
-    systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
-
-    // Add AGENTS.md guidance - always included even in standalone mode
-    // Standalone agents don't have project context, so hasRootAgentsMd is always false
-    systemPromptBuilder.add("agents-md-guidance", {
-        hasRootAgentsMd: false,
-        rootAgentsMdContent: undefined,
-    });
-
-    // Add core agent fragments using shared composition
-    await addCoreAgentFragments(systemPromptBuilder, agent, conversation);
-
-    // Add lessons via fragment (standalone mode doesn't use PromptCompilerService)
-    addLessonsViaFragment(systemPromptBuilder, agent, agentLessons);
-
-    // Add agent-specific fragments only if multiple agents available
-    if (availableAgents.length > 1) {
-        addAgentFragments(
-            systemPromptBuilder,
-            agent,
-            availableAgents,
-            options.projectManagerPubkey
-        );
-    }
-
-    return systemPromptBuilder.build();
-}

@@ -1,5 +1,5 @@
 import { getNDK } from "@/nostr";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
@@ -85,10 +85,6 @@ export class PubkeyService {
      * Uses AgentRegistry's getAgentByPubkey for efficient O(1) lookup.
      */
     private getAgentSlug(pubkey: Hexpubkey): string | undefined {
-        if (!isProjectContextInitialized()) {
-            return undefined;
-        }
-
         const projectCtx = getProjectContext();
 
         // Use direct pubkey lookup from AgentRegistry (O(1) instead of O(n))
