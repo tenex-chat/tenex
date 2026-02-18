@@ -1,5 +1,6 @@
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { createAgentInstance } from "@/agents/agent-loader";
+import { CORE_AGENT_TOOLS, DELEGATE_TOOLS } from "@/agents/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getProjectContext } from "@/services/projects";
@@ -19,9 +20,7 @@ const agentsWriteSchema = z.object({
     tools: z
         .array(z.string())
         .nullable()
-        .describe(
-            "List of tool names available to this agent. Core tools are automatically injected (lessons, reports, todos, conversation tools, kill). Delegation tools (ask, delegate, delegate_crossproject, delegate_followup) are automatically assigned - do not include them. Additional tools can include: agents_write, agents_read, agents_list, agents_discover, agents_hire, analyze, shell, project_list. MCP tools use format: mcp__servername__toolname"
-        ),
+        .describe("List of tool names to make available to this agent"),
 });
 
 type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
@@ -47,8 +46,16 @@ async function executeAgentsWrite(
     input: AgentsWriteInput,
     context?: ToolExecutionContext
 ): Promise<AgentsWriteOutput> {
-    const { slug, name, role, description, instructions, useCriteria, llmConfig, tools } =
+    const { slug, name, role, description, instructions, useCriteria, llmConfig, tools: rawTools } =
         input;
+
+    // Normalize and filter tools
+    const autoInjectedTools = new Set<string>([...CORE_AGENT_TOOLS, ...DELEGATE_TOOLS]);
+    const tools = rawTools === null ? null : rawTools
+        // 1. Strip mcp__tenex__ prefix
+        .map(t => t.startsWith("mcp__tenex__") ? t.slice("mcp__tenex__".length) : t)
+        // 2. Filter out auto-injected tools
+        .filter(t => !autoInjectedTools.has(t));
 
     if (!slug) {
         return {
