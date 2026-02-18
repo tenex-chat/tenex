@@ -48,7 +48,6 @@ interface FileMetadataEvent {
     name: string;
     url: string;
     sha256: string;
-    mimeType: string;
 }
 
 /**
@@ -216,7 +215,6 @@ async function createFileMetadataEvent(
         name,
         url,
         sha256,
-        mimeType,
     };
 }
 

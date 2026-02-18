@@ -133,14 +133,11 @@ export class NDKAgentDefinition extends NDKEvent {
         const result: Array<{ eventId: string; relayUrl?: string; marker?: string }> = [];
 
         for (const tag of eTags) {
-            const eventId = tag[1];
-            if (eventId) {
-                result.push({
-                    eventId,
-                    relayUrl: tag[2] || undefined,
-                    marker: tag[3] || undefined,
-                });
-            }
+            result.push({
+                eventId: tag[1],
+                relayUrl: tag[2] || undefined,
+                marker: tag[3] || undefined,
+            });
         }
 
         return result;
