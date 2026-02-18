@@ -418,17 +418,20 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     systemPromptBuilder.add("relay-configuration", {});
 
     // Add active conversations context (currently running agents in the project)
+    // NOTE: Use project.tagId() (NIP-33 address: "31933:<pubkey>:<d-tag>") for RALRegistry lookups
+    // RALRegistry stores entries using tagId(), so lookups must use the same format
     systemPromptBuilder.add("active-conversations", {
         agent: agentForFragments,
         currentConversationId: conversation.getId(),
-        projectId: project.dTag || project.tagValue("d"),
+        projectId: project.tagId(),
     });
 
     // Add recent conversations context (short-term memory)
+    // NOTE: Use project.tagId() for ConversationStore lookups (directory structure uses full tagId)
     systemPromptBuilder.add("recent-conversations", {
         agent: agentForFragments,
         currentConversationId: conversation.getId(),
-        projectId: project.dTag || project.tagValue("d"),
+        projectId: project.tagId(),
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)
