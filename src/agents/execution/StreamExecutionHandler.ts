@@ -22,6 +22,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { RALRegistry } from "@/services/ral";
+import type { SkillData } from "@/services/skill";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
@@ -51,6 +52,10 @@ export interface StreamExecutionConfig {
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     nudgeContent: string;
+    /** Concatenated skill content */
+    skillContent: string;
+    /** Individual skill data for system prompt rendering */
+    skills: SkillData[];
     ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
@@ -149,6 +154,8 @@ export class StreamExecutionHandler {
                 messageCompiler: this.config.messageCompiler,
                 ephemeralMessages: this.config.ephemeralMessages,
                 nudgeContent: this.config.nudgeContent,
+                skillContent: this.config.skillContent,
+                skills: this.config.skills,
                 ralNumber,
                 execContext: this.execContext,
                 executionSpan: this.executionSpan,
