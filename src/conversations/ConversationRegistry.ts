@@ -32,6 +32,8 @@ import {
     type AdvancedSearchResult,
     type RawSearchInput,
 } from "./search";
+import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { prefixKVStore } from "@/services/storage";
 
 // ConversationStore class is registered from ConversationStore module to avoid circular imports.
 let ConversationStoreClass: typeof ConversationStore | null = null;
@@ -70,6 +72,33 @@ class ConversationRegistryImpl {
     }
 
     /**
+     * Resolve a conversation ID that may be a 12-char prefix to a full 64-char ID.
+     * Returns the input as-is if it's already a full ID or if resolution fails.
+     *
+     * @param conversationId - Either a full 64-char hex ID or a 12-char hex prefix
+     * @returns The full 64-char ID if resolved, otherwise the original input
+     */
+    private resolveConversationId(conversationId: string): string {
+        // Already a full ID (64 hex chars)
+        if (/^[0-9a-fA-F]{64}$/.test(conversationId)) {
+            return conversationId.toLowerCase();
+        }
+
+        // Check if it's a 12-char hex prefix
+        if (isHexPrefix(conversationId)) {
+            const resolved = resolvePrefixToId(conversationId);
+            if (resolved) {
+                logger.debug(`[ConversationRegistry] Resolved prefix ${conversationId} to ${resolved.substring(0, 12)}...`);
+                return resolved;
+            }
+            // Fall through to return original if resolution fails
+        }
+
+        // Return as-is (may be invalid, but let caller handle)
+        return conversationId;
+    }
+
+    /**
      * Initialize the registry for a project.
      * Must be called once at startup before using any stores.
      */
@@ -83,17 +112,21 @@ class ConversationRegistryImpl {
     /**
      * Get or load a conversation store by ID.
      * Loads from disk if not already in memory.
+     * Supports 12-char hex prefix lookups via PrefixKVStore.
      */
     getOrLoad(conversationId: string): ConversationStore {
-        let store = this.stores.get(conversationId);
+        // Resolve prefix to full ID if needed (consistent with get/has)
+        const resolvedId = this.resolveConversationId(conversationId);
+
+        let store = this.stores.get(resolvedId);
         if (!store) {
             if (!this._projectId) {
                 throw new Error("ConversationRegistry.initialize() must be called before getOrLoad()");
             }
             const StoreClass = getConversationStoreClass();
             store = new StoreClass(this._basePath);
-            store.load(this._projectId, conversationId);
-            this.stores.set(conversationId, store);
+            store.load(this._projectId, resolvedId);
+            this.stores.set(resolvedId, store);
         }
         return store;
     }
@@ -101,9 +134,13 @@ class ConversationRegistryImpl {
     /**
      * Get a conversation store if it exists in memory or on disk.
      * Returns undefined if conversation doesn't exist.
+     * Supports 12-char hex prefix lookups via PrefixKVStore.
      */
     get(conversationId: string): ConversationStore | undefined {
-        const cached = this.stores.get(conversationId);
+        // Resolve prefix to full ID if needed
+        const resolvedId = this.resolveConversationId(conversationId);
+
+        const cached = this.stores.get(resolvedId);
         if (cached) return cached;
 
         // Try current project first
@@ -111,9 +148,9 @@ class ConversationRegistryImpl {
             const StoreClass = getConversationStoreClass();
             const store = new StoreClass(this._basePath);
             try {
-                store.load(this._projectId, conversationId);
+                store.load(this._projectId, resolvedId);
                 if (store.getAllMessages().length > 0) {
-                    this.stores.set(conversationId, store);
+                    this.stores.set(resolvedId, store);
                     return store;
                 }
             } catch {
@@ -122,15 +159,15 @@ class ConversationRegistryImpl {
         }
 
         // Search other projects
-        const otherProjectId = this.findProjectForConversation(conversationId);
+        const otherProjectId = this.findProjectForConversation(resolvedId);
         if (otherProjectId) {
             const StoreClass = getConversationStoreClass();
             const store = new StoreClass(this._basePath);
             try {
-                store.load(otherProjectId, conversationId);
+                store.load(otherProjectId, resolvedId);
                 if (store.getAllMessages().length > 0) {
-                    this.stores.set(conversationId, store);
-                    logger.debug(`[ConversationRegistry] Found conversation ${conversationId.substring(0, 8)} in project ${otherProjectId}`);
+                    this.stores.set(resolvedId, store);
+                    logger.debug(`[ConversationRegistry] Found conversation ${resolvedId.substring(0, 8)} in project ${otherProjectId}`);
                     return store;
                 }
             } catch {
@@ -179,6 +216,7 @@ class ConversationRegistryImpl {
 
     /**
      * Create a new conversation from an NDKEvent.
+     * Indexes the conversation ID in PrefixKVStore for prefix lookups.
      */
     async create(event: NDKEvent): Promise<ConversationStore> {
         const eventId = event.id;
@@ -211,6 +249,25 @@ class ConversationRegistryImpl {
 
         await store.save();
         this.stores.set(eventId, store);
+
+        // Index conversation ID in PrefixKVStore for 12-char prefix lookups
+        //
+        // BACKFILL LIMITATION: Prefix indexing only happens on create().
+        // If the prefix store is empty (fresh install or data loss), pre-existing
+        // conversations won't be resolvable by prefix until the migration script
+        // (src/scripts/migrate-prefix-index.ts) is run, OR until those conversations
+        // receive a new message that triggers re-indexing via conversation events.
+        // This is acceptable because:
+        // 1. Most prefix lookups target recently-active conversations
+        // 2. Full 64-char IDs always work as a fallback
+        // 3. A migration script exists for backfilling if needed
+        if (prefixKVStore.isInitialized()) {
+            try {
+                await prefixKVStore.add(eventId);
+            } catch (error) {
+                logger.warn(`[ConversationRegistry] Failed to index conversation ${eventId.substring(0, PREFIX_LENGTH)} in PrefixKVStore`, { error });
+            }
+        }
 
         logger.info(`Starting conversation ${eventId.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`);
 
