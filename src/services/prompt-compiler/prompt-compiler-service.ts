@@ -812,7 +812,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 // Publish kind:0 with compiled instructions (fire-and-forget)
                 // Only publish if agent metadata was provided
                 if (this.agentSigner && this.agentName && this.agentRole && this.projectTitle) {
-                    AgentProfilePublisher.publishCompiledInstructions(
+                    void AgentProfilePublisher.publishCompiledInstructions(
                         this.agentSigner,
                         effectiveInstructions,
                         this.agentName,

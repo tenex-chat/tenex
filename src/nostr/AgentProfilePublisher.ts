@@ -16,6 +16,29 @@ import {
  * Separated from AgentPublisher to handle agent setup vs runtime publishing.
  */
 export class AgentProfilePublisher {
+    /** Timeout in milliseconds for publish operations */
+    private static readonly PUBLISH_TIMEOUT_MS = 5000;
+
+    /** Avatar style families for deterministic avatar selection */
+    private static readonly AVATAR_FAMILIES = [
+        "lorelei",
+        "miniavs",
+        "dylan",
+        "pixel-art",
+        "rings",
+        "avataaars",
+    ];
+
+    /**
+     * Builds a deterministic avatar URL based on the pubkey.
+     * Uses DiceBear API with a family selected based on pubkey hash.
+     */
+    private static buildAvatarUrl(pubkey: string): string {
+        const familyIndex =
+            Number.parseInt(pubkey.substring(0, 8), 16) % AgentProfilePublisher.AVATAR_FAMILIES.length;
+        const avatarStyle = AgentProfilePublisher.AVATAR_FAMILIES[familyIndex];
+        return `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
+    }
     /**
      * Publishes a kind:14199 snapshot event for a project, listing all associated agents.
      * Reads agent associations from AgentStorage instead of maintaining a separate registry.
@@ -67,21 +90,7 @@ export class AgentProfilePublisher {
         let profileEvent: NDKEvent;
 
         try {
-            // Deterministically select avatar family based on pubkey
-            const avatarFamilies = [
-                "lorelei",
-                "miniavs",
-                "dylan",
-                "pixel-art",
-                "rings",
-                "avataaars",
-            ];
-            // Use first few chars of pubkey to select family deterministically
-            const familyIndex =
-                Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
-            const avatarStyle = avatarFamilies[familyIndex];
-            const seed = signer.pubkey; // Use pubkey as seed for consistent avatar
-            const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
+            const avatarUrl = AgentProfilePublisher.buildAvatarUrl(signer.pubkey);
 
             const profile = {
                 name: agentName,
@@ -316,20 +325,7 @@ export class AgentProfilePublisher {
         whitelistedPubkeys?: string[]
     ): Promise<void> {
         try {
-            // Deterministically select avatar based on pubkey (same logic as agents)
-            const avatarFamilies = [
-                "lorelei",
-                "miniavs",
-                "dylan",
-                "pixel-art",
-                "rings",
-                "avataaars",
-            ];
-            const familyIndex =
-                Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
-            const avatarStyle = avatarFamilies[familyIndex];
-            const seed = signer.pubkey;
-            const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
+            const avatarUrl = AgentProfilePublisher.buildAvatarUrl(signer.pubkey);
 
             const profile = {
                 name: backendName,
@@ -366,11 +362,10 @@ export class AgentProfilePublisher {
 
             try {
                 // Publish with timeout - don't block daemon startup if relays are slow
-                const publishTimeout = 5000;
                 await Promise.race([
                     profileEvent.publish(),
                     new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Publish timeout")), publishTimeout)
+                        setTimeout(() => reject(new Error("Publish timeout")), AgentProfilePublisher.PUBLISH_TIMEOUT_MS)
                     ),
                 ]);
                 logger.info("Published TENEX backend profile", {
@@ -403,106 +398,92 @@ export class AgentProfilePublisher {
      * Uses hash-based deduplication to avoid publishing when instructions haven't changed.
      * This is fire-and-forget - failures are logged but don't throw.
      *
+     * Callers should use `void AgentProfilePublisher.publishCompiledInstructions(...)` to
+     * explicitly indicate the fire-and-forget intent.
+     *
      * @param signer The agent's NDKPrivateKeySigner
      * @param compiledInstructions The compiled effective instructions from PromptCompilerService
      * @param agentName The agent's display name
      * @param agentRole The agent's role description
      * @param projectTitle The project title for the profile description
      */
-    static publishCompiledInstructions(
+    static async publishCompiledInstructions(
         signer: NDKPrivateKeySigner,
         compiledInstructions: string,
         agentName: string,
         agentRole: string,
         projectTitle: string
-    ): void {
-        // Fire-and-forget async operation
-        (async () => {
-            try {
-                // Hash-based deduplication: skip if instructions haven't changed
-                const instructionHash = crypto
-                    .createHash("sha256")
-                    .update(compiledInstructions)
-                    .digest("hex");
+    ): Promise<void> {
+        try {
+            // Hash-based deduplication: skip if instructions haven't changed
+            const instructionHash = crypto
+                .createHash("sha256")
+                .update(compiledInstructions)
+                .digest("hex");
 
-                const lastHash = AgentProfilePublisher.lastPublishedInstructionHash.get(signer.pubkey);
-                if (lastHash === instructionHash) {
-                    logger.debug("Skipping kind:0 publish - compiled instructions unchanged", {
-                        agentPubkey: signer.pubkey.substring(0, 8),
-                    });
-                    return;
-                }
-
-                // Deterministically select avatar family based on pubkey (same logic as publishAgentProfile)
-                const avatarFamilies = [
-                    "lorelei",
-                    "miniavs",
-                    "dylan",
-                    "pixel-art",
-                    "rings",
-                    "avataaars",
-                ];
-                const familyIndex =
-                    Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
-                const avatarStyle = avatarFamilies[familyIndex];
-                const seed = signer.pubkey;
-                const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
-
-                const profile = {
-                    name: agentName,
-                    description: `${agentRole} agent for ${projectTitle}`,
-                    picture: avatarUrl,
-                };
-
-                const profileEvent = new NDKEvent(getNDK(), {
-                    kind: 0,
-                    pubkey: signer.pubkey,
-                    content: JSON.stringify(profile),
-                    tags: [],
-                });
-
-                // Add instruction tag with compiled instructions
-                profileEvent.tags.push(["instruction", compiledInstructions]);
-
-                // Add bot tag
-                profileEvent.tags.push(["bot"]);
-
-                // Add tenex tag for discoverability
-                profileEvent.tags.push(["t", "tenex"]);
-
-                await profileEvent.sign(signer, { pTags: false });
-
-                try {
-                    // Publish with timeout to prevent blocking
-                    const publishTimeout = 5000;
-                    await Promise.race([
-                        profileEvent.publish(),
-                        new Promise((_, reject) =>
-                            setTimeout(() => reject(new Error("Publish timeout")), publishTimeout)
-                        ),
-                    ]);
-
-                    // Update deduplication cache on successful publish
-                    AgentProfilePublisher.lastPublishedInstructionHash.set(signer.pubkey, instructionHash);
-
-                    logger.info("Published kind:0 with compiled instructions", {
-                        agentPubkey: signer.pubkey.substring(0, 8),
-                        agentName,
-                        instructionsLength: compiledInstructions.length,
-                    });
-                } catch (publishError) {
-                    logger.warn("Failed to publish kind:0 with compiled instructions (relay timeout or error)", {
-                        error: publishError,
-                        agentPubkey: signer.pubkey.substring(0, 8),
-                    });
-                }
-            } catch (error) {
-                logger.error("Failed to create kind:0 with compiled instructions", {
-                    error,
+            const lastHash = AgentProfilePublisher.lastPublishedInstructionHash.get(signer.pubkey);
+            if (lastHash === instructionHash) {
+                logger.debug("Skipping kind:0 publish - compiled instructions unchanged", {
                     agentPubkey: signer.pubkey.substring(0, 8),
                 });
-                // Don't throw - this is fire-and-forget
+                return;
             }
-        })();
+
+            const avatarUrl = AgentProfilePublisher.buildAvatarUrl(signer.pubkey);
+
+            const profile = {
+                name: agentName,
+                description: `${agentRole} agent for ${projectTitle}`,
+                picture: avatarUrl,
+            };
+
+            const profileEvent = new NDKEvent(getNDK(), {
+                kind: 0,
+                pubkey: signer.pubkey,
+                content: JSON.stringify(profile),
+                tags: [],
+            });
+
+            // Add instruction tag with compiled instructions
+            profileEvent.tags.push(["instruction", compiledInstructions]);
+
+            // Add bot tag
+            profileEvent.tags.push(["bot"]);
+
+            // Add tenex tag for discoverability
+            profileEvent.tags.push(["t", "tenex"]);
+
+            await profileEvent.sign(signer, { pTags: false });
+
+            try {
+                // Publish with timeout to prevent blocking
+                await Promise.race([
+                    profileEvent.publish(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Publish timeout")), AgentProfilePublisher.PUBLISH_TIMEOUT_MS)
+                    ),
+                ]);
+
+                // Update deduplication cache on successful publish
+                AgentProfilePublisher.lastPublishedInstructionHash.set(signer.pubkey, instructionHash);
+
+                logger.info("Published kind:0 with compiled instructions", {
+                    agentPubkey: signer.pubkey.substring(0, 8),
+                    agentName,
+                    instructionsLength: compiledInstructions.length,
+                });
+            } catch (publishError) {
+                logger.warn("Failed to publish kind:0 with compiled instructions (relay timeout or error)", {
+                    error: publishError,
+                    agentPubkey: signer.pubkey.substring(0, 8),
+                });
+            }
+        } catch (error) {
+            logger.error("Failed to create kind:0 with compiled instructions", {
+                error,
+                agentPubkey: signer.pubkey.substring(0, 8),
+            });
+            // Don't throw - this is fire-and-forget
+        }
     }
 }
