@@ -1,5 +1,5 @@
 import { config } from "@/services/ConfigService";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { projectContextStore } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -193,8 +193,8 @@ export class TrustPubkeyService {
         }
 
         // 3. Add agent pubkeys (lowest priority)
-        if (isProjectContextInitialized()) {
-            const projectCtx = getProjectContext();
+        const projectCtx = projectContextStore.getContext();
+        if (projectCtx) {
             for (const [_slug, agent] of projectCtx.agents) {
                 if (agent.pubkey && !trustedMap.has(agent.pubkey)) {
                     trustedMap.set(agent.pubkey, "agent");
@@ -282,14 +282,15 @@ export class TrustPubkeyService {
     }
 
     /**
-     * Check if pubkey belongs to an agent in the system
+     * Check if pubkey belongs to an agent in the system.
+     * Returns false if no project context is available (e.g., during daemon startup
+     * or when called outside of projectContextStore.run()).
      */
     private isAgentPubkey(pubkey: Hexpubkey): boolean {
-        if (!isProjectContextInitialized()) {
+        const projectCtx = projectContextStore.getContext();
+        if (!projectCtx) {
             return false;
         }
-
-        const projectCtx = getProjectContext();
         return projectCtx.getAgentByPubkey(pubkey) !== undefined;
     }
 
