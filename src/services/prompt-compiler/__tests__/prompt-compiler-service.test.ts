@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { PromptCompilerService, type LessonComment } from "../prompt-compiler-service";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { ProjectContext } from "@/services/projects/ProjectContext";
 
 // Mock dependencies
 mock.module("@/services/ConfigService", () => ({
@@ -51,7 +50,6 @@ describe("PromptCompilerService", () => {
     const agentPubkey = "abc123def456";
     const whitelistedPubkeys = ["user123", "user456"];
     let mockNdk: NDK;
-    let mockProjectContext: ProjectContext;
     let eoseCallbacks: Array<() => void> = [];
     let eventCallbacks: Array<(event: unknown) => void> = [];
     let mockLessons: NDKAgentLesson[] = [];
@@ -75,16 +73,6 @@ describe("PromptCompilerService", () => {
                 stop: () => {},
             }),
         } as unknown as NDK;
-
-        // Mock ProjectContext that returns lessons for the agent
-        mockProjectContext = {
-            getLessonsForAgent: (pubkey: string) => {
-                if (pubkey === agentPubkey) {
-                    return mockLessons;
-                }
-                return [];
-            },
-        } as unknown as ProjectContext;
     });
 
     describe("constructor", () => {
@@ -92,8 +80,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             expect(service).toBeDefined();
         });
@@ -104,8 +91,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             const comment: LessonComment = {
@@ -127,8 +113,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             const comment: LessonComment = {
@@ -150,8 +135,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             const comment1: LessonComment = {
@@ -184,8 +168,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const comments = service.getCommentsForLesson("nonexistent");
             expect(comments).toEqual([]);
@@ -198,10 +181,10 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const baseAgentInstructions = "You are a helpful assistant.";
+            await service.initialize(baseAgentInstructions, []); // no lessons
 
             const result = await service.compile(baseAgentInstructions);
 
@@ -227,10 +210,10 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const baseAgentInstructions = "You are a helpful assistant.";
+            await service.initialize(baseAgentInstructions, mockLessons);
 
             // Should throw since LLM fails
             await expect(service.compile(baseAgentInstructions)).rejects.toThrow("LLM service unavailable");
@@ -254,10 +237,10 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const baseAgentInstructions = "You are a helpful assistant.";
+            await service.initialize(baseAgentInstructions, mockLessons);
 
             const result = await service.compile(baseAgentInstructions);
 
@@ -280,10 +263,10 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const baseAgentInstructions = "You are a helpful assistant.";
+            await service.initialize(baseAgentInstructions, mockLessons, "event123");
 
             // Should not throw when event ID is provided
             const result = await service.compile(baseAgentInstructions, "event123");
@@ -305,11 +288,11 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const baseAgentInstructions = "You are a helpful assistant.";
             const additionalPrompt = "Always respond in JSON format.";
+            await service.initialize(baseAgentInstructions, mockLessons);
 
             // Should not throw when additional prompt is provided
             const result = await service.compile(baseAgentInstructions, undefined, additionalPrompt);
@@ -322,8 +305,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -338,8 +320,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -354,8 +335,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             await expect(service.waitForEOSE()).rejects.toThrow(
@@ -367,8 +347,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -389,8 +368,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             // First subscription cycle
@@ -414,8 +392,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -449,8 +426,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -481,8 +457,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
@@ -516,8 +491,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const now = Math.floor(Date.now() / 1000);
 
@@ -550,8 +524,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             const now = Math.floor(Date.now() / 1000);
 
@@ -597,9 +570,9 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
+            await service.initialize("Original Base Agent Instructions", mockLessons);
 
             // First compilation
             const result1 = await service.compile("Original Base Agent Instructions");
@@ -635,11 +608,11 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             const baseAgentInstructions = "You are a helpful assistant.";
+            await service.initialize(baseAgentInstructions, mockLessons);
 
             // First compilation without additionalSystemPrompt
             const result1 = await service.compile(baseAgentInstructions);
@@ -674,16 +647,16 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
-            );
-
             const baseAgentInstructions = "You are a helpful assistant.";
             const eventId = "event123";
             const additionalPrompt = "Be concise.";
+
+            const service = new PromptCompilerService(
+                agentPubkey,
+                whitelistedPubkeys,
+                mockNdk
+            );
+            await service.initialize(baseAgentInstructions, mockLessons, eventId);
 
             // Compile with all three inputs - first call
             await service.compile(baseAgentInstructions, eventId, additionalPrompt);
@@ -712,8 +685,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
 
             // Should not throw
@@ -724,8 +696,7 @@ describe("PromptCompilerService", () => {
             const service = new PromptCompilerService(
                 agentPubkey,
                 whitelistedPubkeys,
-                mockNdk,
-                mockProjectContext
+                mockNdk
             );
             service.subscribe();
 
