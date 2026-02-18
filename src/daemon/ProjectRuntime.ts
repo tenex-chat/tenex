@@ -514,7 +514,7 @@ export class ProjectRuntime {
                     compiler.setAgentMetadata(
                         agent.signer,
                         agent.name,
-                        agent.role,
+                        agent.role || "",
                         projectTitle
                     );
 
