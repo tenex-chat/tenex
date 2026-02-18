@@ -109,7 +109,6 @@ describe("EscalationService", () => {
             slug: "test-escalation-agent",
             name: "Test Escalation Agent",
             role: "escalation",
-            projects: [],
         };
 
         // Reset all mocks
@@ -227,7 +226,6 @@ describe("EscalationService", () => {
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
                 mockLoadAgent.mockReturnValue({
                     ...testStoredAgent,
-                    projects: ["test-project-dtag"], // After being added to project
                 });
             });
 
@@ -368,11 +366,9 @@ describe("EscalationService", () => {
             mockGetProjectDTag.mockReturnValue("project-b");
             mockGetAgentBySlug.mockReturnValue({
                 ...testStoredAgent,
-                projects: ["project-a"], // Already in project-a
             });
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
-                projects: ["project-a", "project-b"],
             });
 
             await resolveEscalationTarget();
@@ -390,7 +386,6 @@ describe("EscalationService", () => {
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
-                projects: ["test-project-dtag"],
             });
 
             await resolveEscalationTarget();
@@ -449,7 +444,6 @@ describe("loadEscalationAgentIntoRegistry", () => {
             slug: "test-escalation-agent",
             name: "Test Escalation Agent",
             role: "escalation",
-            projects: [],
         };
 
         // Reset local mocks
@@ -511,7 +505,6 @@ describe("loadEscalationAgentIntoRegistry", () => {
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
-                projects: ["test-project"],
             });
         });
 
@@ -636,7 +629,6 @@ describe("loadEscalationAgentIntoRegistry", () => {
             mockGetAgentBySlug.mockReturnValue(testStoredAgent);
             mockLoadAgent.mockReturnValue({
                 ...testStoredAgent,
-                projects: ["test-project"],
             });
 
             // First call

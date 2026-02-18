@@ -444,12 +444,12 @@ describe("ProjectContext", () => {
             expect(multiPMWarning).toBeUndefined();
         });
 
-        it("should use project-scoped PM from projectConfigs when no global isPM exists", () => {
+        it("should use project-scoped PM from projectOverrides when no global isPM exists", () => {
             // Agent with project-scoped PM via kind 24020 with a-tag
             const agent1 = createMockAgent({ slug: "agent-1" });
             const agent2: AgentInstance = {
                 ...createMockAgent({ slug: "agent-2" }),
-                projectConfigs: {
+                projectOverrides: {
                     "test-project": { isPM: true },
                 },
             };
@@ -470,7 +470,7 @@ describe("ProjectContext", () => {
             expect(pm).toBe(agent2);
         });
 
-        it("should prioritize global isPM over project-scoped projectConfigs.isPM", () => {
+        it("should prioritize global isPM over project-scoped projectOverrides.isPM", () => {
             // Agent1 has global isPM=true, agent2 has project-scoped isPM
             const agent1 = createMockAgent({
                 slug: "agent-1",
@@ -478,7 +478,7 @@ describe("ProjectContext", () => {
             });
             const agent2: AgentInstance = {
                 ...createMockAgent({ slug: "agent-2" }),
-                projectConfigs: {
+                projectOverrides: {
                     "test-project": { isPM: true }, // Project-scoped PM
                 },
             };
@@ -500,12 +500,12 @@ describe("ProjectContext", () => {
             expect(pm).toBe(agent1);
         });
 
-        it("should prioritize project-scoped projectConfigs.isPM over legacy pmOverrides", () => {
-            // Agent1 has project-scoped isPM via projectConfigs
+        it("should prioritize project-scoped projectOverrides.isPM over legacy pmOverrides", () => {
+            // Agent1 has project-scoped isPM via projectOverrides
             // Agent2 has legacy pmOverrides
             const agent1: AgentInstance = {
                 ...createMockAgent({ slug: "agent-1" }),
-                projectConfigs: {
+                projectOverrides: {
                     "test-project": { isPM: true },
                 },
             };
@@ -527,7 +527,7 @@ describe("ProjectContext", () => {
 
             const pm = resolveProjectManager(project, agents, "test-project");
 
-            // projectConfigs.isPM should win over pmOverrides
+            // projectOverrides.isPM should win over pmOverrides
             expect(pm).toBe(agent1);
         });
 
@@ -535,7 +535,7 @@ describe("ProjectContext", () => {
             // Agent has project-scoped PM for a DIFFERENT project
             const agent1: AgentInstance = {
                 ...createMockAgent({ slug: "agent-1" }),
-                projectConfigs: {
+                projectOverrides: {
                     "other-project": { isPM: true }, // Different project!
                 },
             };
@@ -555,7 +555,7 @@ describe("ProjectContext", () => {
 
             const pm = resolveProjectManager(project, agents, "test-project");
 
-            // Should fall through to first agent from tags since projectConfigs.isPM
+            // Should fall through to first agent from tags since projectOverrides.isPM
             // is for a different project
             expect(pm).toBe(agent2);
         });

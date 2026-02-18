@@ -127,7 +127,8 @@ async function executeAgentConfigure(
     const agentPubkey = signer.pubkey;
 
     // CRITICAL: Validate agent is in current project BEFORE any persistence
-    if (!existingAgent.projects.includes(projectDTag)) {
+    const agentProjects = await agentStorage.getAgentProjects(agentPubkey);
+    if (!agentProjects.includes(projectDTag)) {
         return {
             success: false,
             error: `Agent "${slug}" is not a member of this project (${projectDTag}). Only project members can be configured.`,
@@ -135,7 +136,7 @@ async function executeAgentConfigure(
                 slug,
                 name: existingAgent.name,
                 pubkey: agentPubkey,
-                model: existingAgent.llmConfig,
+                model: existingAgent.default?.model,
                 isPM: agentStorage.hasPMOverride(existingAgent, projectDTag),
             },
         };
@@ -156,16 +157,17 @@ async function executeAgentConfigure(
                     slug,
                     name: existingAgent.name,
                     pubkey: agentPubkey,
-                    model: existingAgent.llmConfig,
+                    model: existingAgent.default?.model,
                     isPM: agentStorage.hasPMOverride(existingAgent, projectDTag),
                 },
             };
         }
 
-        const oldModel = existingAgent.llmConfig;
+        const oldModel = existingAgent.default?.model;
         // Only mark as change if value is actually different
         if (oldModel !== model) {
-            existingAgent.llmConfig = model;
+            if (!existingAgent.default) existingAgent.default = {};
+            existingAgent.default.model = model;
             changes.model = { from: oldModel, to: model };
             hasActualChanges = true;
             logger.info(`Updating model for agent "${slug}": ${oldModel || "default"} -> ${model}`);
@@ -208,7 +210,7 @@ async function executeAgentConfigure(
                 slug,
                 name: existingAgent.name,
                 pubkey: agentPubkey,
-                model: existingAgent.llmConfig,
+                model: existingAgent.default?.model,
                 isPM: isPMResolved,
             },
         };
@@ -234,7 +236,7 @@ async function executeAgentConfigure(
             slug,
             name: existingAgent.name,
             pubkey: agentPubkey,
-            model: existingAgent.llmConfig,
+            model: existingAgent.default?.model,
             isPM: isPMAfterReload,
         },
     };

@@ -4,7 +4,7 @@ import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
 import type { OnStreamStartCallback } from "@/llm/types";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
-import type { ProjectScopedConfig } from "./storage";
+import type { AgentProjectConfig } from "./storage";
 
 /**
  * Simplified agent representation for UI display and selection.
@@ -49,11 +49,11 @@ export interface AgentInstance {
      */
     isPM?: boolean;
     /**
-     * Project-scoped configuration overrides.
-     * Key is project dTag, value contains project-specific settings.
+     * Per-project configuration overrides.
+     * Key is project dTag, value contains project-specific settings including isPM.
      * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
      */
-    projectConfigs?: Record<string, ProjectScopedConfig>;
+    projectOverrides?: Record<string, AgentProjectConfig>;
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

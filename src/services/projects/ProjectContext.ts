@@ -15,8 +15,8 @@ import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
  *
  * Priority order:
  * 1. Global PM designation via kind 24020 event ["pm"] tag without a-tag (highest priority)
- * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectConfigs[dTag].isPM)
- * 3. Legacy local PM override for this specific project (pmOverrides) - from agent_configure tool
+ * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectOverrides[dTag].isPM)
+ * 3. Local PM override for this specific project (pmOverrides) - from agent_configure tool
  * 4. Explicit PM designation in 31933 project tags (role="pm")
  * 5. First agent from project tags
  * 6. First agent in registry (fallback for projects with no agent tags)
@@ -58,10 +58,9 @@ export function resolveProjectManager(
     }
 
     // Step 2: Check for project-scoped PM designation via kind 24020 with a-tag
-    // This is the new mechanism: projectConfigs[projectDTag].isPM
     if (projectDTag) {
         for (const agent of agents.values()) {
-            if (agent.projectConfigs?.[projectDTag]?.isPM === true) {
+            if (agent.projectOverrides?.[projectDTag]?.isPM === true) {
                 logger.info("Found project-scoped PM designation via kind 24020 event", {
                     agentName: agent.name,
                     agentSlug: agent.slug,
@@ -72,7 +71,7 @@ export function resolveProjectManager(
         }
     }
 
-    // Step 3: Check for legacy local PM override for this specific project (pmOverrides)
+    // Step 3: Check for local PM override for this specific project (pmOverrides)
     if (projectDTag) {
         for (const agent of agents.values()) {
             if (agent.pmOverrides?.[projectDTag] === true) {

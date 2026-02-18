@@ -83,8 +83,11 @@ async function executeAgentsWrite(
         if (description !== undefined) existingAgent.description = description ?? undefined;
         if (instructions !== undefined) existingAgent.instructions = instructions ?? undefined;
         if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria ?? undefined;
-        if (llmConfig !== undefined) existingAgent.llmConfig = llmConfig ?? undefined;
-        if (tools !== undefined) existingAgent.tools = tools ?? undefined;
+        if (llmConfig !== undefined || tools !== undefined) {
+            if (!existingAgent.default) existingAgent.default = {};
+            if (llmConfig !== undefined) existingAgent.default.model = llmConfig ?? undefined;
+            if (tools !== undefined) existingAgent.default.tools = tools ?? undefined;
+        }
 
         // Save to storage
         await agentStorage.saveAgent(existingAgent);
@@ -136,14 +139,16 @@ async function executeAgentsWrite(
         description,
         instructions,
         useCriteria,
-        llmConfig: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
-        tools,
+        defaultConfig: {
+            model: llmConfig || DEFAULT_AGENT_LLM_CONFIG,
+            tools: tools ?? undefined,
+        },
         eventId: undefined, // Locally created agents don't have event IDs
-        projects: [projectDTag], // Use d-tag for consistent storage/retrieval
     });
 
-    // Save to storage
+    // Save to storage, then associate with project
     await agentStorage.saveAgent(storedAgent);
+    await agentStorage.addAgentToProject(signer.pubkey, projectDTag);
 
     // Create instance and add to registry
     // Pass projectDTag for project-scoped config resolution

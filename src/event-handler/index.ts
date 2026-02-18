@@ -363,7 +363,7 @@ export class EventHandler {
                     const hasRawToolTags = event.tags.some((tag) => tag[0] === "tool");
                     if (hasRawToolTags) {
                         const storedAgent = await agentStorage.loadAgent(agentPubkey);
-                        const defaultTools = storedAgent?.default?.tools ?? storedAgent?.tools ?? [];
+                        const defaultTools = storedAgent?.default?.tools ?? [];
                         const toolsDelta = computeToolsDelta(defaultTools, newToolNames);
                         // If delta is non-empty, store it. An empty delta means desired == defaults,
                         // so no override is needed. Note: "desired = empty list" with non-empty

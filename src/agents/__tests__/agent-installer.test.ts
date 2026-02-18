@@ -44,18 +44,19 @@ describe("agent-installer", () => {
                 slug: "claude-code",
                 name: "Claude Code",
                 role: "assistant",
-                llmConfig: customLlmConfig, // Custom config (not default)
+                defaultConfig: { model: customLlmConfig },
                 eventId: eventId,
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(existingAgent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Verify it was saved correctly
             const loaded = await storage.getAgentByEventId(eventId);
             expect(loaded).not.toBeNull();
-            expect(loaded?.llmConfig).toBe(customLlmConfig);
-            expect(loaded?.projects).toEqual(["project-1"]);
+            expect(loaded?.default?.model).toBe(customLlmConfig);
+            const loadedProjects = await storage.getAgentProjects(signer.pubkey);
+            expect(loadedProjects).toContain("project-1");
 
             // Now simulate what the installer does:
             // Check if agent already exists by eventId
@@ -63,8 +64,8 @@ describe("agent-installer", () => {
 
             // The fix ensures we return the existing agent instead of creating a new one
             expect(existing).not.toBeNull();
-            expect(existing?.llmConfig).toBe(customLlmConfig);
-            expect(existing?.llmConfig).not.toBe(DEFAULT_AGENT_LLM_CONFIG);
+            expect(existing?.default?.model).toBe(customLlmConfig);
+            expect(existing?.default?.model).not.toBe(DEFAULT_AGENT_LLM_CONFIG);
         });
 
         it("should use default LLM config for truly new agents", async () => {
@@ -82,15 +83,14 @@ describe("agent-installer", () => {
                 slug: "new-agent",
                 name: "New Agent",
                 role: "assistant",
-                llmConfig: DEFAULT_AGENT_LLM_CONFIG,
+                defaultConfig: { model: DEFAULT_AGENT_LLM_CONFIG },
                 eventId: eventId,
-                projects: [],
             });
 
             await storage.saveAgent(newAgent);
 
             const loaded = await storage.getAgentByEventId(eventId);
-            expect(loaded?.llmConfig).toBe(DEFAULT_AGENT_LLM_CONFIG);
+            expect(loaded?.default?.model).toBe(DEFAULT_AGENT_LLM_CONFIG);
         });
 
         it("should preserve pmOverrides when agent already exists", async () => {
@@ -103,9 +103,8 @@ describe("agent-installer", () => {
                 slug: "pm-agent",
                 name: "PM Agent",
                 role: "assistant",
-                llmConfig: "custom-model",
+                defaultConfig: { model: "custom-model" },
                 eventId: eventId,
-                projects: ["project-1"],
                 pmOverrides: { "project-1": true },
             });
 
@@ -125,9 +124,8 @@ describe("agent-installer", () => {
                 slug: "identity-agent",
                 name: "Identity Agent",
                 role: "assistant",
-                llmConfig: "custom-model",
+                defaultConfig: { model: "custom-model" },
                 eventId: eventId,
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(existingAgent);
@@ -146,16 +144,21 @@ describe("agent-installer", () => {
                 slug: "multi-project-agent",
                 name: "Multi Project Agent",
                 role: "assistant",
-                llmConfig: "custom-model",
+                defaultConfig: { model: "custom-model" },
                 eventId: eventId,
-                projects: ["project-1", "project-2", "project-3"],
             });
 
             await storage.saveAgent(existingAgent);
+            const signer2 = new (await import("@nostr-dev-kit/ndk")).NDKPrivateKeySigner(existingAgent.nsec);
+            await storage.addAgentToProject(signer2.pubkey, "project-1");
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+            await storage.addAgentToProject(signer2.pubkey, "project-3");
 
             // All project associations should be preserved
-            const loaded = await storage.getAgentByEventId(eventId);
-            expect(loaded?.projects).toEqual(["project-1", "project-2", "project-3"]);
+            const projects = await storage.getAgentProjects(signer2.pubkey);
+            expect(projects).toContain("project-1");
+            expect(projects).toContain("project-2");
+            expect(projects).toContain("project-3");
         });
     });
 
@@ -177,31 +180,29 @@ describe("agent-installer", () => {
                 slug: "claude-code",
                 name: "Claude Code",
                 role: "Developer",
-                llmConfig: customLlmConfig,
+                defaultConfig: { model: customLlmConfig },
                 eventId: eventId,
-                projects: ["project-A"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-A");
 
             // Step 2: Check if agent already exists (simulating what installAgentFromNostr does)
             const existing = await storage.getAgentByEventId(eventId);
 
             // The fix returns existing agent, preserving config
             expect(existing).not.toBeNull();
-            expect(existing?.llmConfig).toBe(customLlmConfig);
+            expect(existing?.default?.model).toBe(customLlmConfig);
 
             // Step 3: Add to project B (using the existing agent, not creating new)
-            if (existing) {
-                existing.projects.push("project-B");
-                await storage.saveAgent(existing);
-            }
+            await storage.addAgentToProject(signer.pubkey, "project-B");
 
             // Step 4: Verify final state
             const final = await storage.getAgentByEventId(eventId);
-            expect(final?.llmConfig).toBe(customLlmConfig); // LLM config preserved!
-            expect(final?.projects).toContain("project-A");
-            expect(final?.projects).toContain("project-B");
+            expect(final?.default?.model).toBe(customLlmConfig); // LLM config preserved!
+            const finalProjects = await storage.getAgentProjects(signer.pubkey);
+            expect(finalProjects).toContain("project-A");
+            expect(finalProjects).toContain("project-B");
         });
     });
 });
