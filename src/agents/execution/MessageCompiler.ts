@@ -10,6 +10,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import type { LessonComment } from "@/services/prompt-compiler";
 import type { SkillData } from "@/services/skill";
 import { combineSystemReminders } from "@/services/system-reminder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -52,6 +53,8 @@ export interface MessageCompilerContext {
     currentBranch?: string;
     availableAgents?: AgentInstance[];
     agentLessons?: Map<string, NDKAgentLesson[]>;
+    /** Comments on agent lessons (kind 1111 NIP-22 comments) */
+    agentComments?: Map<string, LessonComment[]>;
     mcpManager?: MCPManager;
     nudgeContent?: string;
     /** Individual nudge data for rendering in fragments */

@@ -32,7 +32,6 @@ import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
 import { logger } from "@/utils/logger";
-import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 
 // =====================================================================================
@@ -101,7 +100,9 @@ export class PromptCompilerService {
     private ndk: NDK;
     private agentPubkey: Hexpubkey;
     private whitelistedPubkeys: Set<Hexpubkey>;
-    private projectContext: ProjectContext;
+
+    /** Lessons for this agent — set at initialization and refreshed on each triggerCompilation call */
+    private lessons: NDKAgentLesson[] = [];
 
     /** Subscription for kind 1111 (comment) events */
     private subscription: NDKSubscription | null = null;
@@ -161,13 +162,11 @@ export class PromptCompilerService {
     constructor(
         agentPubkey: Hexpubkey,
         whitelistedPubkeys: Hexpubkey[],
-        ndk: NDK,
-        projectContext: ProjectContext
+        ndk: NDK
     ) {
         this.agentPubkey = agentPubkey;
         this.whitelistedPubkeys = new Set(whitelistedPubkeys);
         this.ndk = ndk;
-        this.projectContext = projectContext;
 
         // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
         this.cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
@@ -438,8 +437,8 @@ export class PromptCompilerService {
         agentDefinitionEventId?: string,
         additionalSystemPrompt?: string
     ): Promise<string> {
-        // Retrieve lessons from ProjectContext
-        const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
+        // Use the lessons set at initialization time
+        const lessons = this.lessons;
 
         // If no lessons and no additional prompt, return Base Agent Instructions directly
         if (lessons.length === 0 && !additionalSystemPrompt) {
@@ -611,15 +610,16 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
     // =====================================================================================
 
     /**
-     * Initialize the compiler with base agent instructions.
+     * Initialize the compiler with base agent instructions and current lessons.
      * This MUST be called before triggerCompilation() or getEffectiveInstructionsSync().
-     * Typically called from ProjectRuntime after creating the compiler.
      *
      * @param baseAgentInstructions The Base Agent Instructions from agent.instructions
+     * @param lessons The agent's current lessons
      * @param agentDefinitionEventId Optional event ID for cache hash (for non-local agents)
      */
     async initialize(
         baseAgentInstructions: string,
+        lessons: NDKAgentLesson[],
         agentDefinitionEventId?: string
     ): Promise<void> {
         const tracer = trace.getTracer("tenex.prompt-compiler");
@@ -628,6 +628,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
             span.setAttribute("agent.pubkey", this.agentPubkey.substring(0, 8));
 
             this.baseAgentInstructions = baseAgentInstructions;
+            this.lessons = lessons;
             this.agentDefinitionEventId = agentDefinitionEventId;
             this.initialized = true;
 
@@ -779,8 +780,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 );
 
                 // Update in-memory cache
-                const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
-                const maxCreatedAt = this.calculateMaxCreatedAt(lessons);
+                const maxCreatedAt = this.calculateMaxCreatedAt(this.lessons);
                 const cacheHash = this.hashString(JSON.stringify({
                     agentDefinitionEventId: this.agentDefinitionEventId || null,
                     baseAgentInstructions: this.baseAgentInstructions,
@@ -799,14 +799,14 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 const duration = Date.now() - startTime;
                 span.addEvent("tenex.prompt_compilation.completed", {
                     "compilation.duration_ms": duration,
-                    "compilation.lessons_count": lessons.length,
+                    "compilation.lessons_count": this.lessons.length,
                 });
                 span.setStatus({ code: SpanStatusCode.OK });
 
                 logger.info("PromptCompilerService: eager compilation completed", {
                     agentPubkey: this.agentPubkey.substring(0, 8),
                     durationMs: duration,
-                    lessonsCount: lessons.length,
+                    lessonsCount: this.lessons.length,
                 });
 
                 // Publish kind:0 with compiled instructions (fire-and-forget)
@@ -877,8 +877,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
         if (this.cachedEffectiveInstructions) {
             const cached = this.cachedEffectiveInstructions;
             // Check if cache is still fresh by comparing maxCreatedAt AND input hash
-            const lessons = this.projectContext.getLessonsForAgent(this.agentPubkey);
-            const currentMaxCreatedAt = this.calculateMaxCreatedAt(lessons);
+            const currentMaxCreatedAt = this.calculateMaxCreatedAt(this.lessons);
 
             // Also check if inputs (base instructions, agentDefinitionEventId) have changed
             const currentInputsHash = this.hashString(JSON.stringify({
@@ -1022,6 +1021,43 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
             agentPubkey: this.agentPubkey.substring(0, 8),
         });
         this.triggerCompilation();
+    }
+
+    /**
+     * Update the lessons for this compiler.
+     * Called by the cache system when lessons may have changed since the compiler was created.
+     * Triggers recompilation if the lesson set has changed.
+     *
+     * @param newLessons The updated set of lessons from ProjectContext
+     */
+    updateLessons(newLessons: NDKAgentLesson[]): void {
+        // Quick check: if counts differ, definitely changed
+        if (newLessons.length !== this.lessons.length) {
+            this.lessons = newLessons;
+            logger.debug("PromptCompilerService: lessons updated (count changed)", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+                previousCount: this.lessons.length,
+                newCount: newLessons.length,
+            });
+            this.triggerCompilation();
+            return;
+        }
+
+        // Deep check: compare lesson IDs (lessons are ordered most recent first)
+        const currentIds = new Set(this.lessons.map((l) => l.id));
+        const newIds = new Set(newLessons.map((l) => l.id));
+
+        const changed = newLessons.some((l) => !currentIds.has(l.id)) ||
+                        this.lessons.some((l) => !newIds.has(l.id));
+
+        if (changed) {
+            this.lessons = newLessons;
+            logger.debug("PromptCompilerService: lessons updated (IDs changed)", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+                lessonsCount: newLessons.length,
+            });
+            this.triggerCompilation();
+        }
     }
 
     /**

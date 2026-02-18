@@ -1051,6 +1051,15 @@ export class Daemon {
 
             span.setAttribute("comment.agent_pubkey", agentPubkey.substring(0, 16));
 
+            // Build the LessonComment object
+            const comment = {
+                id: event.id || "",
+                pubkey: event.pubkey,
+                content: event.content,
+                lessonEventId,
+                createdAt: event.created_at || 0,
+            };
+
             // Route to active runtimes that have this agent
             const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
             let routedCount = 0;
@@ -1062,44 +1071,16 @@ export class Daemon {
                 const agent = context.getAgentByPubkey(agentPubkey);
                 if (!agent) continue;
 
-                // Get the PromptCompilerService for this agent
-                const compiler = context.getPromptCompiler(agentPubkey);
-                if (compiler) {
-                    compiler.addComment({
-                        id: event.id || "",
-                        pubkey: event.pubkey,
-                        content: event.content,
-                        lessonEventId,
-                        createdAt: event.created_at || 0,
-                    });
-                    routedCount++;
+                // Store the comment in ProjectContext for pickup by lazy PromptCompilerService
+                context.addComment(agentPubkey, comment);
 
-                    span.addEvent("comment_routed", {
-                        "project.id": projectId,
-                        "agent.slug": agent.slug,
-                    });
-
-                    logger.debug("Routed lesson comment to prompt compiler", {
-                        projectId,
-                        agentSlug: agent.slug,
-                        commentId: event.id?.substring(0, 8),
-                        lessonEventId: lessonEventId.substring(0, 8),
-                    });
-                } else {
-                    // Log when routing is skipped due to missing compiler
-                    logger.warn("Skipping lesson comment routing - no prompt compiler registered", {
-                        projectId,
-                        agentSlug: agent.slug,
-                        agentPubkey: agentPubkey.substring(0, 8),
-                        commentId: event.id?.substring(0, 8),
-                    });
-
-                    span.addEvent("comment_routing_skipped", {
-                        "project.id": projectId,
-                        "agent.slug": agent.slug,
-                        "reason": "no_prompt_compiler",
-                    });
-                }
+                logger.debug("Stored lesson comment for agent", {
+                    projectId,
+                    agentSlug: agent.slug,
+                    commentId: event.id?.substring(0, 8),
+                    lessonEventId: lessonEventId.substring(0, 8),
+                });
+                routedCount++;
             }
 
             span.setAttribute("comment.routed_count", routedCount);

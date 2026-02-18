@@ -268,6 +268,7 @@ export async function setupStreamExecution(
         availableAgents: Array.from(projectContext.agents.values()),
         mcpManager: projectContext.mcpManager,
         agentLessons: projectContext.agentLessons,
+        agentComments: projectContext.agentComments,
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,

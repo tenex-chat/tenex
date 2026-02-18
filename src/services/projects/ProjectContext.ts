@@ -2,7 +2,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { PromptCompilerService } from "@/services/prompt-compiler";
+import type { LessonComment } from "@/services/prompt-compiler";
 import type { LocalReportStore } from "@/services/reports/LocalReportStore";
 import type { ReportInfo } from "@/services/reports/ReportService";
 import { articleToReportInfo } from "@/services/reports/articleUtils";
@@ -183,6 +183,12 @@ export class ProjectContext {
     public readonly agentLessons: Map<string, NDKAgentLesson[]>;
 
     /**
+     * Comments on agent lessons (kind 1111 events per NIP-22)
+     * Key: agent pubkey, Value: array of comments (limited to most recent 100 per agent)
+     */
+    public readonly agentComments: Map<string, LessonComment[]>;
+
+    /**
      * Reports cache for this project
      * Key: compound key "author:slug", Value: ReportInfo object
      * Using compound key allows efficient lookup by both slug and author
@@ -209,13 +215,6 @@ export class ProjectContext {
      * Each project has its own store to ensure isolation.
      */
     public localReportStore?: LocalReportStore;
-
-    /**
-     * Prompt compilers for agents in this project
-     * Key: agent pubkey, Value: PromptCompilerService instance
-     * Used to compile lessons + comments into optimized system prompts
-     */
-    private readonly promptCompilers: Map<Hexpubkey, PromptCompilerService> = new Map();
 
     /**
      * Callback invoked when a new agent is added to this project's registry.
@@ -255,6 +254,7 @@ export class ProjectContext {
         }
 
         this.agentLessons = new Map();
+        this.agentComments = new Map();
         this.reports = new Map();
     }
 
@@ -313,7 +313,6 @@ export class ProjectContext {
 
     /**
      * Add a lesson for an agent, maintaining the 50-lesson limit per agent.
-     * EAGER COMPILATION: Also triggers background recompilation of the agent's prompt.
      */
     addLesson(agentPubkey: string, lesson: NDKAgentLesson): void {
         const existingLessons = this.agentLessons.get(agentPubkey) || [];
@@ -325,22 +324,10 @@ export class ProjectContext {
         const limitedLessons = updatedLessons.slice(0, 50);
 
         this.agentLessons.set(agentPubkey, limitedLessons);
-
-        // EAGER COMPILATION: Trigger recompilation when new lesson arrives
-        // This is fire-and-forget - compilation happens in background
-        const compiler = this.promptCompilers.get(agentPubkey);
-        if (compiler) {
-            logger.debug("ProjectContext: triggering recompilation after new lesson", {
-                agentPubkey: agentPubkey.substring(0, 8),
-                lessonTitle: lesson.title,
-            });
-            compiler.onLessonArrived();
-        }
     }
 
     /**
      * Remove a lesson for an agent by event ID.
-     * Also triggers background recompilation of the agent's prompt.
      * @returns true if the lesson was found and removed, false otherwise
      */
     removeLesson(agentPubkey: string, eventId: string): boolean {
@@ -363,16 +350,6 @@ export class ProjectContext {
             remainingLessons: lessons.length,
         });
 
-        // Trigger recompilation when a lesson is deleted
-        const compiler = this.promptCompilers.get(agentPubkey);
-        if (compiler) {
-            logger.debug("ProjectContext: triggering recompilation after lesson deletion", {
-                agentPubkey: agentPubkey.substring(0, 8),
-                eventId: eventId.substring(0, 8),
-            });
-            compiler.onLessonDeleted();
-        }
-
         return true;
     }
 
@@ -391,54 +368,55 @@ export class ProjectContext {
     }
 
     // =====================================================================================
-    // PROMPT COMPILER MANAGEMENT
+    // COMMENT MANAGEMENT (kind 1111 NIP-22 comments on lessons)
     // =====================================================================================
 
     /**
-     * Set the prompt compiler for an agent
-     * @param agentPubkey The agent's public key
-     * @param compiler The PromptCompilerService instance
+     * Maximum number of comments to store per agent (memory efficiency)
      */
-    setPromptCompiler(agentPubkey: Hexpubkey, compiler: PromptCompilerService): void {
-        this.promptCompilers.set(agentPubkey, compiler);
-    }
+    private static readonly MAX_COMMENTS_PER_AGENT = 100;
 
     /**
-     * Get the prompt compiler for an agent
-     * @param agentPubkey The agent's public key
-     * @returns The PromptCompilerService instance or undefined if not set
+     * Add a comment for an agent, maintaining the 100-comment limit per agent.
+     * Comments are de-duplicated by event ID.
      */
-    getPromptCompiler(agentPubkey: Hexpubkey): PromptCompilerService | undefined {
-        return this.promptCompilers.get(agentPubkey);
-    }
+    addComment(agentPubkey: string, comment: LessonComment): void {
+        const existingComments = this.agentComments.get(agentPubkey) || [];
 
-    /**
-     * Check if a prompt compiler exists for an agent
-     * @param agentPubkey The agent's public key
-     * @returns True if a compiler exists for this agent
-     */
-    hasPromptCompiler(agentPubkey: Hexpubkey): boolean {
-        return this.promptCompilers.has(agentPubkey);
-    }
-
-    /**
-     * Get all prompt compilers
-     * @returns Map of agent pubkeys to their PromptCompilerService instances
-     */
-    getAllPromptCompilers(): Map<Hexpubkey, PromptCompilerService> {
-        return new Map(this.promptCompilers);
-    }
-
-    /**
-     * Stop all prompt compiler subscriptions
-     * Called during project shutdown
-     */
-    stopAllPromptCompilers(): void {
-        for (const [pubkey, compiler] of this.promptCompilers) {
-            logger.debug("Stopping prompt compiler", { agentPubkey: pubkey.substring(0, 8) });
-            compiler.stop();
+        // Check for duplicates
+        if (existingComments.some((c) => c.id === comment.id)) {
+            return;
         }
-        this.promptCompilers.clear();
+
+        // Add the new comment at the beginning (most recent first)
+        const updatedComments = [comment, ...existingComments];
+
+        // Keep only the most recent comments
+        const limitedComments = updatedComments.slice(0, ProjectContext.MAX_COMMENTS_PER_AGENT);
+
+        this.agentComments.set(agentPubkey, limitedComments);
+
+        logger.debug("ProjectContext: added comment for agent", {
+            agentPubkey: agentPubkey.substring(0, 8),
+            commentId: comment.id.substring(0, 8),
+            lessonEventId: comment.lessonEventId.substring(0, 8),
+            totalComments: limitedComments.length,
+        });
+    }
+
+    /**
+     * Get comments for a specific agent
+     */
+    getCommentsForAgent(agentPubkey: string): LessonComment[] {
+        return this.agentComments.get(agentPubkey) || [];
+    }
+
+    /**
+     * Get comments for a specific lesson event ID
+     */
+    getCommentsForLesson(agentPubkey: string, lessonEventId: string): LessonComment[] {
+        const comments = this.agentComments.get(agentPubkey) || [];
+        return comments.filter((c) => c.lessonEventId === lessonEventId);
     }
 
     // =====================================================================================
