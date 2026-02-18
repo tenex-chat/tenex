@@ -24,9 +24,11 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { NDKEvent, NDKSubscription, Hexpubkey } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
 import { logger } from "@/utils/logger";
@@ -150,6 +152,12 @@ export class PromptCompilerService {
     /** Flag indicating if initialize() has been called */
     private initialized: boolean = false;
 
+    /** Agent metadata for kind:0 publishing (set via setAgentMetadata) */
+    private agentSigner: NDKPrivateKeySigner | null = null;
+    private agentName: string | null = null;
+    private agentRole: string | null = null;
+    private projectTitle: string | null = null;
+
     constructor(
         agentPubkey: Hexpubkey,
         whitelistedPubkeys: Hexpubkey[],
@@ -163,6 +171,27 @@ export class PromptCompilerService {
 
         // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
         this.cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
+    }
+
+    /**
+     * Set agent metadata required for kind:0 publishing after compilation.
+     * Must be called before triggerCompilation() to enable kind:0 publishing.
+     *
+     * @param agentSigner The agent's NDKPrivateKeySigner for signing kind:0 events
+     * @param agentName The agent's display name
+     * @param agentRole The agent's role description
+     * @param projectTitle The project title for the profile description
+     */
+    setAgentMetadata(
+        agentSigner: NDKPrivateKeySigner,
+        agentName: string,
+        agentRole: string,
+        projectTitle: string
+    ): void {
+        this.agentSigner = agentSigner;
+        this.agentName = agentName;
+        this.agentRole = agentRole;
+        this.projectTitle = projectTitle;
     }
 
     // =====================================================================================
@@ -779,6 +808,18 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                     durationMs: duration,
                     lessonsCount: lessons.length,
                 });
+
+                // Publish kind:0 with compiled instructions (fire-and-forget)
+                // Only publish if agent metadata was provided
+                if (this.agentSigner && this.agentName && this.agentRole && this.projectTitle) {
+                    AgentProfilePublisher.publishCompiledInstructions(
+                        this.agentSigner,
+                        effectiveInstructions,
+                        this.agentName,
+                        this.agentRole,
+                        this.projectTitle
+                    );
+                }
             } catch (error) {
                 this.compilationStatus = "error";
                 span.addEvent("tenex.prompt_compilation.error", {
