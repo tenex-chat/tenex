@@ -2,12 +2,11 @@ import type { Tool as CoreTool, ModelMessage } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { CompleteEvent } from "@/llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { ToolRegistryContext } from "@/tools/types";
-import type { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
+import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
  * Execution context for agent runs.
