@@ -498,6 +498,9 @@ export class ProjectRuntime {
             let eagerCompilationTriggeredCount = 0;
             const agentSlugs: string[] = [];
 
+            // Get project title for kind:0 publishing
+            const projectTitle = this.project.tagValue("title") || "Untitled";
+
             for (const agent of context.agents.values()) {
                 try {
                     const compiler = new PromptCompilerService(
@@ -505,6 +508,14 @@ export class ProjectRuntime {
                         whitelistArray,
                         ndk,
                         context
+                    );
+
+                    // Set agent metadata for kind:0 publishing after compilation
+                    compiler.setAgentMetadata(
+                        agent.signer,
+                        agent.name,
+                        agent.role,
+                        projectTitle
                     );
 
                     // Register the compiler with the context

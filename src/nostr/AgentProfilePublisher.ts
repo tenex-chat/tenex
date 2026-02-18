@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import type { AgentConfig } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
@@ -388,5 +389,120 @@ export class AgentProfilePublisher {
             });
             // Don't throw - backend profile is not critical for operation
         }
+    }
+
+    /**
+     * In-memory cache of last published instruction hash per agent pubkey.
+     * Used for deduplication to avoid publishing duplicate kind:0 events
+     * when compiled instructions haven't changed.
+     */
+    private static lastPublishedInstructionHash: Map<string, string> = new Map();
+
+    /**
+     * Publishes a kind:0 profile event with compiled instructions for an agent.
+     * Uses hash-based deduplication to avoid publishing when instructions haven't changed.
+     * This is fire-and-forget - failures are logged but don't throw.
+     *
+     * @param signer The agent's NDKPrivateKeySigner
+     * @param compiledInstructions The compiled effective instructions from PromptCompilerService
+     * @param agentName The agent's display name
+     * @param agentRole The agent's role description
+     * @param projectTitle The project title for the profile description
+     */
+    static publishCompiledInstructions(
+        signer: NDKPrivateKeySigner,
+        compiledInstructions: string,
+        agentName: string,
+        agentRole: string,
+        projectTitle: string
+    ): void {
+        // Fire-and-forget async operation
+        (async () => {
+            try {
+                // Hash-based deduplication: skip if instructions haven't changed
+                const instructionHash = crypto
+                    .createHash("sha256")
+                    .update(compiledInstructions)
+                    .digest("hex");
+
+                const lastHash = AgentProfilePublisher.lastPublishedInstructionHash.get(signer.pubkey);
+                if (lastHash === instructionHash) {
+                    logger.debug("Skipping kind:0 publish - compiled instructions unchanged", {
+                        agentPubkey: signer.pubkey.substring(0, 8),
+                    });
+                    return;
+                }
+
+                // Deterministically select avatar family based on pubkey (same logic as publishAgentProfile)
+                const avatarFamilies = [
+                    "lorelei",
+                    "miniavs",
+                    "dylan",
+                    "pixel-art",
+                    "rings",
+                    "avataaars",
+                ];
+                const familyIndex =
+                    Number.parseInt(signer.pubkey.substring(0, 8), 16) % avatarFamilies.length;
+                const avatarStyle = avatarFamilies[familyIndex];
+                const seed = signer.pubkey;
+                const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${seed}`;
+
+                const profile = {
+                    name: agentName,
+                    description: `${agentRole} agent for ${projectTitle}`,
+                    picture: avatarUrl,
+                };
+
+                const profileEvent = new NDKEvent(getNDK(), {
+                    kind: 0,
+                    pubkey: signer.pubkey,
+                    content: JSON.stringify(profile),
+                    tags: [],
+                });
+
+                // Add instruction tag with compiled instructions
+                profileEvent.tags.push(["instruction", compiledInstructions]);
+
+                // Add bot tag
+                profileEvent.tags.push(["bot"]);
+
+                // Add tenex tag for discoverability
+                profileEvent.tags.push(["t", "tenex"]);
+
+                await profileEvent.sign(signer, { pTags: false });
+
+                try {
+                    // Publish with timeout to prevent blocking
+                    const publishTimeout = 5000;
+                    await Promise.race([
+                        profileEvent.publish(),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error("Publish timeout")), publishTimeout)
+                        ),
+                    ]);
+
+                    // Update deduplication cache on successful publish
+                    AgentProfilePublisher.lastPublishedInstructionHash.set(signer.pubkey, instructionHash);
+
+                    logger.info("Published kind:0 with compiled instructions", {
+                        agentPubkey: signer.pubkey.substring(0, 8),
+                        agentName,
+                        instructionsLength: compiledInstructions.length,
+                    });
+                } catch (publishError) {
+                    logger.warn("Failed to publish kind:0 with compiled instructions (relay timeout or error)", {
+                        error: publishError,
+                        agentPubkey: signer.pubkey.substring(0, 8),
+                    });
+                }
+            } catch (error) {
+                logger.error("Failed to create kind:0 with compiled instructions", {
+                    error,
+                    agentPubkey: signer.pubkey.substring(0, 8),
+                });
+                // Don't throw - this is fire-and-forget
+            }
+        })();
     }
 }
