@@ -19,7 +19,7 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
  * - Validates event structure
  * - Parses event into StoredAgent format
  * - Generates private keys for agents
- * - Installs bundled scripts from kind 1063 (NIP-94) events
+ * - Installs bundled files from kind 1063 (NIP-94) events via e-tags
  * - Saves to AgentStorage
  *
  * ## Architecture
@@ -131,7 +131,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
  * 3. Parse event tags (tools, etc.)
  * 4. Check if agent already exists (by eventId) to preserve user config
  * 5. Generate new private key for this agent instance (if new)
- * 6. Install bundled scripts from kind 1063 events (if any e-tags with "script" marker)
+ * 6. Install bundled files from kind 1063 events (all e-tags referencing 1063 events)
  * 7. Save to AgentStorage
  * 8. Return StoredAgent
  *
@@ -144,10 +144,11 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
  * This prevents re-adding an agent to a new project from resetting its
  * configuration across all projects that share the same agent definition.
  *
- * ## Script Installation
- * Agent definitions can reference kind 1063 (NIP-94 file metadata) events via e-tags
- * with the "script" marker. These files are downloaded from Blossom servers and
- * installed to the agent's home directory at the path specified in the name tag.
+ * ## File Installation
+ * Agent definitions can reference kind 1063 (NIP-94 file metadata) events via e-tags.
+ * These files are downloaded from Blossom servers and installed to the agent's home
+ * directory at the path specified in the name tag. All e-tags are processed, not just
+ * those with the "script" marker.
  *
  * ## Note
  * This does NOT add the agent to any registry or project. That happens
@@ -210,16 +211,16 @@ export async function installAgentFromNostr(
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
 
-    // Install bundled scripts from kind 1063 events
-    const scriptETags = agentDef.getScriptETags();
-    if (scriptETags.length > 0) {
-        logger.info(`Agent "${agentData.name}" has ${scriptETags.length} bundled script(s)`);
-        const scriptResults = await installAgentScripts(scriptETags, signer.pubkey, ndkInstance);
+    // Install bundled files from kind 1063 events (referenced via e-tags)
+    const fileETags = agentDef.getFileETags();
+    if (fileETags.length > 0) {
+        logger.info(`Agent "${agentData.name}" has ${fileETags.length} bundled file(s)`);
+        const fileResults = await installAgentScripts(fileETags, signer.pubkey, ndkInstance);
 
-        // Log any script installation failures (but don't fail the agent installation)
-        const failures = scriptResults.filter((r) => !r.success);
+        // Log any file installation failures (but don't fail the agent installation)
+        const failures = fileResults.filter((r) => !r.success);
         if (failures.length > 0) {
-            logger.warn(`${failures.length} script(s) failed to install for agent "${agentData.name}"`, {
+            logger.warn(`${failures.length} file(s) failed to install for agent "${agentData.name}"`, {
                 failures: failures.map((f) => ({ path: f.relativePath, error: f.error })),
             });
         }

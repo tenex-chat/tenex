@@ -99,6 +99,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * that contain files bundled with the agent.
      *
      * @returns Array of objects with eventId and optional relayUrl
+     * @deprecated Use getFileETags() instead, which returns all e-tags (not just "script" marker)
      */
     getScriptETags(): Array<{ eventId: string; relayUrl?: string }> {
         const scriptTags = this.tags.filter((tag) => tag[0] === "e" && tag[3] === "script");
@@ -112,6 +113,31 @@ export class NDKAgentDefinition extends NDKEvent {
                     relayUrl: tag[2] || undefined,
                 });
             }
+        }
+
+        return result;
+    }
+
+    /**
+     * Get all file e-tags from the agent definition.
+     * File e-tags reference kind 1063 (NIP-94 file metadata) events
+     * that contain files bundled with the agent.
+     *
+     * Unlike getScriptETags(), this method returns ALL e-tags, not just
+     * those with the "script" marker, allowing for general file references.
+     *
+     * @returns Array of objects with eventId, optional relayUrl, and optional marker
+     */
+    getFileETags(): Array<{ eventId: string; relayUrl?: string; marker?: string }> {
+        const eTags = this.tags.filter((tag) => tag[0] === "e" && tag[1]);
+        const result: Array<{ eventId: string; relayUrl?: string; marker?: string }> = [];
+
+        for (const tag of eTags) {
+            result.push({
+                eventId: tag[1],
+                relayUrl: tag[2] || undefined,
+                marker: tag[3] || undefined,
+            });
         }
 
         return result;
