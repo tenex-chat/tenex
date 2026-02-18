@@ -2,7 +2,7 @@ import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
 import { TagExtractor } from "../nostr/TagExtractor";
-import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
+import { getProjectContext } from "@/services/projects";
 import {
     getInstalledMCPEventIds,
     installMCPServerFromEvent,
@@ -37,11 +37,6 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
         "project.agent_count": agentEventIds.length,
         "project.mcp_count": mcpEventIds.length,
     });
-
-    // Only process if project context is initialized (daemon is running)
-    if (!isProjectContextInitialized()) {
-        return;
-    }
 
     try {
         const currentContext = getProjectContext();
