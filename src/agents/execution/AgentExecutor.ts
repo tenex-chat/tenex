@@ -549,6 +549,8 @@ export class AgentExecutor {
             llmService: setup.llmService,
             messageCompiler: setup.messageCompiler,
             nudgeContent: setup.nudgeContent,
+            skillContent: setup.skillContent,
+            skills: setup.skills,
             ephemeralMessages: setup.ephemeralMessages,
             abortSignal: setup.abortSignal,
             metaModelSystemPrompt: setup.metaModelSystemPrompt,

@@ -11,6 +11,7 @@ import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
+import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { LanguageModel, ModelMessage } from "ai";
@@ -56,6 +57,10 @@ export interface PrepareStepConfig {
     messageCompiler: MessageCompiler;
     ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     nudgeContent: string;
+    /** Concatenated skill content */
+    skillContent: string;
+    /** Individual skill data for system prompt rendering */
+    skills: SkillData[];
     ralNumber: number;
     execContext: RALExecutionContext;
     executionSpan?: ReturnType<typeof trace.getActiveSpan>;
@@ -79,6 +84,8 @@ export function createPrepareStep(
         messageCompiler,
         ephemeralMessages,
         nudgeContent,
+        skillContent,
+        skills,
         ralNumber,
         execContext,
         executionSpan,
@@ -215,6 +222,8 @@ export function createPrepareStep(
                     mcpManager: projectContext.mcpManager,
                     agentLessons: projectContext.agentLessons,
                     nudgeContent,
+                    skillContent,
+                    skills,
                     respondingToPubkey: context.triggeringEvent.pubkey,
                     pendingDelegations,
                     completedDelegations,
