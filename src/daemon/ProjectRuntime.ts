@@ -11,7 +11,6 @@ import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { PromptCompilerService } from "@/services/prompt-compiler";
 import { createLocalReportStore, LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
@@ -158,9 +157,6 @@ export class ProjectRuntime {
             // Reconcile any orphaned RALs from a previous daemon run
             await this.reconcileOrphanedRals();
 
-            // Initialize prompt compilers for each agent (TIN-10)
-            await this.initializePromptCompilers();
-
             // Warm user profile cache for whitelisted pubkeys and project owner
             // This ensures getNameSync() returns real names instead of shortened pubkeys
             // for message attribution in delegations.
@@ -300,13 +296,6 @@ export class ProjectRuntime {
         process.stdout.write(chalk.gray("   Saving conversations..."));
         await ConversationStore.cleanup();
         console.log(chalk.gray(" done"));
-
-        // Stop all prompt compilers
-        if (this.context) {
-            process.stdout.write(chalk.gray("   Stopping prompt compilers..."));
-            this.context.stopAllPromptCompilers();
-            console.log(chalk.gray(" done"));
-        }
 
         // Reset local report store
         process.stdout.write(chalk.gray("   Resetting report store..."));
@@ -460,122 +449,6 @@ export class ProjectRuntime {
             });
             // Don't throw - allow project to start even if MCP initialization fails
         }
-    }
-
-    /**
-     * Initialize PromptCompilerService for each agent in the project (TIN-10).
-     * This enables lesson comments to be routed to their respective compilers.
-     *
-     * EAGER COMPILATION: After creating each compiler, we:
-     * 1. Initialize it with the agent's base instructions
-     * 2. Start the comment subscription
-     * 3. Trigger compilation in the background (fire and forget)
-     *
-     * Agent execution will use whatever compiled instructions are available,
-     * falling back to base instructions if compilation isn't done yet.
-     */
-    private async initializePromptCompilers(): Promise<void> {
-        if (!this.context) {
-            logger.warn("[ProjectRuntime] Cannot initialize prompt compilers - context not ready");
-            return;
-        }
-
-        const context = this.context;
-        const tracer = trace.getTracer("tenex.project-runtime");
-
-        return tracer.startActiveSpan("tenex.prompt_compilers.initialize", async (span) => {
-            span.setAttribute("project.id", this.projectId);
-            span.setAttribute("project.dtag", this.dTag);
-
-            const ndk = getNDK();
-            const { config: loadedConfig } = await config.loadConfig();
-            const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
-
-            const agentCount = context.agents.size;
-            span.setAttribute("agents.total", agentCount);
-
-            let initializedCount = 0;
-            let eagerCompilationTriggeredCount = 0;
-            const agentSlugs: string[] = [];
-
-            // Get project title for kind:0 publishing
-            const projectTitle = this.project.tagValue("title") || "Untitled";
-
-            for (const agent of context.agents.values()) {
-                try {
-                    const compiler = new PromptCompilerService(
-                        agent.pubkey,
-                        whitelistArray,
-                        ndk,
-                        context
-                    );
-
-                    // Set agent metadata for kind:0 publishing after compilation
-                    compiler.setAgentMetadata(
-                        agent.signer,
-                        agent.name,
-                        agent.role || "",
-                        projectTitle
-                    );
-
-                    // Register the compiler with the context
-                    context.setPromptCompiler(agent.pubkey, compiler);
-
-                    // Start the subscription for lesson comments
-                    compiler.subscribe();
-
-                    // EAGER COMPILATION: Initialize with base instructions and trigger background compilation
-                    // This is async but we don't await - compilation happens in background
-                    await compiler.initialize(
-                        agent.instructions || "",
-                        agent.eventId
-                    );
-
-                    // Trigger compilation in the background (fire and forget)
-                    // This will check if lessons exist and compile if needed
-                    compiler.triggerCompilation();
-
-                    initializedCount++;
-                    eagerCompilationTriggeredCount++;
-                    agentSlugs.push(agent.slug);
-
-                    span.addEvent("tenex.prompt_compiler.agent_initialized", {
-                        "agent.slug": agent.slug,
-                        "agent.pubkey": agent.pubkey.substring(0, 8),
-                        "compilation.triggered": true,
-                    });
-
-                    logger.debug("[ProjectRuntime] Initialized prompt compiler for agent (eager compilation triggered)", {
-                        agentSlug: agent.slug,
-                        agentPubkey: agent.pubkey.substring(0, 8),
-                    });
-                } catch (error) {
-                    span.addEvent("tenex.prompt_compiler.agent_init_failed", {
-                        "agent.slug": agent.slug,
-                        "error.message": error instanceof Error ? error.message : String(error),
-                    });
-
-                    logger.error("[ProjectRuntime] Failed to initialize prompt compiler for agent", {
-                        agentSlug: agent.slug,
-                        agentPubkey: agent.pubkey.substring(0, 8),
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    // Continue with other agents - don't block startup
-                }
-            }
-
-            span.setAttribute("compilers.initialized", initializedCount);
-            span.setAttribute("compilations.triggered", eagerCompilationTriggeredCount);
-            span.setAttribute("agents.slugs", agentSlugs.join(","));
-
-            if (initializedCount > 0) {
-                logger.info(`[ProjectRuntime] Initialized ${initializedCount} prompt compiler(s) with eager compilation`, {
-                    projectId: this.projectId,
-                });
-            }
-
-            span.end();
-        });
     }
 
     /**

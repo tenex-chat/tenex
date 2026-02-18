@@ -5,8 +5,10 @@ import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
+import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
+import { getNDK } from "@/nostr";
+import { config } from "@/services/ConfigService";
 import { getProjectContext } from "@/services/projects";
-import type { PromptCompilerService } from "@/services/prompt-compiler";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
@@ -16,6 +18,13 @@ import type { ModelMessage } from "ai";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
+
+/**
+ * Module-level cache for PromptCompilerService instances per agent pubkey.
+ * Prevents duplicate LLM calls when multiple system prompt builds occur for the same agent.
+ * The cache holds compilers for the process lifetime — memory is bounded by agent count.
+ */
+const promptCompilerCache = new Map<string, PromptCompilerService>();
 
 /**
  * List of scheduling-related tools that trigger the scheduled tasks context
@@ -52,6 +61,8 @@ export interface BuildSystemPromptOptions {
     // Optional runtime data
     availableAgents?: AgentInstance[];
     agentLessons?: Map<string, NDKAgentLesson[]>;
+    /** Comments on agent lessons (kind 1111 NIP-22 comments) */
+    agentComments?: Map<string, LessonComment[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
     alphaMode?: boolean; // True when running in alpha mode
@@ -333,6 +344,102 @@ export async function buildSystemPromptMessages(
 }
 
 /**
+ * Get or create a PromptCompilerService instance for an agent.
+ *
+ * Uses a module-level cache to avoid duplicate LLM calls when multiple system prompt
+ * builds occur for the same agent (e.g., across multiple RALs or conversations).
+ *
+ * This is the "lazy/on-demand instantiation" pattern:
+ * - Returns cached compiler if available for this agent pubkey
+ * - Creates new compiler on cache miss: reads disk cache, triggers background compilation
+ * - Returns undefined if NDK is unavailable (fallback to simple lesson fragment)
+ *
+ * @param agentPubkey Agent's public key (used as cache key)
+ * @param baseAgentInstructions The Base Agent Instructions from agent.instructions
+ * @param agentEventId Optional event ID for the agent definition
+ * @param lessons Current lessons for this agent
+ * @param comments Current comments for this agent's lessons
+ * @param agentSigner Optional signer for kind:0 publishing
+ * @param agentName Optional agent name for kind:0 publishing
+ * @param agentRole Optional agent role for kind:0 publishing
+ * @param projectTitle Optional project title for kind:0 publishing
+ */
+async function getOrCreatePromptCompiler(
+    agentPubkey: string,
+    baseAgentInstructions: string,
+    agentEventId: string | undefined,
+    lessons: NDKAgentLesson[],
+    comments: LessonComment[],
+    agentSigner?: import("@nostr-dev-kit/ndk").NDKPrivateKeySigner,
+    agentName?: string,
+    agentRole?: string,
+    projectTitle?: string
+): Promise<PromptCompilerService | undefined> {
+    // Check cache first
+    const cachedCompiler = promptCompilerCache.get(agentPubkey);
+    if (cachedCompiler) {
+        // Update the compiler with any new comments that arrived since last call
+        // (Comments are de-duplicated internally by addComment)
+        for (const comment of comments) {
+            cachedCompiler.addComment(comment);
+        }
+
+        // Update lessons if the set has changed (e.g., new lesson arrived)
+        // The compiler will detect staleness and trigger recompilation as needed
+        cachedCompiler.updateLessons(lessons);
+
+        logger.debug("📋 Using cached PromptCompilerService", {
+            agentPubkey: agentPubkey.substring(0, 8),
+            lessonsCount: lessons.length,
+            commentsCount: comments.length,
+        });
+
+        return cachedCompiler;
+    }
+
+    // Create new compiler
+    try {
+        const ndk = getNDK();
+        const { config: loadedConfig } = await config.loadConfig();
+        const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
+
+        const compiler = new PromptCompilerService(agentPubkey, whitelistArray, ndk);
+
+        // Set agent metadata for kind:0 publishing (gap 2 fix)
+        // This enables the compiler to publish kind:0 events with compiled instructions
+        if (agentSigner && agentName && projectTitle) {
+            compiler.setAgentMetadata(agentSigner, agentName, agentRole || "", projectTitle);
+        }
+
+        // Load pre-existing comments from ProjectContext
+        // This restores comment state that was accumulated by Daemon's handleLessonCommentEvent
+        for (const comment of comments) {
+            compiler.addComment(comment);
+        }
+
+        // Initialize: loads disk cache into memory and stores base instructions + lessons
+        await compiler.initialize(baseAgentInstructions, lessons, agentEventId);
+
+        // Trigger background compilation (fire and forget) — no-op if cache is fresh
+        compiler.triggerCompilation();
+
+        // Cache for future calls
+        promptCompilerCache.set(agentPubkey, compiler);
+
+        logger.debug("📋 Created and cached new PromptCompilerService", {
+            agentPubkey: agentPubkey.substring(0, 8),
+            lessonsCount: lessons.length,
+            commentsCount: comments.length,
+        });
+
+        return compiler;
+    } catch (error) {
+        logger.debug("Could not create lazy PromptCompilerService:", error);
+        return undefined;
+    }
+}
+
+/**
  * Builds the main system prompt content.
  *
  * Uses PromptCompilerService (TIN-10) when available to synthesize lessons + comments
@@ -355,6 +462,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         availableAgents = [],
         conversation,
         agentLessons,
+        agentComments,
         alphaMode,
         mcpManager,
         nudgeContent,
@@ -364,19 +472,35 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         skills,
     } = options;
 
-    // Check if PromptCompilerService is available for this agent (TIN-10)
+    // Lazily instantiate PromptCompilerService for this agent (TIN-10).
+    // Reads from disk cache as fast path; triggers LLM compilation in background on cache miss.
+    const lessons = agentLessons?.get(agent.pubkey) || [];
+    const comments = agentComments?.get(agent.pubkey) || [];
+    const baseAgentInstructions = agent.instructions || "";
+
+    // Get project context and agent for kind:0 metadata
     const context = getProjectContext();
-    const promptCompiler = context.getPromptCompiler(agent.pubkey);
+    const projectTitle = project.tagValue("title") || "Untitled";
+    const agentInstance = context.getAgentByPubkey(agent.pubkey);
+
+    const promptCompiler = await getOrCreatePromptCompiler(
+        agent.pubkey,
+        baseAgentInstructions,
+        agent.eventId,
+        lessons,
+        comments,
+        // Pass agent metadata for kind:0 publishing (gap 2 fix)
+        agentInstance?.signer,
+        agentInstance?.name ?? agent.name,
+        agentInstance?.role ?? "",
+        projectTitle
+    );
     const usePromptCompiler = !!promptCompiler;
 
     // If PromptCompilerService is available, get effective instructions SYNCHRONOUSLY
     // EAGER COMPILATION: This NEVER blocks - uses cached compiled instructions or falls back to base
-    // Compilation happens in the background at project startup
     let effectiveAgentInstructions: string | undefined;
     if (promptCompiler) {
-        const lessons = agentLessons?.get(agent.pubkey) || [];
-        const baseAgentInstructions = agent.instructions || "";
-
         // SYNCHRONOUS retrieval - NEVER waits for compilation
         effectiveAgentInstructions = getEffectiveInstructionsSync(
             promptCompiler,
