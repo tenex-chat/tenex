@@ -20,11 +20,44 @@ import type { ModelMessage } from "ai";
 import "@/prompts/fragments"; // This auto-registers all fragments
 
 /**
- * Module-level cache for PromptCompilerService instances per agent pubkey.
+ * Module-level cache for PromptCompilerService instances per project+agent.
  * Prevents duplicate LLM calls when multiple system prompt builds occur for the same agent.
- * The cache holds compilers for the process lifetime — memory is bounded by agent count.
+ * The cache holds compilers for the process lifetime — memory is bounded by agent count × projects.
+ *
+ * KEY FORMAT: `${projectCacheKey}:${agentPubkey}` to prevent cross-project contamination
+ * when the same agent pubkey is active in multiple concurrent projects.
  */
 const promptCompilerCache = new Map<string, PromptCompilerService>();
+
+/**
+ * In-flight promise cache to prevent race conditions when multiple concurrent
+ * prompt builds try to create compilers simultaneously for the same project+agent.
+ * This ensures only one compiler is created per project+agent combination.
+ */
+const inFlightCompilerPromises = new Map<string, Promise<PromptCompilerService | undefined>>();
+
+/**
+ * Set of project IDs that have already emitted a "missing d-tag" warning.
+ * Used to implement warn-once behavior and prevent log spam on hot paths.
+ */
+const warnedMissingDTagProjects = new Set<string>();
+
+/**
+ * Apply updates to an existing PromptCompilerService.
+ * Adds new comments and updates lessons, triggering recompilation if needed.
+ */
+function applyCompilerUpdates(
+    compiler: PromptCompilerService,
+    comments: LessonComment[],
+    lessons: NDKAgentLesson[]
+): void {
+    // Add comments (de-duplicated internally by addComment)
+    for (const comment of comments) {
+        compiler.addComment(comment);
+    }
+    // Update lessons - compiler detects staleness and triggers recompilation as needed
+    compiler.updateLessons(lessons);
+}
 
 /**
  * List of scheduling-related tools that trigger the scheduled tasks context
@@ -344,17 +377,21 @@ export async function buildSystemPromptMessages(
 }
 
 /**
- * Get or create a PromptCompilerService instance for an agent.
+ * Get or create a PromptCompilerService instance for an agent within a specific project.
  *
  * Uses a module-level cache to avoid duplicate LLM calls when multiple system prompt
  * builds occur for the same agent (e.g., across multiple RALs or conversations).
  *
  * This is the "lazy/on-demand instantiation" pattern:
- * - Returns cached compiler if available for this agent pubkey
+ * - Returns cached compiler if available for this project+agent combination
  * - Creates new compiler on cache miss: reads disk cache, triggers background compilation
  * - Returns undefined if NDK is unavailable (fallback to simple lesson fragment)
  *
- * @param agentPubkey Agent's public key (used as cache key)
+ * IMPORTANT: Cache is scoped by project cache key + agent pubkey to prevent cross-project
+ * contamination when the same agent is active in multiple concurrent projects.
+ *
+ * @param projectCacheKey Cache key prefix for the project (typically dTag, but may be event ID or fallback value if dTag is missing)
+ * @param agentPubkey Agent's public key (used as cache key suffix)
  * @param baseAgentInstructions The Base Agent Instructions from agent.instructions
  * @param agentEventId Optional event ID for the agent definition
  * @param lessons Current lessons for this agent
@@ -365,6 +402,7 @@ export async function buildSystemPromptMessages(
  * @param projectTitle Optional project title for kind:0 publishing
  */
 async function getOrCreatePromptCompiler(
+    projectCacheKey: string,
     agentPubkey: string,
     baseAgentInstructions: string,
     agentEventId: string | undefined,
@@ -375,20 +413,17 @@ async function getOrCreatePromptCompiler(
     agentRole?: string,
     projectTitle?: string
 ): Promise<PromptCompilerService | undefined> {
-    // Check cache first
-    const cachedCompiler = promptCompilerCache.get(agentPubkey);
-    if (cachedCompiler) {
-        // Update the compiler with any new comments that arrived since last call
-        // (Comments are de-duplicated internally by addComment)
-        for (const comment of comments) {
-            cachedCompiler.addComment(comment);
-        }
+    // Build cache key scoped by project + agent to prevent cross-project contamination
+    const cacheKey = `${projectCacheKey}:${agentPubkey}`;
 
-        // Update lessons if the set has changed (e.g., new lesson arrived)
-        // The compiler will detect staleness and trigger recompilation as needed
-        cachedCompiler.updateLessons(lessons);
+    // Check cache first
+    const cachedCompiler = promptCompilerCache.get(cacheKey);
+    if (cachedCompiler) {
+        // Update with any new comments/lessons that arrived since last call
+        applyCompilerUpdates(cachedCompiler, comments, lessons);
 
         logger.debug("📋 Using cached PromptCompilerService", {
+            projectCacheKey,
             agentPubkey: agentPubkey.substring(0, 8),
             lessonsCount: lessons.length,
             commentsCount: comments.length,
@@ -397,46 +432,73 @@ async function getOrCreatePromptCompiler(
         return cachedCompiler;
     }
 
-    // Create new compiler
-    try {
-        const ndk = getNDK();
-        const { config: loadedConfig } = await config.loadConfig();
-        const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
-
-        const compiler = new PromptCompilerService(agentPubkey, whitelistArray, ndk);
-
-        // Set agent metadata for kind:0 publishing (gap 2 fix)
-        // This enables the compiler to publish kind:0 events with compiled instructions
-        if (agentSigner && agentName && projectTitle) {
-            compiler.setAgentMetadata(agentSigner, agentName, agentRole || "", projectTitle);
-        }
-
-        // Load pre-existing comments from ProjectContext
-        // This restores comment state that was accumulated by Daemon's handleLessonCommentEvent
-        for (const comment of comments) {
-            compiler.addComment(comment);
-        }
-
-        // Initialize: loads disk cache into memory and stores base instructions + lessons
-        await compiler.initialize(baseAgentInstructions, lessons, agentEventId);
-
-        // Trigger background compilation (fire and forget) — no-op if cache is fresh
-        compiler.triggerCompilation();
-
-        // Cache for future calls
-        promptCompilerCache.set(agentPubkey, compiler);
-
-        logger.debug("📋 Created and cached new PromptCompilerService", {
+    // Check if there's an in-flight creation for this project+agent (race condition guard)
+    const inFlightPromise = inFlightCompilerPromises.get(cacheKey);
+    if (inFlightPromise) {
+        logger.debug("📋 Waiting for in-flight compiler creation", {
+            projectCacheKey,
             agentPubkey: agentPubkey.substring(0, 8),
-            lessonsCount: lessons.length,
-            commentsCount: comments.length,
         });
-
+        // Await the in-flight promise, then apply this caller's comments/lessons
+        // to ensure concurrent callers' data is not silently lost
+        const compiler = await inFlightPromise;
+        if (compiler) {
+            applyCompilerUpdates(compiler, comments, lessons);
+        }
         return compiler;
-    } catch (error) {
-        logger.debug("Could not create lazy PromptCompilerService:", error);
-        return undefined;
     }
+
+    // Create new compiler with single-flight guard
+    const creationPromise = (async (): Promise<PromptCompilerService | undefined> => {
+        try {
+            const ndk = getNDK();
+            const { config: loadedConfig } = await config.loadConfig();
+            const whitelistArray = loadedConfig.whitelistedPubkeys ?? [];
+
+            const compiler = new PromptCompilerService(agentPubkey, whitelistArray, ndk);
+
+            // Set agent metadata for kind:0 publishing (gap 2 fix)
+            // This enables the compiler to publish kind:0 events with compiled instructions
+            if (agentSigner && agentName && projectTitle) {
+                compiler.setAgentMetadata(agentSigner, agentName, agentRole || "", projectTitle);
+            }
+
+            // Load pre-existing comments from ProjectContext
+            // This restores comment state that was accumulated by Daemon's handleLessonCommentEvent
+            for (const comment of comments) {
+                compiler.addComment(comment);
+            }
+
+            // Initialize: loads disk cache into memory and stores base instructions + lessons
+            await compiler.initialize(baseAgentInstructions, lessons, agentEventId);
+
+            // Trigger background compilation (fire and forget) — no-op if cache is fresh
+            compiler.triggerCompilation();
+
+            // Cache for future calls (using project-scoped key)
+            promptCompilerCache.set(cacheKey, compiler);
+
+            logger.debug("📋 Created and cached new PromptCompilerService", {
+                projectCacheKey,
+                agentPubkey: agentPubkey.substring(0, 8),
+                lessonsCount: lessons.length,
+                commentsCount: comments.length,
+            });
+
+            return compiler;
+        } catch (error) {
+            logger.debug("Could not create lazy PromptCompilerService:", error);
+            return undefined;
+        } finally {
+            // Remove from in-flight map once complete (success or failure)
+            inFlightCompilerPromises.delete(cacheKey);
+        }
+    })();
+
+    // Register in-flight promise to prevent duplicate concurrent creations
+    inFlightCompilerPromises.set(cacheKey, creationPromise);
+
+    return creationPromise;
 }
 
 /**
@@ -482,8 +544,27 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     const context = getProjectContext();
     const projectTitle = project.tagValue("title") || "Untitled";
     const agentInstance = context.getAgentByPubkey(agent.pubkey);
+    // Use project's dTag for cache key scoping. Fall back to event ID if no dTag to avoid
+    // cross-project collisions (using a generic "unknown" string would cause collisions).
+    const dTag = project.dTag || project.tagValue("d");
+    let projectCacheKey: string;
+    if (dTag) {
+        projectCacheKey = dTag;
+    } else {
+        // Warn once per project to avoid log spam on hot path
+        const projectIdentifier = project.id || project.pubkey || "unknown";
+        if (!warnedMissingDTagProjects.has(projectIdentifier)) {
+            warnedMissingDTagProjects.add(projectIdentifier);
+            logger.warn("⚠️ Project missing d-tag, using event ID for cache key. This may indicate a misconfigured project.", {
+                projectId: project.id?.substring(0, 8),
+                projectPubkey: project.pubkey?.substring(0, 8),
+            });
+        }
+        projectCacheKey = project.id || `fallback-${project.pubkey?.substring(0, 16) || "unknown"}`;
+    }
 
     const promptCompiler = await getOrCreatePromptCompiler(
+        projectCacheKey,
         agent.pubkey,
         baseAgentInstructions,
         agent.eventId,
