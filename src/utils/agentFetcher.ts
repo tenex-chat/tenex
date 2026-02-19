@@ -1,5 +1,6 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { logger } from "./logger";
 
 /**
@@ -38,14 +39,18 @@ export async function fetchAgentDefinition(
     ndk: NDK
 ): Promise<{
     id: string;
+    slug: string | undefined;
     title: string;
     description: string;
+    markdownDescription: string | undefined;
     role: string;
     instructions: string;
     useCriteria: string;
     version: string;
     created_at: number | undefined;
     pubkey: string;
+    fileETags: Array<{ eventId: string; relayUrl?: string }>;
+    forkSource: { eventId: string; relayUrl?: string } | undefined;
 } | null> {
     try {
         // Strip "nostr:" prefix if present
@@ -58,16 +63,23 @@ export async function fetchAgentDefinition(
             return null;
         }
 
+        // Use NDKAgentDefinition for proper parsing
+        const agentDef = NDKAgentDefinition.from(event);
+
         return {
             id: event.id,
-            title: event.tagValue("title") || "Unnamed Agent",
-            description: event.tagValue("description") || "",
-            role: event.tagValue("role") || "assistant",
-            instructions: event.content || "",
-            useCriteria: event.tagValue("use-criteria") || "",
-            version: event.tagValue("ver") || "1.0.0",
+            slug: agentDef.slug,
+            title: agentDef.title || "Unnamed Agent",
+            description: agentDef.description || "",
+            markdownDescription: agentDef.markdownDescription,
+            role: agentDef.role || "assistant",
+            instructions: agentDef.instructions || "",
+            useCriteria: agentDef.useCriteria || "",
+            version: agentDef.version.toString(),
             created_at: event.created_at,
             pubkey: event.pubkey,
+            fileETags: agentDef.getFileETags(),
+            forkSource: agentDef.getForkSource(),
         };
     } catch (error) {
         logger.error(`Failed to fetch agent event: ${eventId}`, error);
