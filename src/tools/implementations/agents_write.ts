@@ -13,9 +13,8 @@ const agentsWriteSchema = z.object({
     slug: z.string().describe("The slug identifier for the agent"),
     name: z.string().describe("Display name of the agent"),
     role: z.string().describe("Primary role/function of the agent"),
-    description: z.string().nullable().describe("Agent description"),
-    instructions: z.string().nullable().describe("System instructions that guide agent behavior"),
-    useCriteria: z.string().nullable().describe("Criteria for when this agent should be selected"),
+    instructions: z.string().describe("System instructions that guide agent behavior"),
+    useCriteria: z.string().describe("Criteria for when this agent should be selected"),
     llmConfig: z.string().nullable().describe("LLM configuration identifier"),
     tools: z
         .array(z.string())
@@ -46,7 +45,7 @@ async function executeAgentsWrite(
     input: AgentsWriteInput,
     context?: ToolExecutionContext
 ): Promise<AgentsWriteOutput> {
-    const { slug, name, role, description, instructions, useCriteria, llmConfig, tools: rawTools } =
+    const { slug, name, role, instructions, useCriteria, llmConfig, tools: rawTools } =
         input;
 
     // Normalize and filter tools
@@ -87,9 +86,8 @@ async function executeAgentsWrite(
         // Update fields
         existingAgent.name = name;
         existingAgent.role = role;
-        if (description !== undefined) existingAgent.description = description ?? undefined;
-        if (instructions !== undefined) existingAgent.instructions = instructions ?? undefined;
-        if (useCriteria !== undefined) existingAgent.useCriteria = useCriteria ?? undefined;
+        existingAgent.instructions = instructions;
+        existingAgent.useCriteria = useCriteria;
         if (llmConfig !== undefined || tools !== undefined) {
             if (!existingAgent.default) existingAgent.default = {};
             if (llmConfig !== undefined) existingAgent.default.model = llmConfig ?? undefined;
@@ -143,7 +141,6 @@ async function executeAgentsWrite(
         slug,
         name,
         role,
-        description,
         instructions,
         useCriteria,
         defaultConfig: {
