@@ -1032,11 +1032,12 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
      */
     updateLessons(newLessons: NDKAgentLesson[]): void {
         // Quick check: if counts differ, definitely changed
-        if (newLessons.length !== this.lessons.length) {
+        const previousCount = this.lessons.length;
+        if (newLessons.length !== previousCount) {
             this.lessons = newLessons;
             logger.debug("PromptCompilerService: lessons updated (count changed)", {
                 agentPubkey: this.agentPubkey.substring(0, 8),
-                previousCount: this.lessons.length,
+                previousCount,
                 newCount: newLessons.length,
             });
             this.triggerCompilation();
