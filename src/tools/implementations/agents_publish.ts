@@ -21,6 +21,8 @@ const fileReferenceSchema = z.object({
 
 const agentsPublishSchema = z.object({
     slug: z.string().describe("The slug identifier of the agent to publish"),
+    one_liner: z.string().describe("Short one-line description of the agent definition"),
+    rich_description: z.string().describe("Comprehensive homepage-style description of what the agent definition is all about (markdown)"),
     files: z
         .array(fileReferenceSchema)
         .optional()
@@ -290,7 +292,7 @@ async function uploadFileAndCreateMetadata(
  * Returns the event ID on success.
  */
 async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> {
-    const { slug, files } = input;
+    const { slug, one_liner, rich_description, files } = input;
 
     if (!slug) {
         throw new Error("Agent slug is required");
@@ -334,10 +336,8 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
 
     agentDefinition.title = agent.name;
     agentDefinition.role = agent.role;
-
-    if (agent.description) {
-        agentDefinition.description = agent.description;
-    }
+    agentDefinition.oneLiner = one_liner;
+    agentDefinition.richDescription = rich_description;
 
     if (agent.instructions) {
         agentDefinition.instructions = agent.instructions;

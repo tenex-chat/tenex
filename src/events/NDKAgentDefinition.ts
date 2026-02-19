@@ -93,6 +93,30 @@ export class NDKAgentDefinition extends NDKEvent {
         if (value) this.tags.push(["use-criteria", value]);
     }
 
+    get oneLiner(): string | undefined {
+        return this.tagValue("one-liner");
+    }
+
+    /**
+     * A short one-line description of the agent definition.
+     */
+    set oneLiner(value: string | undefined) {
+        this.removeTag("one-liner");
+        if (value) this.tags.push(["one-liner", value]);
+    }
+
+    get richDescription(): string | undefined {
+        return this.tagValue("rich-description");
+    }
+
+    /**
+     * A comprehensive homepage-style markdown description of the agent definition.
+     */
+    set richDescription(value: string | undefined) {
+        this.removeTag("rich-description");
+        if (value) this.tags.push(["rich-description", value]);
+    }
+
     /**
      * Get script e-tags from the agent definition.
      * Script e-tags reference kind 1063 (NIP-94 file metadata) events
