@@ -41,6 +41,21 @@ export interface AgentProjectConfig {
 }
 
 /**
+ * Project-scoped configuration for an agent (legacy schema).
+ * Used by agents written before the new `default`/`projectOverrides` schema.
+ *
+ * @deprecated Prefer `AgentProjectConfig` with `projectOverrides` field.
+ */
+export interface ProjectScopedConfig {
+    /** Project-scoped LLM configuration string. */
+    llmConfig?: string;
+    /** Project-scoped tools list. */
+    tools?: string[];
+    /** Project-scoped PM designation. */
+    isPM?: boolean;
+}
+
+/**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
 export interface StoredAgentData {
@@ -51,6 +66,18 @@ export interface StoredAgentData {
     useCriteria?: string;
     /** Agent-specific MCP server configurations */
     mcpServers?: Record<string, MCPServerConfig>;
+
+    /**
+     * Legacy top-level LLM config field.
+     * @deprecated Use `default.model` instead.
+     */
+    llmConfig?: string;
+
+    /**
+     * Legacy top-level tools field.
+     * @deprecated Use `default.tools` instead.
+     */
+    tools?: string[];
 
     /**
      * Default configuration block.
@@ -68,6 +95,12 @@ export interface StoredAgentData {
      * See ConfigResolver for resolution logic.
      */
     projectOverrides?: Record<string, AgentProjectConfig>;
+
+    /**
+     * Legacy project-scoped configurations (old schema).
+     * @deprecated Use `projectOverrides` instead.
+     */
+    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**
