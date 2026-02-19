@@ -105,6 +105,23 @@ export class NDKAgentDefinition extends NDKEvent {
         if (value) this.tags.push(["category", value]);
     }
 
+    get slug(): string | undefined {
+        return this.tagValue("d");
+    }
+
+    /**
+     * The slug identifier for this agent definition.
+     * This is used to find different versions from the same author of the same agent
+     * (e.g., version 1, 2, 3 of a 'human-replica' agent would all share ["d", "human-replica"]).
+     *
+     * Note: We use direct tag mutation instead of replaceTag() because replaceTag()
+     * always adds a tag, but we need to support clearing the slug (setting undefined).
+     */
+    set slug(value: string | undefined) {
+        this.removeTag("d");
+        if (value !== undefined) this.tags.push(["d", value]);
+    }
+
     /**
      * Get script e-tags from the agent definition.
      * Script e-tags reference kind 1063 (NIP-94 file metadata) events

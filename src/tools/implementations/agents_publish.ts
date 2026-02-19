@@ -352,6 +352,8 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
 
     agentDefinition.version = 1;
 
+    agentDefinition.slug = slug;
+
     // Add e-tags for each file metadata event
     for (const fileMetadata of fileMetadataEvents) {
         agentDefinition.tags.push(["e", fileMetadata.eventId]);
