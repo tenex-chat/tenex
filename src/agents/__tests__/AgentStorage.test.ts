@@ -1221,9 +1221,9 @@ describe("AgentStorage", () => {
                 const indexContent = await fs.readFile(indexPath, "utf-8");
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["test-agent"]).toHaveProperty("pubkey");
-                expect(migratedIndex.bySlug["test-agent"]).toHaveProperty("projects");
-                expect(migratedIndex.bySlug["test-agent"].projects).toContain("project-1");
-                expect(migratedIndex.bySlug["test-agent"].projects).toContain("project-2");
+                expect(migratedIndex.bySlug["test-agent"]).toHaveProperty("projectIds");
+                expect(migratedIndex.bySlug["test-agent"].projectIds).toContain("project-1");
+                expect(migratedIndex.bySlug["test-agent"].projectIds).toContain("project-2");
             } finally {
                 ConfigService.config.getConfigPath = originalGetConfigPath;
             }
@@ -1273,9 +1273,9 @@ describe("AgentStorage", () => {
                 const indexContent = await fs.readFile(indexPath, "utf-8");
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("pubkey");
-                expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("projects");
-                // When byProject is empty/missing, rebuild populates projects from agent file
-                expect(migratedIndex.bySlug["orphan-agent"].projects).toEqual(["project-1"]);
+                expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("projectIds");
+                // When byProject is empty/missing, rebuild populates projectIds from agent file
+                expect(migratedIndex.bySlug["orphan-agent"].projectIds).toEqual(["project-1"]);
                 // Verify byProject was rebuilt too
                 expect(migratedIndex.byProject["project-1"]).toContain(signer.pubkey);
             } finally {
@@ -1382,7 +1382,7 @@ describe("AgentStorage", () => {
             const indexPath = path.join(tempDir, "index.json");
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
-            expect(index.bySlug["leaving-agent"].projects).toEqual(["project-1", "project-2", "project-3"]);
+            expect(index.bySlug["leaving-agent"].projectIds).toEqual(["project-1", "project-2", "project-3"]);
 
             // Remove agent from project-2
             agent.projects = ["project-1", "project-3"];
@@ -1391,8 +1391,8 @@ describe("AgentStorage", () => {
             // Verify slug entry synced to current projects (ghost project-2 removed)
             indexContent = await fs.readFile(indexPath, "utf-8");
             index = JSON.parse(indexContent);
-            expect(index.bySlug["leaving-agent"].projects).toEqual(["project-1", "project-3"]);
-            expect(index.bySlug["leaving-agent"].projects).not.toContain("project-2");
+            expect(index.bySlug["leaving-agent"].projectIds).toEqual(["project-1", "project-3"]);
+            expect(index.bySlug["leaving-agent"].projectIds).not.toContain("project-2");
         });
 
         it("should sync slug entry when agent changes slug", async () => {
@@ -1417,9 +1417,9 @@ describe("AgentStorage", () => {
             const index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
 
-            // Verify new slug entry has correct projects
+            // Verify new slug entry has correct projectIds
             expect(index.bySlug["new-slug"].pubkey).toBe(signer.pubkey);
-            expect(index.bySlug["new-slug"].projects).toEqual(["project-1", "project-2"]);
+            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-1", "project-2"]);
         });
 
         it("should handle getProjectAgents with unique slugs across projects", async () => {
@@ -1516,14 +1516,14 @@ describe("AgentStorage", () => {
             const indexPath = path.join(tempDir, "index.json");
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
-            expect(index.bySlug["shrinking-agent"].projects).toEqual(["project-1", "project-3"]);
+            expect(index.bySlug["shrinking-agent"].projectIds).toEqual(["project-1", "project-3"]);
 
             // Remove from another project
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
             indexContent = await fs.readFile(indexPath, "utf-8");
             index = JSON.parse(indexContent);
-            expect(index.bySlug["shrinking-agent"].projects).toEqual(["project-3"]);
+            expect(index.bySlug["shrinking-agent"].projectIds).toEqual(["project-3"]);
 
             // Remove from last project - agent becomes inactive but slug entry remains for reactivation
             await storage.removeAgentFromProject(signer.pubkey, "project-3");
@@ -1532,7 +1532,7 @@ describe("AgentStorage", () => {
             index = JSON.parse(indexContent);
             // Slug entry should still exist for reactivation
             expect(index.bySlug["shrinking-agent"]).toBeDefined();
-            expect(index.bySlug["shrinking-agent"].projects).toEqual([]);
+            expect(index.bySlug["shrinking-agent"].projectIds).toEqual([]);
 
             // Agent should be inactive
             const loaded = await storage.loadAgent(signer.pubkey);
@@ -1667,7 +1667,7 @@ describe("AgentStorage", () => {
             const indexPath = path.join(tempDir, "index.json");
             const indexContent = await fs.readFile(indexPath, "utf-8");
             const index = JSON.parse(indexContent);
-            index.bySlug["test-agent"].projects.push("project-2");
+            index.bySlug["test-agent"].projectIds.push("project-2");
             await fs.writeFile(indexPath, JSON.stringify(index, null, 2));
 
             // Re-initialize storage to load corrupted index
@@ -1702,7 +1702,7 @@ describe("AgentStorage", () => {
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeDefined();
-            expect(index.bySlug["old-slug"].projects).toEqual(["project-1", "project-2"]);
+            expect(index.bySlug["old-slug"].projectIds).toEqual(["project-1", "project-2"]);
 
             // Rename the agent
             agent.slug = "new-slug";
@@ -1713,7 +1713,7 @@ describe("AgentStorage", () => {
             index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
             expect(index.bySlug["new-slug"]).toBeDefined();
-            expect(index.bySlug["new-slug"].projects).toEqual(["project-1", "project-2"]);
+            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-1", "project-2"]);
         });
 
         it("should clean up old slug when agent renames AND changes projects", async () => {
@@ -1739,7 +1739,7 @@ describe("AgentStorage", () => {
             const index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
             expect(index.bySlug["new-slug"]).toBeDefined();
-            expect(index.bySlug["new-slug"].projects).toEqual(["project-3"]);
+            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-3"]);
         });
 
         it("should handle partial slug cleanup when multiple agents share old slug", async () => {
@@ -1778,7 +1778,7 @@ describe("AgentStorage", () => {
             const index = JSON.parse(indexContent);
             expect(index.bySlug["shared-slug"]).toBeDefined();
             expect(index.bySlug["shared-slug"].pubkey).toBe(signer2.pubkey);
-            expect(index.bySlug["shared-slug"].projects).toEqual(["project-3"]);
+            expect(index.bySlug["shared-slug"].projectIds).toEqual(["project-3"]);
             expect(index.bySlug["new-slug"]).toBeDefined();
             expect(index.bySlug["new-slug"].pubkey).toBe(signer1.pubkey);
         });
@@ -1884,7 +1884,7 @@ describe("AgentStorage", () => {
 
             expect(index.bySlug["test-agent"]).toBeDefined();
             expect(index.bySlug["test-agent"].pubkey).toBe(signer.pubkey);
-            expect(index.bySlug["test-agent"].projects).toEqual(["project-1"]);
+            expect(index.bySlug["test-agent"].projectIds).toEqual(["project-1"]);
             expect(index.byProject["project-1"]).toEqual([signer.pubkey]);
         });
     });
@@ -1927,7 +1927,7 @@ describe("AgentStorage", () => {
 
             // Slug should now point to agent2
             expect(index.bySlug["conflict-slug"].pubkey).toBe(signer2.pubkey);
-            expect(index.bySlug["conflict-slug"].projects).toEqual(["project-1"]);
+            expect(index.bySlug["conflict-slug"].projectIds).toEqual(["project-1"]);
 
             // Agent1 file should still exist but be inactive (identity preservation)
             const agent1Loaded = await storage.loadAgent(signer1.pubkey);
