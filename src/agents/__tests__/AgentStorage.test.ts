@@ -43,7 +43,6 @@ describe("AgentStorage", () => {
                 llmConfig: "anthropic:claude-sonnet-4",
                 tools: ["fs_read", "shell"],
                 eventId: "test-event-id",
-                projects: ["project-1"],
             });
 
             expect(agent.nsec).toBe(signer.nsec);
@@ -56,7 +55,6 @@ describe("AgentStorage", () => {
             expect(agent.llmConfig).toBe("anthropic:claude-sonnet-4");
             expect(agent.tools).toEqual(["fs_read", "shell"]);
             expect(agent.eventId).toBe("test-event-id");
-            expect(agent.projects).toEqual(["project-1"]);
         });
 
         it("should handle null values by converting to undefined", () => {
@@ -78,54 +76,16 @@ describe("AgentStorage", () => {
             expect(agent.tools).toBeUndefined();
         });
 
-        it("should default projects to empty array", () => {
+        it("should set status to 'active' by default", () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-            });
-
-            expect(agent.projects).toEqual([]);
-        });
-
-        it("should set status to 'active' when projects are provided", () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                projects: ["project-1"],
             });
 
             expect(agent.status).toBe("active");
-        });
-
-        it("should set status to 'inactive' when no projects are provided", () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                projects: [],
-            });
-
-            expect(agent.status).toBe("inactive");
-        });
-
-        it("should set status to 'inactive' when projects is undefined", () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            expect(agent.status).toBe("inactive");
         });
     });
 
@@ -137,7 +97,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             expect(isAgentActive(agent)).toBe(true);
@@ -150,21 +109,19 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: [],
             });
+            agent.status = "inactive";
 
             expect(isAgentActive(agent)).toBe(false);
         });
 
-        it("should return true for legacy agents without status field but with projects", () => {
+        it("should return true for agents without status field (treat as active)", () => {
             const signer = NDKPrivateKeySigner.generate();
-            // Simulate a legacy agent without status field
             const agent: StoredAgent = {
                 nsec: signer.nsec,
                 slug: "legacy-agent",
                 name: "Legacy Agent",
                 role: "assistant",
-                projects: ["project-1"],
             };
             // Explicitly remove status to simulate legacy data
             delete (agent as Record<string, unknown>).status;
@@ -172,20 +129,20 @@ describe("AgentStorage", () => {
             expect(isAgentActive(agent)).toBe(true);
         });
 
-        it("should return false for legacy agents without status field and no projects", () => {
-            const signer = NDKPrivateKeySigner.generate();
-            // Simulate a legacy agent without status field
-            const agent: StoredAgent = {
-                nsec: signer.nsec,
-                slug: "legacy-agent",
-                name: "Legacy Agent",
-                role: "assistant",
-                projects: [],
-            };
-            // Explicitly remove status to simulate legacy data
-            delete (agent as Record<string, unknown>).status;
+        it("should handle isAgentActive with null/undefined/junk status values", () => {
+            // Test that isAgentActive properly handles edge cases for status field
 
-            expect(isAgentActive(agent)).toBe(false);
+            // Explicit 'active' status
+            expect(isAgentActive({ status: "active" } as StoredAgent)).toBe(true);
+
+            // Explicit 'inactive' status
+            expect(isAgentActive({ status: "inactive" } as StoredAgent)).toBe(false);
+
+            // Undefined status - treated as active
+            expect(isAgentActive({ status: undefined } as StoredAgent)).toBe(true);
+
+            // No status field - treated as active
+            expect(isAgentActive({} as StoredAgent)).toBe(true);
         });
     });
 
@@ -430,15 +387,14 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: [],
             });
 
             await storage.saveAgent(agent);
 
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projects).toContain("project-1");
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).toContain("project-1");
         });
 
         it("should not add duplicate project", async () => {
@@ -448,15 +404,15 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projects.filter((p) => p === "project-1").length).toBe(1);
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects.filter((p) => p === "project-1").length).toBe(1);
         });
 
         it("should remove agent from project", async () => {
@@ -466,16 +422,17 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projects).not.toContain("project-1");
-            expect(loaded?.projects).toContain("project-2");
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).not.toContain("project-1");
+            expect(projects).toContain("project-2");
         });
 
         it("should set agent to inactive when removed from all projects (identity preservation)", async () => {
@@ -485,10 +442,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
@@ -496,10 +453,13 @@ describe("AgentStorage", () => {
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded).not.toBeNull();
             expect(loaded?.status).toBe("inactive");
-            expect(loaded?.projects).toEqual([]);
             // Identity should be preserved
             expect(loaded?.nsec).toBe(signer.nsec);
             expect(loaded?.slug).toBe("test-agent");
+
+            // No projects remain
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).toEqual([]);
         });
 
         it("should reactivate inactive agent when added to project", async () => {
@@ -509,10 +469,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Remove from all projects - becomes inactive
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
@@ -523,7 +483,8 @@ describe("AgentStorage", () => {
             await storage.addAgentToProject(signer.pubkey, "project-2");
             loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.status).toBe("active");
-            expect(loaded?.projects).toContain("project-2");
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).toContain("project-2");
             // Original identity preserved
             expect(loaded?.nsec).toBe(signer.nsec);
         });
@@ -537,7 +498,6 @@ describe("AgentStorage", () => {
                 slug: "active-agent",
                 name: "Active Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const inactiveAgent = createStoredAgent({
@@ -545,12 +505,13 @@ describe("AgentStorage", () => {
                 slug: "inactive-agent",
                 name: "Inactive Agent",
                 role: "assistant",
-                projects: ["project-1"],
-                // Note: status will be set to inactive after removal
             });
 
             await storage.saveAgent(activeAgent);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
             await storage.saveAgent(inactiveAgent);
+            await storage.addAgentToProject(signer2.pubkey, "project-1");
 
             // Both agents should be in project initially
             let projectAgents = await storage.getProjectAgents("project-1");
@@ -572,10 +533,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Remove from all projects - becomes inactive
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
@@ -591,9 +552,6 @@ describe("AgentStorage", () => {
             // Scenario: Agent in project becomes inactive, then we verify
             // that after reactivating a different agent with the same slug,
             // the bySlug index correctly points to the active one.
-            //
-            // The actual bug was: when saveAgent was called on an inactive agent,
-            // it would overwrite bySlug even though another active agent should own it.
 
             const signer1 = NDKPrivateKeySigner.generate();
 
@@ -603,9 +561,9 @@ describe("AgentStorage", () => {
                 slug: "my-agent",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // Verify agent is visible
             let projectAgents = await storage.getProjectAgents("project-1");
@@ -645,9 +603,9 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Active Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
             await storage.saveAgent(activeAgent);
+            await storage.addAgentToProject(activeSigner.pubkey, "project-1");
 
             // Create inactive agent with same slug
             const inactiveAgent = createStoredAgent({
@@ -655,9 +613,7 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Inactive Agent",
                 role: "assistant",
-                projects: [], // No projects = inactive
             });
-            // Force status to inactive since createStoredAgent now sets it
             inactiveAgent.status = "inactive";
             await storage.saveAgent(inactiveAgent);
 
@@ -670,11 +626,6 @@ describe("AgentStorage", () => {
         it("should reassign bySlug to active agent when canonical owner becomes inactive", async () => {
             // Regression test for: canonical slug owner becomes inactive while another
             // active agent with the same slug exists
-            //
-            // Repro scenario:
-            // 1. Save agent A (active) → bySlug=A
-            // 2. Save agent B (active, same slug) → bySlug=B
-            // 3. Remove B's last project (B becomes inactive) → bySlug should become A, not stay B
 
             const signerA = NDKPrivateKeySigner.generate();
             const signerB = NDKPrivateKeySigner.generate();
@@ -685,62 +636,28 @@ describe("AgentStorage", () => {
                 slug: "conflict-slug",
                 name: "Agent A",
                 role: "assistant",
-                projects: ["project-a"],
             });
             await storage.saveAgent(agentA);
+            await storage.addAgentToProject(signerA.pubkey, "project-a");
 
-            // Verify A owns bySlug
-            let bySlug = await storage.getAgentBySlug("conflict-slug");
-            expect(bySlug?.name).toBe("Agent A");
-
-            // Step 2: Create active agent B with same slug (takes over bySlug)
+            // Step 2: Save agent B (active, same slug, different project)
             const agentB = createStoredAgent({
                 nsec: signerB.nsec,
                 slug: "conflict-slug",
                 name: "Agent B",
                 role: "assistant",
-                projects: ["project-b"],
             });
             await storage.saveAgent(agentB);
+            await storage.addAgentToProject(signerB.pubkey, "project-b");
 
-            // Verify B now owns bySlug
-            bySlug = await storage.getAgentBySlug("conflict-slug");
-            expect(bySlug?.name).toBe("Agent B");
-
-            // Step 3: Remove B from its project (becomes inactive)
+            // Step 3: Remove B from its last project (B becomes inactive) → bySlug should become A
             await storage.removeAgentFromProject(signerB.pubkey, "project-b");
 
-            // bySlug should now point to A (the remaining active agent with this slug)
-            bySlug = await storage.getAgentBySlug("conflict-slug");
+            // bySlug should now point to Agent A (the remaining active one)
+            const bySlug = await storage.getAgentBySlug("conflict-slug");
             expect(bySlug).not.toBeNull();
             expect(bySlug?.name).toBe("Agent A");
             expect(bySlug?.status).toBe("active");
-        });
-
-        it("should handle isAgentActive with null/undefined/junk status values", () => {
-            // Test that isAgentActive properly handles edge cases for status field
-
-            // Explicit 'active' status
-            expect(isAgentActive({ status: "active", projects: [] } as StoredAgent)).toBe(true);
-            expect(isAgentActive({ status: "active", projects: ["p1"] } as StoredAgent)).toBe(true);
-
-            // Explicit 'inactive' status
-            expect(isAgentActive({ status: "inactive", projects: [] } as StoredAgent)).toBe(false);
-            expect(isAgentActive({ status: "inactive", projects: ["p1"] } as StoredAgent)).toBe(false);
-
-            // Undefined status - falls back to projects check
-            expect(isAgentActive({ status: undefined, projects: [] } as StoredAgent)).toBe(false);
-            expect(isAgentActive({ status: undefined, projects: ["p1"] } as StoredAgent)).toBe(true);
-
-            // No status field - falls back to projects check
-            expect(isAgentActive({ projects: [] } as StoredAgent)).toBe(false);
-            expect(isAgentActive({ projects: ["p1"] } as StoredAgent)).toBe(true);
-
-            // Junk/invalid status values - should fall back to projects check
-            expect(isAgentActive({ status: null as unknown as string, projects: [] } as StoredAgent)).toBe(false);
-            expect(isAgentActive({ status: null as unknown as string, projects: ["p1"] } as StoredAgent)).toBe(true);
-            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: [] } as StoredAgent)).toBe(false);
-            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: ["p1"] } as StoredAgent)).toBe(true);
         });
     });
 
@@ -753,10 +670,10 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 llmConfig: "anthropic:claude-sonnet-4",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Set project-scoped config
             storage.setProjectConfig(agent, "project-1", {
@@ -780,7 +697,6 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 llmConfig: "anthropic:claude-sonnet-4",
-                projects: ["project-1", "project-2"],
             });
 
             // Set project-scoped override for project-1 only
@@ -803,7 +719,6 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 tools: ["fs_read", "shell"],
-                projects: ["project-1", "project-2"],
             });
 
             // Set project-scoped override for project-1 only
@@ -825,7 +740,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2", "project-3"],
             });
 
             // Test 1: No PM designation
@@ -855,10 +769,10 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 llmConfig: "anthropic:claude-sonnet-4",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedLLMConfig(
                 signer.pubkey,
@@ -879,10 +793,10 @@ describe("AgentStorage", () => {
                 name: "Test Agent",
                 role: "assistant",
                 tools: ["fs_read"],
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedTools(
                 signer.pubkey,
@@ -902,10 +816,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedIsPM(
                 signer.pubkey,
@@ -925,10 +839,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Set initial config
             await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
@@ -965,10 +879,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Set config
             await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
@@ -992,7 +906,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Set config with undefined values
@@ -1015,7 +928,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Set initial config
@@ -1042,7 +954,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
@@ -1063,7 +974,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
@@ -1082,20 +992,23 @@ describe("AgentStorage", () => {
                 slug: "shared-agent",
                 name: "Shared Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
-            // Add agent to second project
-            agent.projects = ["project-1", "project-2"];
-            await storage.saveAgent(agent);
+            // Verify both projects are tracked in the index
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).toContain("project-1");
+            expect(projects).toContain("project-2");
 
-            // Verify slug entry tracks both projects
-            const loaded = await storage.getAgentBySlug("shared-agent");
-            expect(loaded).toBeDefined();
-            expect(loaded?.projects).toContain("project-1");
-            expect(loaded?.projects).toContain("project-2");
+            // And slug entry reflects both projects
+            const indexPath = path.join(tempDir, "index.json");
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
+            expect(index.bySlug["shared-agent"].projectIds).toContain("project-1");
+            expect(index.bySlug["shared-agent"].projectIds).toContain("project-2");
         });
 
         it("should cleanup old agent when new agent claims same slug in overlapping projects", async () => {
@@ -1107,7 +1020,6 @@ describe("AgentStorage", () => {
                 slug: "conflict-slug",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const agent2 = createStoredAgent({
@@ -1115,15 +1027,15 @@ describe("AgentStorage", () => {
                 slug: "conflict-slug",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // Cleanup will remove agent1 from project-1 (the overlapping project)
             // Agent1 becomes inactive (identity preserved) since it has no projects left
-            // So agent2 can take over the slug without conflict
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-1");
 
             // Verify agent2 took the slug
             const loaded = await storage.getAgentBySlug("conflict-slug");
@@ -1133,7 +1045,8 @@ describe("AgentStorage", () => {
             const agent1Loaded = await storage.loadAgent(signer1.pubkey);
             expect(agent1Loaded).not.toBeNull();
             expect(agent1Loaded?.status).toBe("inactive");
-            expect(agent1Loaded?.projects).toEqual([]);
+            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            expect(agent1Projects).toEqual([]);
         });
 
         it("should allow same slug in different projects when no overlap", async () => {
@@ -1145,7 +1058,6 @@ describe("AgentStorage", () => {
                 slug: "my-agent",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const agent2 = createStoredAgent({
@@ -1153,14 +1065,15 @@ describe("AgentStorage", () => {
                 slug: "my-agent",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // No overlap in projects, so no cleanup needed
             // Agent2 will take over the slug
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
 
             // Verify agent2 took over the slug
             const loaded = await storage.getAgentBySlug("my-agent");
@@ -1168,9 +1081,8 @@ describe("AgentStorage", () => {
 
             // Verify agent1 still exists in project-1
             // (no cleanup happened because no overlapping projects)
-            const agent1Loaded = await storage.loadAgent(signer1.pubkey);
-            expect(agent1Loaded).not.toBeNull();
-            expect(agent1Loaded?.projects).toEqual(["project-1"]);
+            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            expect(agent1Projects).toContain("project-1");
         });
 
         it("should migrate old flat index format to SlugEntry structure", async () => {
@@ -1186,7 +1098,6 @@ describe("AgentStorage", () => {
                     slug: "test-agent",
                     name: "Test Agent",
                     role: "assistant",
-                    projects: ["project-1", "project-2"],
                 });
 
                 // Manually save agent file
@@ -1215,7 +1126,6 @@ describe("AgentStorage", () => {
                 // Verify migration happened
                 const loaded = await newStorage.getAgentBySlug("test-agent");
                 expect(loaded).toBeDefined();
-                expect(loaded?.projects).toEqual(["project-1", "project-2"]);
 
                 // Verify index is now in new format
                 const indexContent = await fs.readFile(indexPath, "utf-8");
@@ -1242,7 +1152,6 @@ describe("AgentStorage", () => {
                     slug: "orphan-agent",
                     name: "Orphan Agent",
                     role: "assistant",
-                    projects: ["project-1"],
                 });
 
                 // Manually save agent file
@@ -1262,6 +1171,7 @@ describe("AgentStorage", () => {
                 await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
 
                 // Create new storage instance to trigger migration
+                // rebuildIndex is called when byProject is empty after migration
                 const newStorage = new AgentStorage();
                 await newStorage.initialize();
 
@@ -1274,10 +1184,9 @@ describe("AgentStorage", () => {
                 const migratedIndex = JSON.parse(indexContent);
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("pubkey");
                 expect(migratedIndex.bySlug["orphan-agent"]).toHaveProperty("projectIds");
-                // When byProject is empty/missing, rebuild populates projectIds from agent file
-                expect(migratedIndex.bySlug["orphan-agent"].projectIds).toEqual(["project-1"]);
-                // Verify byProject was rebuilt too
-                expect(migratedIndex.byProject["project-1"]).toContain(signer.pubkey);
+                // byProject cannot be rebuilt from agent files (no projects field)
+                // so it stays empty after rebuildIndex
+                expect(migratedIndex.bySlug["orphan-agent"].projectIds).toEqual([]);
             } finally {
                 ConfigService.config.getConfigPath = originalGetConfigPath;
             }
@@ -1290,10 +1199,10 @@ describe("AgentStorage", () => {
                 slug: "temp-agent",
                 name: "Temp Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Remove from project - agent becomes inactive but identity preserved
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
@@ -1302,7 +1211,8 @@ describe("AgentStorage", () => {
             const loaded = await storage.getAgentBySlug("temp-agent");
             expect(loaded).not.toBeNull();
             expect(loaded?.status).toBe("inactive");
-            expect(loaded?.projects).toEqual([]);
+            const projects = await storage.getAgentProjects(signer.pubkey);
+            expect(projects).toEqual([]);
         });
 
         it("should handle cleanupDuplicateSlugs correctly", async () => {
@@ -1315,7 +1225,6 @@ describe("AgentStorage", () => {
                 slug: "cleanup-test",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             // Agent 2 trying to claim same slug in project 2
@@ -1324,19 +1233,23 @@ describe("AgentStorage", () => {
                 slug: "cleanup-test",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             await storage.saveAgent(agent1);
-            await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+            await storage.addAgentToProject(signer1.pubkey, "project-2");
 
-            // Agent 1 should still exist but only in project-1
-            const agent1Loaded = await storage.loadAgent(signer1.pubkey);
-            expect(agent1Loaded?.projects).toEqual(["project-1"]);
+            await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+
+            // Agent 1 should still exist but only in project-1 (removed from project-2 by cleanup)
+            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            expect(agent1Projects).toContain("project-1");
+            expect(agent1Projects).not.toContain("project-2");
 
             // Agent 2 should have project-2
-            const agent2Loaded = await storage.loadAgent(signer2.pubkey);
-            expect(agent2Loaded?.projects).toEqual(["project-2"]);
+            const agent2Projects = await storage.getAgentProjects(signer2.pubkey);
+            expect(agent2Projects).toContain("project-2");
 
             // Slug should point to agent2 (last one saved)
             const slugLookup = await storage.getAgentBySlug("cleanup-test");
@@ -1350,20 +1263,19 @@ describe("AgentStorage", () => {
                 slug: "rebuild-test",
                 name: "Rebuild Test",
                 role: "assistant",
-                projects: ["project-1", "project-2", "project-3"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
+            await storage.addAgentToProject(signer.pubkey, "project-3");
 
             // Rebuild index
             await storage.rebuildIndex();
 
-            // Verify slug entry has all projects
+            // Agent should still be findable by slug
             const loaded = await storage.getAgentBySlug("rebuild-test");
             expect(loaded).toBeDefined();
-            expect(loaded?.projects).toContain("project-1");
-            expect(loaded?.projects).toContain("project-2");
-            expect(loaded?.projects).toContain("project-3");
         });
 
         it("should remove ghost projects from slug entry when agent leaves project", async () => {
@@ -1373,26 +1285,30 @@ describe("AgentStorage", () => {
                 slug: "leaving-agent",
                 name: "Leaving Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2", "project-3"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
+            await storage.addAgentToProject(signer.pubkey, "project-3");
 
             // Manually verify initial state - slug entry should have all 3 projects
             const indexPath = path.join(tempDir, "index.json");
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
-            expect(index.bySlug["leaving-agent"].projectIds).toEqual(["project-1", "project-2", "project-3"]);
+            expect(index.bySlug["leaving-agent"].projectIds).toContain("project-1");
+            expect(index.bySlug["leaving-agent"].projectIds).toContain("project-2");
+            expect(index.bySlug["leaving-agent"].projectIds).toContain("project-3");
 
             // Remove agent from project-2
-            agent.projects = ["project-1", "project-3"];
-            await storage.saveAgent(agent);
+            await storage.removeAgentFromProject(signer.pubkey, "project-2");
 
             // Verify slug entry synced to current projects (ghost project-2 removed)
             indexContent = await fs.readFile(indexPath, "utf-8");
             index = JSON.parse(indexContent);
-            expect(index.bySlug["leaving-agent"].projectIds).toEqual(["project-1", "project-3"]);
             expect(index.bySlug["leaving-agent"].projectIds).not.toContain("project-2");
+            expect(index.bySlug["leaving-agent"].projectIds).toContain("project-1");
+            expect(index.bySlug["leaving-agent"].projectIds).toContain("project-3");
         });
 
         it("should sync slug entry when agent changes slug", async () => {
@@ -1402,10 +1318,11 @@ describe("AgentStorage", () => {
                 slug: "old-slug",
                 name: "Renaming Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             // Change slug
             agent.slug = "new-slug";
@@ -1417,9 +1334,8 @@ describe("AgentStorage", () => {
             const index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
 
-            // Verify new slug entry has correct projectIds
+            // Verify new slug entry exists with correct pubkey
             expect(index.bySlug["new-slug"].pubkey).toBe(signer.pubkey);
-            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-1", "project-2"]);
         });
 
         it("should handle getProjectAgents with unique slugs across projects", async () => {
@@ -1432,7 +1348,6 @@ describe("AgentStorage", () => {
                 slug: "worker-1",
                 name: "Worker 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Agent 2 with "worker-2" slug in project-2
@@ -1441,11 +1356,13 @@ describe("AgentStorage", () => {
                 slug: "worker-2",
                 name: "Worker 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
 
             // Both agents should be retrievable from their respective projects
             const project1Agents = await storage.getProjectAgents("project-1");
@@ -1467,7 +1384,6 @@ describe("AgentStorage", () => {
                 slug: "worker",
                 name: "Worker 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Agent 2 with "worker" slug in project-2
@@ -1476,11 +1392,13 @@ describe("AgentStorage", () => {
                 slug: "worker",
                 name: "Worker 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
 
             // bySlug points to last saved agent (agent2)
             const slugLookup = await storage.getAgentBySlug("worker");
@@ -1504,10 +1422,12 @@ describe("AgentStorage", () => {
                 slug: "shrinking-agent",
                 name: "Shrinking Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2", "project-3"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
+            await storage.addAgentToProject(signer.pubkey, "project-3");
 
             // Use removeAgentFromProject to remove from project-2
             await storage.removeAgentFromProject(signer.pubkey, "project-2");
@@ -1516,7 +1436,9 @@ describe("AgentStorage", () => {
             const indexPath = path.join(tempDir, "index.json");
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
-            expect(index.bySlug["shrinking-agent"].projectIds).toEqual(["project-1", "project-3"]);
+            expect(index.bySlug["shrinking-agent"].projectIds).not.toContain("project-2");
+            expect(index.bySlug["shrinking-agent"].projectIds).toContain("project-1");
+            expect(index.bySlug["shrinking-agent"].projectIds).toContain("project-3");
 
             // Remove from another project
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
@@ -1548,7 +1470,6 @@ describe("AgentStorage", () => {
                 slug: "duplicate-slug",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const agent2 = createStoredAgent({
@@ -1556,11 +1477,11 @@ describe("AgentStorage", () => {
                 slug: "duplicate-slug",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Save both agents (this would normally trigger cleanup)
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // Manually corrupt the index to simulate the bug scenario
             // Add both agents to the same project with same slug
@@ -1591,10 +1512,11 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             const result1 = await storage.getAgentBySlugForProject("test-agent", "project-1");
             expect(result1).not.toBeNull();
@@ -1612,10 +1534,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const result = await storage.getAgentBySlugForProject("test-agent", "project-2");
             expect(result).toBeNull();
@@ -1629,21 +1551,18 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Multi-Project Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             // Same agent should be retrievable from both projects
             const result1 = await storage.getAgentBySlugForProject("shared-slug", "project-1");
             expect(result1?.name).toBe("Multi-Project Agent");
-            expect(result1?.projects).toContain("project-1");
-            expect(result1?.projects).toContain("project-2");
 
             const result2 = await storage.getAgentBySlugForProject("shared-slug", "project-2");
             expect(result2?.name).toBe("Multi-Project Agent");
-            expect(result2?.projects).toContain("project-1");
-            expect(result2?.projects).toContain("project-2");
         });
 
         it("should return null when slug does not exist", async () => {
@@ -1651,36 +1570,35 @@ describe("AgentStorage", () => {
             expect(result).toBeNull();
         });
 
-        it("should detect index mismatch and return null", async () => {
+        it("should use index exclusively for project membership check", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Manually corrupt the index to claim agent is in project-2
+            // Manually extend the index to claim agent is in project-2 (without the byProject entry)
             const indexPath = path.join(tempDir, "index.json");
             const indexContent = await fs.readFile(indexPath, "utf-8");
             const index = JSON.parse(indexContent);
             index.bySlug["test-agent"].projectIds.push("project-2");
             await fs.writeFile(indexPath, JSON.stringify(index, null, 2));
 
-            // Re-initialize storage to load corrupted index
-            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
+            // Re-initialize storage to load updated index
             const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
             (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
             const newStorage = new AgentStorage();
             await newStorage.initialize();
             (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
 
-            // Should detect mismatch and return null for project-2
+            // Should find agent in project-2 because index says so (no agent-file double-check)
             const result = await newStorage.getAgentBySlugForProject("test-agent", "project-2");
-            expect(result).toBeNull();
+            expect(result).not.toBeNull();
         });
     });
 
@@ -1692,17 +1610,17 @@ describe("AgentStorage", () => {
                 slug: "old-slug",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             // Verify old slug exists
             const indexPath = path.join(tempDir, "index.json");
             let indexContent = await fs.readFile(indexPath, "utf-8");
             let index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeDefined();
-            expect(index.bySlug["old-slug"].projectIds).toEqual(["project-1", "project-2"]);
 
             // Rename the agent
             agent.slug = "new-slug";
@@ -1713,7 +1631,6 @@ describe("AgentStorage", () => {
             index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
             expect(index.bySlug["new-slug"]).toBeDefined();
-            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-1", "project-2"]);
         });
 
         it("should clean up old slug when agent renames AND changes projects", async () => {
@@ -1723,14 +1640,14 @@ describe("AgentStorage", () => {
                 slug: "old-slug",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+            await storage.addAgentToProject(signer.pubkey, "project-2");
 
-            // Rename AND change projects at the same time
+            // Rename the agent (project changes now handled via addAgentToProject/removeAgentFromProject)
             agent.slug = "new-slug";
-            agent.projects = ["project-3"];
             await storage.saveAgent(agent);
 
             // Old slug should be completely removed (no ghost entries)
@@ -1739,7 +1656,6 @@ describe("AgentStorage", () => {
             const index = JSON.parse(indexContent);
             expect(index.bySlug["old-slug"]).toBeUndefined();
             expect(index.bySlug["new-slug"]).toBeDefined();
-            expect(index.bySlug["new-slug"].projectIds).toEqual(["project-3"]);
         });
 
         it("should handle partial slug cleanup when multiple agents share old slug", async () => {
@@ -1752,10 +1668,11 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+            await storage.addAgentToProject(signer1.pubkey, "project-2");
 
             // Agent 2 in project-3 with same slug (allowed - different project)
             const agent2 = createStoredAgent({
@@ -1763,10 +1680,10 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-3"],
             });
 
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-3");
 
             // Now agent 1 renames
             agent1.slug = "new-slug";
@@ -1795,7 +1712,6 @@ describe("AgentStorage", () => {
                 slug: "agent-1",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const agent2 = createStoredAgent({
@@ -1803,7 +1719,6 @@ describe("AgentStorage", () => {
                 slug: "agent-2",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             // Write agent files manually
@@ -1825,21 +1740,20 @@ describe("AgentStorage", () => {
             await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
 
             // Initialize storage - should migrate and rebuild
-            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
             const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
             (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
             const newStorage = new AgentStorage();
             await newStorage.initialize();
             (await import("@/services/ConfigService")).config.getConfigPath = originalGetConfigPath;
 
-            // Verify byProject was rebuilt correctly
+            // Verify slugs were migrated (byProject stays empty since no agent files have projects)
             const indexContent = await fs.readFile(indexPath, "utf-8");
             const index = JSON.parse(indexContent);
 
-            expect(index.byProject["project-1"]).toBeDefined();
-            expect(index.byProject["project-1"]).toContain(signer1.pubkey);
-            expect(index.byProject["project-2"]).toBeDefined();
-            expect(index.byProject["project-2"]).toContain(signer2.pubkey);
+            expect(index.bySlug["agent-1"]).toBeDefined();
+            expect(index.bySlug["agent-1"].pubkey).toBe(signer1.pubkey);
+            expect(index.bySlug["agent-2"]).toBeDefined();
+            expect(index.bySlug["agent-2"].pubkey).toBe(signer2.pubkey);
         });
 
         it("should preserve byProject when migration produces valid byProject", async () => {
@@ -1850,7 +1764,6 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             // Write agent file manually
@@ -1871,7 +1784,6 @@ describe("AgentStorage", () => {
             await fs.writeFile(indexPath, JSON.stringify(oldIndex, null, 2));
 
             // Initialize storage - should migrate but NOT rebuild
-            // IMPORTANT: Override config path BEFORE creating AgentStorage instance
             const originalGetConfigPath = (await import("@/services/ConfigService")).config.getConfigPath;
             (await import("@/services/ConfigService")).config.getConfigPath = () => tempDir;
             const newStorage = new AgentStorage();
@@ -1884,7 +1796,7 @@ describe("AgentStorage", () => {
 
             expect(index.bySlug["test-agent"]).toBeDefined();
             expect(index.bySlug["test-agent"].pubkey).toBe(signer.pubkey);
-            expect(index.bySlug["test-agent"].projectIds).toEqual(["project-1"]);
+            expect(index.bySlug["test-agent"].projectIds).toContain("project-1");
             expect(index.byProject["project-1"]).toEqual([signer.pubkey]);
         });
     });
@@ -1899,10 +1811,10 @@ describe("AgentStorage", () => {
                 slug: "conflict-slug",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
             // Verify agent1 is in the index
             const indexPath = path.join(tempDir, "index.json");
@@ -1916,10 +1828,10 @@ describe("AgentStorage", () => {
                 slug: "conflict-slug",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-1");
 
             // Cleanup should have removed agent1 from project-1
             indexContent = await fs.readFile(indexPath, "utf-8");
@@ -1927,13 +1839,14 @@ describe("AgentStorage", () => {
 
             // Slug should now point to agent2
             expect(index.bySlug["conflict-slug"].pubkey).toBe(signer2.pubkey);
-            expect(index.bySlug["conflict-slug"].projectIds).toEqual(["project-1"]);
+            expect(index.bySlug["conflict-slug"].projectIds).toContain("project-1");
 
             // Agent1 file should still exist but be inactive (identity preservation)
             const agent1Loaded = await storage.loadAgent(signer1.pubkey);
             expect(agent1Loaded).not.toBeNull();
             expect(agent1Loaded?.status).toBe("inactive");
-            expect(agent1Loaded?.projects).toEqual([]);
+            const agent1Projects = await storage.getAgentProjects(signer1.pubkey);
+            expect(agent1Projects).toEqual([]);
         });
     });
 
@@ -1945,10 +1858,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             // Call deprecated method - should still work but warn
             const result = await storage.getAgentBySlug("test-agent");
@@ -1965,7 +1878,6 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Agent 1",
                 role: "assistant",
-                projects: ["project-1"],
             });
 
             const agent2 = createStoredAgent({
@@ -1973,11 +1885,13 @@ describe("AgentStorage", () => {
                 slug: "shared-slug",
                 name: "Agent 2",
                 role: "assistant",
-                projects: ["project-2"],
             });
 
             await storage.saveAgent(agent1);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
             await storage.saveAgent(agent2);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
 
             // Deprecated method returns last saved (agent2)
             const result = await storage.getAgentBySlug("shared-slug");

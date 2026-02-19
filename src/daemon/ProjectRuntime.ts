@@ -210,8 +210,12 @@ export class ProjectRuntime {
                 this.prefixStoreInitialized = false;
             }
 
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(chalk.red(`❌ Failed to start project: ${chalk.bold(projectTitle)}`));
+            console.error(chalk.red(`   ${errorMessage}`));
+
             logger.error(`Failed to start project runtime: ${this.projectId}`, {
-                error: error instanceof Error ? error.message : String(error),
+                error: errorMessage,
                 stack: error instanceof Error ? error.stack : undefined,
             });
             throw error;
