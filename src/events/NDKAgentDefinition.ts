@@ -1,6 +1,20 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKEvent, type NDKRawEvent } from "@nostr-dev-kit/ndk";
 
+/**
+ * Tuple type for e-tags: ["e", eventId, relayUrl, marker]
+ */
+export type ETag = [marker: "e", eventId: string, relayUrl: string, tagMarker: string];
+
+/**
+ * Parsed e-tag reference with typed fields
+ */
+export interface ETagReference {
+    eventId: string;
+    relayUrl?: string;
+    marker?: string;
+}
+
 export class NDKAgentDefinition extends NDKEvent {
     static kind = 4199;
     static kinds = [4199];
@@ -14,22 +28,31 @@ export class NDKAgentDefinition extends NDKEvent {
         return new NDKAgentDefinition(event.ndk, event);
     }
 
-    get name(): string | undefined {
-        return this.tagValue("title");
-    }
-
-    set name(value: string | undefined) {
-        this.removeTag("title");
-        if (value) this.tags.push(["title", value]);
-    }
-
+    /**
+     * The canonical title/name of the agent.
+     * Maps to the "title" tag.
+     */
     get title(): string | undefined {
         return this.tagValue("title");
     }
 
     set title(value: string | undefined) {
-        this.removeTag("title");
-        if (value) this.tags.push(["title", value]);
+        this.setOptionalTag("title", value);
+    }
+
+    /**
+     * Alias for `title`. Prefer using `title` directly.
+     * @deprecated Use `title` instead. Will be removed in a future version.
+     */
+    get name(): string | undefined {
+        return this.title;
+    }
+
+    /**
+     * @deprecated Use `title` instead. Will be removed in a future version.
+     */
+    set name(value: string | undefined) {
+        this.title = value;
     }
 
     get description(): string | undefined {
@@ -40,8 +63,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * A one-liner description of the agent's purpose or functionality.
      */
     set description(value: string | undefined) {
-        this.removeTag("description");
-        if (value) this.tags.push(["description", value]);
+        this.setOptionalTag("description", value);
     }
 
     /**
@@ -56,7 +78,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * Set the extended markdown description in the event content field.
      */
     set markdownDescription(value: string | undefined) {
-        this.content = value || "";
+        this.content = value ?? "";
     }
 
     get role(): string | undefined {
@@ -68,8 +90,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * This shapes how the agent interacts with users and other agents.
      */
     set role(value: string | undefined) {
-        this.removeTag("role");
-        if (value) this.tags.push(["role", value]);
+        this.setOptionalTag("role", value);
     }
 
     get instructions(): string | undefined {
@@ -80,14 +101,14 @@ export class NDKAgentDefinition extends NDKEvent {
      * Detailed instructions or guidelines for the agent's operation.
      */
     set instructions(value: string | undefined) {
-        this.removeTag("instructions");
-        if (value) this.tags.push(["instructions", value]);
+        this.setOptionalTag("instructions", value);
     }
 
     get version(): number {
         const val = this.tagValue("ver");
         if (val === undefined) return 1; // Default version if not specified
-        return Number.parseInt(val, 10);
+        const parsed = Number.parseInt(val, 10);
+        return Number.isNaN(parsed) ? 1 : parsed; // Fallback to 1 if parsing fails
     }
 
     set version(value: number) {
@@ -104,8 +125,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * This helps with agent routing and selection.
      */
     set useCriteria(value: string | undefined) {
-        this.removeTag("use-criteria");
-        if (value) this.tags.push(["use-criteria", value]);
+        this.setOptionalTag("use-criteria", value);
     }
 
     get category(): string | undefined {
@@ -116,8 +136,7 @@ export class NDKAgentDefinition extends NDKEvent {
      * Category for the agent (e.g., 'developer', 'analyst', 'assistant').
      */
     set category(value: string | undefined) {
-        this.removeTag("category");
-        if (value) this.tags.push(["category", value]);
+        this.setOptionalTag("category", value);
     }
 
     get slug(): string | undefined {
@@ -129,8 +148,9 @@ export class NDKAgentDefinition extends NDKEvent {
      * This is used to find different versions from the same author of the same agent
      * (e.g., version 1, 2, 3 of a 'human-replica' agent would all share ["d", "human-replica"]).
      *
-     * Note: We use direct tag mutation instead of replaceTag() because replaceTag()
-     * always adds a tag, but we need to support clearing the slug (setting undefined).
+     * Note: Unlike other setters, this uses `value !== undefined` instead of truthy check
+     * because empty string is a valid d-tag value per Nostr conventions. Only `undefined`
+     * should clear the tag. This is intentionally different from setOptionalTag behavior.
      */
     set slug(value: string | undefined) {
         this.removeTag("d");
@@ -142,24 +162,11 @@ export class NDKAgentDefinition extends NDKEvent {
      * Script e-tags reference kind 1063 (NIP-94 file metadata) events
      * that contain files bundled with the agent.
      *
-     * @returns Array of objects with eventId and optional relayUrl
+     * @returns Array of parsed e-tag references
      * @deprecated Use getFileETags() instead, which returns all e-tags (not just "script" marker)
      */
-    getScriptETags(): Array<{ eventId: string; relayUrl?: string }> {
-        const scriptTags = this.tags.filter((tag) => tag[0] === "e" && tag[3] === "script");
-        const result: Array<{ eventId: string; relayUrl?: string }> = [];
-
-        for (const tag of scriptTags) {
-            const eventId = tag[1];
-            if (eventId) {
-                result.push({
-                    eventId,
-                    relayUrl: tag[2] || undefined,
-                });
-            }
-        }
-
-        return result;
+    getScriptETags(): ETagReference[] {
+        return this.parseETags("script");
     }
 
     /**
@@ -170,21 +177,10 @@ export class NDKAgentDefinition extends NDKEvent {
      * Unlike getScriptETags(), this method returns ALL e-tags, not just
      * those with a specific marker, allowing for general event references.
      *
-     * @returns Array of objects with eventId, optional relayUrl, and optional marker
+     * @returns Array of parsed e-tag references
      */
-    getETags(): Array<{ eventId: string; relayUrl?: string; marker?: string }> {
-        const eTags = this.tags.filter((tag) => tag[0] === "e" && tag[1]);
-        const result: Array<{ eventId: string; relayUrl?: string; marker?: string }> = [];
-
-        for (const tag of eTags) {
-            result.push({
-                eventId: tag[1],
-                relayUrl: tag[2] || undefined,
-                marker: tag[3] || undefined,
-            });
-        }
-
-        return result;
+    getETags(): ETagReference[] {
+        return this.parseETags();
     }
 
     /**
@@ -192,15 +188,10 @@ export class NDKAgentDefinition extends NDKEvent {
      * These reference kind 1063 (NIP-94 file metadata) events that contain
      * files bundled with this agent definition.
      *
-     * @returns Array of objects with eventId and optional relayUrl
+     * @returns Array of parsed e-tag references
      */
-    getFileETags(): Array<{ eventId: string; relayUrl?: string }> {
-        return this.tags
-            .filter((tag) => tag[0] === "e" && tag[1] && tag[3] === "file")
-            .map((tag) => ({
-                eventId: tag[1],
-                relayUrl: tag[2] || undefined,
-            }));
+    getFileETags(): ETagReference[] {
+        return this.parseETags("file");
     }
 
     /**
@@ -208,15 +199,10 @@ export class NDKAgentDefinition extends NDKEvent {
      * These reference the source kind 4199 agent definition event that
      * this agent was forked from.
      *
-     * @returns Array of objects with eventId and optional relayUrl
+     * @returns Array of parsed e-tag references
      */
-    getForkETags(): Array<{ eventId: string; relayUrl?: string }> {
-        return this.tags
-            .filter((tag) => tag[0] === "e" && tag[1] && tag[3] === "fork")
-            .map((tag) => ({
-                eventId: tag[1],
-                relayUrl: tag[2] || undefined,
-            }));
+    getForkETags(): ETagReference[] {
+        return this.parseETags("fork");
     }
 
     /**
@@ -257,14 +243,50 @@ export class NDKAgentDefinition extends NDKEvent {
     }
 
     /**
-     * Build an e-tag array with the standard format: ["e", eventId, relayUrl, marker]
+     * Build an e-tag tuple with the standard format: ["e", eventId, relayUrl, marker]
      *
      * @param eventId - The event ID to reference
      * @param relayUrl - Optional relay hint URL (defaults to empty string if not provided)
      * @param marker - The marker for the e-tag (e.g., "file", "fork", "script")
-     * @returns The constructed e-tag array
+     * @returns The constructed e-tag tuple
      */
-    private buildETag(eventId: string, relayUrl: string | undefined, marker: string): string[] {
-        return ["e", eventId, relayUrl || "", marker];
+    private buildETag(eventId: string, relayUrl: string | undefined, marker: string): ETag {
+        return ["e", eventId, relayUrl ?? "", marker];
+    }
+
+    /**
+     * Parse e-tags from the event, optionally filtering by marker.
+     * Consolidates the common filter/map logic for e-tag extraction.
+     *
+     * @param marker - Optional marker to filter by (e.g., "file", "fork", "script").
+     *                 If not provided, returns all e-tags.
+     * @returns Array of parsed e-tag references with eventId, relayUrl, and marker
+     */
+    private parseETags(marker?: string): ETagReference[] {
+        return this.tags
+            .filter((tag) => tag[0] === "e" && !!tag[1] && (marker === undefined || tag[3] === marker))
+            .map((tag) => ({
+                eventId: tag[1],
+                relayUrl: tag[2] || undefined,
+                marker: tag[3] || undefined,
+            }));
+    }
+
+    /**
+     * Set an optional tag value with consistent semantics.
+     * Removes any existing tag with the same name, then adds it back only if value is truthy.
+     * This means empty strings, undefined, and null all clear the tag.
+     *
+     * Note: For tags where empty string is a valid value (like the "d" tag for slug),
+     * use direct tag manipulation with `value !== undefined` check instead of this helper.
+     *
+     * @param tagName - The tag name to set
+     * @param value - The value to set, or falsy value to clear the tag
+     */
+    private setOptionalTag(tagName: string, value: string | undefined): void {
+        this.removeTag(tagName);
+        if (value) {
+            this.tags.push([tagName, value]);
+        }
     }
 }
