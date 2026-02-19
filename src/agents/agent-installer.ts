@@ -202,8 +202,8 @@ export async function installAgentFromNostr(
     // Wrap in NDKAgentDefinition for proper accessors
     const agentDef = NDKAgentDefinition.from(agentEvent);
 
-    // Generate slug from name if not provided
-    const slug = customSlug || toKebabCase(agentDef.title || "unnamed-agent");
+    // Generate slug: prefer customSlug > event's d-tag > derived from title
+    const slug = customSlug || agentDef.slug || toKebabCase(agentDef.title || "unnamed-agent");
 
     // Parse the event into agent data
     const agentData = parseAgentEvent(agentEvent, slug);
