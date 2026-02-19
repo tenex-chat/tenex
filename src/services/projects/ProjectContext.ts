@@ -16,7 +16,7 @@ import type { Hexpubkey, NDKProject, NDKArticle } from "@nostr-dev-kit/ndk";
  * Priority order:
  * 1. Global PM designation via kind 24020 event ["pm"] tag without a-tag (highest priority)
  * 2. Project-scoped PM designation via kind 24020 event ["pm"] tag WITH a-tag (projectOverrides[dTag].isPM)
- * 3. Local PM override for this specific project (pmOverrides) - from agent_configure tool
+ * 3. Local PM override for this specific project (pmOverrides) - legacy, for backward compatibility
  * 4. Explicit PM designation in 31933 project tags (role="pm")
  * 5. First agent from project tags
  * 6. First agent in registry (fallback for projects with no agent tags)

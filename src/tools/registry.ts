@@ -24,7 +24,6 @@ function asTool<T>(tool: T): CoreTool<unknown, unknown> {
 }
 import { logger } from "@/utils/logger";
 import { CORE_AGENT_TOOLS } from "@/agents/constants";
-import { createAgentConfigureTool } from "./implementations/agent_configure";
 import { createAgentsDiscoverTool } from "./implementations/agents_discover";
 import { createAgentsHireTool } from "./implementations/agents_hire";
 import { createAgentsListTool } from "./implementations/agents_list";
@@ -146,7 +145,6 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
  */
 const toolFactories: Record<ToolName, ToolFactory> = {
     // Agent tools
-    agent_configure: createAgentConfigureTool,
     agents_publish: createAgentsPublishTool,
     agents_discover: createAgentsDiscoverTool,
     agents_hire: createAgentsHireTool,
