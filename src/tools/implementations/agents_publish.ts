@@ -21,8 +21,9 @@ const fileReferenceSchema = z.object({
 
 const agentsPublishSchema = z.object({
     slug: z.string().describe("The slug identifier of the agent to publish"),
-    one_liner: z.string().describe("Short one-line description of the agent definition"),
-    rich_description: z.string().describe("Comprehensive homepage-style description of what the agent definition is all about (markdown)"),
+    description: z.string().describe("Short one-line description of the agent definition"),
+    category: z.string().describe("Category for the agent (e.g., 'developer', 'analyst', 'assistant')"),
+    rich_description: z.string().describe("Comprehensive homepage-style description of what the agent definition is all about (markdown). This becomes the event content."),
     files: z
         .array(fileReferenceSchema)
         .optional()
@@ -292,7 +293,7 @@ async function uploadFileAndCreateMetadata(
  * Returns the event ID on success.
  */
 async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> {
-    const { slug, one_liner, rich_description, files } = input;
+    const { slug, description, category, rich_description, files } = input;
 
     if (!slug) {
         throw new Error("Agent slug is required");
@@ -336,8 +337,10 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
 
     agentDefinition.title = agent.name;
     agentDefinition.role = agent.role;
-    agentDefinition.oneLiner = one_liner;
-    agentDefinition.richDescription = rich_description;
+    agentDefinition.description = description;
+    agentDefinition.category = category;
+    // Rich description goes into event content, not a tag
+    agentDefinition.content = rich_description;
 
     if (agent.instructions) {
         agentDefinition.instructions = agent.instructions;
