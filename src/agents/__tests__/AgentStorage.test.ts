@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AgentStorage, createStoredAgent, type StoredAgent } from "../AgentStorage";
-import { AgentSlugConflictError } from "../errors";
+import { AgentStorage, createStoredAgent, isAgentActive, type StoredAgent } from "../AgentStorage";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 describe("AgentStorage", () => {
@@ -41,8 +40,10 @@ describe("AgentStorage", () => {
                 description: "A test agent",
                 instructions: "Test instructions",
                 useCriteria: "Test criteria",
-                defaultConfig: { model: "anthropic:claude-sonnet-4", tools: ["fs_read", "shell"] },
+                llmConfig: "anthropic:claude-sonnet-4",
+                tools: ["fs_read", "shell"],
                 eventId: "test-event-id",
+                projects: ["project-1"],
             });
 
             expect(agent.nsec).toBe(signer.nsec);
@@ -52,9 +53,10 @@ describe("AgentStorage", () => {
             expect(agent.description).toBe("A test agent");
             expect(agent.instructions).toBe("Test instructions");
             expect(agent.useCriteria).toBe("Test criteria");
-            expect(agent.default?.model).toBe("anthropic:claude-sonnet-4");
-            expect(agent.default?.tools).toEqual(["fs_read", "shell"]);
+            expect(agent.llmConfig).toBe("anthropic:claude-sonnet-4");
+            expect(agent.tools).toEqual(["fs_read", "shell"]);
             expect(agent.eventId).toBe("test-event-id");
+            expect(agent.projects).toEqual(["project-1"]);
         });
 
         it("should handle null values by converting to undefined", () => {
@@ -67,15 +69,16 @@ describe("AgentStorage", () => {
                 description: null,
                 instructions: null,
                 useCriteria: null,
+                tools: null,
             });
 
             expect(agent.description).toBeUndefined();
             expect(agent.instructions).toBeUndefined();
             expect(agent.useCriteria).toBeUndefined();
-            expect(agent.default).toBeUndefined();
+            expect(agent.tools).toBeUndefined();
         });
 
-        it("should not include a projects field on the created agent", () => {
+        it("should default projects to empty array", () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -84,7 +87,105 @@ describe("AgentStorage", () => {
                 role: "assistant",
             });
 
-            expect((agent as any).projects).toBeUndefined();
+            expect(agent.projects).toEqual([]);
+        });
+
+        it("should set status to 'active' when projects are provided", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            expect(agent.status).toBe("active");
+        });
+
+        it("should set status to 'inactive' when no projects are provided", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: [],
+            });
+
+            expect(agent.status).toBe("inactive");
+        });
+
+        it("should set status to 'inactive' when projects is undefined", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+            });
+
+            expect(agent.status).toBe("inactive");
+        });
+    });
+
+    describe("isAgentActive helper", () => {
+        it("should return true for agents with status 'active'", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            expect(isAgentActive(agent)).toBe(true);
+        });
+
+        it("should return false for agents with status 'inactive'", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: [],
+            });
+
+            expect(isAgentActive(agent)).toBe(false);
+        });
+
+        it("should return true for legacy agents without status field but with projects", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            // Simulate a legacy agent without status field
+            const agent: StoredAgent = {
+                nsec: signer.nsec,
+                slug: "legacy-agent",
+                name: "Legacy Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            };
+            // Explicitly remove status to simulate legacy data
+            delete (agent as Record<string, unknown>).status;
+
+            expect(isAgentActive(agent)).toBe(true);
+        });
+
+        it("should return false for legacy agents without status field and no projects", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            // Simulate a legacy agent without status field
+            const agent: StoredAgent = {
+                nsec: signer.nsec,
+                slug: "legacy-agent",
+                name: "Legacy Agent",
+                role: "assistant",
+                projects: [],
+            };
+            // Explicitly remove status to simulate legacy data
+            delete (agent as Record<string, unknown>).status;
+
+            expect(isAgentActive(agent)).toBe(false);
         });
     });
 
@@ -96,6 +197,7 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                tools: ["fs_read"],
             });
 
             await storage.saveAgent(agent);
@@ -130,7 +232,6 @@ describe("AgentStorage", () => {
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.name).toBe("Updated Name");
         });
-
     });
 
     describe("index management", () => {
@@ -201,7 +302,7 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                llmConfig: "anthropic:claude-sonnet-4",
             });
 
             await storage.saveAgent(agent);
@@ -213,7 +314,7 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
+            expect(loaded?.llmConfig).toBe("anthropic:claude-opus-4");
         });
 
         it("should return false for non-existent agent", async () => {
@@ -233,7 +334,7 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { tools: ["fs_read"] },
+                tools: ["fs_read"],
             });
 
             await storage.saveAgent(agent);
@@ -243,7 +344,7 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.tools).toEqual(newTools);
+            expect(loaded?.tools).toEqual(newTools);
         });
 
         it("should return false for non-existent agent", async () => {
@@ -329,13 +430,15 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: [],
             });
 
             await storage.saveAgent(agent);
+
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toContain("project-1");
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projects).toContain("project-1");
         });
 
         it("should not add duplicate project", async () => {
@@ -345,14 +448,15 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
+
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects.filter((p) => p === "project-1").length).toBe(1);
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projects.filter((p) => p === "project-1").length).toBe(1);
         });
 
         it("should remove agent from project", async () => {
@@ -362,87 +466,310 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1", "project-2"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).not.toContain("project-1");
-            expect(projects).toContain("project-2");
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projects).not.toContain("project-1");
+            expect(loaded?.projects).toContain("project-2");
         });
 
-        it("should delete agent when removed from all projects", async () => {
+        it("should set agent to inactive when removed from all projects (identity preservation)", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             await storage.removeAgentFromProject(signer.pubkey, "project-1");
 
+            // Agent should still exist but be inactive
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded).toBeNull();
+            expect(loaded).not.toBeNull();
+            expect(loaded?.status).toBe("inactive");
+            expect(loaded?.projects).toEqual([]);
+            // Identity should be preserved
+            expect(loaded?.nsec).toBe(signer.nsec);
+            expect(loaded?.slug).toBe("test-agent");
         });
 
-        it("should throw AgentSlugConflictError when adding agent with conflicting slug to same project", async () => {
+        it("should reactivate inactive agent when added to project", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Remove from all projects - becomes inactive
+            await storage.removeAgentFromProject(signer.pubkey, "project-1");
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.status).toBe("inactive");
+
+            // Add to new project - should reactivate
+            await storage.addAgentToProject(signer.pubkey, "project-2");
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.status).toBe("active");
+            expect(loaded?.projects).toContain("project-2");
+            // Original identity preserved
+            expect(loaded?.nsec).toBe(signer.nsec);
+        });
+
+        it("should not return inactive agents in getProjectAgents", async () => {
             const signer1 = NDKPrivateKeySigner.generate();
             const signer2 = NDKPrivateKeySigner.generate();
 
+            const activeAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "active-agent",
+                name: "Active Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            const inactiveAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "inactive-agent",
+                name: "Inactive Agent",
+                role: "assistant",
+                projects: ["project-1"],
+                // Note: status will be set to inactive after removal
+            });
+
+            await storage.saveAgent(activeAgent);
+            await storage.saveAgent(inactiveAgent);
+
+            // Both agents should be in project initially
+            let projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(2);
+
+            // Remove inactive agent from project (becomes inactive)
+            await storage.removeAgentFromProject(signer2.pubkey, "project-1");
+
+            // Only active agent should be returned
+            projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].slug).toBe("active-agent");
+        });
+
+        it("should keep inactive agent in bySlug index for reactivation", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+
+            await storage.saveAgent(agent);
+
+            // Remove from all projects - becomes inactive
+            await storage.removeAgentFromProject(signer.pubkey, "project-1");
+
+            // Should still be findable by slug
+            const foundBySlug = await storage.getAgentBySlug("test-agent");
+            expect(foundBySlug).not.toBeNull();
+            expect(foundBySlug?.status).toBe("inactive");
+        });
+
+        it("should preserve active agent visibility when same-slug agent becomes inactive (slug collision bug)", async () => {
+            // This is a regression test for the slug index collision bug
+            // Scenario: Agent in project becomes inactive, then we verify
+            // that after reactivating a different agent with the same slug,
+            // the bySlug index correctly points to the active one.
+            //
+            // The actual bug was: when saveAgent was called on an inactive agent,
+            // it would overwrite bySlug even though another active agent should own it.
+
+            const signer1 = NDKPrivateKeySigner.generate();
+
+            // Create an active agent with "my-agent" slug
             const agent1 = createStoredAgent({
                 nsec: signer1.nsec,
-                slug: "conflict-slug",
+                slug: "my-agent",
                 name: "Agent 1",
                 role: "assistant",
+                projects: ["project-1"],
             });
-
-            const agent2 = createStoredAgent({
-                nsec: signer2.nsec,
-                slug: "conflict-slug",
-                name: "Agent 2",
-                role: "assistant",
-            });
-
             await storage.saveAgent(agent1);
-            await storage.addAgentToProject(signer1.pubkey, "project-1");
 
-            await storage.saveAgent(agent2);
+            // Verify agent is visible
+            let projectAgents = await storage.getProjectAgents("project-1");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].name).toBe("Agent 1");
 
-            // Adding agent2 to the same project with same slug should throw
-            await expect(
-                storage.addAgentToProject(signer2.pubkey, "project-1")
-            ).rejects.toBeInstanceOf(AgentSlugConflictError);
+            // Remove from project - becomes inactive
+            await storage.removeAgentFromProject(signer1.pubkey, "project-1");
+
+            // Agent should still own bySlug for reactivation lookup
+            let bySlug = await storage.getAgentBySlug("my-agent");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.status).toBe("inactive");
+
+            // Reactivate the agent
+            await storage.addAgentToProject(signer1.pubkey, "project-2");
+
+            // Agent should be active and visible again
+            projectAgents = await storage.getProjectAgents("project-2");
+            expect(projectAgents.length).toBe(1);
+            expect(projectAgents[0].status).toBe("active");
+
+            // bySlug should still point to this agent
+            bySlug = await storage.getAgentBySlug("my-agent");
+            expect(bySlug?.status).toBe("active");
+        });
+
+        it("should handle inactive agent not overwriting active agent slug index on save", async () => {
+            // Direct test of the saveAgent slug index logic
+
+            const activeSigner = NDKPrivateKeySigner.generate();
+            const inactiveSigner = NDKPrivateKeySigner.generate();
+
+            // Create and save active agent first
+            const activeAgent = createStoredAgent({
+                nsec: activeSigner.nsec,
+                slug: "shared-slug",
+                name: "Active Agent",
+                role: "assistant",
+                projects: ["project-1"],
+            });
+            await storage.saveAgent(activeAgent);
+
+            // Create inactive agent with same slug
+            const inactiveAgent = createStoredAgent({
+                nsec: inactiveSigner.nsec,
+                slug: "shared-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+                projects: [], // No projects = inactive
+            });
+            // Force status to inactive since createStoredAgent now sets it
+            inactiveAgent.status = "inactive";
+            await storage.saveAgent(inactiveAgent);
+
+            // bySlug should still point to the active agent
+            const bySlug = await storage.getAgentBySlug("shared-slug");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.name).toBe("Active Agent");
+        });
+
+        it("should reassign bySlug to active agent when canonical owner becomes inactive", async () => {
+            // Regression test for: canonical slug owner becomes inactive while another
+            // active agent with the same slug exists
+            //
+            // Repro scenario:
+            // 1. Save agent A (active) → bySlug=A
+            // 2. Save agent B (active, same slug) → bySlug=B
+            // 3. Remove B's last project (B becomes inactive) → bySlug should become A, not stay B
+
+            const signerA = NDKPrivateKeySigner.generate();
+            const signerB = NDKPrivateKeySigner.generate();
+
+            // Step 1: Create active agent A with slug "conflict-slug"
+            const agentA = createStoredAgent({
+                nsec: signerA.nsec,
+                slug: "conflict-slug",
+                name: "Agent A",
+                role: "assistant",
+                projects: ["project-a"],
+            });
+            await storage.saveAgent(agentA);
+
+            // Verify A owns bySlug
+            let bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug?.name).toBe("Agent A");
+
+            // Step 2: Create active agent B with same slug (takes over bySlug)
+            const agentB = createStoredAgent({
+                nsec: signerB.nsec,
+                slug: "conflict-slug",
+                name: "Agent B",
+                role: "assistant",
+                projects: ["project-b"],
+            });
+            await storage.saveAgent(agentB);
+
+            // Verify B now owns bySlug
+            bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug?.name).toBe("Agent B");
+
+            // Step 3: Remove B from its project (becomes inactive)
+            await storage.removeAgentFromProject(signerB.pubkey, "project-b");
+
+            // bySlug should now point to A (the remaining active agent with this slug)
+            bySlug = await storage.getAgentBySlug("conflict-slug");
+            expect(bySlug).not.toBeNull();
+            expect(bySlug?.name).toBe("Agent A");
+            expect(bySlug?.status).toBe("active");
+        });
+
+        it("should handle isAgentActive with null/undefined/junk status values", () => {
+            // Test that isAgentActive properly handles edge cases for status field
+
+            // Explicit 'active' status
+            expect(isAgentActive({ status: "active", projects: [] } as StoredAgent)).toBe(true);
+            expect(isAgentActive({ status: "active", projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // Explicit 'inactive' status
+            expect(isAgentActive({ status: "inactive", projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: "inactive", projects: ["p1"] } as StoredAgent)).toBe(false);
+
+            // Undefined status - falls back to projects check
+            expect(isAgentActive({ status: undefined, projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: undefined, projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // No status field - falls back to projects check
+            expect(isAgentActive({ projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ projects: ["p1"] } as StoredAgent)).toBe(true);
+
+            // Junk/invalid status values - should fall back to projects check
+            expect(isAgentActive({ status: null as unknown as string, projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: null as unknown as string, projects: ["p1"] } as StoredAgent)).toBe(true);
+            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: [] } as StoredAgent)).toBe(false);
+            expect(isAgentActive({ status: "invalid" as unknown as "active" | "inactive", projects: ["p1"] } as StoredAgent)).toBe(true);
         });
     });
 
     describe("project-scoped configuration", () => {
-        it("should set and get project-scoped config via projectOverrides", async () => {
+        it("should set and get project-scoped config", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4" },
-                projectOverrides: {
-                    "project-1": { model: "anthropic:claude-opus-4", isPM: true },
-                },
+                llmConfig: "anthropic:claude-sonnet-4",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            // Set project-scoped config
+            storage.setProjectConfig(agent, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
+                isPM: true,
+            });
+            await storage.saveAgent(agent);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
-            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
+            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
+                llmConfig: "anthropic:claude-opus-4",
+                isPM: true,
+            });
         });
 
         it("should resolve effective LLM config with project override", async () => {
@@ -452,10 +779,13 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4" },
-                projectOverrides: {
-                    "project-1": { model: "anthropic:claude-opus-4" },
-                },
+                llmConfig: "anthropic:claude-sonnet-4",
+                projects: ["project-1", "project-2"],
+            });
+
+            // Set project-scoped override for project-1 only
+            storage.setProjectConfig(agent, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
             });
 
             // project-1 should use override
@@ -472,10 +802,13 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { tools: ["fs_read", "shell"] },
-                projectOverrides: {
-                    "project-1": { tools: ["fs_read", "shell", "agents_write"] },
-                },
+                tools: ["fs_read", "shell"],
+                projects: ["project-1", "project-2"],
+            });
+
+            // Set project-scoped override for project-1 only
+            storage.setProjectConfig(agent, "project-1", {
+                tools: ["fs_read", "shell", "agents_write"],
             });
 
             // project-1 should use override
@@ -492,18 +825,19 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1", "project-2", "project-3"],
             });
 
             // Test 1: No PM designation
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(false);
 
-            // Test 2: pmOverrides
+            // Test 2: Legacy pmOverrides
             agent.pmOverrides = { "project-1": true };
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(true);
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(false);
 
-            // Test 3: projectOverrides.isPM is also checked
-            agent.projectOverrides = { "project-2": { isPM: true } };
+            // Test 3: Project-scoped config takes precedence over pmOverrides for same project
+            storage.setProjectConfig(agent, "project-2", { isPM: true });
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(true);
 
             // Test 4: Global isPM takes highest precedence
@@ -520,11 +854,11 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                llmConfig: "anthropic:claude-sonnet-4",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedLLMConfig(
                 signer.pubkey,
@@ -534,8 +868,7 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("anthropic:claude-opus-4");
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
+            expect(loaded?.projectConfigs?.["project-1"]?.llmConfig).toBe("anthropic:claude-opus-4");
         });
 
         it("should update project-scoped tools via async method", async () => {
@@ -545,11 +878,11 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { tools: ["fs_read"] },
+                tools: ["fs_read"],
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedTools(
                 signer.pubkey,
@@ -559,8 +892,7 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["fs_read", "shell", "agents_write"]);
-            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["fs_read", "shell", "agents_write"]);
+            expect(loaded?.projectConfigs?.["project-1"]?.tools).toEqual(["fs_read", "shell", "agents_write"]);
         });
 
         it("should update project-scoped isPM via async method", async () => {
@@ -570,10 +902,10 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
             const success = await storage.updateProjectScopedIsPM(
                 signer.pubkey,
@@ -583,652 +915,162 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
+            expect(loaded?.projectConfigs?.["project-1"]?.isPM).toBe(true);
         });
 
-        it("should update complete project override authoritatively via updateProjectOverride", async () => {
+        it("should update complete project-scoped config authoritatively", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1"],
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "anthropic:claude-opus-4",
+            // Set initial config
+            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
                 tools: ["fs_read", "shell"],
                 isPM: true,
             });
 
             let loaded = await storage.loadAgent(signer.pubkey);
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-opus-4");
-            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["fs_read", "shell"]);
-            expect(storage.resolveEffectiveIsPM(loaded!, "project-1")).toBe(true);
-
-            // Replace with new override (isPM should be gone)
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "anthropic:claude-sonnet-4",
-            });
-
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("anthropic:claude-sonnet-4");
-        });
-
-        it("should clear project override when reset=true", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-1", "anthropic:claude-opus-4");
-
-            let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeDefined();
-
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {}, true);
-
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
-            expect(loaded?.projectOverrides).toBeUndefined();
-        });
-
-        it("should store project overrides with only defined fields", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            agent.projectOverrides = { "project-1": { model: "anthropic:claude-opus-4" } };
-
-            expect(agent.projectOverrides["project-1"]).toEqual({ model: "anthropic:claude-opus-4" });
-        });
-
-        it("should layer project overrides independently per project", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
-
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-1", "model-for-p1");
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-2", "model-for-p2");
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toEqual({ model: "model-for-p1" });
-            expect(loaded?.projectOverrides?.["project-2"]).toEqual({ model: "model-for-p2" });
-        });
-
-        it("should clear individual project override without affecting others", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
-
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-1", "config-1");
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-2", "config-2");
-
-            expect(Object.keys((await storage.loadAgent(signer.pubkey))!.projectOverrides!).length).toBe(2);
-
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {}, true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
-            expect(loaded?.projectOverrides?.["project-2"]).toEqual({ model: "config-2" });
-        });
-
-        it("should clear projectOverrides when last override is removed", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            await storage.updateProjectScopedLLMConfig(signer.pubkey, "project-1", "config-1");
-
-            let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides).toBeDefined();
-
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {}, true);
-
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides).toBeUndefined();
-        });
-    });
-
-    describe("new schema: updateDefaultConfig and updateProjectOverride", () => {
-        it("should write to default block when calling updateDefaultConfig", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            const success = await storage.updateDefaultConfig(signer.pubkey, {
-                model: "anthropic:claude-opus-4",
+            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
+                llmConfig: "anthropic:claude-opus-4",
                 tools: ["fs_read", "shell"],
-            });
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
-            expect(loaded?.default?.tools).toEqual(["fs_read", "shell"]);
-        });
-
-        it("should write to projectOverrides when calling updateProjectOverride", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
-            });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "modelB",
-                tools: ["-tool1", "+tool4"],
-            });
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("modelB");
-            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["-tool1", "+tool4"]);
-
-            // Effective config should resolve delta correctly
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("modelB");
-            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["tool2", "tool4"]);
-        });
-
-        it("should apply dedup: remove model override when same as default", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
-            });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            // Set initial override
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "modelB",
-                tools: ["tool1", "tool2"],
+                isPM: true,
             });
 
-            let loaded = await storage.loadAgent(signer.pubkey);
-            // modelB is different from default (modelA), so kept
-            // tools is same as default, so should be removed by dedup
-            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("modelB");
-            expect(loaded?.projectOverrides?.["project-1"]?.tools).toBeUndefined();
-
-            // Now set model to same as default -> entire override should be cleared
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "modelA",
+            // Replace with new config (authoritative - previous isPM should be gone)
+            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
+                llmConfig: "anthropic:claude-sonnet-4",
+                tools: [],
             });
 
             loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+            // Empty tools array should result in no tools field
+            // isPM should be gone since it wasn't in the new config
+            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
+                llmConfig: "anthropic:claude-sonnet-4",
+            });
         });
 
-        it("should reset project override when reset=true", async () => {
+        it("should clear project config when all values are empty", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
+                projects: ["project-1"],
             });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Set override
-            await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                model: "modelB",
-                tools: ["+tool3"],
+            await storage.saveAgent(agent);
+
+            // Set config
+            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
             });
 
             let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeDefined();
+            expect(loaded?.projectConfigs?.["project-1"]).toBeDefined();
 
-            // Reset
-            const success = await storage.updateProjectOverride(
-                signer.pubkey, "project-1", {}, true
-            );
-            expect(success).toBe(true);
+            // Clear config by setting empty
+            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {});
 
             loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
-            expect(loaded?.projectOverrides).toBeUndefined();
-
-            // Effective config should fall back to defaults
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-1")).toBe("modelA");
-            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual(["tool1", "tool2"]);
+            expect(loaded?.projectConfigs).toBeUndefined();
         });
 
-        it("should handle full example from requirements", async () => {
-            // agentA has:
-            //   default: { model: 'modelA', tools: [ 'tool1', 'tool2' ] }
-            //   projectA: { model: 'modelB', tools: [ '-tool1', '+tool4' ] } -> modelB, [tool2, tool4]
-            //   projectB: { tools: [ '+tool5' ] } -> modelA, [tool1, tool2, tool5]
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "agent-a",
-                name: "Agent A",
-                role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["tool1", "tool2"] },
-                projectOverrides: {
-                    "project-a": { model: "modelB", tools: ["-tool1", "+tool4"] },
-                    "project-b": { tools: ["+tool5"] },
-                },
-            });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-a");
-            await storage.addAgentToProject(signer.pubkey, "project-b");
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded).toBeDefined();
-
-            // projectA: modelB, [tool2, tool4]
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-a")).toBe("modelB");
-            expect(storage.resolveEffectiveTools(loaded!, "project-a")).toEqual(["tool2", "tool4"]);
-
-            // projectB: modelA, [tool1, tool2, tool5]
-            expect(storage.resolveEffectiveLLMConfig(loaded!, "project-b")).toBe("modelA");
-            expect(storage.resolveEffectiveTools(loaded!, "project-b")).toEqual(["tool1", "tool2", "tool5"]);
-
-            // Now send 24020 a-tagging projectB with: { model: 'modelA', tools: ['tool1', 'tool2'] }
-            // -> config becomes projectB: {} (empty = deleted)
-            await storage.updateProjectOverride(signer.pubkey, "project-b", {
-                model: "modelA",
-                tools: ["tool1", "tool2"],
-            });
-
-            const updated = await storage.loadAgent(signer.pubkey);
-            expect(updated?.projectOverrides?.["project-b"]).toBeUndefined();
-
-            // After reset, projectB uses defaults
-            expect(storage.resolveEffectiveLLMConfig(updated!, "project-b")).toBe("modelA");
-            expect(storage.resolveEffectiveTools(updated!, "project-b")).toEqual(["tool1", "tool2"]);
-
-            // projectA should be unchanged
-            expect(storage.resolveEffectiveLLMConfig(updated!, "project-a")).toBe("modelB");
-        });
-
-        it("should NOT clear model or tools when only isPM is updated (PM-only update behavior)", async () => {
-            // DESIGN: A PM-only 24020 event (no model/tools tags) uses PARTIAL-UPDATE semantics.
-            // Only fields explicitly present in the event are updated; absent fields are unchanged.
-            // This means updateDefaultConfig({}) must NOT clear existing model or tools.
-            // Clearing would require an explicit reset tag or explicit empty-value fields.
+        it("should clean up undefined values in setProjectConfig", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "anthropic:claude-sonnet-4", tools: ["fs_read", "shell"] },
+                projects: ["project-1"],
             });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Step 1: Simulate PM designation (updateAgentIsPM is called separately)
-            const pmSuccess = await storage.updateAgentIsPM(signer.pubkey, true);
-            expect(pmSuccess).toBe(true);
-
-            // Step 2: Simulate the updateDefaultConfig call with no model/tools
-            // This is what the event handler does when a 24020 has only a ["pm"] tag
-            const success = await storage.updateDefaultConfig(signer.pubkey, {
-                // No model, no tools - only pm is being changed via updateAgentIsPM above
+            // Set config with undefined values
+            storage.setProjectConfig(agent, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
+                tools: undefined,
+                isPM: undefined,
             });
-            expect(success).toBe(true);
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            // PM should now be true
-            expect(loaded?.isPM).toBe(true);
-            // Model and tools should be UNCHANGED - PM-only update must not clear them
-            expect(loaded?.default?.model).toBe("anthropic:claude-sonnet-4");
-            expect(loaded?.default?.tools).toEqual(["fs_read", "shell"]);
+            // Only llmConfig should be present
+            expect(agent.projectConfigs?.["project-1"]).toEqual({
+                llmConfig: "anthropic:claude-opus-4",
+            });
         });
 
-        it("should deduplicate no-op delta: +tool where tool already in defaults is a no-op", async () => {
-            // Issue 3: If a project override delta becomes a no-op (e.g., +tool that's already
-            // in defaults), it should be cleaned up - user is confirming availability.
+        it("should merge with existing project config", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["fs_read", "shell"] },
+                projects: ["project-1"],
             });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Pass a delta where "+fs_read" is already in defaults - resolves to same as defaults
-            // resolves to: apply +fs_read to [fs_read, shell] → [fs_read, shell] = same as defaults
-            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                tools: ["+fs_read"], // fs_read is already in defaults, so this is a no-op
+            // Set initial config
+            storage.setProjectConfig(agent, "project-1", {
+                llmConfig: "anthropic:claude-opus-4",
             });
-            expect(success).toBe(true);
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            // No-op delta: resolved tools equal defaults → override should be cleared
-            expect(loaded?.projectOverrides?.["project-1"]).toBeUndefined();
+            // Merge additional config
+            storage.setProjectConfig(agent, "project-1", {
+                isPM: true,
+            });
+
+            // Both should be present
+            expect(agent.projectConfigs?.["project-1"]).toEqual({
+                llmConfig: "anthropic:claude-opus-4",
+                isPM: true,
+            });
         });
 
-        it("should preserve useful part of delta when only some entries are no-ops", async () => {
-            // If a delta has mixed entries (some no-op, some actual changes), only the
-            // effective difference should be stored.
+        it("should clear project config via clearProjectConfig", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                defaultConfig: { model: "modelA", tools: ["fs_read", "shell"] },
+                projects: ["project-1", "project-2"],
             });
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Delta: +fs_read (already there = no-op), +agents_write (new = actual change)
-            // Resolved: [fs_read, shell, agents_write] ≠ defaults [fs_read, shell]
-            // So override should NOT be cleared - it represents a real difference
-            const success = await storage.updateProjectOverride(signer.pubkey, "project-1", {
-                tools: ["+fs_read", "+agents_write"],
-            });
-            expect(success).toBe(true);
+            storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
+            storage.setProjectConfig(agent, "project-2", { llmConfig: "config-2" });
 
-            const loaded = await storage.loadAgent(signer.pubkey);
-            // Override should still exist because resolved result differs from defaults
-            expect(loaded?.projectOverrides?.["project-1"]).toBeDefined();
-            // The STORED delta should be normalized: "+fs_read" is a no-op (fs_read is already
-            // in defaults), so it should be removed from the stored delta. Only "+agents_write"
-            // represents a real change and should remain.
-            expect(loaded?.projectOverrides?.["project-1"]?.tools).toEqual(["+agents_write"]);
-            // The effective tools should be [fs_read, shell, agents_write]
-            expect(storage.resolveEffectiveTools(loaded!, "project-1")).toEqual([
-                "fs_read",
-                "shell",
-                "agents_write",
-            ]);
+            expect(Object.keys(agent.projectConfigs!).length).toBe(2);
+
+            storage.clearProjectConfig(agent, "project-1");
+
+            expect(agent.projectConfigs?.["project-1"]).toBeUndefined();
+            expect(agent.projectConfigs?.["project-2"]).toEqual({ llmConfig: "config-2" });
         });
 
-    });
-
-    describe("multi-project slug index", () => {
-        it("should track same agent across multiple projects", async () => {
+        it("should clean up projectConfigs when last project config is cleared", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
-                slug: "shared-agent",
-                name: "Shared Agent",
+                slug: "test-agent",
+                name: "Test Agent",
                 role: "assistant",
+                projects: ["project-1"],
             });
 
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
+            storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
+            expect(agent.projectConfigs).toBeDefined();
 
-            // Verify agent is in both projects
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toContain("project-1");
-            expect(projects).toContain("project-2");
-        });
-
-        it("should throw conflict error when adding agent with same slug to same project", async () => {
-            const signer1 = NDKPrivateKeySigner.generate();
-            const signer2 = NDKPrivateKeySigner.generate();
-
-            const agent1 = createStoredAgent({
-                nsec: signer1.nsec,
-                slug: "conflict-slug",
-                name: "Agent 1",
-                role: "assistant",
-            });
-
-            const agent2 = createStoredAgent({
-                nsec: signer2.nsec,
-                slug: "conflict-slug",
-                name: "Agent 2",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent1);
-            await storage.addAgentToProject(signer1.pubkey, "project-1");
-
-            await storage.saveAgent(agent2);
-
-            await expect(
-                storage.addAgentToProject(signer2.pubkey, "project-1")
-            ).rejects.toBeInstanceOf(AgentSlugConflictError);
-        });
-
-        it("should allow same slug in different projects", async () => {
-            const signer1 = NDKPrivateKeySigner.generate();
-            const signer2 = NDKPrivateKeySigner.generate();
-
-            const agent1 = createStoredAgent({
-                nsec: signer1.nsec,
-                slug: "my-agent",
-                name: "Agent 1",
-                role: "assistant",
-            });
-
-            const agent2 = createStoredAgent({
-                nsec: signer2.nsec,
-                slug: "my-agent",
-                name: "Agent 2",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent1);
-            await storage.addAgentToProject(signer1.pubkey, "project-1");
-
-            await storage.saveAgent(agent2);
-            await storage.addAgentToProject(signer2.pubkey, "project-2");
-
-            // Both agents should be retrievable from their respective projects
-            const project1Agents = await storage.getProjectAgents("project-1");
-            expect(project1Agents).toHaveLength(1);
-            expect(project1Agents[0].name).toBe("Agent 1");
-
-            const project2Agents = await storage.getProjectAgents("project-2");
-            expect(project2Agents).toHaveLength(1);
-            expect(project2Agents[0].name).toBe("Agent 2");
-        });
-
-        it("should remove slug entry when agent has no projects left", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "temp-agent",
-                name: "Temp Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            // Remove from project (will delete agent)
-            await storage.removeAgentFromProject(signer.pubkey, "project-1");
-
-            // Slug should no longer exist
-            const loaded = await storage.getAgentBySlug("temp-agent");
-            expect(loaded).toBeNull();
-        });
-
-        it("should rebuild index preserving byProject and rebuilding bySlug/byEventId", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "rebuild-test",
-                name: "Rebuild Test",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
-            await storage.addAgentToProject(signer.pubkey, "project-3");
-
-            // Rebuild index
-            await storage.rebuildIndex();
-
-            // Verify slug entry exists
-            const loaded = await storage.getAgentBySlug("rebuild-test");
-            expect(loaded).toBeDefined();
-
-            // Verify byProject still has all associations
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toContain("project-1");
-            expect(projects).toContain("project-2");
-            expect(projects).toContain("project-3");
-        });
-
-        it("should shrink project list when agent is removed from projects", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "shrinking-agent",
-                name: "Shrinking Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-            await storage.addAgentToProject(signer.pubkey, "project-2");
-            await storage.addAgentToProject(signer.pubkey, "project-3");
-
-            // Use removeAgentFromProject to remove from project-2
-            await storage.removeAgentFromProject(signer.pubkey, "project-2");
-
-            let projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toContain("project-1");
-            expect(projects).not.toContain("project-2");
-            expect(projects).toContain("project-3");
-
-            // Remove from another project
-            await storage.removeAgentFromProject(signer.pubkey, "project-1");
-
-            projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toEqual(["project-3"]);
-
-            // Remove from last project (should delete agent and slug entry)
-            await storage.removeAgentFromProject(signer.pubkey, "project-3");
-
-            const indexPath = path.join(tempDir, "index.json");
-            const indexContent = await fs.readFile(indexPath, "utf-8");
-            const index = JSON.parse(indexContent);
-            expect(index.bySlug["shrinking-agent"]).toBeUndefined();
-        });
-
-        it("should handle corrupted index with duplicate slugs in same project", async () => {
-            const signer1 = NDKPrivateKeySigner.generate();
-            const signer2 = NDKPrivateKeySigner.generate();
-
-            const agent1 = createStoredAgent({
-                nsec: signer1.nsec,
-                slug: "duplicate-slug",
-                name: "Agent 1",
-                role: "assistant",
-            });
-
-            const agent2 = createStoredAgent({
-                nsec: signer2.nsec,
-                slug: "duplicate-slug",
-                name: "Agent 2",
-                role: "assistant",
-            });
-
-            // Save both agents
-            await storage.saveAgent(agent1);
-            await storage.addAgentToProject(signer1.pubkey, "project-1");
-
-            // Manually corrupt the index to simulate the bug scenario
-            // Add both agents to the same project with same slug
-            const indexPath = path.join(tempDir, "index.json");
-            let indexContent = await fs.readFile(indexPath, "utf-8");
-            let index = JSON.parse(indexContent);
-
-            // Force both pubkeys into project-1
-            index.byProject["project-1"].push(signer2.pubkey);
-            await fs.writeFile(indexPath, JSON.stringify(index, null, 2));
-
-            // Manually save agent2 file
-            await storage.saveAgent(agent2);
-
-            // getProjectAgents should handle this gracefully (return only first agent)
-            const projectAgents = await storage.getProjectAgents("project-1");
-            expect(projectAgents).toHaveLength(1);
-            expect(projectAgents[0].name).toBe("Agent 1");
-        });
-
-        it("should sync slug when agent changes slug", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "old-slug",
-                name: "Renaming Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            // Change slug
-            agent.slug = "new-slug";
-            await storage.saveAgent(agent);
-
-            // Verify old slug entry removed
-            const oldLookup = await storage.getAgentBySlug("old-slug");
-            expect(oldLookup).toBeNull();
-
-            // Verify new slug entry exists and agent is still in project
-            const newLookup = await storage.getAgentBySlug("new-slug");
-            expect(newLookup).toBeDefined();
-
-            const projects = await storage.getAgentProjects(signer.pubkey);
-            expect(projects).toContain("project-1");
+            storage.clearProjectConfig(agent, "project-1");
+            expect(agent.projectConfigs).toBeUndefined();
         });
     });
 });
