@@ -90,10 +90,42 @@ export class AgentProfilePublisher {
         let profileEvent: NDKEvent;
 
         try {
+            // Check if there are other agents with the same slug (name) in this project
+            // If so, append pubkey prefix for disambiguation
+            const projectDTag = projectEvent.dTag;
+            let displayName = agentName;
+
+            if (projectDTag) {
+                // Load the agent's slug from storage to check for conflicts
+                const agent = await agentStorage.loadAgent(signer.pubkey);
+                if (agent && agent.slug) {
+                    // Check if this slug has conflicts (multiple pubkeys for same slug)
+                    const conflictingAgent = await agentStorage.getAgentBySlugForProject(
+                        agent.slug,
+                        projectDTag
+                    );
+
+                    // If we found an agent with this slug but it's a different pubkey, there's a conflict
+                    if (conflictingAgent && conflictingAgent.nsec !== agent.nsec) {
+                        const otherSigner = new NDKPrivateKeySigner(conflictingAgent.nsec);
+                        if (otherSigner.pubkey !== signer.pubkey) {
+                            // Conflict exists - append pubkey prefix to both names
+                            displayName = `${agentName} (${signer.pubkey.slice(0, 5)})`;
+                            logger.info("Agent slug conflict detected, adding pubkey prefix to Kind 0 name", {
+                                slug: agent.slug,
+                                pubkey: signer.pubkey.substring(0, 8),
+                                projectDTag,
+                                displayName,
+                            });
+                        }
+                    }
+                }
+            }
+
             const avatarUrl = AgentProfilePublisher.buildAvatarUrl(signer.pubkey);
 
             const profile = {
-                name: agentName,
+                name: displayName,
                 description: `${agentRole} agent for ${projectTitle}`,
                 picture: avatarUrl,
             };
@@ -108,7 +140,7 @@ export class AgentProfilePublisher {
             // Validate projectEvent has required fields before tagging
             // Both pubkey and dTag are required for valid NIP-01 addressable coordinates:
             // Format: <kind>:<pubkey>:<d-tag> (e.g., "31933:abc123:my-project")
-            const projectDTag = projectEvent.dTag;
+            // Note: projectDTag was already declared earlier for conflict detection
             if (!projectEvent.pubkey) {
                 logger.warn("Project event missing pubkey, skipping a-tag", {
                     agentPubkey: signer.pubkey,
