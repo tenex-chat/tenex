@@ -196,6 +196,8 @@ export interface DelegateConfig {
     content: string;
     /** Optional branch for worktree support */
     branch?: string;
+    /** Optional nudge event IDs to apply to the delegated agent */
+    nudges?: string[];
 }
 
 /**

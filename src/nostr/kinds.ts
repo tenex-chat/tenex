@@ -22,6 +22,7 @@ export const NDKKind = {
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
     AgentSkill: 4202 as BaseNDKKind, // Agent Skill - transient capability injection
     DelegationMarker: 4203 as BaseNDKKind, // Delegation Marker - lifecycle tracking
+    NudgeSkillWhitelist: 14202 as BaseNDKKind, // Nudge/Skill Whitelist - NIP-51-like list of e-tagged nudges/skills
 
     // Tenex custom kinds (2xxxx range)
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag

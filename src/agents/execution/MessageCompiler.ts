@@ -9,7 +9,7 @@ import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import type { NudgeToolPermissions, NudgeData, WhitelistItem } from "@/services/nudge";
 import type { LessonComment } from "@/services/prompt-compiler";
 import type { SkillData } from "@/services/skill";
 import { combineSystemReminders } from "@/services/system-reminder";
@@ -75,6 +75,8 @@ export interface MessageCompilerContext {
     variantSystemPrompt?: string;
     /** Ephemeral messages to include in this compilation only (not persisted) */
     ephemeralMessages?: EphemeralMessage[];
+    /** Available whitelisted nudges for delegation */
+    availableNudges?: WhitelistItem[];
 }
 
 export interface CompiledMessages {
