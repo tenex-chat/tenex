@@ -36,7 +36,7 @@ export class ProviderConfigUI {
      */
     static async configureProvider(
         provider: string,
-        currentConfig?: TenexLLMsWithProviders
+        currentProviders?: Record<string, { apiKey: string }>
     ): Promise<{ apiKey: string }> {
         if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             // Agent providers don't require an API key
@@ -49,7 +49,7 @@ export class ProviderConfigUI {
         }
         if (provider === PROVIDER_IDS.OLLAMA) {
             // For Ollama, ask for base URL instead of API key
-            const currentUrl = currentConfig?.providers[provider]?.apiKey || "local";
+            const currentUrl = currentProviders?.[provider]?.apiKey || "local";
             const { ollamaConfig } = await inquirer.prompt([
                 {
                     type: "select",
@@ -88,7 +88,7 @@ export class ProviderConfigUI {
             return { apiKey: baseUrl };
         }
         // For other providers, ask for API key
-        const currentKey = currentConfig?.providers[provider]?.apiKey;
+        const currentKey = currentProviders?.[provider]?.apiKey;
         const { apiKey } = await inquirer.prompt([
             {
                 type: "password",

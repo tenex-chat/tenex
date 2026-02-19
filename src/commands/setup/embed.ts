@@ -80,6 +80,13 @@ export const embedCommand = new Command("embed")
 
             // Load configured providers from providers.json
             const providersConfig = await configService.loadTenexProviders(configService.getGlobalPath());
+            if (Object.keys(providersConfig.providers).length === 0) {
+                logger.error(
+                    "No providers configured. Run `tenex setup providers` before configuring embeddings."
+                );
+                process.exitCode = 1;
+                return;
+            }
             const configuredProviders = Object.keys(providersConfig.providers);
 
             // Build provider choices: local + any configured embedding-capable providers

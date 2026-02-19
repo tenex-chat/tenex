@@ -3,10 +3,10 @@ import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { llmServiceFactory } from "./LLMServiceFactory";
-import { AI_SDK_PROVIDERS } from "./types";
 import { ConfigurationManager } from "./utils/ConfigurationManager";
 import { ConfigurationTester } from "./utils/ConfigurationTester";
 import { ProviderConfigUI } from "./utils/ProviderConfigUI";
+import { runProviderSetup } from "./utils/provider-setup";
 
 /**
  * Internal type used by editor to work with providers
@@ -35,7 +35,6 @@ export class LLMConfigEditor {
                 name: "action",
                 message: "What would you like to do?",
                 choices: [
-                    { name: "Configure provider API keys", value: "providers" },
                     { name: "Add new configuration", value: "add" },
                     { name: "Create meta model", value: "addMeta" },
                     { name: "Delete configuration", value: "delete" },
@@ -71,10 +70,7 @@ export class LLMConfigEditor {
 
         if (action === "exit") process.exit(0);
 
-        if (action === "providers") {
-            await this.configureProviders(llmsConfig);
-            await this.saveConfig(llmsConfig);
-        } else if (action === "test") {
+        if (action === "test") {
             await ConfigurationTester.test(llmsConfig);
         } else {
             // All other actions use ConfigurationManager
@@ -97,10 +93,13 @@ export class LLMConfigEditor {
         console.log(chalk.green("\n🚀 Welcome to TENEX LLM Setup!\n"));
 
         const llmsConfig = await this.loadConfig();
+        const globalPath = config.getGlobalPath();
 
         // Step 1: Configure providers
         console.log(chalk.cyan("Step 1: Configure Provider API Keys"));
-        await this.configureProviders(llmsConfig);
+        const existingProviders = await config.loadTenexProviders(globalPath);
+        const updatedProviders = await runProviderSetup(existingProviders);
+        llmsConfig.providers = updatedProviders.providers;
         await this.saveConfig(llmsConfig);
 
         // Step 2: Create first configuration
@@ -123,40 +122,6 @@ export class LLMConfigEditor {
         }
 
         console.log(chalk.green("\n✅ LLM configuration complete!"));
-    }
-
-    private async configureProviders(llmsConfig: LLMConfigWithProviders): Promise<void> {
-        const choices = AI_SDK_PROVIDERS.map((p) => {
-            const isConfigured =
-                llmsConfig.providers[p]?.apiKey && llmsConfig.providers[p]?.apiKey !== "none";
-            const name = ProviderConfigUI.getProviderDisplayName(p);
-            return {
-                name: isConfigured ? `${name} (configured)` : name,
-                value: p,
-            };
-        });
-
-        const { selected } = await inquirer.prompt([
-            {
-                type: "checkbox",
-                name: "selected",
-                message: "Select providers to configure:",
-                choices: choices,
-            },
-        ]);
-
-        const providers = selected;
-
-        for (const provider of providers) {
-            const config = await ProviderConfigUI.configureProvider(provider, llmsConfig);
-            if (!llmsConfig.providers[provider]) {
-                llmsConfig.providers[provider] = { apiKey: "" };
-            }
-            const providerConfig = llmsConfig.providers[provider];
-            if (providerConfig) {
-                providerConfig.apiKey = config.apiKey;
-            }
-        }
     }
 
     private async loadConfig(): Promise<LLMConfigWithProviders> {
