@@ -29,6 +29,44 @@ interface ClaudeCodeProviderMetadata {
 }
 
 /**
+ * Mapping between Claude Code built-in tools and their TENEX/MCP equivalents.
+ * Used to determine which built-in tools to disable when TENEX provides alternatives.
+ */
+interface ToolMapping {
+    tenex?: string;
+    mcpPatterns?: RegExp[];
+}
+
+/** Claude Code built-in tools and their TENEX/MCP equivalents */
+const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
+    // File system tools
+    Read: { tenex: "fs_read", mcpPatterns: [/^mcp__.*__fs_read$/, /^mcp__.*__read_file$/] },
+    Write: { tenex: "fs_write", mcpPatterns: [/^mcp__.*__fs_write$/, /^mcp__.*__write_file$/] },
+    Edit: { tenex: "fs_edit", mcpPatterns: [/^mcp__.*__fs_edit$/, /^mcp__.*__edit_file$/] },
+    Glob: { tenex: "fs_glob", mcpPatterns: [/^mcp__.*__fs_glob$/, /^mcp__.*__glob$/] },
+    Grep: { tenex: "fs_grep", mcpPatterns: [/^mcp__.*__fs_grep$/, /^mcp__.*__grep$/] },
+    LS: { tenex: "fs_glob", mcpPatterns: [/^mcp__.*__fs_glob$/, /^mcp__.*__list_directory$/] },
+    // Web tools
+    WebFetch: { tenex: "web_fetch", mcpPatterns: [/^mcp__.*__web_fetch$/, /^mcp__.*__fetch$/] },
+    WebSearch: { tenex: "web_search", mcpPatterns: [/^mcp__.*__web_search$/, /^mcp__.*__search$/] },
+    // Shell tools (Bash is controlled via TENEX's shell tool)
+    Bash: { tenex: "shell", mcpPatterns: [/^mcp__.*__shell$/, /^mcp__.*__bash$/, /^mcp__.*__execute$/] },
+    // Notebook tools
+    NotebookEdit: { tenex: undefined, mcpPatterns: [/^mcp__.*__notebook_edit$/] },
+    // Task/agent tools (TENEX uses delegate)
+    Task: { tenex: "delegate", mcpPatterns: [/^mcp__.*__delegate$/] },
+} as const;
+
+/** File system tool names that indicate FS capability */
+const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] as const;
+
+/** File system built-in tool names */
+const FS_BUILTIN_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit"] as const;
+
+/** Pattern to detect MCP tools that provide FS capability */
+const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
+
+/**
  * AI SDK usage with optional extended fields
  */
 interface ExtendedUsage extends LanguageModelUsage {
@@ -96,13 +134,19 @@ export class ClaudeCodeProvider extends AgentProvider {
         // Extract tool names from the provided tools
         const toolNames = context.tools ? Object.keys(context.tools) : [];
         const regularTools = toolNames.filter((name) => !name.startsWith("mcp__"));
+        const mcpTools = toolNames.filter((name) => name.startsWith("mcp__"));
+
+        // Determine which built-in tools to disable based on TENEX configuration
+        const disallowedTools = this.computeDisallowedBuiltinTools(regularTools, mcpTools);
 
         trace.getActiveSpan()?.addEvent("llm_factory.creating_claude_code", {
             "agent.name": context.agentName ?? "",
             "session.id": context.sessionId ?? "",
             "tools.count": regularTools.length,
+            "mcp_tools.count": mcpTools.length,
             "tenex_tools.enabled": this.enableTenexTools,
             "cwd.from_context": context.workingDirectory ?? "(undefined)",
+            "disallowed_builtins": disallowedTools.join(", "),
         });
 
         // Create SDK MCP server for local TENEX tools if enabled
@@ -147,7 +191,7 @@ export class ClaudeCodeProvider extends AgentProvider {
                 CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
             },
             mcpServers: mcpServersConfig,
-            disallowedTools: ["AskUserQuestion"],
+            disallowedTools,
             persistSession: false,
             // Enable streaming input for mid-execution message injection
             streamingInput: "always",
@@ -166,6 +210,116 @@ export class ClaudeCodeProvider extends AgentProvider {
         }
 
         return settings;
+    }
+
+    /**
+     * Compute which Claude Code built-in tools should be disabled.
+     *
+     * TENEX manages agent capabilities through its tool configuration system.
+     * When TENEX provides MCP-wrapped versions of tools (fs_read, fs_write, etc.),
+     * we disable Claude Code's built-in equivalents to ensure:
+     * 1. TENEX has accurate control over agent capabilities
+     * 2. Agents cannot bypass restrictions using built-in tools
+     * 3. Tool permissions are consistent and auditable
+     *
+     * Built-in tools are ALWAYS disabled when TENEX provides equivalents.
+     * If an agent has NO file system tools in their configuration, ALL file
+     * system built-in tools are disabled (they get no file access).
+     */
+    private computeDisallowedBuiltinTools(regularTools: string[], mcpTools: string[]): string[] {
+        const { disallowed, hasAnyFsCapability } = this.computeDisallowedToolsCore(regularTools, mcpTools);
+
+        // Log the decision for debugging (separate from pure computation)
+        this.logDisallowedToolsDecision(disallowed, regularTools, hasAnyFsCapability);
+
+        return disallowed;
+    }
+
+    /**
+     * Pure computation of disallowed tools without side effects.
+     */
+    private computeDisallowedToolsCore(
+        regularTools: string[],
+        mcpTools: string[]
+    ): { disallowed: string[]; hasAnyFsCapability: boolean } {
+        // Always disallow AskUserQuestion - TENEX has its own ask tool
+        const disallowed: string[] = ["AskUserQuestion"];
+
+        // Check if agent has ANY file system capability (TENEX or MCP)
+        const hasTenexFsTools = FS_TOOL_NAMES.some(tool => regularTools.includes(tool));
+        const hasMcpFsTools = mcpTools.some(tool => MCP_FS_CAPABILITY_PATTERN.test(tool));
+        const hasAnyFsCapability = hasTenexFsTools || hasMcpFsTools;
+
+        // If agent has NO file system capability, disable ALL file system built-in tools
+        if (!hasAnyFsCapability) {
+            disallowed.push(...FS_BUILTIN_TOOLS);
+        }
+
+        // Check each built-in tool and disable if TENEX/MCP provides equivalent
+        for (const [builtinTool, mapping] of Object.entries(TOOL_MAPPINGS)) {
+            // Skip if already disallowed (e.g., FS tools when no FS capability)
+            if (disallowed.includes(builtinTool)) {
+                continue;
+            }
+
+            const hasEquivalent = this.hasToolEquivalent(mapping, regularTools, mcpTools);
+
+            // If TENEX/MCP provides this capability, disable the built-in
+            if (hasEquivalent) {
+                disallowed.push(builtinTool);
+            }
+        }
+
+        return { disallowed, hasAnyFsCapability };
+    }
+
+    /**
+     * Check if TENEX or MCP provides an equivalent for a built-in tool.
+     */
+    private hasToolEquivalent(
+        mapping: ToolMapping,
+        regularTools: string[],
+        mcpTools: string[]
+    ): boolean {
+        // Check for TENEX tool equivalent
+        if (mapping.tenex && regularTools.includes(mapping.tenex)) {
+            return true;
+        }
+
+        // Check for MCP tool equivalent
+        if (mapping.mcpPatterns) {
+            for (const pattern of mapping.mcpPatterns) {
+                if (mcpTools.some(tool => pattern.test(tool))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Log the disallowed tools decision for debugging.
+     */
+    private logDisallowedToolsDecision(
+        disallowed: string[],
+        regularTools: string[],
+        hasAnyFsCapability: boolean
+    ): void {
+        if (!hasAnyFsCapability) {
+            logger.debug("[ClaudeCodeProvider] Agent has no FS capability - disabling all FS built-in tools");
+        }
+
+        if (disallowed.length > 1) { // More than just AskUserQuestion
+            const relevantTools = ["shell", "web_fetch", "web_search", "delegate"] as const;
+            logger.info("[ClaudeCodeProvider] Disabling built-in tools with TENEX equivalents", {
+                disallowed,
+                tenexTools: regularTools.filter(t =>
+                    (FS_TOOL_NAMES as readonly string[]).includes(t) || relevantTools.includes(t as typeof relevantTools[number])
+                ),
+                hasFsCapability: hasAnyFsCapability,
+            });
+        }
     }
 
     /**

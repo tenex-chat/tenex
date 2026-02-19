@@ -16,10 +16,10 @@ export interface WhitelistItem {
     kind: typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill;
     /** The name of the nudge/skill (from title tag) */
     name?: string;
-    /** Description of the nudge/skill (from content) */
+    /** Description of the nudge/skill (full content - truncation is done in presentation layer) */
     description?: string;
-    /** The pubkey that whitelisted this item */
-    whitelistedBy: string;
+    /** Pubkeys that have whitelisted this item (multiple whitelist events can reference same item) */
+    whitelistedBy: string[];
 }
 
 /**
@@ -43,20 +43,22 @@ interface WhitelistCache {
  * The service maintains a cached list of all whitelisted nudges and skills,
  * categorized by their event kind.
  */
-export class NudgeWhitelistService {
-    private static instance: NudgeWhitelistService;
+export class NudgeSkillWhitelistService {
+    private static instance: NudgeSkillWhitelistService;
     private cache: WhitelistCache | null = null;
     private subscription: NDKSubscription | null = null;
     private whitelistPubkeys: Set<string> = new Set();
     private initialized = false;
+    /** Guard to prevent concurrent refresh operations */
+    private refreshInFlight: Promise<void> | null = null;
 
     private constructor() {}
 
-    static getInstance(): NudgeWhitelistService {
-        if (!NudgeWhitelistService.instance) {
-            NudgeWhitelistService.instance = new NudgeWhitelistService();
+    static getInstance(): NudgeSkillWhitelistService {
+        if (!NudgeSkillWhitelistService.instance) {
+            NudgeSkillWhitelistService.instance = new NudgeSkillWhitelistService();
         }
-        return NudgeWhitelistService.instance;
+        return NudgeSkillWhitelistService.instance;
     }
 
     /**
@@ -66,7 +68,7 @@ export class NudgeWhitelistService {
      */
     async initialize(whitelistPubkeys: string[]): Promise<void> {
         if (this.initialized && this.pubkeysMatch(whitelistPubkeys)) {
-            logger.debug("[NudgeWhitelistService] Already initialized with same pubkeys, skipping");
+            logger.debug("[NudgeSkillWhitelistService] Already initialized with same pubkeys, skipping");
             return;
         }
 
@@ -76,7 +78,7 @@ export class NudgeWhitelistService {
         await this.refresh();
         this.startSubscription();
 
-        logger.info("[NudgeWhitelistService] Initialized", {
+        logger.info("[NudgeSkillWhitelistService] Initialized", {
             pubkeyCount: whitelistPubkeys.length,
         });
     }
@@ -99,7 +101,7 @@ export class NudgeWhitelistService {
         }
 
         if (this.whitelistPubkeys.size === 0) {
-            logger.debug("[NudgeWhitelistService] No whitelisted pubkeys, skipping subscription");
+            logger.debug("[NudgeSkillWhitelistService] No whitelisted pubkeys, skipping subscription");
             return;
         }
 
@@ -115,7 +117,7 @@ export class NudgeWhitelistService {
         );
 
         this.subscription.on("event", async (event: NDKEvent) => {
-            logger.debug("[NudgeWhitelistService] Received whitelist event", {
+            logger.debug("[NudgeSkillWhitelistService] Received whitelist event", {
                 eventId: event.id?.substring(0, 12),
                 author: event.pubkey.substring(0, 8),
             });
@@ -123,7 +125,7 @@ export class NudgeWhitelistService {
             await this.refresh();
         });
 
-        logger.debug("[NudgeWhitelistService] Started subscription", {
+        logger.debug("[NudgeSkillWhitelistService] Started subscription", {
             pubkeyCount: authors.length,
         });
     }
@@ -131,8 +133,29 @@ export class NudgeWhitelistService {
     /**
      * Refresh the cache by fetching all kind:14202 events from whitelisted pubkeys
      * and resolving the referenced nudge/skill events.
+     *
+     * Race condition guard: If a refresh is already in flight, returns the existing
+     * promise to coalesce concurrent refresh triggers.
      */
     async refresh(): Promise<void> {
+        // Guard against concurrent refresh operations
+        if (this.refreshInFlight) {
+            logger.debug("[NudgeSkillWhitelistService] Refresh already in flight, coalescing");
+            return this.refreshInFlight;
+        }
+
+        this.refreshInFlight = this.doRefresh();
+        try {
+            await this.refreshInFlight;
+        } finally {
+            this.refreshInFlight = null;
+        }
+    }
+
+    /**
+     * Internal refresh implementation - does the actual work.
+     */
+    private async doRefresh(): Promise<void> {
         const span = tracer.startSpan("tenex.nudge-whitelist.refresh", {
             attributes: {
                 "whitelist.pubkey_count": this.whitelistPubkeys.size,
@@ -157,16 +180,20 @@ export class NudgeWhitelistService {
                     authors,
                 });
 
-                // Collect all e-tagged event IDs
+                // Collect all e-tagged event IDs and track ALL whitelisters per event
                 const referencedEventIds: Set<string> = new Set();
-                const eventToWhitelister: Map<string, string> = new Map();
+                const eventToWhitelisters: Map<string, Set<string>> = new Map();
 
                 for (const event of whitelistEvents) {
                     const eTags = event.tags.filter(tag => tag[0] === "e" && tag[1]);
                     for (const eTag of eTags) {
                         const eventId = eTag[1];
                         referencedEventIds.add(eventId);
-                        eventToWhitelister.set(eventId, event.pubkey);
+                        // Track all pubkeys that whitelist this event (fixes data loss)
+                        if (!eventToWhitelisters.has(eventId)) {
+                            eventToWhitelisters.set(eventId, new Set());
+                        }
+                        eventToWhitelisters.get(eventId)!.add(event.pubkey);
                     }
                 }
 
@@ -187,20 +214,26 @@ export class NudgeWhitelistService {
                 const skills: WhitelistItem[] = [];
 
                 for (const event of referencedEvents) {
-                    const whitelistedBy = eventToWhitelister.get(event.id) || "unknown";
+                    const whitelisters = eventToWhitelisters.get(event.id);
+                    const whitelistedBy = whitelisters ? Array.from(whitelisters) : [];
 
-                    const item: WhitelistItem = {
-                        eventId: event.id,
-                        kind: event.kind as typeof NDKKind.AgentNudge | typeof NDKKind.AgentSkill,
-                        name: event.tagValue("title") || event.tagValue("name"),
-                        description: event.content?.substring(0, 200),
-                        whitelistedBy,
-                    };
-
+                    // Type-safe construction: build items inside the kind-checked branches
                     if (event.kind === NDKKind.AgentNudge) {
-                        nudges.push(item);
+                        nudges.push({
+                            eventId: event.id,
+                            kind: NDKKind.AgentNudge,
+                            name: event.tagValue("title") || event.tagValue("name"),
+                            description: event.content, // Full content, truncation in presentation layer
+                            whitelistedBy,
+                        });
                     } else if (event.kind === NDKKind.AgentSkill) {
-                        skills.push(item);
+                        skills.push({
+                            eventId: event.id,
+                            kind: NDKKind.AgentSkill,
+                            name: event.tagValue("title") || event.tagValue("name"),
+                            description: event.content, // Full content, truncation in presentation layer
+                            whitelistedBy,
+                        });
                     }
                     // Ignore other kinds - they shouldn't be in the whitelist but we don't fail
                 }
@@ -217,7 +250,7 @@ export class NudgeWhitelistService {
                     "whitelist.item_count": nudges.length + skills.length,
                 });
 
-                logger.info("[NudgeWhitelistService] Cache refreshed", {
+                logger.info("[NudgeSkillWhitelistService] Cache refreshed", {
                     nudgeCount: nudges.length,
                     skillCount: skills.length,
                 });
@@ -231,7 +264,7 @@ export class NudgeWhitelistService {
                     message: (error as Error).message,
                 });
                 span.end();
-                logger.error("[NudgeWhitelistService] Failed to refresh cache", { error });
+                logger.error("[NudgeSkillWhitelistService] Failed to refresh cache", { error });
             }
         });
     }
