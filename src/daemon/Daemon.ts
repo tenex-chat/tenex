@@ -1,9 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
-import type { AgentInstance } from "@/agents/types";
+import type { AgentInstance, AgentDefaultConfig } from "@/agents/types";
+import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { TagExtractor } from "@/nostr/TagExtractor";
 import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
@@ -359,6 +361,15 @@ export class Daemon {
             addRoutingEvent(span, "lesson_comment_event", { reason: "kind_1111_K_4129" });
             await this.handleLessonCommentEvent(event);
             await logDropped(this.routingLogger, event, "Lesson comment - routed to prompt compilers");
+            return;
+        }
+
+        // Handle global agent config updates (kind 24020 without a-tag) at daemon level.
+        // These update the agent's default config in storage and don't need project context.
+        // With a-tag: falls through to normal A-tag routing for project-scoped updates.
+        if (AgentEventDecoder.isConfigUpdate(event) && !event.tagValue("a")) {
+            addRoutingEvent(span, "agent_config_global", { reason: "kind_24020_no_a_tag" });
+            await this.handleGlobalAgentConfigUpdate(event);
             return;
         }
 
@@ -785,6 +796,87 @@ export class Daemon {
             agentSlug: agent.slug,
             agentPubkey: agent.pubkey.slice(0, 8),
         });
+    }
+
+    /**
+     * Handle global agent config updates (kind 24020 without a-tag).
+     * Updates agent storage directly and reloads the agent in all running runtimes.
+     */
+    private async handleGlobalAgentConfigUpdate(event: NDKEvent): Promise<void> {
+        const agentPubkey = event.tagValue("p");
+        if (!agentPubkey) {
+            logger.warn("Global agent config update missing p-tag", { eventId: event.id });
+            return;
+        }
+
+        await agentStorage.initialize();
+        const storedAgent = await agentStorage.loadAgent(agentPubkey);
+        if (!storedAgent) {
+            logger.warn("Agent not found for global config update", {
+                agentPubkey: agentPubkey.substring(0, 8),
+            });
+            return;
+        }
+
+        // Extract config from event tags
+        const newModel = event.tagValue("model");
+        const toolTags = TagExtractor.getToolTags(event);
+        const newToolNames = toolTags.map((tool) => tool.name).filter(Boolean);
+        const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
+
+        // Build default config update (partial update semantics)
+        const defaultUpdates: AgentDefaultConfig = {};
+
+        const hasModelTag = event.tags.some((tag) => tag[0] === "model");
+        if (hasModelTag && newModel) {
+            defaultUpdates.model = newModel;
+        }
+
+        const hasToolTags = event.tags.some((tag) => tag[0] === "tool");
+        if (hasToolTags) {
+            defaultUpdates.tools = newToolNames;
+        }
+
+        let configUpdated = false;
+
+        const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates);
+        if (defaultUpdated) configUpdated = true;
+
+        // PM designation uses authoritative snapshot semantics
+        const pmUpdated = await agentStorage.updateAgentIsPM(agentPubkey, hasPMTag);
+        if (pmUpdated) configUpdated = true;
+
+        if (!configUpdated) {
+            logger.info("No config changes for global agent config update", {
+                agentSlug: storedAgent.slug,
+                agentPubkey: agentPubkey.substring(0, 8),
+            });
+            return;
+        }
+
+        logger.info("Applied global agent config update", {
+            agentSlug: storedAgent.slug,
+            agentPubkey: agentPubkey.substring(0, 8),
+            hasModel: !!newModel,
+            toolCount: newToolNames.length,
+            hasPM: hasPMTag,
+        });
+
+        // Reload agent in all running runtimes that have it
+        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+        for (const [, runtime] of activeRuntimes) {
+            const context = runtime.getContext();
+            if (!context) continue;
+
+            const agent = context.getAgentByPubkey(agentPubkey);
+            if (!agent) continue;
+
+            await context.agentRegistry.reloadAgent(agentPubkey);
+
+            if (context.statusPublisher) {
+                await context.statusPublisher.publishImmediately();
+            }
+        }
     }
 
     /**

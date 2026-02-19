@@ -40,8 +40,10 @@ describe("AgentStorage", () => {
                 description: "A test agent",
                 instructions: "Test instructions",
                 useCriteria: "Test criteria",
-                llmConfig: "anthropic:claude-sonnet-4",
-                tools: ["fs_read", "shell"],
+                defaultConfig: {
+                    model: "anthropic:claude-sonnet-4",
+                    tools: ["fs_read", "shell"],
+                },
                 eventId: "test-event-id",
             });
 
@@ -52,8 +54,8 @@ describe("AgentStorage", () => {
             expect(agent.description).toBe("A test agent");
             expect(agent.instructions).toBe("Test instructions");
             expect(agent.useCriteria).toBe("Test criteria");
-            expect(agent.llmConfig).toBe("anthropic:claude-sonnet-4");
-            expect(agent.tools).toEqual(["fs_read", "shell"]);
+            expect(agent.default?.model).toBe("anthropic:claude-sonnet-4");
+            expect(agent.default?.tools).toEqual(["fs_read", "shell"]);
             expect(agent.eventId).toBe("test-event-id");
         });
 
@@ -67,13 +69,11 @@ describe("AgentStorage", () => {
                 description: null,
                 instructions: null,
                 useCriteria: null,
-                tools: null,
             });
 
             expect(agent.description).toBeUndefined();
             expect(agent.instructions).toBeUndefined();
             expect(agent.useCriteria).toBeUndefined();
-            expect(agent.tools).toBeUndefined();
         });
 
         it("should set status to 'active' by default", () => {
@@ -251,61 +251,54 @@ describe("AgentStorage", () => {
         });
     });
 
-    describe("updateAgentLLMConfig", () => {
-        it("should update LLM config in storage", async () => {
+    describe("updateDefaultConfig", () => {
+        it("should update default model in storage", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                llmConfig: "anthropic:claude-sonnet-4",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
             });
 
             await storage.saveAgent(agent);
 
-            const success = await storage.updateAgentLLMConfig(
-                signer.pubkey,
-                "anthropic:claude-opus-4"
-            );
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                model: "anthropic:claude-opus-4",
+            });
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.llmConfig).toBe("anthropic:claude-opus-4");
+            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
         });
 
-        it("should return false for non-existent agent", async () => {
-            const success = await storage.updateAgentLLMConfig(
-                "nonexistent-pubkey",
-                "anthropic:claude-opus-4"
-            );
-            expect(success).toBe(false);
-        });
-    });
-
-    describe("updateAgentTools", () => {
-        it("should update tools in storage", async () => {
+        it("should update default tools in storage", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                tools: ["fs_read"],
+                defaultConfig: { tools: ["fs_read"] },
             });
 
             await storage.saveAgent(agent);
 
             const newTools = ["fs_read", "shell", "agents_write"];
-            const success = await storage.updateAgentTools(signer.pubkey, newTools);
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                tools: newTools,
+            });
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.tools).toEqual(newTools);
+            expect(loaded?.default?.tools).toEqual(newTools);
         });
 
         it("should return false for non-existent agent", async () => {
-            const success = await storage.updateAgentTools("nonexistent-pubkey", ["fs_read"]);
+            const success = await storage.updateDefaultConfig("nonexistent-pubkey", {
+                model: "anthropic:claude-opus-4",
+            });
             expect(success).toBe(false);
         });
     });
@@ -662,53 +655,26 @@ describe("AgentStorage", () => {
     });
 
     describe("project-scoped configuration", () => {
-        it("should set and get project-scoped config", async () => {
+        it("should resolve effective config with project override", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                llmConfig: "anthropic:claude-sonnet-4",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            // Set project-scoped config
-            storage.setProjectConfig(agent, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
-                isPM: true,
-            });
-            await storage.saveAgent(agent);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-                isPM: true,
-            });
-        });
-
-        it("should resolve effective LLM config with project override", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                llmConfig: "anthropic:claude-sonnet-4",
-            });
-
-            // Set project-scoped override for project-1 only
-            storage.setProjectConfig(agent, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                projectOverrides: {
+                    "project-1": { model: "anthropic:claude-opus-4" },
+                },
             });
 
             // project-1 should use override
-            expect(storage.resolveEffectiveLLMConfig(agent, "project-1")).toBe("anthropic:claude-opus-4");
+            const config1 = storage.getEffectiveConfig(agent, "project-1");
+            expect(config1.model).toBe("anthropic:claude-opus-4");
 
-            // project-2 should use global
-            expect(storage.resolveEffectiveLLMConfig(agent, "project-2")).toBe("anthropic:claude-sonnet-4");
+            // project-2 should use default
+            const config2 = storage.getEffectiveConfig(agent, "project-2");
+            expect(config2.model).toBe("anthropic:claude-sonnet-4");
         });
 
         it("should resolve effective tools with project override", async () => {
@@ -718,19 +684,19 @@ describe("AgentStorage", () => {
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                tools: ["fs_read", "shell"],
+                defaultConfig: { tools: ["fs_read", "shell"] },
+                projectOverrides: {
+                    "project-1": { tools: ["+agents_write"] },
+                },
             });
 
-            // Set project-scoped override for project-1 only
-            storage.setProjectConfig(agent, "project-1", {
-                tools: ["fs_read", "shell", "agents_write"],
-            });
+            // project-1 should add agents_write via delta
+            const config1 = storage.getEffectiveConfig(agent, "project-1");
+            expect(config1.tools).toEqual(["fs_read", "shell", "agents_write"]);
 
-            // project-1 should use override
-            expect(storage.resolveEffectiveTools(agent, "project-1")).toEqual(["fs_read", "shell", "agents_write"]);
-
-            // project-2 should use global
-            expect(storage.resolveEffectiveTools(agent, "project-2")).toEqual(["fs_read", "shell"]);
+            // project-2 should use defaults
+            const config2 = storage.getEffectiveConfig(agent, "project-2");
+            expect(config2.tools).toEqual(["fs_read", "shell"]);
         });
 
         it("should resolve effective isPM with priority order", async () => {
@@ -745,13 +711,13 @@ describe("AgentStorage", () => {
             // Test 1: No PM designation
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(false);
 
-            // Test 2: Legacy pmOverrides
+            // Test 2: pmOverrides
             agent.pmOverrides = { "project-1": true };
             expect(storage.resolveEffectiveIsPM(agent, "project-1")).toBe(true);
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(false);
 
-            // Test 3: Project-scoped config takes precedence over pmOverrides for same project
-            storage.setProjectConfig(agent, "project-2", { isPM: true });
+            // Test 3: projectOverrides isPM
+            agent.projectOverrides = { "project-2": { isPM: true } };
             expect(storage.resolveEffectiveIsPM(agent, "project-2")).toBe(true);
 
             // Test 4: Global isPM takes highest precedence
@@ -761,55 +727,31 @@ describe("AgentStorage", () => {
             expect(storage.resolveEffectiveIsPM(agent, "project-3")).toBe(true);
         });
 
-        it("should update project-scoped LLM config via async method", async () => {
+        it("should update project override model via updateProjectOverride", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
                 slug: "test-agent",
                 name: "Test Agent",
                 role: "assistant",
-                llmConfig: "anthropic:claude-sonnet-4",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
             });
 
             await storage.saveAgent(agent);
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            const success = await storage.updateProjectScopedLLMConfig(
+            const success = await storage.updateProjectOverride(
                 signer.pubkey,
                 "project-1",
-                "anthropic:claude-opus-4"
+                { model: "anthropic:claude-opus-4" }
             );
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.llmConfig).toBe("anthropic:claude-opus-4");
+            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("anthropic:claude-opus-4");
         });
 
-        it("should update project-scoped tools via async method", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-                tools: ["fs_read"],
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            const success = await storage.updateProjectScopedTools(
-                signer.pubkey,
-                "project-1",
-                ["fs_read", "shell", "agents_write"]
-            );
-            expect(success).toBe(true);
-
-            const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.tools).toEqual(["fs_read", "shell", "agents_write"]);
-        });
-
-        it("should update project-scoped isPM via async method", async () => {
+        it("should update project-scoped isPM via updateProjectScopedIsPM", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -829,10 +771,31 @@ describe("AgentStorage", () => {
             expect(success).toBe(true);
 
             const loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]?.isPM).toBe(true);
+            expect(loaded?.projectOverrides?.["project-1"]?.isPM).toBe(true);
         });
 
-        it("should update complete project-scoped config authoritatively", async () => {
+        it("should clear project override via reset", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                projectOverrides: {
+                    "project-1": { model: "anthropic:claude-opus-4" },
+                },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            await storage.updateProjectOverride(signer.pubkey, "project-1", {}, true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides).toBeUndefined();
+        });
+
+        it("should clear isPM via updateProjectScopedIsPM", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -842,145 +805,14 @@ describe("AgentStorage", () => {
             });
 
             await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Set initial config
-            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
-                tools: ["fs_read", "shell"],
-                isPM: true,
-            });
-
+            await storage.updateProjectScopedIsPM(signer.pubkey, "project-1", true);
             let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-                tools: ["fs_read", "shell"],
-                isPM: true,
-            });
+            expect(loaded?.projectOverrides?.["project-1"]?.isPM).toBe(true);
 
-            // Replace with new config (authoritative - previous isPM should be gone)
-            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
-                llmConfig: "anthropic:claude-sonnet-4",
-                tools: [],
-            });
-
+            await storage.updateProjectScopedIsPM(signer.pubkey, "project-1", undefined);
             loaded = await storage.loadAgent(signer.pubkey);
-            // Empty tools array should result in no tools field
-            // isPM should be gone since it wasn't in the new config
-            expect(loaded?.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-sonnet-4",
-            });
-        });
-
-        it("should clear project config when all values are empty", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            await storage.saveAgent(agent);
-            await storage.addAgentToProject(signer.pubkey, "project-1");
-
-            // Set config
-            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
-            });
-
-            let loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs?.["project-1"]).toBeDefined();
-
-            // Clear config by setting empty
-            await storage.updateProjectScopedConfig(signer.pubkey, "project-1", {});
-
-            loaded = await storage.loadAgent(signer.pubkey);
-            expect(loaded?.projectConfigs).toBeUndefined();
-        });
-
-        it("should clean up undefined values in setProjectConfig", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            // Set config with undefined values
-            storage.setProjectConfig(agent, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
-                tools: undefined,
-                isPM: undefined,
-            });
-
-            // Only llmConfig should be present
-            expect(agent.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-            });
-        });
-
-        it("should merge with existing project config", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            // Set initial config
-            storage.setProjectConfig(agent, "project-1", {
-                llmConfig: "anthropic:claude-opus-4",
-            });
-
-            // Merge additional config
-            storage.setProjectConfig(agent, "project-1", {
-                isPM: true,
-            });
-
-            // Both should be present
-            expect(agent.projectConfigs?.["project-1"]).toEqual({
-                llmConfig: "anthropic:claude-opus-4",
-                isPM: true,
-            });
-        });
-
-        it("should clear project config via clearProjectConfig", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
-            storage.setProjectConfig(agent, "project-2", { llmConfig: "config-2" });
-
-            expect(Object.keys(agent.projectConfigs!).length).toBe(2);
-
-            storage.clearProjectConfig(agent, "project-1");
-
-            expect(agent.projectConfigs?.["project-1"]).toBeUndefined();
-            expect(agent.projectConfigs?.["project-2"]).toEqual({ llmConfig: "config-2" });
-        });
-
-        it("should clean up projectConfigs when last project config is cleared", async () => {
-            const signer = NDKPrivateKeySigner.generate();
-            const agent = createStoredAgent({
-                nsec: signer.nsec,
-                slug: "test-agent",
-                name: "Test Agent",
-                role: "assistant",
-            });
-
-            storage.setProjectConfig(agent, "project-1", { llmConfig: "config-1" });
-            expect(agent.projectConfigs).toBeDefined();
-
-            storage.clearProjectConfig(agent, "project-1");
-            expect(agent.projectConfigs).toBeUndefined();
+            expect(loaded?.projectOverrides).toBeUndefined();
         });
     });
 

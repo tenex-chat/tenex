@@ -43,14 +43,6 @@ export interface ResolvedAgentConfig {
 }
 
 /**
- * Determines if a tools array uses delta syntax.
- * Delta syntax means at least one tool has a "+" or "-" prefix.
- */
-export function isToolsDelta(tools: string[]): boolean {
-    return tools.some((t) => t.startsWith("+") || t.startsWith("-"));
-}
-
-/**
  * Apply delta tools to a base tool list.
  * "+tool" adds, "-tool" removes. Order: apply removals first, then additions.
  *
@@ -87,18 +79,11 @@ export function resolveEffectiveTools(
     projectTools: string[] | undefined
 ): string[] | undefined {
     if (!projectTools || projectTools.length === 0) {
-        // No project-level override - use defaults
         return defaultTools;
     }
 
-    if (isToolsDelta(projectTools)) {
-        // Delta syntax - apply on top of defaults
-        const base = defaultTools ?? [];
-        return applyToolsDelta(base, projectTools);
-    }
-
-    // Full replacement
-    return projectTools;
+    const base = defaultTools ?? [];
+    return applyToolsDelta(base, projectTools);
 }
 
 /**
@@ -207,13 +192,9 @@ export function deduplicateProjectConfig(
 
         // Compare resolved tools to default tools (order-insensitive)
         if (arraysEqualUnordered(resolvedProjectTools ?? [], defaultToolsResolved)) {
-            // Resolved tools are identical to defaults - clear the override entirely
             delete cleaned.tools;
-        } else if (isToolsDelta(cleaned.tools)) {
-            // The delta represents a real change, but may contain redundant entries.
+        } else {
             // Normalize: recompute the minimal delta from the fully-resolved tool list.
-            // e.g., ["+fs_read", "+agents_write"] where fs_read is already in defaults
-            // becomes ["+agents_write"] — the minimal equivalent delta.
             cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
         }
     }
