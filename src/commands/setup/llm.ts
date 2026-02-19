@@ -14,6 +14,15 @@ export const llmCommand = new Command("llm")
             // Ensure global config directory exists
             await fileSystem.ensureDirectory(globalConfigDir);
 
+            const providersConfig = await config.loadTenexProviders(globalConfigDir);
+            if (Object.keys(providersConfig.providers).length === 0) {
+                logger.error(
+                    "No providers configured. Run `tenex setup providers` before configuring LLMs."
+                );
+                process.exitCode = 1;
+                return;
+            }
+
             const llmManager = new LLMConfigEditor();
             await llmManager.showMainMenu();
         } catch (error: unknown) {
