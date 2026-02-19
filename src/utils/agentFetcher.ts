@@ -1,6 +1,6 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
+import { NDKAgentDefinition, type ETagReference } from "@/events/NDKAgentDefinition";
 import { logger } from "./logger";
 
 /**
@@ -31,9 +31,9 @@ export interface AgentDefinitionData {
     /** Pubkey of the agent definition author */
     pubkey: string;
     /** References to bundled file metadata events */
-    fileETags: Array<{ eventId: string; relayUrl?: string }>;
+    fileETags: ETagReference[];
     /** Reference to the source agent if this is a fork */
-    forkSource: { eventId: string; relayUrl?: string } | undefined;
+    forkSource: ETagReference | undefined;
 }
 
 /**
