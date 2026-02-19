@@ -230,7 +230,7 @@ describe("AgentPublisher", () => {
 | 31990 | Agent metadata |
 | 4200 | Delegation |
 | 1111 | Comment (NIP-22) |
-| 4129 | Agent definition |
+| 4129 | Agent lesson |
 
 See `kinds.ts` for complete list.
 

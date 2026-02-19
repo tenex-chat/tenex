@@ -39,7 +39,6 @@ export interface StoredAgent extends StoredAgentData {
      * Project-scoped PM override flags.
      * Key is project dTag, value is true if this agent is PM for that project.
      * Only one agent per project should have this set to true.
-     * Set via agent_configure tool.
      */
     pmOverrides?: Record<string, boolean>;
     /**
@@ -420,58 +419,6 @@ export class AgentStorage {
             logger.error(`Failed to load agent ${pubkey}`, { error });
             return null;
         }
-    }
-
-    /**
-     * Check if an agent has PM override for a specific project
-     */
-    hasPMOverride(agent: StoredAgent, projectDTag: string): boolean {
-        return agent.pmOverrides?.[projectDTag] === true;
-    }
-
-    /**
-     * Set PM override for an agent in a specific project.
-     * Does NOT save the agent - caller must save after making all changes.
-     */
-    setPMOverride(agent: StoredAgent, projectDTag: string, isPM: boolean): void {
-        if (!agent.pmOverrides) {
-            agent.pmOverrides = {};
-        }
-        if (isPM) {
-            agent.pmOverrides[projectDTag] = true;
-        } else {
-            delete agent.pmOverrides[projectDTag];
-            // Clean up empty object
-            if (Object.keys(agent.pmOverrides).length === 0) {
-                delete agent.pmOverrides;
-            }
-        }
-    }
-
-    /**
-     * Clear PM override for all agents in a project except the specified one.
-     * Returns the list of agents that were modified.
-     */
-    async clearOtherPMOverrides(
-        projectDTag: string,
-        exceptPubkey: string
-    ): Promise<StoredAgent[]> {
-        const projectAgents = await this.getProjectAgents(projectDTag);
-        const modifiedAgents: StoredAgent[] = [];
-
-        for (const agent of projectAgents) {
-            const signer = new NDKPrivateKeySigner(agent.nsec);
-            const pubkey = signer.pubkey;
-
-            if (pubkey !== exceptPubkey && this.hasPMOverride(agent, projectDTag)) {
-                this.setPMOverride(agent, projectDTag, false);
-                await this.saveAgent(agent);
-                modifiedAgents.push(agent);
-                logger.info(`Cleared PM override from agent "${agent.slug}" for project ${projectDTag}`);
-            }
-        }
-
-        return modifiedAgents;
     }
 
     /**
@@ -1067,7 +1014,7 @@ export class AgentStorage {
      * Priority:
      * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
      * 2. projectOverrides[projectDTag].isPM (project-scoped PM via kind 24020 with a-tag)
-     * 3. pmOverrides[projectDTag] (from agent_configure tool)
+     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
      */
     resolveEffectiveIsPM(agent: StoredAgent, projectDTag: string): boolean {
         if (agent.isPM === true) {

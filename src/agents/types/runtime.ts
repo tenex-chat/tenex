@@ -38,7 +38,6 @@ export interface AgentInstance {
     /**
      * Project-scoped PM override flags.
      * Key is project dTag, value is true if this agent is PM for that project.
-     * Set via agent_configure tool.
      */
     pmOverrides?: Record<string, boolean>;
     /**
