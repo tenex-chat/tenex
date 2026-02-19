@@ -44,6 +44,21 @@ export class NDKAgentDefinition extends NDKEvent {
         if (value) this.tags.push(["description", value]);
     }
 
+    /**
+     * Extended markdown description from the event content field.
+     * MAY contain markdown-formatted extended description of the agent.
+     */
+    get markdownDescription(): string | undefined {
+        return this.content || undefined;
+    }
+
+    /**
+     * Set the extended markdown description in the event content field.
+     */
+    set markdownDescription(value: string | undefined) {
+        this.content = value || "";
+    }
+
     get role(): string | undefined {
         return this.tagValue("role");
     }
@@ -148,16 +163,16 @@ export class NDKAgentDefinition extends NDKEvent {
     }
 
     /**
-     * Get all file e-tags from the agent definition.
-     * File e-tags reference kind 1063 (NIP-94 file metadata) events
-     * that contain files bundled with the agent.
+     * Get all e-tags from the agent definition.
+     * E-tags may reference kind 1063 (NIP-94 file metadata) events
+     * that contain files bundled with the agent, or other related events.
      *
      * Unlike getScriptETags(), this method returns ALL e-tags, not just
-     * those with the "script" marker, allowing for general file references.
+     * those with a specific marker, allowing for general event references.
      *
      * @returns Array of objects with eventId, optional relayUrl, and optional marker
      */
-    getFileETags(): Array<{ eventId: string; relayUrl?: string; marker?: string }> {
+    getETags(): Array<{ eventId: string; relayUrl?: string; marker?: string }> {
         const eTags = this.tags.filter((tag) => tag[0] === "e" && tag[1]);
         const result: Array<{ eventId: string; relayUrl?: string; marker?: string }> = [];
 
@@ -170,5 +185,86 @@ export class NDKAgentDefinition extends NDKEvent {
         }
 
         return result;
+    }
+
+    /**
+     * Get e-tags with the "file" marker.
+     * These reference kind 1063 (NIP-94 file metadata) events that contain
+     * files bundled with this agent definition.
+     *
+     * @returns Array of objects with eventId and optional relayUrl
+     */
+    getFileETags(): Array<{ eventId: string; relayUrl?: string }> {
+        return this.tags
+            .filter((tag) => tag[0] === "e" && tag[1] && tag[3] === "file")
+            .map((tag) => ({
+                eventId: tag[1],
+                relayUrl: tag[2] || undefined,
+            }));
+    }
+
+    /**
+     * Get e-tags with the "fork" marker.
+     * These reference the source kind 4199 agent definition event that
+     * this agent was forked from.
+     *
+     * @returns Array of objects with eventId and optional relayUrl
+     */
+    getForkETags(): Array<{ eventId: string; relayUrl?: string }> {
+        return this.tags
+            .filter((tag) => tag[0] === "e" && tag[1] && tag[3] === "fork")
+            .map((tag) => ({
+                eventId: tag[1],
+                relayUrl: tag[2] || undefined,
+            }));
+    }
+
+    /**
+     * Get the source agent definition this was forked from (if any).
+     * Returns the first fork e-tag, or undefined if this is not a fork.
+     *
+     * @returns Object with eventId and optional relayUrl, or undefined
+     */
+    getForkSource(): { eventId: string; relayUrl?: string } | undefined {
+        const forks = this.getForkETags();
+        return forks.length > 0 ? forks[0] : undefined;
+    }
+
+    /**
+     * Add a file reference e-tag with the "file" marker.
+     * References a kind 1063 (NIP-94 file metadata) event.
+     *
+     * @param eventId - The event ID of the kind 1063 file metadata event
+     * @param relayUrl - Optional relay hint URL
+     */
+    addFileReference(eventId: string, relayUrl?: string): void {
+        this.tags.push(this.buildETag(eventId, relayUrl, "file"));
+    }
+
+    /**
+     * Set the fork source for this agent definition.
+     * Removes any existing fork e-tags and adds a new one.
+     *
+     * @param eventId - The event ID of the source kind 4199 agent definition
+     * @param relayUrl - Optional relay hint URL
+     */
+    setForkSource(eventId: string, relayUrl?: string): void {
+        // Remove existing fork tags
+        this.tags = this.tags.filter((tag) => !(tag[0] === "e" && tag[3] === "fork"));
+
+        // Add new fork tag
+        this.tags.push(this.buildETag(eventId, relayUrl, "fork"));
+    }
+
+    /**
+     * Build an e-tag array with the standard format: ["e", eventId, relayUrl, marker]
+     *
+     * @param eventId - The event ID to reference
+     * @param relayUrl - Optional relay hint URL (defaults to empty string if not provided)
+     * @param marker - The marker for the e-tag (e.g., "file", "fork", "script")
+     * @returns The constructed e-tag array
+     */
+    private buildETag(eventId: string, relayUrl: string | undefined, marker: string): string[] {
+        return ["e", eventId, relayUrl || "", marker];
     }
 }

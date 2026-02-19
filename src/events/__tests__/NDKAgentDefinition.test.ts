@@ -161,4 +161,192 @@ describe("NDKAgentDefinition", () => {
             expect(result[0].relayUrl).toBeUndefined();
         });
     });
+
+    describe("markdownDescription (content field)", () => {
+        it("should return undefined when content is empty", () => {
+            agentDef.content = "";
+            expect(agentDef.markdownDescription).toBeUndefined();
+        });
+
+        it("should return content when set", () => {
+            agentDef.content = "# Agent Title\n\nThis is a detailed description.";
+            expect(agentDef.markdownDescription).toBe("# Agent Title\n\nThis is a detailed description.");
+        });
+
+        it("should set content via markdownDescription setter", () => {
+            agentDef.markdownDescription = "## Features\n\n- Feature 1\n- Feature 2";
+            expect(agentDef.content).toBe("## Features\n\n- Feature 1\n- Feature 2");
+        });
+
+        it("should clear content when setting undefined", () => {
+            agentDef.content = "Some content";
+            agentDef.markdownDescription = undefined;
+            expect(agentDef.content).toBe("");
+        });
+    });
+
+    describe("getFileETags", () => {
+        it("should return empty array when no file e-tags present", () => {
+            const result = agentDef.getFileETags();
+            expect(result).toEqual([]);
+        });
+
+        it("should return only e-tags with file marker", () => {
+            agentDef.tags = [
+                ["e", "file-event-1", "wss://relay.example.com", "file"],
+                ["e", "fork-event", "wss://relay.example.com", "fork"],
+                ["e", "file-event-2", "", "file"],
+                ["e", "other-event", "", "script"],
+            ];
+
+            const result = agentDef.getFileETags();
+
+            expect(result).toHaveLength(2);
+            expect(result[0]).toEqual({
+                eventId: "file-event-1",
+                relayUrl: "wss://relay.example.com",
+            });
+            expect(result[1]).toEqual({
+                eventId: "file-event-2",
+                relayUrl: undefined,
+            });
+        });
+    });
+
+    describe("getETags", () => {
+        it("should return empty array when no e-tags present", () => {
+            const result = agentDef.getETags();
+            expect(result).toEqual([]);
+        });
+
+        it("should return all e-tags regardless of marker", () => {
+            agentDef.tags = [
+                ["e", "file-event-1", "wss://relay.example.com", "file"],
+                ["e", "fork-event", "wss://relay2.example.com", "fork"],
+                ["e", "script-event", "", "script"],
+                ["e", "no-marker-event", ""],
+                ["title", "Test Agent"],
+            ];
+
+            const result = agentDef.getETags();
+
+            expect(result).toHaveLength(4);
+            expect(result[0]).toEqual({
+                eventId: "file-event-1",
+                relayUrl: "wss://relay.example.com",
+                marker: "file",
+            });
+            expect(result[1]).toEqual({
+                eventId: "fork-event",
+                relayUrl: "wss://relay2.example.com",
+                marker: "fork",
+            });
+            expect(result[2]).toEqual({
+                eventId: "script-event",
+                relayUrl: undefined,
+                marker: "script",
+            });
+            expect(result[3]).toEqual({
+                eventId: "no-marker-event",
+                relayUrl: undefined,
+                marker: undefined,
+            });
+        });
+    });
+
+    describe("getForkETags", () => {
+        it("should return empty array when no fork e-tags present", () => {
+            const result = agentDef.getForkETags();
+            expect(result).toEqual([]);
+        });
+
+        it("should return only e-tags with fork marker", () => {
+            agentDef.tags = [
+                ["e", "file-event", "wss://relay.example.com", "file"],
+                ["e", "fork-event-1", "wss://relay1.example.com", "fork"],
+                ["e", "fork-event-2", "", "fork"],
+            ];
+
+            const result = agentDef.getForkETags();
+
+            expect(result).toHaveLength(2);
+            expect(result[0]).toEqual({
+                eventId: "fork-event-1",
+                relayUrl: "wss://relay1.example.com",
+            });
+            expect(result[1]).toEqual({
+                eventId: "fork-event-2",
+                relayUrl: undefined,
+            });
+        });
+    });
+
+    describe("getForkSource", () => {
+        it("should return undefined when not a fork", () => {
+            const result = agentDef.getForkSource();
+            expect(result).toBeUndefined();
+        });
+
+        it("should return first fork source when present", () => {
+            agentDef.tags = [
+                ["e", "fork-source", "wss://relay.example.com", "fork"],
+            ];
+
+            const result = agentDef.getForkSource();
+
+            expect(result).toEqual({
+                eventId: "fork-source",
+                relayUrl: "wss://relay.example.com",
+            });
+        });
+    });
+
+    describe("addFileReference", () => {
+        it("should add file e-tag with marker", () => {
+            agentDef.addFileReference("file-event-123", "wss://relay.example.com");
+
+            const tag = agentDef.tags.find((t) => t[0] === "e" && t[3] === "file");
+            expect(tag).toEqual(["e", "file-event-123", "wss://relay.example.com", "file"]);
+        });
+
+        it("should add file e-tag without relay URL", () => {
+            agentDef.addFileReference("file-event-456");
+
+            const tag = agentDef.tags.find((t) => t[0] === "e" && t[3] === "file");
+            expect(tag).toEqual(["e", "file-event-456", "", "file"]);
+        });
+
+        it("should allow multiple file references", () => {
+            agentDef.addFileReference("file-1");
+            agentDef.addFileReference("file-2");
+
+            const fileTags = agentDef.tags.filter((t) => t[0] === "e" && t[3] === "file");
+            expect(fileTags).toHaveLength(2);
+        });
+    });
+
+    describe("setForkSource", () => {
+        it("should set fork source e-tag", () => {
+            agentDef.setForkSource("source-event-123", "wss://relay.example.com");
+
+            const tag = agentDef.tags.find((t) => t[0] === "e" && t[3] === "fork");
+            expect(tag).toEqual(["e", "source-event-123", "wss://relay.example.com", "fork"]);
+        });
+
+        it("should set fork source without relay URL", () => {
+            agentDef.setForkSource("source-event-456");
+
+            const tag = agentDef.tags.find((t) => t[0] === "e" && t[3] === "fork");
+            expect(tag).toEqual(["e", "source-event-456", "", "fork"]);
+        });
+
+        it("should replace existing fork source", () => {
+            agentDef.setForkSource("old-source");
+            agentDef.setForkSource("new-source");
+
+            const forkTags = agentDef.tags.filter((t) => t[0] === "e" && t[3] === "fork");
+            expect(forkTags).toHaveLength(1);
+            expect(forkTags[0][1]).toBe("new-source");
+        });
+    });
 });
