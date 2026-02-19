@@ -10,6 +10,7 @@ import { fragmentRegistry } from "../core/FragmentRegistry";
 import { globalSystemPromptFragment } from "./00-global-system-prompt";
 import { agentIdentityFragment } from "./01-agent-identity";
 import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
+import { systemRemindersExplanationFragment } from "./03-system-reminders-explanation";
 import { relayConfigurationFragment } from "./04-relay-configuration";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { agentTodosFragment } from "./06-agent-todos";
@@ -49,6 +50,7 @@ export function registerAllFragments(): void {
     // Core identity and context
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentHomeDirectoryFragment);
+    fragmentRegistry.register(systemRemindersExplanationFragment);
     fragmentRegistry.register(relayConfigurationFragment);
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(agentTodosFragment);

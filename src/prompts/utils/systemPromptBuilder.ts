@@ -626,6 +626,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add agent home directory context
     systemPromptBuilder.add("agent-home-directory", { agent: agentForFragments });
 
+    // Explain <system-reminder> tags before agents encounter them
+    systemPromptBuilder.add("system-reminders-explanation", {});
+
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});
 
