@@ -1,7 +1,7 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { type RAGQueryResult, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
-import { type ToolResponse, executeToolWithErrorHandling, parseNumericInput } from "@/tools/utils";
+import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -10,13 +10,14 @@ const ragQuerySchema = z.object({
     query_text: z.string().describe("The text query for semantic search"),
     top_k: z
         .number()
-        .nullable()
-        .default(5)
-        .describe("Number of top results to return (default: 5)"),
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Number of top results to return (default: 5, range: 1-100)"),
     include_metadata: z
         .boolean()
-        .nullable()
-        .default(true)
+        .optional()
         .describe("Whether to include document metadata in results (default: true)"),
 });
 
@@ -65,10 +66,12 @@ async function executeQuery(
     input: z.infer<typeof ragQuerySchema>,
     _context: ToolExecutionContext
 ): Promise<ToolResponse> {
-    const { collection, query_text, include_metadata = true } = input;
+    const { collection, query_text } = input;
 
-    // Validate and parse top_k with constraints
-    const topK = parseNumericInput(input.top_k ?? undefined, 5, { min: 1, max: 100, integer: true });
+    // Use provided top_k or default to 5
+    // The schema already validates the range (1-100) and integer constraint
+    const topK = input.top_k ?? 5;
+    const includeMetadata = input.include_metadata ?? true;
 
     const ragService = RAGService.getInstance();
     const results = await ragService.query(collection, query_text, topK);
@@ -78,7 +81,7 @@ async function executeQuery(
         collection: collection,
         query: query_text,
         results_count: results.length,
-        results: formatResults(results, include_metadata ?? true),
+        results: formatResults(results, includeMetadata),
     };
 }
 
