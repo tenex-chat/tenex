@@ -212,7 +212,7 @@ export async function installAgentFromNostr(
     const signer = NDKPrivateKeySigner.generate();
 
     // Install bundled files from kind 1063 events (referenced via e-tags)
-    const fileETags = agentDef.getFileETags();
+    const fileETags = agentDef.getETags();
     if (fileETags.length > 0) {
         logger.info(`Agent "${agentData.name}" has ${fileETags.length} bundled file(s)`);
         const fileResults = await installAgentScripts(fileETags, signer.pubkey, ndkInstance);
