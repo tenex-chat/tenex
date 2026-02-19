@@ -13,15 +13,19 @@ interface AvailableNudgesArgs {
 }
 
 /**
- * Escape XML attribute value to prevent injection
+ * Escape text for safe inclusion in prompt output.
+ * Prevents injection attacks by escaping special characters.
  */
-function escapeAttrValue(value: string): string {
+function escapePromptText(value: string): string {
     return value
         .replace(/&/g, "&amp;")
         .replace(/"/g, "&quot;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 }
+
+/** Maximum description length for display in available nudges list */
+const MAX_DESCRIPTION_LENGTH = 150;
 
 export const availableNudgesFragment: PromptFragment<AvailableNudgesArgs> = {
     id: "available-nudges",
@@ -34,10 +38,11 @@ export const availableNudgesFragment: PromptFragment<AvailableNudgesArgs> = {
         const nudgeList = availableNudges
             .map((nudge) => {
                 const name = nudge.name || nudge.eventId.substring(0, 12);
+                // Truncate description here in presentation layer (service keeps full content)
                 const description = nudge.description
-                    ? nudge.description.replace(/\n/g, " ").substring(0, 150)
+                    ? nudge.description.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH)
                     : "No description";
-                return `  - **${escapeAttrValue(name)}** (${nudge.eventId.substring(0, 12)}): ${escapeAttrValue(description)}`;
+                return `  - **${escapePromptText(name)}** (${nudge.eventId.substring(0, 12)}): ${escapePromptText(description)}`;
             })
             .join("\n");
 

@@ -244,9 +244,10 @@ export class AgentPublisher {
             event.tags.push(["branch", config.branch]);
         }
 
-        // Add nudge tags for the delegated agent
+        // Add nudge tags for the delegated agent (deduplicated for robustness)
         if (config.nudges && config.nudges.length > 0) {
-            for (const nudgeId of config.nudges) {
+            const uniqueNudges = [...new Set(config.nudges)];
+            for (const nudgeId of uniqueNudges) {
                 event.tags.push(["nudge", nudgeId]);
             }
         }
