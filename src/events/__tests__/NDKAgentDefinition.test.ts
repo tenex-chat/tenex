@@ -115,10 +115,12 @@ describe("NDKAgentDefinition", () => {
             expect(result[0]).toEqual({
                 eventId: "script-event-1",
                 relayUrl: "wss://relay.example.com",
+                marker: "script",
             });
             expect(result[1]).toEqual({
                 eventId: "script-event-2",
                 relayUrl: undefined, // Empty string becomes undefined
+                marker: "script",
             });
         });
 
@@ -205,10 +207,12 @@ describe("NDKAgentDefinition", () => {
             expect(result[0]).toEqual({
                 eventId: "file-event-1",
                 relayUrl: "wss://relay.example.com",
+                marker: "file",
             });
             expect(result[1]).toEqual({
                 eventId: "file-event-2",
                 relayUrl: undefined,
+                marker: "file",
             });
         });
     });
@@ -273,10 +277,12 @@ describe("NDKAgentDefinition", () => {
             expect(result[0]).toEqual({
                 eventId: "fork-event-1",
                 relayUrl: "wss://relay1.example.com",
+                marker: "fork",
             });
             expect(result[1]).toEqual({
                 eventId: "fork-event-2",
                 relayUrl: undefined,
+                marker: "fork",
             });
         });
     });
@@ -297,6 +303,7 @@ describe("NDKAgentDefinition", () => {
             expect(result).toEqual({
                 eventId: "fork-source",
                 relayUrl: "wss://relay.example.com",
+                marker: "fork",
             });
         });
     });

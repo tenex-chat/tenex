@@ -4,6 +4,39 @@ import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { logger } from "./logger";
 
 /**
+ * Represents the parsed data from an agent definition event.
+ * Contains all fields needed to instantiate or display an agent.
+ */
+export interface AgentDefinitionData {
+    /** The Nostr event ID of the agent definition */
+    id: string;
+    /** The slug identifier (d-tag) for versioning */
+    slug: string | undefined;
+    /** Display name of the agent */
+    title: string;
+    /** Short one-liner description */
+    description: string;
+    /** Extended markdown description from content field */
+    markdownDescription: string | undefined;
+    /** The agent's role/personality */
+    role: string;
+    /** Detailed operational instructions */
+    instructions: string;
+    /** Criteria for when to use this agent */
+    useCriteria: string;
+    /** Version number of the agent definition */
+    version: number;
+    /** Unix timestamp when the event was created */
+    created_at: number | undefined;
+    /** Pubkey of the agent definition author */
+    pubkey: string;
+    /** References to bundled file metadata events */
+    fileETags: Array<{ eventId: string; relayUrl?: string }>;
+    /** Reference to the source agent if this is a fork */
+    forkSource: { eventId: string; relayUrl?: string } | undefined;
+}
+
+/**
  * Fetches an agent event from Nostr
  * @param eventId - The ID of the event containing the agent
  * @param ndk - The NDK instance to use for fetching
@@ -32,26 +65,12 @@ export async function fetchAgent(eventId: string, ndk: NDK): Promise<NDKEvent | 
  * Fetches an agent definition from a Nostr event
  * @param eventId - The ID of the event containing the agent definition
  * @param ndk - The NDK instance to use for fetching
- * @returns The agent definition or null if not found
+ * @returns The agent definition data or null if not found
  */
 export async function fetchAgentDefinition(
     eventId: string,
     ndk: NDK
-): Promise<{
-    id: string;
-    slug: string | undefined;
-    title: string;
-    description: string;
-    markdownDescription: string | undefined;
-    role: string;
-    instructions: string;
-    useCriteria: string;
-    version: string;
-    created_at: number | undefined;
-    pubkey: string;
-    fileETags: Array<{ eventId: string; relayUrl?: string }>;
-    forkSource: { eventId: string; relayUrl?: string } | undefined;
-} | null> {
+): Promise<AgentDefinitionData | null> {
     try {
         // Strip "nostr:" prefix if present
         const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
@@ -75,7 +94,7 @@ export async function fetchAgentDefinition(
             role: agentDef.role || "assistant",
             instructions: agentDef.instructions || "",
             useCriteria: agentDef.useCriteria || "",
-            version: agentDef.version.toString(),
+            version: agentDef.version,
             created_at: event.created_at,
             pubkey: event.pubkey,
             fileETags: agentDef.getFileETags(),
