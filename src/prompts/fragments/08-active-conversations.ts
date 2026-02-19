@@ -218,6 +218,7 @@ export const activeConversationsFragment: PromptFragment<ActiveConversationsArgs
             const summaryLine = conv.summary ? `\n   Summary: ${conv.summary}` : "";
 
             return `${index + 1}. **${title}**
+   - ID: ${conv.conversationId}
    - Agent: ${conv.agentName}
    - Status: ${status}
    - Duration: ${duration}
