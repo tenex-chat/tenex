@@ -36,14 +36,10 @@ export function createAgentInstance(
     const signer = new NDKPrivateKeySigner(storedAgent.nsec);
     const pubkey = signer.pubkey;
 
-    // Resolve effective configuration for this project
-    const effectiveLLMConfig = projectDTag
-        ? agentStorage.resolveEffectiveLLMConfig(storedAgent, projectDTag)
-        : storedAgent.default?.model;
-
-    const effectiveTools = projectDTag
-        ? agentStorage.resolveEffectiveTools(storedAgent, projectDTag)
-        : storedAgent.default?.tools;
+    // Resolve effective configuration: projectOverrides[dTag] ?? default
+    const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent, projectDTag);
+    const effectiveLLMConfig = resolvedConfig.model;
+    const effectiveTools = resolvedConfig.tools;
 
     // Process tools using pure functions
     const validToolNames = processAgentTools(effectiveTools || [], storedAgent.slug);

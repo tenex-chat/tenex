@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-    isToolsDelta,
     applyToolsDelta,
     resolveEffectiveTools,
     resolveEffectiveModel,
@@ -11,30 +10,6 @@ import {
 } from "../ConfigResolver";
 
 describe("ConfigResolver", () => {
-    describe("isToolsDelta", () => {
-        it("should return false for empty array", () => {
-            expect(isToolsDelta([])).toBe(false);
-        });
-
-        it("should return false for plain tool list", () => {
-            expect(isToolsDelta(["fs_read", "shell", "agents_write"])).toBe(false);
-        });
-
-        it("should return true when any tool has + prefix", () => {
-            expect(isToolsDelta(["+fs_edit"])).toBe(true);
-            expect(isToolsDelta(["fs_read", "+fs_edit"])).toBe(true);
-        });
-
-        it("should return true when any tool has - prefix", () => {
-            expect(isToolsDelta(["-fs_write"])).toBe(true);
-            expect(isToolsDelta(["fs_read", "-fs_write"])).toBe(true);
-        });
-
-        it("should return true when tools have mixed +/- prefixes", () => {
-            expect(isToolsDelta(["+fs_edit", "-fs_write"])).toBe(true);
-        });
-    });
-
     describe("applyToolsDelta", () => {
         it("should add tools with + prefix", () => {
             const base = ["tool1", "tool2"];
@@ -92,12 +67,6 @@ describe("ConfigResolver", () => {
             expect(resolveEffectiveTools(defaults, [])).toEqual(["tool1", "tool2"]);
         });
 
-        it("should use full replacement when no delta syntax", () => {
-            const defaults = ["tool1", "tool2"];
-            const override = ["tool3", "tool4"];
-            expect(resolveEffectiveTools(defaults, override)).toEqual(["tool3", "tool4"]);
-        });
-
         it("should apply delta when + prefix used", () => {
             const defaults = ["tool1", "tool2"];
             const override = ["+tool3"];
@@ -114,8 +83,8 @@ describe("ConfigResolver", () => {
             expect(resolveEffectiveTools(undefined, undefined)).toBeUndefined();
         });
 
-        it("should use full replacement for override when no defaults", () => {
-            expect(resolveEffectiveTools(undefined, ["tool1"])).toEqual(["tool1"]);
+        it("should apply delta additions even when no defaults", () => {
+            expect(resolveEffectiveTools(undefined, ["+tool1"])).toEqual(["tool1"]);
         });
     });
 
@@ -193,9 +162,9 @@ describe("ConfigResolver", () => {
 
         it("should keep tools override when resolved result differs from default", () => {
             const defaultConfig = { tools: ["tool1", "tool2"] };
-            const projectConfig = { tools: ["tool1", "tool2", "tool3"] };
+            const projectConfig = { tools: ["+tool3"] };
             const result = deduplicateProjectConfig(defaultConfig, projectConfig);
-            expect(result.tools).toEqual(["tool1", "tool2", "tool3"]);
+            expect(result.tools).toEqual(["+tool3"]);
         });
 
         it("should dedup delta tools when they produce the same result as default", () => {
@@ -225,17 +194,14 @@ describe("ConfigResolver", () => {
             expect(result.tools).toBeUndefined();
         });
 
-        it("should handle requirement example: clearing -fs_write by sending fs_write, fs_read, fs_edit", () => {
+        it("should handle requirement example: adding fs_edit via delta", () => {
             // agentA default: { model: 'test-model', tools: ['fs_write', 'fs_read'] }
-            // projectA current: { model: 'test-model2', tools: ['+fs_edit', '-fs_write'] }
-            // Send: tools = ['fs_write', 'fs_read', 'fs_edit'] (full list, no delta)
-            // This results in tools=[fs_write,fs_read,fs_edit] which != default [fs_write,fs_read]
-            // So tools override is kept
+            // Send delta: ["+fs_edit"] -> resolves to [fs_write, fs_read, fs_edit]
+            // Differs from default, so override is kept
             const defaultConfig = { model: "test-model", tools: ["fs_write", "fs_read"] };
-            const projectConfig = { tools: ["fs_write", "fs_read", "fs_edit"] };
+            const projectConfig = { tools: ["+fs_edit"] };
             const result = deduplicateProjectConfig(defaultConfig, projectConfig);
-            // tools differ from default, so kept
-            expect(result.tools).toEqual(["fs_write", "fs_read", "fs_edit"]);
+            expect(result.tools).toEqual(["+fs_edit"]);
         });
 
         it("should handle requirement example: sending model same as default clears model override", () => {

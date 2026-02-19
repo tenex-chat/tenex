@@ -62,6 +62,12 @@ export class SubscriptionFilterBuilder {
             filters.push(lessonCommentFilter);
         }
 
+        // Add agent config update filter (kind 24020 from whitelisted users)
+        const configUpdateFilter = this.buildConfigUpdateFilter(config.whitelistedPubkeys);
+        if (configUpdateFilter) {
+            filters.push(configUpdateFilter);
+        }
+
         // Add report filter
         const reportFilter = this.buildReportFilter(config.knownProjects);
         if (reportFilter) {
@@ -184,6 +190,22 @@ export class SubscriptionFilterBuilder {
             "#K": [String(NDKKind.AgentLesson)], // Comments on kind 4129 (lessons)
             "#p": Array.from(agentPubkeys),
             authors: Array.from(whitelistedPubkeys),
+        };
+    }
+
+    /**
+     * Build filter for agent config update events (kind 24020) from whitelisted users.
+     * These are handled at daemon level and don't depend on agent pubkeys being populated.
+     */
+    static buildConfigUpdateFilter(whitelistedPubkeys: Set<Hexpubkey>): NDKFilter | null {
+        if (whitelistedPubkeys.size === 0) {
+            return null;
+        }
+
+        return {
+            kinds: [NDKKind.TenexAgentConfigUpdate],
+            authors: Array.from(whitelistedPubkeys),
+            limit: 0,
         };
     }
 

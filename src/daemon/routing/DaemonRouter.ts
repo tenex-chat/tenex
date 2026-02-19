@@ -66,6 +66,13 @@ export class DaemonRouter {
             return isWhitelisted;
         }
 
+        // Agent config updates (kind 24020) from whitelisted authors are handled
+        // at daemon level (no project routing needed for global updates).
+        if (AgentEventDecoder.isConfigUpdate(event)) {
+            const isWhitelisted = whitelistedPubkeys.includes(event.pubkey);
+            return isWhitelisted;
+        }
+
         // Lesson events from our agents should be traced if we have a runtime
         // for at least one of their projects.
         if (AgentEventDecoder.isLessonEvent(event)) {

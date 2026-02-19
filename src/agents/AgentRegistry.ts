@@ -49,7 +49,7 @@ import { agentStorage } from "./AgentStorage";
  * const llm = agent.createLLMService();
  *
  * // After storage updates, reload
- * await agentStorage.updateAgentTools(pubkey, newTools);
+ * await agentStorage.updateDefaultConfig(pubkey, { tools: newTools });
  * await registry.reloadAgent(pubkey); // Refresh instance
  * ```
  *
@@ -355,8 +355,8 @@ export class AgentRegistry {
      *
      * ## When to use
      * Call this after any AgentStorage update method:
-     * - updateAgentLLMConfig()
-     * - updateAgentTools()
+     * - updateDefaultConfig()
+     * - updateProjectOverride()
      * - Or any direct modification to stored agent data
      *
      * ## What it does
@@ -370,7 +370,7 @@ export class AgentRegistry {
      *
      * @example
      * // Update pattern
-     * await agentStorage.updateAgentLLMConfig(pubkey, 'anthropic:claude-opus-4');
+     * await agentStorage.updateDefaultConfig(pubkey, { model: 'anthropic:claude-opus-4' });
      * await registry.reloadAgent(pubkey); // Pick up changes
      *
      * @example
