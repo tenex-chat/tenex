@@ -341,13 +341,13 @@ export class ProjectContext {
             return false;
         }
 
-        // Remove the lesson from the array
-        lessons.splice(index, 1);
+        const newLessons = [...lessons.slice(0, index), ...lessons.slice(index + 1)];
+        this.agentLessons.set(agentPubkey, newLessons);
 
         logger.debug("ProjectContext: removed lesson from cache", {
             agentPubkey: agentPubkey.substring(0, 8),
             eventId: eventId.substring(0, 8),
-            remainingLessons: lessons.length,
+            remainingLessons: newLessons.length,
         });
 
         return true;
