@@ -2,6 +2,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import type { MCPManager } from "@/services/mcp/MCPManager";
+import { NudgeWhitelistService, type WhitelistItem } from "@/services/nudge";
 import type { LessonComment } from "@/services/prompt-compiler";
 import type { LocalReportStore } from "@/services/reports/LocalReportStore";
 import type { ReportInfo } from "@/services/reports/ReportService";
@@ -217,6 +218,12 @@ export class ProjectContext {
     public localReportStore?: LocalReportStore;
 
     /**
+     * Nudge whitelist service for this project.
+     * Provides access to whitelisted nudges/skills from trusted pubkeys.
+     */
+    public nudgeWhitelist: NudgeWhitelistService;
+
+    /**
      * Callback invoked when a new agent is added to this project's registry.
      * Used by Daemon to synchronize its routing map (agentPubkeyToProjects).
      *
@@ -256,6 +263,38 @@ export class ProjectContext {
         this.agentLessons = new Map();
         this.agentComments = new Map();
         this.reports = new Map();
+
+        // Initialize nudge whitelist service (lazy init on first use)
+        this.nudgeWhitelist = NudgeWhitelistService.getInstance();
+    }
+
+    /**
+     * Initialize the nudge whitelist subscription for this project.
+     * This should be called during project boot with trusted pubkeys.
+     *
+     * By default, whitelists the project owner's pubkey.
+     * Additional trusted pubkeys can be provided for team whitelisting.
+     *
+     * @param additionalPubkeys - Additional pubkeys beyond the project owner to whitelist
+     */
+    async initializeNudgeWhitelist(additionalPubkeys: string[] = []): Promise<void> {
+        const ownerPubkey = this.project.pubkey;
+        const whitelistPubkeys = [ownerPubkey, ...additionalPubkeys];
+
+        await this.nudgeWhitelist.initialize(whitelistPubkeys);
+
+        logger.info("Nudge whitelist initialized for project", {
+            projectId: this.project.id?.substring(0, 12),
+            ownerPubkey: ownerPubkey.substring(0, 8),
+            totalPubkeys: whitelistPubkeys.length,
+        });
+    }
+
+    /**
+     * Get available whitelisted nudges for delegation
+     */
+    getAvailableNudges(): WhitelistItem[] {
+        return this.nudgeWhitelist.getWhitelistedNudges();
     }
 
     // =====================================================================================

@@ -244,6 +244,13 @@ export class AgentPublisher {
             event.tags.push(["branch", config.branch]);
         }
 
+        // Add nudge tags for the delegated agent
+        if (config.nudges && config.nudges.length > 0) {
+            for (const nudgeId of config.nudges) {
+                event.tags.push(["nudge", nudgeId]);
+            }
+        }
+
         // Add standard metadata (project tag, model, cost, execution time, etc)
         this.encoder.addStandardTags(event, enhancedContext);
 

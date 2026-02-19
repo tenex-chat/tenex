@@ -281,6 +281,7 @@ export async function setupStreamExecution(
         metaModelSystemPrompt,
         variantSystemPrompt,
         ephemeralMessages,
+        availableNudges: projectContext.getAvailableNudges(),
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {

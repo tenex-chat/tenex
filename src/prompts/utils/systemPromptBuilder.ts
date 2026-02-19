@@ -3,7 +3,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import type { NudgeToolPermissions, NudgeData, WhitelistItem } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
 import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
 import { getNDK } from "@/nostr";
@@ -109,6 +109,8 @@ export interface BuildSystemPromptOptions {
     skillContent?: string;
     /** Individual skill data for rendering with files */
     skills?: SkillData[];
+    /** Available whitelisted nudges for delegation */
+    availableNudges?: WhitelistItem[];
 }
 
 
@@ -338,8 +340,16 @@ function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     availableAgents: AgentInstance[],
-    projectManagerPubkey?: string
+    projectManagerPubkey?: string,
+    availableNudges?: WhitelistItem[]
 ): void {
+    // Add available nudges for delegation (priority 13, before available-agents)
+    if (availableNudges && availableNudges.length > 0) {
+        builder.add("available-nudges", {
+            availableNudges,
+        });
+    }
+
     // Add available agents for delegations
     builder.add("available-agents", {
         agents: availableAgents,
@@ -726,7 +736,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     }
 
     // Add agent-specific fragments
-    addAgentFragments(systemPromptBuilder, agentForFragments, availableAgents, options.projectManagerPubkey);
+    addAgentFragments(
+        systemPromptBuilder,
+        agentForFragments,
+        availableAgents,
+        options.projectManagerPubkey,
+        options.availableNudges
+    );
 
     // Build and return the complete prompt with all fragments
     return systemPromptBuilder.build();

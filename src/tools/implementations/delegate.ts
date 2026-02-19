@@ -23,6 +23,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationMarker } from "@/conversations/types";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -41,6 +42,10 @@ const delegationItemSchema = z.object({
     .boolean()
     .optional()
     .describe("Set to true to proceed even if circular delegation is detected"),
+  nudges: z
+    .array(z.string())
+    .optional()
+    .describe("Nudge event IDs to apply to this delegated agent. Nudges can modify tool availability and inject additional context."),
 });
 
 type DelegationItem = z.infer<typeof delegationItemSchema>;
@@ -108,6 +113,11 @@ async function executeDelegate(
   const conversationStore = ConversationStore.get(context.conversationId);
   const delegationChain = conversationStore?.metadata?.delegationChain;
 
+  // Extract inherited nudges from the triggering event
+  // Nudge inheritance: any nudges on the current triggering event are automatically
+  // passed forward to delegated agents unless explicitly overridden
+  const inheritedNudges = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+
   for (const delegation of delegations) {
     // Resolve slug to pubkey - throws if invalid
     const resolution = resolveAgentSlug(delegation.recipient);
@@ -155,10 +165,22 @@ async function executeDelegate(
 
     // Publish delegation event
     const eventContext = createEventContext(context);
+
+    // Combine inherited nudges with explicitly specified nudges
+    // Nudge inheritance: inherited nudges are always passed forward
+    // Explicit nudges are added to the inherited set (not replaced)
+    const combinedNudges = [
+      ...inheritedNudges,
+      ...(delegation.nudges || []),
+    ];
+    // Deduplicate nudges
+    const uniqueNudges = [...new Set(combinedNudges)];
+
     const eventId = await context.agentPublisher.delegate({
       recipient: pubkey,
       content: delegation.prompt,
       branch: delegation.branch,
+      nudges: uniqueNudges.length > 0 ? uniqueNudges : undefined,
     }, eventContext);
 
     const pendingDelegation: PendingDelegation = {
@@ -235,6 +257,7 @@ async function executeDelegate(
     count: pendingDelegations.length,
     delegationConversationIds,
     circularWarningsCount: circularWarnings.length,
+    inheritedNudgesCount: inheritedNudges.length,
   });
 
   let message = `Delegated ${pendingDelegations.length} task(s). The agent(s) will wake you up when ready with the response(s).`;
@@ -264,7 +287,9 @@ export function createDelegateTool(context: ToolExecutionContext): AISdkTool {
 
   const description = `Delegate tasks to one or more agents. Each delegation can have its own prompt and branch. IMPORTANT: Delegated agents ONLY see your prompt - they cannot see any prior conversation. Include ALL necessary context, requirements, and constraints in your prompt.
 
-Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` on an individual delegation to bypass this check.`;
+Circular delegation detection: The tool detects when a delegation would create a circular chain (A→B→C→A). By default, circular delegations are skipped with a soft warning. Set \`force: true\` on an individual delegation to bypass this check.
+
+Nudge support: Pass nudge event IDs in the \`nudges\` array to apply behavioral nudges to delegated agents. Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context. Nudge inheritance: any nudges active on the current agent are automatically forwarded to all delegated agents.`;
 
   const aiTool = tool({
     description,
