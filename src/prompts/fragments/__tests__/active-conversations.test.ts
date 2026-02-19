@@ -127,9 +127,30 @@ describe("activeConversationsFragment", () => {
 
             expect(result).toContain("## Active Conversations");
             expect(result).toContain("Active Task");
+            expect(result).toContain("ID: conv-active-1");
             expect(result).toContain("Working on feature X");
             expect(result).toContain("Messages: 10");
             expect(result).toContain("streaming");
+        });
+
+        it("should include conversation ID for use with conversation_get", () => {
+            const ralEntry = createMockRalEntry({
+                conversationId: "test-conversation-id-12345",
+                isStreaming: true,
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([ralEntry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                title: "Task with ID",
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            expect(result).toContain("ID: test-conversation-id-12345");
         });
     });
 
