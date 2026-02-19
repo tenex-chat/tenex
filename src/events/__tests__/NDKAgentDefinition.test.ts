@@ -51,6 +51,39 @@ describe("NDKAgentDefinition", () => {
         it("should default version to 1", () => {
             expect(agentDef.version).toBe(1);
         });
+
+        it("should get and set slug (d-tag)", () => {
+            agentDef.slug = "human-replica";
+            expect(agentDef.slug).toBe("human-replica");
+            // Verify it's stored as a d-tag
+            const dTag = agentDef.tags.find((t) => t[0] === "d");
+            expect(dTag).toEqual(["d", "human-replica"]);
+        });
+
+        it("should return undefined for slug when not set", () => {
+            expect(agentDef.slug).toBeUndefined();
+        });
+
+        it("should replace existing slug when setting new value", () => {
+            agentDef.slug = "old-slug";
+            agentDef.slug = "new-slug";
+            expect(agentDef.slug).toBe("new-slug");
+            // Verify only one d-tag exists
+            const dTags = agentDef.tags.filter((t) => t[0] === "d");
+            expect(dTags).toHaveLength(1);
+        });
+
+        it("should clear slug when setting undefined", () => {
+            agentDef.slug = "existing-slug";
+            expect(agentDef.slug).toBe("existing-slug");
+
+            agentDef.slug = undefined;
+            expect(agentDef.slug).toBeUndefined();
+
+            // Verify d-tag is removed
+            const dTags = agentDef.tags.filter((t) => t[0] === "d");
+            expect(dTags).toHaveLength(0);
+        });
     });
 
     describe("getScriptETags", () => {

@@ -260,7 +260,7 @@ describe("conversationEventSchema", () => {
 | 4199 | CONVERSATION_MESSAGE | Conversation messages |
 | 4200 | DELEGATION | Delegation requests/results |
 | 31990 | AGENT_METADATA | Agent profile (replaceable) |
-| 4129 | AGENT_DEFINITION | Agent definition |
+| 4129 | AGENT_LESSON | Agent lesson (learned knowledge) |
 | 1111 | COMMENT | NIP-22 comments |
 
 ## Related
