@@ -11,6 +11,7 @@ import { ensureDirectory, fileExists } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 
 /**
  * Agent data stored in ~/.tenex/agents/<pubkey>.json
@@ -163,10 +164,18 @@ export function isAgentActive(agent: StoredAgent): boolean {
 }
 
 /**
+ * Slug index entry tracking which projects use this slug
+ */
+interface SlugEntry {
+    pubkey: string;
+    projects: string[];
+}
+
+/**
  * Index structure for fast lookups
  */
 interface AgentIndex {
-    bySlug: Record<string, string>; // slug -> pubkey
+    bySlug: Record<string, SlugEntry>; // slug -> { pubkey, projects[] }
     byEventId: Record<string, string>; // eventId -> pubkey
     byProject: Record<string, string[]>; // projectDTag -> pubkey[]
 }
@@ -241,7 +250,34 @@ export class AgentStorage {
         if (await fileExists(this.indexPath)) {
             try {
                 const content = await fs.readFile(this.indexPath, "utf-8");
-                this.index = JSON.parse(content);
+                const rawIndex = JSON.parse(content);
+
+                // Detect old format: bySlug is Record<string, string> instead of Record<string, SlugEntry>
+                const needsMigration = rawIndex.bySlug &&
+                    Object.values(rawIndex.bySlug).some((val: any) => typeof val === "string");
+
+                if (needsMigration) {
+                    logger.info("Migrating agent index from old format to multi-project slug structure");
+                    this.index = this.migrateIndexFormat(rawIndex);
+
+                    // Verify byProject is populated after migration
+                    const hasValidByProject = this.index.byProject &&
+                        Object.keys(this.index.byProject).length > 0;
+
+                    if (!hasValidByProject) {
+                        logger.warn("Migration produced empty byProject index, rebuilding from agent files");
+                        await this.rebuildIndex();
+                    } else {
+                        await this.saveIndex();
+                    }
+
+                    logger.info("Agent index migration complete", {
+                        slugCount: Object.keys(this.index.bySlug).length,
+                        projectCount: Object.keys(this.index.byProject).length,
+                    });
+                } else {
+                    this.index = rawIndex;
+                }
             } catch (error) {
                 logger.error("Failed to load agent index, creating new one", { error });
                 this.index = { bySlug: {}, byEventId: {}, byProject: {} };
@@ -257,6 +293,45 @@ export class AgentStorage {
     private async saveIndex(): Promise<void> {
         if (!this.index) return;
         await fs.writeFile(this.indexPath, JSON.stringify(this.index, null, 2));
+    }
+
+    /**
+     * Migrate index from old flat format to new SlugEntry structure.
+     * Old format: bySlug[slug] = pubkey
+     * New format: bySlug[slug] = { pubkey, projects: [] }
+     */
+    private migrateIndexFormat(oldIndex: any): AgentIndex {
+        const newIndex: AgentIndex = {
+            bySlug: {},
+            byEventId: oldIndex.byEventId || {},
+            byProject: oldIndex.byProject || {},
+        };
+
+        // Build reverse lookup: pubkey -> projects[]
+        const pubkeyToProjects: Record<string, string[]> = {};
+        for (const [projectDTag, pubkeys] of Object.entries(oldIndex.byProject || {})) {
+            for (const pubkey of (pubkeys as string[])) {
+                if (!pubkeyToProjects[pubkey]) {
+                    pubkeyToProjects[pubkey] = [];
+                }
+                pubkeyToProjects[pubkey].push(projectDTag);
+            }
+        }
+
+        // Convert slug index
+        for (const [slug, pubkey] of Object.entries(oldIndex.bySlug || {})) {
+            if (typeof pubkey === "string") {
+                newIndex.bySlug[slug] = {
+                    pubkey,
+                    projects: pubkeyToProjects[pubkey] || [],
+                };
+            } else {
+                // Already in new format
+                newIndex.bySlug[slug] = pubkey as SlugEntry;
+            }
+        }
+
+        return newIndex;
     }
 
     /**
@@ -283,13 +358,33 @@ export class AgentStorage {
 
                 const isActive = isAgentActive(agent);
 
-                // Update slug index - active agents take precedence
-                if (isActive) {
-                    index.bySlug[agent.slug] = pubkey;
-                    activeSlugOwners.add(agent.slug);
-                } else if (!activeSlugOwners.has(agent.slug)) {
-                    // Only set inactive agent as owner if no active agent owns this slug
-                    index.bySlug[agent.slug] = pubkey;
+                // Update slug index with multi-project support - active agents take precedence
+                const existingEntry = index.bySlug[agent.slug];
+                if (existingEntry) {
+                    if (existingEntry.pubkey !== pubkey) {
+                        // Different agent with same slug - active takes precedence
+                        if (isActive && !activeSlugOwners.has(agent.slug)) {
+                            index.bySlug[agent.slug] = {
+                                pubkey,
+                                projects: [...agent.projects],
+                            };
+                            activeSlugOwners.add(agent.slug);
+                        }
+                        // If not active and active agent already owns, skip
+                    } else {
+                        // Same agent in multiple projects - merge projects
+                        existingEntry.projects = [
+                            ...new Set([...existingEntry.projects, ...agent.projects]),
+                        ];
+                    }
+                } else {
+                    index.bySlug[agent.slug] = {
+                        pubkey,
+                        projects: [...agent.projects],
+                    };
+                    if (isActive) {
+                        activeSlugOwners.add(agent.slug);
+                    }
                 }
 
                 // Update eventId index
@@ -453,10 +548,10 @@ export class AgentStorage {
         if (!this.index) await this.loadIndex();
         if (!this.index) return;
 
-        const existingPubkey = this.index.bySlug[slug];
-        if (!existingPubkey || existingPubkey === newPubkey) return;
+        const existingEntry = this.index.bySlug[slug];
+        if (!existingEntry || existingEntry.pubkey === newPubkey) return;
 
-        const existingAgent = await this.loadAgent(existingPubkey);
+        const existingAgent = await this.loadAgent(existingEntry.pubkey);
         if (!existingAgent) return;
 
         // Find overlapping projects
@@ -464,14 +559,46 @@ export class AgentStorage {
         if (overlappingProjects.length === 0) return;
 
         logger.info(`Cleaning up duplicate slug '${slug}'`, {
-            oldPubkey: existingPubkey.substring(0, 8),
+            oldPubkey: existingEntry.pubkey.substring(0, 8),
             newPubkey: newPubkey.substring(0, 8),
             overlappingProjects,
         });
 
+        // Emit telemetry for agent eviction
+        trace.getActiveSpan()?.addEvent("agent.slug_conflict_eviction", {
+            "conflict.slug": slug,
+            "conflict.evicted_pubkey": existingEntry.pubkey,
+            "conflict.incoming_pubkey": newPubkey,
+            "conflict.overlapping_projects": overlappingProjects.join(", "),
+            "conflict.overlapping_count": overlappingProjects.length,
+        });
+
         // Remove old agent from overlapping projects
         for (const projectDTag of overlappingProjects) {
-            await this.removeAgentFromProject(existingPubkey, projectDTag);
+            await this.removeAgentFromProject(existingEntry.pubkey, projectDTag);
+
+            // Update slug entry's project list
+            existingEntry.projects = existingEntry.projects.filter(p => p !== projectDTag);
+
+            // Emit per-project eviction event for granular tracking
+            trace.getActiveSpan()?.addEvent("agent.evicted_from_project", {
+                "eviction.slug": slug,
+                "eviction.pubkey": existingEntry.pubkey,
+                "eviction.project": projectDTag,
+                "eviction.reason": "slug_conflict",
+            });
+        }
+
+        // If old agent has no projects left, remove the slug entry entirely
+        if (existingEntry.projects.length === 0) {
+            delete this.index.bySlug[slug];
+            logger.info(`Removed slug entry for '${slug}' - no projects remaining`);
+
+            trace.getActiveSpan()?.addEvent("agent.slug_entry_deleted", {
+                "slug.deleted": slug,
+                "slug.pubkey": existingEntry.pubkey,
+                "slug.reason": "no_projects_remaining",
+            });
         }
     }
 
@@ -500,8 +627,25 @@ export class AgentStorage {
 
         // Remove old index entries if slug or eventId changed
         if (existing) {
-            if (existing.slug !== agent.slug && this.index.bySlug[existing.slug] === pubkey) {
-                delete this.index.bySlug[existing.slug];
+            if (existing.slug !== agent.slug) {
+                const oldSlugEntry = this.index.bySlug[existing.slug];
+                if (oldSlugEntry && oldSlugEntry.pubkey === pubkey) {
+                    // When slug changes, we need to remove ALL of the EXISTING agent's
+                    // projects from the old slug, not the new projects list.
+                    // This prevents ghost entries when an agent changes both slug and projects.
+                    oldSlugEntry.projects = oldSlugEntry.projects.filter(
+                        p => !existing.projects.includes(p)
+                    );
+                    // Delete entry if no projects remain
+                    if (oldSlugEntry.projects.length === 0) {
+                        delete this.index.bySlug[existing.slug];
+                        trace.getActiveSpan()?.addEvent("agent.slug_renamed_cleanup", {
+                            "slug.old": existing.slug,
+                            "slug.new": agent.slug,
+                            "agent.pubkey": pubkey,
+                        });
+                    }
+                }
             }
             if (
                 existing.eventId &&
@@ -531,22 +675,35 @@ export class AgentStorage {
         // Only update bySlug index for active agents to prevent inactive agents
         // from hiding active agents with the same slug
         if (isAgentActive(agent)) {
-            this.index.bySlug[agent.slug] = pubkey;
+            this.index.bySlug[agent.slug] = {
+                pubkey,
+                projects: [...agent.projects],
+            };
         } else {
             // For inactive agents, handle slug ownership transition
             const currentOwner = this.index.bySlug[agent.slug];
-            if (currentOwner === pubkey) {
+            if (currentOwner?.pubkey === pubkey) {
                 // This agent was the canonical owner but is now inactive
                 // Find another active agent with the same slug to take ownership
                 const alternativeOwner = await this.findAlternativeSlugOwner(agent.slug, pubkey);
                 if (alternativeOwner) {
-                    this.index.bySlug[agent.slug] = alternativeOwner;
+                    // Load the alternative owner's projects
+                    const altAgent = await this.loadAgent(alternativeOwner);
+                    this.index.bySlug[agent.slug] = {
+                        pubkey: alternativeOwner,
+                        projects: altAgent?.projects ?? [],
+                    };
                     logger.debug(`Reassigned slug '${agent.slug}' from inactive ${pubkey.substring(0, 8)} to active ${alternativeOwner.substring(0, 8)}`);
+                } else {
+                    // No alternative found - update projects for the inactive agent
+                    currentOwner.projects = [...agent.projects];
                 }
-                // If no alternative found, keep the inactive agent as owner for reactivation lookups
             } else if (!currentOwner) {
                 // No owner yet - claim it for reactivation lookup purposes
-                this.index.bySlug[agent.slug] = pubkey;
+                this.index.bySlug[agent.slug] = {
+                    pubkey,
+                    projects: [...agent.projects],
+                };
             }
             // If another agent owns the slug, don't overwrite
         }
@@ -600,7 +757,8 @@ export class AgentStorage {
         if (!this.index) return;
 
         // Remove from slug index
-        if (this.index.bySlug[agent.slug] === pubkey) {
+        const slugEntry = this.index.bySlug[agent.slug];
+        if (slugEntry?.pubkey === pubkey) {
             delete this.index.bySlug[agent.slug];
         }
 
@@ -625,16 +783,63 @@ export class AgentStorage {
     }
 
     /**
-     * Get agent by slug (uses index for O(1) lookup)
+     * Get agent by slug (uses index for O(1) lookup).
+     *
+     * **DEPRECATED**: Use getAgentBySlugForProject() instead for project-scoped lookups.
+     * This method returns the LAST agent saved with this slug, which may not be the
+     * correct agent when multiple agents use the same slug across different projects.
+     *
+     * @deprecated Use getAgentBySlugForProject(slug, projectDTag) instead
      */
     async getAgentBySlug(slug: string): Promise<StoredAgent | null> {
         if (!this.index) await this.loadIndex();
         if (!this.index) return null;
 
-        const pubkey = this.index.bySlug[slug];
-        if (!pubkey) return null;
+        const slugEntry = this.index.bySlug[slug];
+        if (!slugEntry) return null;
 
-        return this.loadAgent(pubkey);
+        logger.warn("Using deprecated getAgentBySlug() - consider using getAgentBySlugForProject()", {
+            slug,
+            pubkey: slugEntry.pubkey.substring(0, 8),
+        });
+
+        return this.loadAgent(slugEntry.pubkey);
+    }
+
+    /**
+     * Get agent by slug within a specific project context.
+     * This is the correct method to use when slug may not be globally unique.
+     *
+     * @param slug - The agent slug to search for
+     * @param projectDTag - The project context to search within
+     * @returns The agent if found in this project, null otherwise
+     */
+    async getAgentBySlugForProject(slug: string, projectDTag: string): Promise<StoredAgent | null> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return null;
+
+        const slugEntry = this.index.bySlug[slug];
+        if (!slugEntry) return null;
+
+        // Check if this slug is used in the specified project
+        if (!slugEntry.projects.includes(projectDTag)) {
+            return null;
+        }
+
+        const agent = await this.loadAgent(slugEntry.pubkey);
+
+        // Double-check that the agent is actually in this project
+        if (agent && !agent.projects.includes(projectDTag)) {
+            logger.warn("Index mismatch: slug entry claims agent is in project but agent file disagrees", {
+                slug,
+                projectDTag,
+                pubkey: slugEntry.pubkey.substring(0, 8),
+                agentProjects: agent.projects,
+            });
+            return null;
+        }
+
+        return agent;
     }
 
     /**
@@ -676,7 +881,8 @@ export class AgentStorage {
             if (seenSlugs.has(agent.slug)) continue;
 
             // Only include if this pubkey is the canonical one for this slug
-            if (this.index.bySlug[agent.slug] === pubkey) {
+            const slugEntry = this.index.bySlug[agent.slug];
+            if (slugEntry?.pubkey === pubkey) {
                 agents.push(agent);
                 seenSlugs.add(agent.slug);
             }
