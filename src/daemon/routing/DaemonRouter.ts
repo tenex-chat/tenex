@@ -227,7 +227,7 @@ export class DaemonRouter {
         }
 
         // No match found
-        const aTags = event.tags.filter((t) => t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
         const pTags = event.tags.filter((t) => t[0] === "p");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
@@ -258,7 +258,8 @@ export class DaemonRouter {
         event: NDKEvent,
         knownProjects: Map<string, NDKProject>
     ): RoutingDecision | null {
-        const aTags = event.tags.filter((t) => t[0] === "a");
+        // Check both lowercase 'a' and uppercase 'A' tags (NIP convention: A for addressable events)
+        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
         logger.debug("Checking A-tags for project routing", {
