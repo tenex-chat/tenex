@@ -656,6 +656,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         projectTitle: project.tagValue("title") || "Unknown Project",
         projectOwnerPubkey: project.pubkey,
         workingDirectory,
+        conversationId: conversation.getId(),
     });
 
     // Add agent home directory context
