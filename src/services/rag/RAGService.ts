@@ -131,6 +131,28 @@ export class RAGService {
     }
 
     /**
+     * Get collection statistics including document counts by agent
+     */
+    public async getCollectionStats(
+        collectionName: string,
+        agentPubkey?: string
+    ): Promise<{ totalCount: number; agentCount?: number }> {
+        await this.ensureInitialized();
+        return this.operations.getCollectionStats(collectionName, agentPubkey);
+    }
+
+    /**
+     * Get statistics for all collections with agent attribution.
+     * Used by the RAG collections system prompt fragment.
+     */
+    public async getAllCollectionStats(
+        agentPubkey: string
+    ): Promise<Array<{ name: string; agentDocCount: number; totalDocCount: number }>> {
+        await this.ensureInitialized();
+        return this.operations.getAllCollectionStats(agentPubkey);
+    }
+
+    /**
      * Set a custom embedding provider.
      * This recreates the operations instance with the new provider.
      */

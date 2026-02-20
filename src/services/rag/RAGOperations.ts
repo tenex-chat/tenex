@@ -450,6 +450,80 @@ export class RAGOperations {
     }
 
     /**
+     * Get collection statistics including document counts by agent.
+     * Uses LanceDB's countRows with SQL filtering for efficiency.
+     *
+     * @param collectionName Name of the collection to query
+     * @param agentPubkey Optional agent pubkey to count their contributions
+     * @returns Object with total count and optional agent-specific count
+     */
+    async getCollectionStats(
+        collectionName: string,
+        agentPubkey?: string
+    ): Promise<{ totalCount: number; agentCount?: number }> {
+        const table = await this.dbManager.getTable(collectionName);
+
+        try {
+            // Get total document count
+            const totalCount = await table.countRows();
+
+            // If agentPubkey provided, count documents attributed to this agent
+            // The metadata field is stored as JSON string, so we use LIKE for matching
+            let agentCount: number | undefined;
+            if (agentPubkey) {
+                // SQL filter for JSON string field containing agent_pubkey
+                // Format: metadata LIKE '%"agent_pubkey":"<pubkey>"%'
+                const escapedPubkey = agentPubkey.replace(/"/g, '\\"');
+                const filter = `metadata LIKE '%"agent_pubkey":"${escapedPubkey}"%'`;
+                agentCount = await table.countRows(filter);
+            }
+
+            return { totalCount, agentCount };
+        } catch (error) {
+            return this.handleRAGError(
+                error,
+                `Failed to get stats for collection '${collectionName}'`
+            );
+        }
+    }
+
+    /**
+     * Get statistics for all collections with agent attribution.
+     * Efficiently retrieves counts for all collections in parallel.
+     *
+     * @param agentPubkey Agent pubkey to count contributions for
+     * @returns Array of collection stats with agent and total counts
+     */
+    async getAllCollectionStats(
+        agentPubkey: string
+    ): Promise<Array<{ name: string; agentDocCount: number; totalDocCount: number }>> {
+        const collections = await this.listCollections();
+
+        const stats = await Promise.all(
+            collections.map(async (name) => {
+                try {
+                    const { totalCount, agentCount } = await this.getCollectionStats(name, agentPubkey);
+                    return {
+                        name,
+                        agentDocCount: agentCount ?? 0,
+                        totalDocCount: totalCount,
+                    };
+                } catch (error) {
+                    // Log but don't fail - return zero counts for problematic collections
+                    logger.warn(`Failed to get stats for collection '${name}':`, error);
+                    return {
+                        name,
+                        agentDocCount: 0,
+                        totalDocCount: 0,
+                    };
+                }
+            })
+        );
+
+        return stats;
+    }
+
+    /**
      * Generate a unique document ID
      */
     private generateDocumentId(): string {

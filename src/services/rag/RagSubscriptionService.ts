@@ -1,10 +1,11 @@
 import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
-import { getProjectContext } from "@/services/projects";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import { RAGService } from "./RAGService";
+import type { DocumentMetadata } from "./rag-utils";
 
 /**
  * RagSubscriptionService - Manages persistent RAG subscriptions to MCP resources
@@ -272,16 +273,35 @@ export class RagSubscriptionService {
                 return;
             }
 
+            // Build metadata with provenance fields for filtering at query time
+            const metadata: DocumentMetadata = {
+                // Auto-inject provenance for filtering at query time
+                agent_pubkey: subscription.agentPubkey,
+                // Subscription-specific metadata
+                subscriptionId: subscription.subscriptionId,
+                mcpServerId: subscription.mcpServerId,
+                resourceUri: subscription.resourceUri,
+                timestamp: Date.now(),
+            };
+
+            // Add project_id if available from project context (uses NIP-33 address format)
+            if (isProjectContextInitialized()) {
+                try {
+                    const projectCtx = getProjectContext();
+                    const projectId = projectCtx.project.tagId();
+                    if (projectId) {
+                        metadata.project_id = projectId;
+                    }
+                } catch (error) {
+                    logger.debug("Project context error during RAG subscription update", { error });
+                }
+            }
+
             // Add document to RAG collection
             await this.ragService.addDocuments(subscription.ragCollection, [
                 {
                     content,
-                    metadata: {
-                        subscriptionId: subscription.subscriptionId,
-                        mcpServerId: subscription.mcpServerId,
-                        resourceUri: subscription.resourceUri,
-                        timestamp: Date.now(),
-                    },
+                    metadata,
                     source: `${subscription.mcpServerId}:${subscription.resourceUri}`,
                     timestamp: Date.now(),
                 },
