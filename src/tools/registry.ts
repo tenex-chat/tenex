@@ -32,7 +32,6 @@ import { createAgentsReadTool } from "./implementations/agents_read";
 import { createAgentsWriteTool } from "./implementations/agents_write";
 import { createAskTool } from "./implementations/ask";
 import { createConversationGetTool } from "./implementations/conversation_get";
-import { createConversationIndexTool } from "./implementations/conversation_index";
 import { createConversationListTool } from "./implementations/conversation_list";
 import { createConversationSearchTool } from "./implementations/conversation_search";
 import { createDelegateTool } from "./implementations/delegate";
@@ -193,9 +192,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     schedule_task_once: createScheduleTaskOnceTool,
     schedule_tasks_list: createListScheduledTasksTool,
 
-    // Conversation search and indexing
+    // Conversation search
     conversation_search: createConversationSearchTool,
-    conversation_index: createConversationIndexTool,
 
     shell: createShellTool,
     kill: createKillTool,
