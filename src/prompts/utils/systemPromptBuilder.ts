@@ -265,6 +265,30 @@ async function addCoreAgentFragments(
             resourcesPerServer,
         });
     }
+
+    // Add RAG collection attribution - shows agents their contributions to RAG collections
+    // This uses the provenance tracking metadata (agent_pubkey) from document ingestion
+    try {
+        const { RAGService } = await import("@/services/rag/RAGService");
+        const ragService = RAGService.getInstance();
+        const collections = await ragService.getAllCollectionStats(agent.pubkey);
+
+        // Only add the fragment if we have any collection data
+        if (collections.length > 0) {
+            builder.add("rag-collections", {
+                agentPubkey: agent.pubkey,
+                collections,
+            });
+            logger.debug("📊 Added RAG collection stats to system prompt", {
+                agent: agent.name,
+                collectionsWithContributions: collections.filter(c => c.agentDocCount > 0).length,
+                totalCollections: collections.length,
+            });
+        }
+    } catch (error) {
+        // RAG service might not be available - skip gracefully
+        logger.debug("Could not fetch RAG collection stats for prompt:", error);
+    }
 }
 
 /**
