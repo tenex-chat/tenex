@@ -670,6 +670,13 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add relay configuration context
     systemPromptBuilder.add("relay-configuration", {});
 
+    // Add meta-project context (other projects this agent belongs to)
+    // This gives agents cross-project awareness without overwhelming them
+    systemPromptBuilder.add("meta-project-context", {
+        agent: agentForFragments,
+        currentProjectId: project.tagId(),
+    });
+
     // Add active conversations context (currently running agents in the project)
     // NOTE: Use project.tagId() (NIP-33 address: "31933:<pubkey>:<d-tag>") for RALRegistry lookups
     // RALRegistry stores entries using tagId(), so lookups must use the same format
