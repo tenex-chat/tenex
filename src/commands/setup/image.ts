@@ -5,7 +5,7 @@ import {
     ASPECT_RATIOS,
     IMAGE_SIZES,
     type ImageConfig,
-} from "@/services/image";
+} from "@/services/image/ImageGenerationService";
 import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { Command } from "commander";
