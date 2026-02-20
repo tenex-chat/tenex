@@ -1,4 +1,3 @@
-import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
 /**
@@ -7,6 +6,9 @@ import type { PromptFragment } from "../core/types";
  *
  * This fragment leverages the provenance tracking metadata (agent_pubkey)
  * added during document ingestion to surface personalized collection stats.
+ *
+ * Registration: This fragment is registered explicitly in fragments/index.ts
+ * following the project's explicit registration pattern.
  */
 interface RAGCollectionStats {
     name: string;
@@ -46,6 +48,3 @@ export const ragCollectionsFragment: PromptFragment<RAGCollectionsArgs> = {
     },
     expectedArgs: "{ agentPubkey: string, collections: RAGCollectionStats[] }",
 };
-
-// Register the fragment
-fragmentRegistry.register(ragCollectionsFragment);
