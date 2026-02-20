@@ -6,6 +6,7 @@ import { type RAGDocument, RAGService } from "@/services/rag/RAGService";
 import type { AISdkTool } from "@/tools/types";
 import type { DocumentMetadata } from "@/services/rag/rag-utils";
 import { type ToolResponse, executeToolWithErrorHandling, resolveAndValidatePath } from "@/tools/utils";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -367,11 +368,58 @@ async function extractDocumentContentFromSource(
 }
 
 /**
+ * Compute base provenance metadata once per tool execution
+ *
+ * Rationale: Pre-computing provenance avoids repeated global context access
+ * per document. This is called once in executeAddDocuments and passed down.
+ */
+function computeBaseProvenance(context: ToolExecutionContext): DocumentMetadata {
+    const provenance: DocumentMetadata = {};
+
+    // Auto-inject agent_pubkey if available
+    if (context.agent?.pubkey) {
+        provenance.agent_pubkey = context.agent.pubkey;
+    }
+
+    // Auto-inject project_id if available (uses NIP-33 address format)
+    if (isProjectContextInitialized()) {
+        try {
+            const projectCtx = getProjectContext();
+            const projectId = projectCtx.project.tagId();
+            if (projectId) {
+                provenance.project_id = projectId;
+            }
+        } catch {
+            // Project context not available - skip project_id injection
+        }
+    }
+
+    return provenance;
+}
+
+/**
+ * Merge document metadata with base provenance
+ *
+ * Rationale: Separates provenance computation (done once) from per-document
+ * metadata merging. Caller-provided metadata takes precedence over auto-injected.
+ */
+function mergeWithProvenance(
+    documentMetadata: Record<string, unknown> | null | undefined,
+    baseProvenance: DocumentMetadata
+): DocumentMetadata {
+    return {
+        ...baseProvenance,
+        ...(documentMetadata || {}),
+    };
+}
+
+/**
  * Process documents and prepare them for insertion
  */
 async function processDocuments(
     documents: z.infer<typeof ragAddDocumentsSchema>["documents"],
-    workingDirectory: string
+    workingDirectory: string,
+    baseProvenance: DocumentMetadata
 ): Promise<RAGDocument[]> {
     const processedDocs: RAGDocument[] = [];
 
@@ -385,10 +433,13 @@ async function processDocuments(
             // Validate content
             validateContent(content, source || "document");
 
+            // Merge document metadata with pre-computed provenance
+            const metadata = mergeWithProvenance(doc.metadata, baseProvenance);
+
             processedDocs.push({
                 id: doc.id ?? undefined,
                 content,
-                metadata: (doc.metadata ?? undefined) as DocumentMetadata | undefined,
+                metadata,
                 source: source ?? undefined,
                 timestamp: Date.now(),
             });
@@ -415,8 +466,11 @@ async function executeAddDocuments(
 ): Promise<ToolResponse> {
     const { collection, documents } = input;
 
-    // Process documents
-    const processedDocs = await processDocuments(documents, context.workingDirectory);
+    // Pre-compute base provenance once (avoids repeated global context access per document)
+    const baseProvenance = computeBaseProvenance(context);
+
+    // Process documents with provenance injection
+    const processedDocs = await processDocuments(documents, context.workingDirectory, baseProvenance);
 
     // Add to collection
     const ragService = RAGService.getInstance();
