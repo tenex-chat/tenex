@@ -6,6 +6,36 @@ import { RAGOperations } from "./RAGOperations";
 import type { LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
 /**
+ * Lightweight check for RAG collections without full service initialization.
+ * Returns true if any RAG collections exist in the database.
+ *
+ * This is designed for use in system prompt building where we want to avoid
+ * initializing the embedding provider (which can be expensive) if RAG isn't used.
+ */
+export async function hasRagCollections(): Promise<boolean> {
+    let tempDbService: RAGDatabaseService | null = null;
+    try {
+        // Use a temporary DB service just for listing - avoids embedding provider init
+        tempDbService = new RAGDatabaseService();
+        const tables = await tempDbService.listTables();
+        return tables.length > 0;
+    } catch (error) {
+        // Database doesn't exist or can't connect - no collections
+        logger.debug("RAG database not available for collection check:", error);
+        return false;
+    } finally {
+        // Ensure cleanup even on listTables() errors; log but don't override result
+        if (tempDbService) {
+            try {
+                await tempDbService.close();
+            } catch (closeError) {
+                logger.debug("Failed to close temporary RAG database service:", closeError);
+            }
+        }
+    }
+}
+
+/**
  * Facade for RAG functionality
  * Coordinates between database management and operations
  */
@@ -197,3 +227,4 @@ export class RAGService {
 export type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
 export { RAGValidationError, RAGOperationError } from "./RAGOperations";
 export { RAGDatabaseError } from "./RAGDatabaseService";
+// hasRagCollections is exported at module level (above class)
