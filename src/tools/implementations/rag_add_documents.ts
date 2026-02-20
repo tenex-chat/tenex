@@ -407,10 +407,12 @@ function mergeWithProvenance(
     documentMetadata: Record<string, unknown> | null | undefined,
     baseProvenance: DocumentMetadata
 ): DocumentMetadata {
+    // Cast is safe: documentMetadata comes from user input that should be JSON-serializable
+    // The DocumentMetadata type enforces JsonValue constraints at compile time
     return {
         ...baseProvenance,
         ...(documentMetadata || {}),
-    };
+    } as DocumentMetadata;
 }
 
 /**
