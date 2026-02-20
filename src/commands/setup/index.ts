@@ -1,5 +1,6 @@
 import { embedCommand } from "@/commands/setup/embed";
 import { globalSystemPromptCommand } from "@/commands/setup/global-system-prompt";
+import { imageCommand } from "@/commands/setup/image";
 import { llmCommand } from "@/commands/setup/llm";
 import { onboardingCommand } from "@/commands/setup/onboarding";
 import { providersCommand } from "@/commands/setup/providers";
@@ -11,4 +12,5 @@ export const setupCommand = new Command("setup")
     .addCommand(providersCommand)
     .addCommand(llmCommand)
     .addCommand(embedCommand)
+    .addCommand(imageCommand)
     .addCommand(globalSystemPromptCommand);
