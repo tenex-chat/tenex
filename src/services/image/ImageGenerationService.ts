@@ -181,9 +181,13 @@ export class ImageGenerationService {
                 throw new Error("No response step received from model");
             }
 
-            const message = step.response.messages[0];
+            // Guard against missing response/messages
+            if (!step.response) {
+                throw new Error("No response object in step - unexpected API response format");
+            }
+            const message = step.response.messages?.[0];
             if (!message) {
-                throw new Error("No message in response");
+                throw new Error("No message in response - model may have returned an empty response");
             }
 
             // Find the file part containing the image
@@ -193,15 +197,17 @@ export class ImageGenerationService {
                 throw new Error("Model returned text instead of an image. Try a different image-capable model.");
             }
 
-            // biome-ignore lint/suspicious/noExplicitAny: OpenRouter returns typed file parts that AI SDK types don't fully cover
-            const imagePart = (content as any[]).find(
+            // Type for OpenRouter response content parts (not fully covered by AI SDK types)
+            type ContentPart = { type: string; mediaType?: string; data?: string; text?: string };
+            const contentParts = content as ContentPart[];
+
+            const imagePart = contentParts.find(
                 (part) => part.type === "file" && part.mediaType?.startsWith("image/")
             );
 
             if (!imagePart) {
                 // Check if we got text response instead
-                // biome-ignore lint/suspicious/noExplicitAny: Type inference for text part
-                const textPart = (content as any[]).find((part) => part.type === "text");
+                const textPart = contentParts.find((part) => part.type === "text");
                 if (textPart) {
                     throw new Error(
                         `Model returned text instead of image: "${textPart.text?.slice(0, 100) || 'unknown'}". ` +
@@ -223,34 +229,38 @@ export class ImageGenerationService {
                 model: modelId,
             };
         } catch (error) {
-            // Handle common API errors
+            // Handle common API errors with cause preservation
             if (error instanceof Error) {
                 const errorMessage = error.message.toLowerCase();
 
                 if (errorMessage.includes("content_policy") || errorMessage.includes("safety")) {
                     throw new Error(
                         "Image generation blocked: The prompt was rejected due to content policy. " +
-                        "Please modify your prompt to comply with content guidelines."
+                        "Please modify your prompt to comply with content guidelines.",
+                        { cause: error }
                     );
                 }
 
                 if (errorMessage.includes("rate_limit") || errorMessage.includes("429")) {
                     throw new Error(
                         "Rate limit exceeded: Too many image generation requests. " +
-                        "Please wait a moment before trying again."
+                        "Please wait a moment before trying again.",
+                        { cause: error }
                     );
                 }
 
                 if (errorMessage.includes("billing") || errorMessage.includes("quota") || errorMessage.includes("insufficient")) {
                     throw new Error(
                         "Billing issue: Your OpenRouter account may have exceeded its quota or " +
-                        "have insufficient credits. Please check your OpenRouter account."
+                        "have insufficient credits. Please check your OpenRouter account.",
+                        { cause: error }
                     );
                 }
 
                 if (errorMessage.includes("model") && errorMessage.includes("not found")) {
                     throw new Error(
-                        `Model "${modelId}" not found. Run 'tenex setup image' to select a valid model.`
+                        `Model "${modelId}" not found. Run 'tenex setup image' to select a valid model.`,
+                        { cause: error }
                     );
                 }
             }

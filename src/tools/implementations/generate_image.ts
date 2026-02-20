@@ -11,7 +11,7 @@ import {
     OPENROUTER_IMAGE_MODELS,
     ASPECT_RATIOS,
     IMAGE_SIZES,
-} from "@/services/image";
+} from "@/services/image/ImageGenerationService";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -86,11 +86,11 @@ async function executeGenerateImage(
     // Create the service (will load config and validate API key)
     const service = await ImageGenerationService.create();
 
-    // Load config to get defaults
-    const imageConfig = await ImageGenerationService.loadConfiguration();
-    const effectiveAspectRatio = aspect_ratio || imageConfig.defaultAspectRatio || "1:1";
-    const effectiveImageSize = image_size || imageConfig.defaultImageSize || "2K";
-    const effectiveModel = model || imageConfig.model;
+    // Get effective config from the service (avoids loading config twice)
+    const effectiveConfig = service.getConfig();
+    const effectiveAspectRatio = aspect_ratio || effectiveConfig.defaultAspectRatio || "1:1";
+    const effectiveImageSize = image_size || effectiveConfig.defaultImageSize || "2K";
+    const effectiveModel = model || effectiveConfig.model;
 
     // Generate the image
     const result = await service.generateImage(prompt, {
