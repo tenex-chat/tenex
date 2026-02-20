@@ -268,22 +268,33 @@ async function addCoreAgentFragments(
 
     // Add RAG collection attribution - shows agents their contributions to RAG collections
     // This uses the provenance tracking metadata (agent_pubkey) from document ingestion
+    //
+    // OPTIMIZATION: First check if any collections exist using lightweight check
+    // to avoid initializing embedding provider when RAG isn't used.
     try {
-        const { RAGService } = await import("@/services/rag/RAGService");
-        const ragService = RAGService.getInstance();
-        const collections = await ragService.getAllCollectionStats(agent.pubkey);
+        const { hasRagCollections, RAGService } = await import("@/services/rag/RAGService");
 
-        // Only add the fragment if we have any collection data
-        if (collections.length > 0) {
-            builder.add("rag-collections", {
-                agentPubkey: agent.pubkey,
-                collections,
-            });
-            logger.debug("📊 Added RAG collection stats to system prompt", {
-                agent: agent.name,
-                collectionsWithContributions: collections.filter(c => c.agentDocCount > 0).length,
-                totalCollections: collections.length,
-            });
+        // Fast path: skip full initialization if no collections exist
+        // Note: hasRagCollections() returns false on errors and logs them internally
+        if (!(await hasRagCollections())) {
+            logger.debug("📊 Skipping RAG collection stats - no collections available");
+        } else {
+            // Collections exist - now we need full service for stats
+            const ragService = RAGService.getInstance();
+            const collections = await ragService.getAllCollectionStats(agent.pubkey);
+
+            // Only add the fragment if we have any collection data
+            if (collections.length > 0) {
+                builder.add("rag-collections", {
+                    agentPubkey: agent.pubkey,
+                    collections,
+                });
+                logger.debug("📊 Added RAG collection stats to system prompt", {
+                    agent: agent.name,
+                    collectionsWithContributions: collections.filter(c => c.agentDocCount > 0).length,
+                    totalCollections: collections.length,
+                });
+            }
         }
     } catch (error) {
         // RAG service might not be available - skip gracefully
