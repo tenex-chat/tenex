@@ -398,6 +398,44 @@ function computeBaseProvenance(context: ToolExecutionContext): DocumentMetadata 
 }
 
 /**
+ * Coerce unknown record values to JSON-serializable DocumentMetadata values.
+ * Filters out non-serializable values (functions, undefined, symbols) and
+ * coerces compatible values to their JSON equivalents.
+ *
+ * Rationale: User-provided metadata from tool input may contain unknown types.
+ * Instead of blindly casting, we validate/coerce each value to ensure type safety.
+ */
+function coerceToDocumentMetadata(record: Record<string, unknown>): DocumentMetadata {
+    const result: DocumentMetadata = {};
+
+    for (const [key, value] of Object.entries(record)) {
+        // Skip non-serializable values
+        if (value === undefined || typeof value === "function" || typeof value === "symbol") {
+            continue;
+        }
+
+        // Handle primitives directly
+        if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            result[key] = value;
+            continue;
+        }
+
+        // Handle arrays and objects by JSON round-trip (ensures serializable)
+        if (typeof value === "object") {
+            try {
+                // JSON round-trip validates serializability and clones deeply
+                result[key] = JSON.parse(JSON.stringify(value));
+            } catch {
+                // Non-serializable object (circular refs, etc.) - skip
+                continue;
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
  * Merge document metadata with base provenance
  *
  * Rationale: Separates provenance computation (done once) from per-document
@@ -407,12 +445,14 @@ function mergeWithProvenance(
     documentMetadata: Record<string, unknown> | null | undefined,
     baseProvenance: DocumentMetadata
 ): DocumentMetadata {
-    // Cast is safe: documentMetadata comes from user input that should be JSON-serializable
-    // The DocumentMetadata type enforces JsonValue constraints at compile time
+    // Coerce user-provided metadata to ensure JSON-serializable values
+    const coercedMetadata = documentMetadata ? coerceToDocumentMetadata(documentMetadata) : {};
+
+    // Base provenance (agent_pubkey, project_id) comes first, user metadata can override
     return {
         ...baseProvenance,
-        ...(documentMetadata || {}),
-    } as DocumentMetadata;
+        ...coercedMetadata,
+    };
 }
 
 /**
