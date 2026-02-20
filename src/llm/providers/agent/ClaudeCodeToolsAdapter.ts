@@ -51,21 +51,18 @@ export class ClaudeCodeToolsAdapter {
         tools: Record<string, AISdkTool>
     ): SdkMcpServer | undefined {
         // Filter out tools that Claude Code has its own version of:
-        // - fs_* (Claude Code has Read, Write, Edit, Glob, Grep)
         // - web_fetch (Claude Code has WebFetch)
-        // - shell (Claude Code has Bash)
         // - web_search (Claude Code has WebSearch)
-        // Note: todo_* tools are now exposed via MCP to give Claude Code agents access to TENEX todo functionality
+        // fs_* and shell tools are NOT filtered — they pass through so TENEX controls access.
+        // Claude Code's built-in equivalents are always disabled via disallowedTools.
         const claudeCodeBuiltinTools = new Set([
             "web_fetch",
-            "shell",
             "web_search",
         ]);
         // CRITICAL: Filter out external MCP tools - they have JSON Schema format (no .safeParseAsync())
         // and will crash if we try to wrap them with tool() from Claude SDK.
         // External MCP servers are passed directly to Claude Code via mcpConfig.servers instead.
         const localTools = Object.entries(tools).filter(([name, tool]) =>
-            !name.startsWith("fs_") &&
             !claudeCodeBuiltinTools.has(name) &&
             !this.isExternalMcpTool(name, tool)
         );
@@ -87,7 +84,7 @@ export class ClaudeCodeToolsAdapter {
                 totalTools: Object.keys(tools).length,
                 externalMcpCount: externalMcpTools.length,
                 builtinFilteredCount: Object.keys(tools).filter(name =>
-                    name.startsWith("fs_") || claudeCodeBuiltinTools.has(name)
+                    claudeCodeBuiltinTools.has(name)
                 ).length,
             });
             return undefined;
