@@ -83,6 +83,9 @@ import { createWebSearchTool } from "./implementations/web_search";
 // Nostr tools
 import { createNostrFetchTool } from "./implementations/nostr_fetch";
 
+// Image generation tools
+import { createGenerateImageTool } from "./implementations/generate_image";
+
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
@@ -228,6 +231,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Nostr tools
     nostr_fetch: createNostrFetchTool,
+
+    // Image generation
+    generate_image: createGenerateImageTool,
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
     change_model: createChangeModelTool as ToolFactory,
