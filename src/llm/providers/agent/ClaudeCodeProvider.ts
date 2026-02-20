@@ -55,6 +55,8 @@ const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
     NotebookEdit: { tenex: undefined, mcpPatterns: [/^mcp__.*__notebook_edit$/] },
     // Task/agent tools (TENEX uses delegate)
     Task: { tenex: "delegate", mcpPatterns: [/^mcp__.*__delegate$/] },
+    // Todo tools (TENEX uses its own conversation-scoped todo_write)
+    TodoWrite: { tenex: "todo_write", mcpPatterns: [/^mcp__.*__todo_write$/, /^mcp__.*__write_todos$/] },
 } as const;
 
 /** File system tool names that indicate FS capability */
@@ -311,7 +313,7 @@ export class ClaudeCodeProvider extends AgentProvider {
         }
 
         if (disallowed.length > 1) { // More than just AskUserQuestion
-            const relevantTools = ["shell", "web_fetch", "web_search", "delegate"] as const;
+            const relevantTools = ["shell", "web_fetch", "web_search", "delegate", "todo_write"] as const;
             logger.info("[ClaudeCodeProvider] Disabling built-in tools with TENEX equivalents", {
                 disallowed,
                 tenexTools: regularTools.filter(t =>

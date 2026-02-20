@@ -18,6 +18,23 @@ mock.module("ai-sdk-provider-claude-code", () => ({
 // Import after mocking
 import { ClaudeCodeProvider } from "../ClaudeCodeProvider";
 
+/**
+ * Full set of TENEX tools that a fully-capable agent would have.
+ * Used to test that all corresponding built-in tools are disabled.
+ */
+const FULL_CAPABILITY_TOOLS = [
+    "fs_read",
+    "fs_write",
+    "fs_edit",
+    "fs_glob",
+    "fs_grep",
+    "shell",
+    "web_fetch",
+    "web_search",
+    "delegate",
+    "todo_write",
+] as const;
+
 describe("ClaudeCodeProvider", () => {
     let provider: ClaudeCodeProvider;
 
@@ -152,6 +169,11 @@ describe("ClaudeCodeProvider", () => {
                 const disallowed = getDisallowedTools(["delegate", "fs_read"], []);
                 expect(disallowed).toContain("Task");
             });
+
+            it("should disable TodoWrite when todo_write is provided", () => {
+                const disallowed = getDisallowedTools(["todo_write", "fs_read"], []);
+                expect(disallowed).toContain("TodoWrite");
+            });
         });
 
         describe("MCP tool pattern matching", () => {
@@ -186,12 +208,28 @@ describe("ClaudeCodeProvider", () => {
                 );
                 expect(disallowed).toContain("Bash");
             });
+
+            it("should disable TodoWrite when mcp__*__todo_write is provided", () => {
+                const disallowed = getDisallowedTools(
+                    ["fs_read"],
+                    ["mcp__tenex__todo_write"]
+                );
+                expect(disallowed).toContain("TodoWrite");
+            });
+
+            it("should disable TodoWrite when mcp__*__write_todos is provided", () => {
+                const disallowed = getDisallowedTools(
+                    ["fs_read"],
+                    ["mcp__external__write_todos"]
+                );
+                expect(disallowed).toContain("TodoWrite");
+            });
         });
 
         describe("full capability agents", () => {
             it("should disable all overlapping built-ins for full-capability agent", () => {
                 const disallowed = getDisallowedTools(
-                    ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep", "shell", "web_fetch", "web_search", "delegate"],
+                    [...FULL_CAPABILITY_TOOLS],
                     []
                 );
 
@@ -206,6 +244,7 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("WebSearch");
                 expect(disallowed).toContain("Bash");
                 expect(disallowed).toContain("Task");
+                expect(disallowed).toContain("TodoWrite");
             });
         });
 
