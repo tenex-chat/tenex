@@ -1,4 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -14,12 +15,17 @@ interface AgentIdentityArgs {
      * This is displayed as "Absolute Path" in the system prompt.
      */
     workingDirectory?: string;
+    /**
+     * Current conversation ID (full hex).
+     * First 12 characters are displayed as short ID in the system prompt.
+     */
+    conversationId?: string;
 }
 
 export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
     id: "agent-identity",
     priority: 1,
-    template: ({ agent, projectTitle, projectOwnerPubkey, workingDirectory }) => {
+    template: ({ agent, projectTitle, projectOwnerPubkey, workingDirectory, conversationId }) => {
         const parts: string[] = [];
 
         // Identity
@@ -49,6 +55,10 @@ export const agentIdentityFragment: PromptFragment<AgentIdentityArgs> = {
             contextLines.push(`- Absolute Path: ${workingDirectory}`);
         }
         contextLines.push(`- User (Owner) pubkey: "${projectOwnerPubkey}"`);
+        if (conversationId) {
+            const shortId = shortenConversationId(conversationId);
+            contextLines.push(`- Current Conversation (short): ${shortId}`);
+        }
         parts.push(contextLines.join("\n"));
 
         return parts.join("\n");
