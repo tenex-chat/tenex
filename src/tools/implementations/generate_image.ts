@@ -1,16 +1,24 @@
 /**
  * Image Generation Tool
  *
- * Generates images using AI image generation models (DALL-E 3, etc.)
- * Uses the ImageGenerationService which wraps AI SDK v6's generateImage.
+ * Generates images using OpenRouter's image-capable models via the multimodal chat pattern.
+ * Uses generateText with providerOptions.openrouter.image_config for aspect ratio and size.
  */
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
-import { ImageGenerationService, IMAGE_SIZES } from "@/services/image";
+import {
+    ImageGenerationService,
+    OPENROUTER_IMAGE_MODELS,
+    ASPECT_RATIOS,
+    IMAGE_SIZES,
+} from "@/services/image/ImageGenerationService";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
+
+// Build valid model IDs from the available models
+const validModelIds = OPENROUTER_IMAGE_MODELS.map((m) => m.value) as [string, ...string[]];
 
 const generateImageSchema = z.object({
     prompt: z
@@ -21,26 +29,25 @@ const generateImageSchema = z.object({
             "A detailed description of the image to generate. Be specific about subjects, style, " +
             "composition, colors, lighting, and mood. Longer, more detailed prompts often produce better results."
         ),
-    size: z
-        .enum(["1024x1024", "1024x1792", "1792x1024", "256x256", "512x512"])
+    aspect_ratio: z
+        .enum(ASPECT_RATIOS)
         .optional()
         .describe(
-            "Image dimensions. DALL-E 3 supports: 1024x1024 (square), 1024x1792 (portrait), 1792x1024 (landscape). " +
-            "DALL-E 2 supports: 256x256, 512x512, 1024x1024. Default: 1024x1024"
+            "Aspect ratio for the image. Options: 1:1 (square), 16:9 (landscape), 9:16 (portrait), " +
+            "4:3, 3:4, 3:2, 2:3. Default: 1:1"
         ),
-    quality: z
-        .enum(["standard", "hd"])
+    image_size: z
+        .enum(IMAGE_SIZES)
         .optional()
         .describe(
-            "Image quality (DALL-E 3 only). 'hd' creates more detailed images but costs more (~$0.08 vs $0.04). " +
-            "Default: standard"
+            "Image resolution. Options: 1K, 2K, 4K. Higher resolution costs more. Default: 2K"
         ),
-    style: z
-        .enum(["natural", "vivid"])
+    model: z
+        .enum(validModelIds)
         .optional()
         .describe(
-            "Image style (DALL-E 3 only). 'vivid' produces hyper-real, dramatic images. " +
-            "'natural' produces more realistic, less stylized images. Default: vivid"
+            "Override the default model. Options: " +
+            OPENROUTER_IMAGE_MODELS.map((m) => `${m.value} (${m.description})`).join(", ")
         ),
 });
 
@@ -52,91 +59,70 @@ interface GenerateImageOutput {
     base64: string;
     /** MIME type of the image */
     mimeType: string;
-    /** The prompt that was used (may differ from input if revised by the model) */
+    /** The prompt that was used */
     prompt: string;
-    /** Image dimensions */
-    size: string;
-    /** Estimated cost of generation */
-    estimatedCost: string;
+    /** Model used for generation */
+    model: string;
+    /** Aspect ratio used */
+    aspectRatio: string;
+    /** Image size used */
+    imageSize: string;
     /** Note about using the image */
     note: string;
-}
-
-/**
- * Estimate cost based on model and size
- */
-function estimateCost(model: string, size: string, quality?: string): string {
-    if (model === "dall-e-3") {
-        const isHD = quality === "hd";
-        if (size === "1024x1024") {
-            return isHD ? "$0.080" : "$0.040";
-        }
-        // Other sizes (1024x1792, 1792x1024) are more expensive
-        return isHD ? "$0.120" : "$0.080";
-    }
-    // DALL-E 2
-    if (size === "256x256") return "$0.016";
-    if (size === "512x512") return "$0.018";
-    return "$0.020"; // 1024x1024
 }
 
 async function executeGenerateImage(
     input: GenerateImageInput
 ): Promise<GenerateImageOutput> {
-    const { prompt, size, quality, style } = input;
+    const { prompt, aspect_ratio, image_size, model } = input;
 
     logger.info(`Generating image`, {
         promptPreview: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
-        size,
-        quality,
-        style,
+        aspectRatio: aspect_ratio,
+        imageSize: image_size,
+        model,
     });
 
     // Create the service (will load config and validate API key)
     const service = await ImageGenerationService.create();
 
-    // Load config to get model info for cost estimation
-    const imageConfig = await ImageGenerationService.loadConfiguration();
-    const effectiveSize = size || imageConfig.defaultSize || "1024x1024";
-    const effectiveQuality = quality || imageConfig.defaultQuality || "standard";
-
-    // Validate size is supported by the model
-    const supportedSizes = IMAGE_SIZES[imageConfig.model] || IMAGE_SIZES["dall-e-3"];
-    if (!supportedSizes.includes(effectiveSize)) {
-        throw new Error(
-            `Size "${effectiveSize}" is not supported by ${imageConfig.model}. ` +
-            `Supported sizes: ${supportedSizes.join(", ")}`
-        );
-    }
+    // Get effective config from the service (avoids loading config twice)
+    const effectiveConfig = service.getConfig();
+    const effectiveAspectRatio = aspect_ratio || effectiveConfig.defaultAspectRatio || "1:1";
+    const effectiveImageSize = image_size || effectiveConfig.defaultImageSize || "2K";
+    const effectiveModel = model || effectiveConfig.model;
 
     // Generate the image
     const result = await service.generateImage(prompt, {
-        size: effectiveSize,
-        quality: effectiveQuality,
-        style: style || imageConfig.defaultStyle,
+        aspectRatio: effectiveAspectRatio,
+        imageSize: effectiveImageSize,
+        model: effectiveModel,
     });
-
-    const estimatedCost = estimateCost(imageConfig.model, effectiveSize, effectiveQuality);
 
     return {
         success: true,
         base64: result.base64,
         mimeType: result.mimeType,
-        prompt: result.revisedPrompt || prompt,
-        size: effectiveSize,
-        estimatedCost,
+        prompt,
+        model: result.model,
+        aspectRatio: effectiveAspectRatio,
+        imageSize: effectiveImageSize,
         note: "The image is returned as base64. To save it permanently, use the upload_blob tool to upload it to Blossom storage.",
     };
 }
 
 export function createGenerateImageTool(_context: ToolExecutionContext): AISdkTool {
+    const modelList = OPENROUTER_IMAGE_MODELS.map(
+        (m) => `${m.name} (${m.value})`
+    ).join(", ");
+
     const toolInstance = tool({
         description:
-            "Generate an image from a text description using AI (DALL-E 3 by default). " +
-            "Returns the image as base64 data. For best results, provide detailed prompts describing " +
-            "the subject, style, composition, colors, lighting, and mood. " +
-            "IMPORTANT: Image generation costs money (~$0.04-$0.12 per image). " +
-            "Use sparingly and only when the user explicitly requests image generation.",
+            `Generate an image from a text description using OpenRouter's image-capable models. ` +
+            `Returns the image as base64 data. For best results, provide detailed prompts describing ` +
+            `the subject, style, composition, colors, lighting, and mood. ` +
+            `Available models: ${modelList}. ` +
+            `IMPORTANT: Image generation costs money. Use sparingly and only when the user explicitly requests image generation.`,
 
         inputSchema: generateImageSchema,
 
@@ -148,7 +134,7 @@ export function createGenerateImageTool(_context: ToolExecutionContext): AISdkTo
                 logger.error("Image generation failed", { error, prompt: input.prompt?.slice(0, 100) });
 
                 // Handle common errors with user-friendly messages
-                if (errorMsg.includes("content_policy_violation") || errorMsg.includes("safety")) {
+                if (errorMsg.includes("content_policy") || errorMsg.includes("safety")) {
                     throw new Error(
                         "Image generation was blocked due to content policy. " +
                         "Please revise your prompt to avoid potentially inappropriate content.",
@@ -170,17 +156,30 @@ export function createGenerateImageTool(_context: ToolExecutionContext): AISdkTo
                     );
                 }
 
+                if (errorMsg.includes("OpenRouter API key required")) {
+                    throw new Error(
+                        "OpenRouter API key not configured. Run 'tenex setup providers' and add your OpenRouter API key.",
+                        { cause: error }
+                    );
+                }
+
                 throw new Error(`Image generation failed: ${errorMsg}`, { cause: error });
             }
         },
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ prompt, size, quality }: GenerateImageInput) => {
-            const sizeStr = size ? ` (${size})` : "";
-            const qualityStr = quality === "hd" ? " HD" : "";
+        value: ({ prompt, aspect_ratio, image_size, model }: GenerateImageInput) => {
+            const parts: string[] = [];
+            if (aspect_ratio) parts.push(aspect_ratio);
+            if (image_size) parts.push(image_size);
+            if (model) {
+                const modelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === model);
+                parts.push(modelInfo?.name || model);
+            }
+            const optionsStr = parts.length > 0 ? ` (${parts.join(", ")})` : "";
             const promptPreview = prompt.length > 60 ? prompt.slice(0, 60) + "..." : prompt;
-            return `Generating${qualityStr} image${sizeStr}: "${promptPreview}"`;
+            return `Generating image${optionsStr}: "${promptPreview}"`;
         },
         enumerable: false,
         configurable: true,

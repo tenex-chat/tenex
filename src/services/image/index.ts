@@ -4,7 +4,9 @@ export {
     type ImageGenerationOptions,
     type ImageResult,
     type ImageConfigOptions,
-    IMAGE_CAPABLE_PROVIDERS,
-    IMAGE_MODELS,
+    type AspectRatio,
+    type ImageSize,
+    OPENROUTER_IMAGE_MODELS,
+    ASPECT_RATIOS,
     IMAGE_SIZES,
 } from "./ImageGenerationService";

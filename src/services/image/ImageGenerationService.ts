@@ -4,24 +4,22 @@ import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 
 /**
- * Configuration for image generation
+ * Configuration for image generation using OpenRouter
  */
 export interface ImageConfig {
-    provider: string; // Provider ID (e.g., "openai")
-    model: string; // Model ID (e.g., "dall-e-3")
-    defaultSize?: string; // Default image size (e.g., "1024x1024")
-    defaultQuality?: "standard" | "hd"; // Default quality (DALL-E 3 only)
-    defaultStyle?: "natural" | "vivid"; // Default style (DALL-E 3 only)
+    provider: "openrouter"; // Only OpenRouter is supported
+    model: string; // Model ID (e.g., "black-forest-labs/flux.2-pro")
+    defaultAspectRatio?: string; // Default aspect ratio (e.g., "16:9", "1:1", "9:16")
+    defaultImageSize?: string; // Default image size (e.g., "1K", "2K", "4K")
 }
 
 /**
  * Options for image generation
  */
 export interface ImageGenerationOptions {
-    size?: string;
-    quality?: "standard" | "hd";
-    style?: "natural" | "vivid";
-    n?: number; // Number of images (DALL-E 2 only, DALL-E 3 always generates 1)
+    aspectRatio?: string;
+    imageSize?: string;
+    model?: string; // Override the default model
 }
 
 /**
@@ -29,9 +27,8 @@ export interface ImageGenerationOptions {
  */
 export interface ImageResult {
     base64: string;
-    url?: string;
     mimeType: string;
-    revisedPrompt?: string;
+    model: string;
 }
 
 export interface ImageConfigOptions {
@@ -41,40 +38,68 @@ export interface ImageConfigOptions {
 }
 
 /**
- * Image generation provider IDs that support image generation
+ * Available OpenRouter image-capable models
  */
-export const IMAGE_CAPABLE_PROVIDERS = ["openai"] as const;
-export type ImageCapableProvider = (typeof IMAGE_CAPABLE_PROVIDERS)[number];
+export const OPENROUTER_IMAGE_MODELS: Array<{
+    name: string;
+    value: string;
+    description: string;
+}> = [
+    {
+        name: "FLUX.2 Pro",
+        value: "black-forest-labs/flux.2-pro",
+        description: "High quality text-to-image",
+    },
+    {
+        name: "FLUX.2 Max",
+        value: "black-forest-labs/flux.2-max",
+        description: "Top-tier quality",
+    },
+    {
+        name: "FLUX.2 Klein",
+        value: "black-forest-labs/flux.2-klein-4b",
+        description: "Fast, cost-effective",
+    },
+    {
+        name: "Gemini 2.5 Flash Image",
+        value: "google/gemini-2.5-flash-image",
+        description: "Multimodal with contextual understanding",
+    },
+];
 
 /**
- * Available image models by provider
+ * Valid aspect ratios for OpenRouter image generation
  */
-export const IMAGE_MODELS: Record<string, Array<{ name: string; value: string; cost: string }>> = {
-    openai: [
-        { name: "DALL-E 3 (HD, best quality)", value: "dall-e-3", cost: "$0.040-$0.120/image" },
-        { name: "DALL-E 2 (faster, lower cost)", value: "dall-e-2", cost: "$0.016-$0.020/image" },
-    ],
-};
+export const ASPECT_RATIOS = [
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+] as const;
+export type AspectRatio = (typeof ASPECT_RATIOS)[number];
 
 /**
- * Available sizes by model
+ * Valid image sizes for OpenRouter image generation
  */
-export const IMAGE_SIZES: Record<string, string[]> = {
-    "dall-e-3": ["1024x1024", "1024x1792", "1792x1024"],
-    "dall-e-2": ["256x256", "512x512", "1024x1024"],
-};
+export const IMAGE_SIZES = ["1K", "2K", "4K"] as const;
+export type ImageSize = (typeof IMAGE_SIZES)[number];
 
 const IMAGE_CONFIG_FILE = "image.json";
 const DEFAULT_CONFIG: ImageConfig = {
-    provider: "openai",
-    model: "dall-e-3",
-    defaultSize: "1024x1024",
-    defaultQuality: "standard",
-    defaultStyle: "vivid",
+    provider: "openrouter",
+    model: "black-forest-labs/flux.2-pro",
+    defaultAspectRatio: "1:1",
+    defaultImageSize: "2K",
 };
 
 /**
- * Service for AI image generation using AI SDK v6
+ * Service for AI image generation using OpenRouter via AI SDK
+ *
+ * OpenRouter uses the multimodal chat pattern - images are generated
+ * via generateText and returned as file parts in the response.
  */
 export class ImageGenerationService {
     private imageConfig: ImageConfig;
@@ -94,119 +119,148 @@ export class ImageGenerationService {
     ): Promise<ImageGenerationService> {
         const imageConfig = customConfig || (await ImageGenerationService.loadConfiguration(options));
 
-        // Load API key from providers.json
-        const apiKey = await ImageGenerationService.loadProviderApiKey(imageConfig.provider);
+        // Load API key from providers.json - OpenRouter only
+        const apiKey = await ImageGenerationService.loadProviderApiKey("openrouter");
         if (!apiKey) {
             throw new Error(
-                `API key required for ${imageConfig.provider}. Configure with 'tenex setup providers'.`
+                "OpenRouter API key required for image generation. Configure with 'tenex setup providers'."
             );
         }
 
-        logger.debug(`Creating image generation service: ${imageConfig.provider}/${imageConfig.model}`);
+        logger.debug(`Creating image generation service: openrouter/${imageConfig.model}`);
         return new ImageGenerationService(imageConfig, apiKey);
     }
 
     /**
-     * Generate an image from a text prompt
+     * Generate an image from a text prompt using OpenRouter's multimodal chat pattern
      */
     async generateImage(
         prompt: string,
         options: ImageGenerationOptions = {}
     ): Promise<ImageResult> {
-        const { provider, model, defaultSize, defaultQuality, defaultStyle } = this.imageConfig;
+        const modelId = options.model || this.imageConfig.model;
+        const aspectRatio = options.aspectRatio || this.imageConfig.defaultAspectRatio || "1:1";
+        const imageSize = options.imageSize || this.imageConfig.defaultImageSize || "2K";
 
-        if (provider !== "openai") {
-            throw new Error(`Image provider "${provider}" is not yet supported. Currently only OpenAI is supported.`);
-        }
-
-        // Dynamic import of AI SDK OpenAI provider
-        const { createOpenAI } = await import("@ai-sdk/openai");
-
-        const openai = createOpenAI({
-            apiKey: this.apiKey,
-        });
-
-        const size = options.size || defaultSize || "1024x1024";
-        const quality = options.quality || defaultQuality || "standard";
-        const style = options.style || defaultStyle || "vivid";
-
-        logger.info(`Generating image with ${provider}/${model}`, {
+        logger.info(`Generating image with openrouter/${modelId}`, {
             prompt: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
-            size,
-            quality,
-            style,
+            aspectRatio,
+            imageSize,
         });
 
-        // Use experimental_generateImage from AI SDK
-        const { experimental_generateImage, NoImageGeneratedError } = await import("ai");
+        // Dynamic import of dependencies
+        const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
+        const { generateText } = await import("ai");
+
+        const openrouter = createOpenRouter({
+            apiKey: this.apiKey,
+            headers: {
+                "X-Title": "TENEX",
+                "HTTP-Referer": "https://tenex.chat/",
+            },
+        });
 
         try {
-            const result = await experimental_generateImage({
-                model: openai.image(model),
+            const result = await generateText({
+                model: openrouter.chat(modelId),
                 prompt,
-                size: size as "1024x1024" | "1024x1792" | "1792x1024" | "256x256" | "512x512",
-                ...(model === "dall-e-3" ? { 
-                    providerOptions: {
-                        openai: {
-                            quality,
-                            style,
-                        }
-                    }
-                } : {}),
+                providerOptions: {
+                    openrouter: {
+                        image_config: {
+                            aspect_ratio: aspectRatio,
+                            image_size: imageSize,
+                        },
+                    },
+                },
             });
 
-            // Get the first image from the result
-            const image = result.images[0];
-            if (!image) {
-                throw new Error("No image was generated");
+            // Extract image from response using the multimodal chat pattern
+            // OpenRouter returns images as file parts in the response content
+            const step = result.steps[0];
+            if (!step) {
+                throw new Error("No response step received from model");
+            }
+
+            // Guard against missing response/messages
+            if (!step.response) {
+                throw new Error("No response object in step - unexpected API response format");
+            }
+            const message = step.response.messages?.[0];
+            if (!message) {
+                throw new Error("No message in response - model may have returned an empty response");
+            }
+
+            // Find the file part containing the image
+            // Content can be string or array of parts
+            const content = message.content;
+            if (typeof content === "string") {
+                throw new Error("Model returned text instead of an image. Try a different image-capable model.");
+            }
+
+            // Type for OpenRouter response content parts (not fully covered by AI SDK types)
+            type ContentPart = { type: string; mediaType?: string; data?: string; text?: string };
+            const contentParts = content as ContentPart[];
+
+            const imagePart = contentParts.find(
+                (part) => part.type === "file" && part.mediaType?.startsWith("image/")
+            );
+
+            if (!imagePart) {
+                // Check if we got text response instead
+                const textPart = contentParts.find((part) => part.type === "text");
+                if (textPart) {
+                    throw new Error(
+                        `Model returned text instead of image: "${textPart.text?.slice(0, 100) || 'unknown'}". ` +
+                        "This model may not support image generation."
+                    );
+                }
+                throw new Error("No image found in model response");
             }
 
             logger.info(`Image generated successfully`, {
-                hasBase64: !!image.base64,
-                mediaType: image.mediaType,
+                model: modelId,
+                mediaType: imagePart.mediaType,
+                hasData: !!imagePart.data,
             });
 
             return {
-                base64: image.base64,
-                url: undefined, // AI SDK v6 returns base64, not URL
-                mimeType: image.mediaType || "image/png",
-                revisedPrompt: undefined, // Not available in AI SDK response
+                base64: imagePart.data,
+                mimeType: imagePart.mediaType || "image/png",
+                model: modelId,
             };
         } catch (error) {
-            // Handle AI SDK specific errors
-            if (NoImageGeneratedError.isInstance(error)) {
-                logger.error("AI SDK failed to generate image", {
-                    cause: error.cause,
-                    responses: error.responses,
-                });
-                throw new Error(
-                    `Image generation failed: The AI model could not generate an image. ${error.message}`
-                );
-            }
-
-            // Handle OpenAI API errors (content policy, rate limits, etc.)
+            // Handle common API errors with cause preservation
             if (error instanceof Error) {
                 const errorMessage = error.message.toLowerCase();
-                
-                if (errorMessage.includes("content_policy_violation") || 
-                    errorMessage.includes("safety system")) {
+
+                if (errorMessage.includes("content_policy") || errorMessage.includes("safety")) {
                     throw new Error(
                         "Image generation blocked: The prompt was rejected due to content policy. " +
-                        "Please modify your prompt to comply with OpenAI's content guidelines."
+                        "Please modify your prompt to comply with content guidelines.",
+                        { cause: error }
                     );
                 }
-                
+
                 if (errorMessage.includes("rate_limit") || errorMessage.includes("429")) {
                     throw new Error(
                         "Rate limit exceeded: Too many image generation requests. " +
-                        "Please wait a moment before trying again."
+                        "Please wait a moment before trying again.",
+                        { cause: error }
                     );
                 }
-                
-                if (errorMessage.includes("billing") || errorMessage.includes("quota")) {
+
+                if (errorMessage.includes("billing") || errorMessage.includes("quota") || errorMessage.includes("insufficient")) {
                     throw new Error(
-                        "Billing issue: Your OpenAI account may have exceeded its quota or " +
-                        "have billing issues. Please check your OpenAI account."
+                        "Billing issue: Your OpenRouter account may have exceeded its quota or " +
+                        "have insufficient credits. Please check your OpenRouter account.",
+                        { cause: error }
+                    );
+                }
+
+                if (errorMessage.includes("model") && errorMessage.includes("not found")) {
+                    throw new Error(
+                        `Model "${modelId}" not found. Run 'tenex setup image' to select a valid model.`,
+                        { cause: error }
                     );
                 }
             }
@@ -258,18 +312,17 @@ export class ImageGenerationService {
 
         // Don't save API key to file - it's stored in providers.json
         const configToSave: ImageConfig = {
-            provider: imageConfig.provider,
+            provider: "openrouter",
             model: imageConfig.model,
-            defaultSize: imageConfig.defaultSize,
-            defaultQuality: imageConfig.defaultQuality,
-            defaultStyle: imageConfig.defaultStyle,
+            defaultAspectRatio: imageConfig.defaultAspectRatio,
+            defaultImageSize: imageConfig.defaultImageSize,
         };
 
         await ensureDirectory(basePath);
         await writeJsonFile(configPath, configToSave);
 
         logger.info(
-            `Image configuration saved to ${scope} config: ${imageConfig.provider}/${imageConfig.model}`
+            `Image configuration saved to ${scope} config: openrouter/${imageConfig.model}`
         );
     }
 
@@ -288,11 +341,18 @@ export class ImageGenerationService {
     }
 
     /**
-     * Check if a provider is configured with API key
+     * Check if OpenRouter is configured with API key
      */
-    static async isProviderConfigured(providerId: string): Promise<boolean> {
-        const apiKey = await ImageGenerationService.loadProviderApiKey(providerId);
+    static async isConfigured(): Promise<boolean> {
+        const apiKey = await ImageGenerationService.loadProviderApiKey("openrouter");
         return !!apiKey;
+    }
+
+    /**
+     * Get the current configuration (for display purposes)
+     */
+    getConfig(): ImageConfig {
+        return { ...this.imageConfig };
     }
 
     private static resolveConfigBases(options?: ImageConfigOptions): string[] {
