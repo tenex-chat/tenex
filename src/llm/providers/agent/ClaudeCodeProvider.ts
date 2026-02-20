@@ -62,8 +62,8 @@ const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
 /** File system tool names that indicate FS capability */
 const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] as const;
 
-/** File system built-in tool names */
-const FS_BUILTIN_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit"] as const;
+/** Built-in tools that TENEX always controls — agents get these only via TENEX's equivalents */
+const ALWAYS_DISABLED_BUILTINS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash"] as const;
 
 /** Pattern to detect MCP tools that provide FS capability */
 const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
@@ -217,16 +217,13 @@ export class ClaudeCodeProvider extends AgentProvider {
     /**
      * Compute which Claude Code built-in tools should be disabled.
      *
-     * TENEX manages agent capabilities through its tool configuration system.
-     * When TENEX provides MCP-wrapped versions of tools (fs_read, fs_write, etc.),
-     * we disable Claude Code's built-in equivalents to ensure:
-     * 1. TENEX has accurate control over agent capabilities
-     * 2. Agents cannot bypass restrictions using built-in tools
-     * 3. Tool permissions are consistent and auditable
+     * FS and shell built-in tools (Read, Write, Edit, Glob, Grep, LS,
+     * NotebookEdit, Bash) are ALWAYS disabled. TENEX controls filesystem
+     * and shell access exclusively through its fs_* and shell tools,
+     * provided conditionally based on agent configuration.
      *
-     * Built-in tools are ALWAYS disabled when TENEX provides equivalents.
-     * If an agent has NO file system tools in their configuration, ALL file
-     * system built-in tools are disabled (they get no file access).
+     * Other built-in tools (WebFetch, etc.) are disabled when TENEX
+     * provides an equivalent.
      */
     private computeDisallowedBuiltinTools(regularTools: string[], mcpTools: string[]): string[] {
         const { disallowed, hasAnyFsCapability } = this.computeDisallowedToolsCore(regularTools, mcpTools);
@@ -245,28 +242,23 @@ export class ClaudeCodeProvider extends AgentProvider {
         mcpTools: string[]
     ): { disallowed: string[]; hasAnyFsCapability: boolean } {
         // Always disallow AskUserQuestion - TENEX has its own ask tool
-        const disallowed: string[] = ["AskUserQuestion"];
+        // Always disallow FS built-in tools — TENEX controls filesystem access
+        // exclusively through its fs_* tools. Agents get fs_* only when their
+        // tool configuration includes them.
+        const disallowed: string[] = ["AskUserQuestion", ...ALWAYS_DISABLED_BUILTINS];
 
-        // Check if agent has ANY file system capability (TENEX or MCP)
         const hasTenexFsTools = FS_TOOL_NAMES.some(tool => regularTools.includes(tool));
         const hasMcpFsTools = mcpTools.some(tool => MCP_FS_CAPABILITY_PATTERN.test(tool));
         const hasAnyFsCapability = hasTenexFsTools || hasMcpFsTools;
 
-        // If agent has NO file system capability, disable ALL file system built-in tools
-        if (!hasAnyFsCapability) {
-            disallowed.push(...FS_BUILTIN_TOOLS);
-        }
-
-        // Check each built-in tool and disable if TENEX/MCP provides equivalent
+        // Check each non-FS built-in tool and disable if TENEX/MCP provides equivalent
         for (const [builtinTool, mapping] of Object.entries(TOOL_MAPPINGS)) {
-            // Skip if already disallowed (e.g., FS tools when no FS capability)
             if (disallowed.includes(builtinTool)) {
                 continue;
             }
 
             const hasEquivalent = this.hasToolEquivalent(mapping, regularTools, mcpTools);
 
-            // If TENEX/MCP provides this capability, disable the built-in
             if (hasEquivalent) {
                 disallowed.push(builtinTool);
             }
@@ -308,20 +300,15 @@ export class ClaudeCodeProvider extends AgentProvider {
         regularTools: string[],
         hasAnyFsCapability: boolean
     ): void {
-        if (!hasAnyFsCapability) {
-            logger.debug("[ClaudeCodeProvider] Agent has no FS capability - disabling all FS built-in tools");
-        }
-
-        if (disallowed.length > 1) { // More than just AskUserQuestion
-            const relevantTools = ["shell", "web_fetch", "web_search", "delegate", "todo_write"] as const;
-            logger.info("[ClaudeCodeProvider] Disabling built-in tools with TENEX equivalents", {
-                disallowed,
-                tenexTools: regularTools.filter(t =>
-                    (FS_TOOL_NAMES as readonly string[]).includes(t) || relevantTools.includes(t as typeof relevantTools[number])
-                ),
-                hasFsCapability: hasAnyFsCapability,
-            });
-        }
+        const relevantTools = [...FS_TOOL_NAMES, "shell", "web_fetch", "web_search", "delegate", "todo_write"] as const;
+        logger.info("[ClaudeCodeProvider] Disabling built-in tools", {
+            disallowed,
+            tenexTools: regularTools.filter(t =>
+                (relevantTools as readonly string[]).includes(t)
+            ),
+            hasFsCapability: hasAnyFsCapability,
+            hasShell: regularTools.includes("shell"),
+        });
     }
 
     /**

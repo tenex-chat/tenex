@@ -64,10 +64,9 @@ describe("ClaudeCodeProvider", () => {
             });
         });
 
-        describe("file system tool blocking", () => {
-            it("should disable ALL FS built-in tools when agent has NO fs capability", () => {
-                // Agent with no fs_* tools and no MCP fs tools
-                const disallowed = getDisallowedTools(["delegate", "ask"], []);
+        describe("always-disabled built-in tools (FS + Bash)", () => {
+            it("should disable all TENEX-controlled built-ins unconditionally", () => {
+                const disallowed = getDisallowedTools([], []);
 
                 expect(disallowed).toContain("Read");
                 expect(disallowed).toContain("Write");
@@ -76,152 +75,62 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("Grep");
                 expect(disallowed).toContain("LS");
                 expect(disallowed).toContain("NotebookEdit");
+                expect(disallowed).toContain("Bash");
             });
 
-            it("should only disable specific FS built-ins that TENEX provides, not all FS tools", () => {
-                // Agent with fs_read - has FS capability
-                const disallowed = getDisallowedTools(["fs_read", "delegate"], []);
-
-                // Read should be disabled because fs_read is provided
-                expect(disallowed).toContain("Read");
-
-                // But Write, Edit, Grep should NOT be disabled - agent has FS capability
-                // but doesn't have the specific TENEX tools for these
-                expect(disallowed).not.toContain("Write");
-                expect(disallowed).not.toContain("Edit");
-                expect(disallowed).not.toContain("Grep");
-            });
-
-            it("should disable specific FS built-in when TENEX provides that specific tool", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_write"], []);
-
-                expect(disallowed).toContain("Read");
-                expect(disallowed).toContain("Write");
-                // Edit is not provided, but since agent has fs_*, it's not blanket disabled
-            });
-
-            it("should disable specific FS built-ins when MCP provides equivalents", () => {
-                // Agent has MCP fs tools - so has FS capability
+            it("should disable all TENEX-controlled built-ins regardless of agent tools", () => {
                 const disallowed = getDisallowedTools(
-                    ["delegate"],
-                    ["mcp__tenex__fs_read", "mcp__tenex__fs_write"]
+                    ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep", "shell"],
+                    []
                 );
 
-                // These should be disabled because MCP provides equivalents
                 expect(disallowed).toContain("Read");
                 expect(disallowed).toContain("Write");
-
-                // These should NOT be disabled - agent has FS capability via MCP
-                // but MCP doesn't provide Edit, Glob, Grep equivalents
-                expect(disallowed).not.toContain("Edit");
-                expect(disallowed).not.toContain("Glob");
-                expect(disallowed).not.toContain("Grep");
+                expect(disallowed).toContain("Edit");
+                expect(disallowed).toContain("Glob");
+                expect(disallowed).toContain("Grep");
+                expect(disallowed).toContain("LS");
+                expect(disallowed).toContain("NotebookEdit");
+                expect(disallowed).toContain("Bash");
             });
         });
 
-        describe("tool mapping - TENEX to built-in", () => {
-            it("should disable Read when fs_read is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_write", "fs_glob"], []);
-                expect(disallowed).toContain("Read");
-            });
-
-            it("should disable Write when fs_write is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_write", "fs_glob"], []);
-                expect(disallowed).toContain("Write");
-            });
-
-            it("should disable Edit when fs_edit is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_write", "fs_edit"], []);
-                expect(disallowed).toContain("Edit");
-            });
-
-            it("should disable Glob when fs_glob is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_glob"], []);
-                expect(disallowed).toContain("Glob");
-            });
-
-            it("should disable Grep when fs_grep is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_grep"], []);
-                expect(disallowed).toContain("Grep");
-            });
-
-            it("should disable LS when fs_glob is provided", () => {
-                const disallowed = getDisallowedTools(["fs_read", "fs_glob"], []);
-                expect(disallowed).toContain("LS");
-            });
-
+        describe("conditionally disabled built-in tools", () => {
             it("should disable WebFetch when web_fetch is provided", () => {
-                const disallowed = getDisallowedTools(["web_fetch", "fs_read"], []);
+                const disallowed = getDisallowedTools(["web_fetch"], []);
                 expect(disallowed).toContain("WebFetch");
             });
 
             it("should disable WebSearch when web_search is provided", () => {
-                const disallowed = getDisallowedTools(["web_search", "fs_read"], []);
+                const disallowed = getDisallowedTools(["web_search"], []);
                 expect(disallowed).toContain("WebSearch");
             });
 
-            it("should disable Bash when shell is provided", () => {
-                const disallowed = getDisallowedTools(["shell", "fs_read"], []);
-                expect(disallowed).toContain("Bash");
-            });
-
             it("should disable Task when delegate is provided", () => {
-                const disallowed = getDisallowedTools(["delegate", "fs_read"], []);
+                const disallowed = getDisallowedTools(["delegate"], []);
                 expect(disallowed).toContain("Task");
             });
 
             it("should disable TodoWrite when todo_write is provided", () => {
-                const disallowed = getDisallowedTools(["todo_write", "fs_read"], []);
+                const disallowed = getDisallowedTools(["todo_write"], []);
                 expect(disallowed).toContain("TodoWrite");
+            });
+
+            it("should NOT disable conditional built-ins when TENEX does not provide equivalents", () => {
+                const disallowed = getDisallowedTools(["delegate"], []);
+                expect(disallowed).not.toContain("WebFetch");
+                expect(disallowed).not.toContain("WebSearch");
             });
         });
 
         describe("MCP tool pattern matching", () => {
-            it("should disable Read when mcp__*__fs_read is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"], // Need at least one fs tool to have FS capability
-                    ["mcp__tenex__fs_read"]
-                );
-                expect(disallowed).toContain("Read");
-            });
-
-            it("should disable Write when mcp__*__write_file is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"],
-                    ["mcp__external__write_file"]
-                );
-                expect(disallowed).toContain("Write");
-            });
-
-            it("should disable Bash when mcp__*__shell is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"],
-                    ["mcp__external__shell"]
-                );
-                expect(disallowed).toContain("Bash");
-            });
-
-            it("should disable Bash when mcp__*__execute is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"],
-                    ["mcp__external__execute"]
-                );
-                expect(disallowed).toContain("Bash");
-            });
-
             it("should disable TodoWrite when mcp__*__todo_write is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"],
-                    ["mcp__tenex__todo_write"]
-                );
+                const disallowed = getDisallowedTools([], ["mcp__tenex__todo_write"]);
                 expect(disallowed).toContain("TodoWrite");
             });
 
             it("should disable TodoWrite when mcp__*__write_todos is provided", () => {
-                const disallowed = getDisallowedTools(
-                    ["fs_read"],
-                    ["mcp__external__write_todos"]
-                );
+                const disallowed = getDisallowedTools([], ["mcp__external__write_todos"]);
                 expect(disallowed).toContain("TodoWrite");
             });
         });
@@ -249,10 +158,10 @@ describe("ClaudeCodeProvider", () => {
         });
 
         describe("restricted agents", () => {
-            it("should disable ALL FS built-ins for agents with only delegation tools", () => {
+            it("should disable always-disabled built-ins and mapped tools, allow unmapped conditional built-ins", () => {
                 const disallowed = getDisallowedTools(["delegate", "ask", "lesson_learn"], []);
 
-                // No fs capability = all FS built-ins disabled
+                // Always disabled
                 expect(disallowed).toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
@@ -260,29 +169,14 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("Grep");
                 expect(disallowed).toContain("LS");
                 expect(disallowed).toContain("NotebookEdit");
+                expect(disallowed).toContain("Bash");
 
                 // delegate is provided, so Task should be disabled
                 expect(disallowed).toContain("Task");
 
-                // No shell/web tools provided, so those built-ins should NOT be disabled
-                expect(disallowed).not.toContain("Bash");
+                // No web tools provided, so those built-ins should NOT be disabled
                 expect(disallowed).not.toContain("WebFetch");
                 expect(disallowed).not.toContain("WebSearch");
-            });
-
-            it("should allow Bash for restricted agent without shell tool", () => {
-                const disallowed = getDisallowedTools(["delegate", "ask"], []);
-
-                // shell not provided, so Bash should NOT be disabled
-                // Agent can still use Bash for commands
-                expect(disallowed).not.toContain("Bash");
-            });
-
-            it("should allow WebFetch for restricted agent without web_fetch tool", () => {
-                const disallowed = getDisallowedTools(["delegate", "ask"], []);
-
-                // web_fetch not provided, so WebFetch should NOT be disabled
-                expect(disallowed).not.toContain("WebFetch");
             });
         });
     });
@@ -309,7 +203,7 @@ describe("ClaudeCodeProvider", () => {
             expect(settings.disallowedTools).toContain("Task");
         });
 
-        it("should disable ALL FS tools for agent with no FS capability", () => {
+        it("should disable all always-disabled built-ins for any agent", () => {
             const tools: Record<string, AISdkTool> = {
                 delegate: createMockTenexTool(),
                 ask: createMockTenexTool(),
@@ -328,6 +222,7 @@ describe("ClaudeCodeProvider", () => {
             expect(settings.disallowedTools).toContain("Grep");
             expect(settings.disallowedTools).toContain("LS");
             expect(settings.disallowedTools).toContain("NotebookEdit");
+            expect(settings.disallowedTools).toContain("Bash");
         });
     });
 });
