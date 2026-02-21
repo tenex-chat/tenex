@@ -429,8 +429,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                         break;
                 }
 
-                // Handle tool-error events that don't come through onChunk
-                if (part.type === "tool-error") {
+                // Handle events that don't come through onChunk callback.
+                // AI SDK's onChunk only fires for: text-delta, reasoning-delta, source,
+                // tool-call, tool-input-start, tool-input-delta, tool-result, raw.
+                // Events like "finish" and "tool-error" must be forwarded explicitly.
+                if (part.type === "finish" || part.type === "tool-error") {
                     this.chunkHandler.handleChunk({ chunk: part as TextStreamPart<Record<string, AISdkTool>> });
                 }
             }
