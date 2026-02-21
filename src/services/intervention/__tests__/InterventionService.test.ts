@@ -135,6 +135,9 @@ mock.module("@/services/trust-pubkeys/TrustPubkeyService", () => ({
 // Import after mocks are set up
 import { InterventionService } from "../InterventionService";
 
+/** Fixed timestamp for deterministic tests (avoids Date.now() non-determinism). */
+const FIXED_COMPLETION_TIME = 1_700_000_000_000;
+
 describe("InterventionService", () => {
     let tempDir: string;
     let projectAgents: Map<string, Array<{ slug: string; pubkey: string }>>;
@@ -1652,7 +1655,7 @@ describe("InterventionService", () => {
             // Completion should be queued despite resolver throwing
             service.onAgentCompletion(
                 "test-conv-1",
-                Date.now() + 10000,
+                FIXED_COMPLETION_TIME + 10000,
                 "agent-123",
                 "user-456",
                 "project-789"
@@ -1664,8 +1667,6 @@ describe("InterventionService", () => {
     });
 
     describe("active delegation checking", () => {
-        const FIXED_COMPLETION_TIME = 1700000000000; // Fixed timestamp for deterministic tests
-
         it("should skip intervention when agent has active delegations", async () => {
             // Create a mock delegation checker that returns true (has active delegations)
             const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => true);

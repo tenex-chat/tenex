@@ -278,7 +278,7 @@ export class DaemonRouter {
                     );
                 }
 
-                logger.info("Routing event to project via A-tag", {
+                logger.info("Routing event to project via a-tag", {
                     eventId: event.id.slice(0, 8),
                     eventKind: event.kind,
                     projectId: aTagValue,
@@ -289,7 +289,7 @@ export class DaemonRouter {
                     projectId: aTagValue,
                     method: "a_tag",
                     matchedTags: [aTagValue],
-                    reason: `Matched project A-tag: ${aTagValue}`,
+                    reason: `Matched project a-tag: ${aTagValue}`,
                 };
             }
         }
