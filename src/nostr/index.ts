@@ -1,6 +1,14 @@
 // Agent event system
 
 export { AgentEventDecoder } from "./AgentEventDecoder";
+
+// Blossom upload service
+export { BlossomService, calculateSHA256, getExtensionFromMimeType } from "./BlossomService";
+export type {
+    BlossomUploadResult,
+    BlossomUploadOptions,
+    BlossomSigner,
+} from "./BlossomService";
 export type {
     CompletionIntent,
     DelegationIntent,

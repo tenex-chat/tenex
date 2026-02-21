@@ -217,6 +217,10 @@ export class ImageGenerationService {
                 throw new Error("No image found in model response");
             }
 
+            if (!imagePart.data) {
+                throw new Error("Image part found but contains no data");
+            }
+
             logger.info(`Image generated successfully`, {
                 model: modelId,
                 mediaType: imagePart.mediaType,

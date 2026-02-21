@@ -1,17 +1,41 @@
-import * as crypto from "node:crypto";
+/**
+ * Upload Blob Tool
+ *
+ * Uploads files, URLs, or base64 blobs to a Blossom server using Nostr authentication.
+ * Supports downloading from URLs, reading local files, and handling base64-encoded data.
+ *
+ * The tool delegates Blossom upload operations to BlossomService in the nostr layer,
+ * keeping NDK usage centralized.
+ */
+
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { ToolExecutionContext } from "@/tools/types";
+import type { ToolExecutionContext, AISdkTool } from "@/tools/types";
+import { BlossomService } from "@/nostr/BlossomService";
 import { config } from "@/services/ConfigService";
-import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
 const MAX_BLOB_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 const DOWNLOAD_TIMEOUT_MS = 30_000;
-const UPLOAD_TIMEOUT_MS = 60_000;
+const DEFAULT_BLOSSOM_SERVER = "https://blossom.primal.net";
+
+/**
+ * Load Blossom server URL from config.
+ * Falls back to default if config is unavailable.
+ */
+async function loadBlossomServerUrl(): Promise<string> {
+    try {
+        const tenexConfig = await config.loadTenexConfig(config.getGlobalPath());
+        return tenexConfig.blossomServerUrl || DEFAULT_BLOSSOM_SERVER;
+    } catch (error) {
+        logger.warn("[upload_blob] Failed to load Blossom config, using default", {
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return DEFAULT_BLOSSOM_SERVER;
+    }
+}
 
 const uploadBlobSchema = z.object({
     input: z
@@ -38,13 +62,12 @@ interface UploadBlobOutput {
     sha256: string;
     size: number;
     type?: string;
-    uploaded: number;
+    uploaded?: number;
 }
 
-interface BlossomConfig {
-    serverUrl: string;
-}
-
+/**
+ * Enforce size limit on blob data
+ */
 function enforceSizeLimit(bytes: number): void {
     if (bytes > MAX_BLOB_SIZE_BYTES) {
         throw new Error(
@@ -54,26 +77,10 @@ function enforceSizeLimit(bytes: number): void {
 }
 
 /**
- * Get Blossom server configuration from global config
- */
-async function getBlossomConfig(): Promise<BlossomConfig> {
-    try {
-        const tenexConfig = await config.loadTenexConfig(config.getGlobalPath());
-        return {
-            serverUrl: tenexConfig.blossomServerUrl || "https://blossom.primal.net",
-        };
-    } catch {
-        // Return default configuration if config doesn't exist or has errors
-        return {
-            serverUrl: "https://blossom.primal.net",
-        };
-    }
-}
-
-/**
- * Detect MIME type from file extension or data
+ * Detect MIME type from file extension or data magic bytes
  */
 function detectMimeType(filePath?: string, data?: Buffer): string {
+    // Try file extension first
     if (filePath) {
         const ext = path.extname(filePath).toLowerCase();
         const mimeTypes: Record<string, string> = {
@@ -92,42 +99,25 @@ function detectMimeType(filePath?: string, data?: Buffer): string {
             ".json": "application/json",
             ".txt": "text/plain",
         };
-        return mimeTypes[ext] || "application/octet-stream";
+        if (mimeTypes[ext]) {
+            return mimeTypes[ext];
+        }
     }
 
-    // Try to detect from data magic bytes
+    // Try magic bytes detection
     if (data && data.length > 4) {
         const header = data.slice(0, 4).toString("hex");
         if (header.startsWith("ffd8ff")) return "image/jpeg";
         if (header === "89504e47") return "image/png";
         if (header === "47494638") return "image/gif";
-        if (header.startsWith("52494646") && data.slice(8, 12).toString("hex") === "57454250")
-            return "image/webp";
+        if (header.startsWith("52494646") && data.length > 12) {
+            if (data.slice(8, 12).toString("hex") === "57454250") {
+                return "image/webp";
+            }
+        }
     }
 
     return "application/octet-stream";
-}
-
-/**
- * Get file extension from MIME type
- */
-function getExtensionFromMimeType(mimeType: string): string {
-    const extensions: Record<string, string> = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/gif": ".gif",
-        "image/webp": ".webp",
-        "video/mp4": ".mp4",
-        "video/quicktime": ".mov",
-        "video/x-msvideo": ".avi",
-        "video/webm": ".webm",
-        "audio/mpeg": ".mp3",
-        "audio/wav": ".wav",
-        "application/pdf": ".pdf",
-        "application/json": ".json",
-        "text/plain": ".txt",
-    };
-    return extensions[mimeType] || "";
 }
 
 /**
@@ -225,95 +215,68 @@ async function downloadFromURL(
 }
 
 /**
- * Calculate SHA256 hash of data
+ * Resolve input to data buffer and MIME type
  */
-function calculateSHA256(data: Buffer): string {
-    return crypto.createHash("sha256").update(data).digest("hex");
-}
+async function resolveInput(
+    dataInput: string,
+    providedMimeType: string | null
+): Promise<{ data: Buffer; mimeType: string; description: string }> {
+    // Handle URL download
+    if (isURL(dataInput)) {
+        const downloadResult = await downloadFromURL(dataInput);
+        return {
+            data: downloadResult.data,
+            mimeType:
+                providedMimeType ||
+                downloadResult.mimeType ||
+                detectMimeType(downloadResult.filename, downloadResult.data),
+            description: downloadResult.filename || "Upload from URL",
+        };
+    }
 
-/**
- * Create Blossom authorization event (kind 24242)
- */
-async function createAuthEvent(
-    sha256Hash: string,
-    description: string,
-    context: ToolExecutionContext
-): Promise<NDKEvent> {
-    const event = new NDKEvent();
-    event.kind = 24242;
-    event.content = description;
-    event.created_at = Math.floor(Date.now() / 1000);
-    event.tags = [
-        ["t", "upload"],
-        ["x", sha256Hash],
-        ["expiration", String(Math.floor(Date.now() / 1000) + 3600)], // 1 hour expiration
-    ];
+    // Handle base64 data (with or without data URL prefix)
+    if (dataInput.startsWith("data:") || dataInput.includes(",")) {
+        const base64Data = dataInput.includes(",") ? dataInput.split(",")[1] : dataInput;
+        let mimeType: string;
 
-    // Sign the event with the agent's signer
-    await context.agent.sign(event);
+        // Extract MIME type from data URL if present
+        if (dataInput.startsWith("data:")) {
+            const matches = dataInput.match(/^data:([^;]+);/);
+            mimeType = matches ? matches[1] : (providedMimeType || "application/octet-stream");
+        } else {
+            mimeType = providedMimeType || "application/octet-stream";
+        }
 
-    return event;
-}
+        const data = Buffer.from(base64Data, "base64");
+        enforceSizeLimit(data.length);
 
-/**
- * Upload data to Blossom server
- */
-async function uploadToBlossomServer(
-    serverUrl: string,
-    data: Buffer,
-    mimeType: string,
-    authEvent: NDKEvent
-): Promise<UploadBlobOutput> {
-    // Encode the auth event as base64 for the header
-    const authHeader = `Nostr ${Buffer.from(JSON.stringify(authEvent.rawEvent())).toString("base64")}`;
+        return {
+            data,
+            mimeType,
+            description: "Upload blob data",
+        };
+    }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    // Handle file path
+    const filePath = path.resolve(dataInput);
 
     try {
-        const response = await fetch(`${serverUrl}/upload`, {
-            method: "PUT",
-            headers: {
-                Authorization: authHeader,
-                "Content-Type": mimeType,
-                "Content-Length": String(data.length),
-            },
-            body: data,
-            signal: controller.signal,
-        });
-
-        if (!response.ok) {
-            let errorMessage = `Upload failed with status ${response.status}`;
-            try {
-                const errorData = await response.json() as { message?: string };
-                if (errorData.message) {
-                    errorMessage = `Upload failed: ${errorData.message}`;
-                }
-            } catch {
-                // If parsing JSON fails, use the default error message
-            }
-            throw new Error(errorMessage);
-        }
-
-        const result = await response.json() as UploadBlobOutput;
-
-        // Add extension to URL if not present and we can determine it
-        if (result.url && !path.extname(result.url)) {
-            const ext = getExtensionFromMimeType(mimeType);
-            if (ext) {
-                result.url = result.url + ext;
-            }
-        }
-
-        return result;
-    } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-            throw new Error(`Upload timed out after ${UPLOAD_TIMEOUT_MS}ms`, { cause: error });
-        }
-        throw error;
-    } finally {
-        clearTimeout(timeout);
+        await fs.access(filePath);
+    } catch {
+        throw new Error(`File not found: ${filePath}`);
     }
+
+    const stats = await fs.stat(filePath);
+    enforceSizeLimit(stats.size);
+
+    const data = await fs.readFile(filePath);
+    const mimeType = providedMimeType || detectMimeType(filePath, data);
+
+    return {
+        data,
+        mimeType,
+        description: `Upload ${path.basename(filePath)}`,
+    };
 }
 
 /**
@@ -323,7 +286,7 @@ async function executeUploadBlob(
     input: UploadBlobInput,
     context: ToolExecutionContext
 ): Promise<UploadBlobOutput> {
-    const { input: dataInput, mimeType: providedMimeType, description } = input;
+    const { input: dataInput, mimeType: providedMimeType, description: providedDescription } = input;
 
     // Validate that input is provided
     if (!dataInput) {
@@ -334,102 +297,37 @@ async function executeUploadBlob(
 
     logger.info("[upload_blob] Starting blob upload", {
         isURL: isURL(dataInput),
-        hasFilePath:
-            !isURL(dataInput) && !dataInput.startsWith("data:") && !dataInput.includes(","),
+        hasFilePath: !isURL(dataInput) && !dataInput.startsWith("data:") && !dataInput.includes(","),
         hasMimeType: !!providedMimeType,
-        description,
+        description: providedDescription,
     });
 
-    // Get Blossom server configuration
-    const blossomConfig = await getBlossomConfig();
-    const serverUrl = blossomConfig.serverUrl;
+    // Resolve input to data buffer
+    const resolved = await resolveInput(dataInput, providedMimeType);
+    const uploadDescription = providedDescription || resolved.description;
 
-    logger.info("[upload_blob] Using Blossom server", { serverUrl });
-
-    let data: Buffer;
-    let mimeType: string;
-    let uploadDescription: string;
-
-    // Check if input is a URL
-    if (isURL(dataInput)) {
-        // Handle URL download
-        const downloadResult = await downloadFromURL(dataInput);
-        data = downloadResult.data;
-        mimeType =
-            providedMimeType ||
-            downloadResult.mimeType ||
-            detectMimeType(downloadResult.filename, data);
-        uploadDescription = description || downloadResult.filename || "Upload from URL";
-    } else if (dataInput.startsWith("data:") || dataInput.includes(",")) {
-        // Handle base64 data (with or without data URL prefix)
-        const base64Data = dataInput.includes(",") ? dataInput.split(",")[1] : dataInput;
-
-        // Extract MIME type from data URL if present
-        if (dataInput.startsWith("data:")) {
-            const matches = dataInput.match(/^data:([^;]+);/);
-            if (matches) {
-                mimeType = matches[1];
-            } else {
-                mimeType = providedMimeType || "application/octet-stream";
-            }
-        } else {
-            mimeType = providedMimeType || "application/octet-stream";
-        }
-
-        data = Buffer.from(base64Data, "base64");
-        enforceSizeLimit(data.length);
-        uploadDescription = description || "Upload blob data";
-    } else {
-        // Handle file path
-        const filePath = path.resolve(dataInput);
-
-        // Check if file exists
-        try {
-            await fs.access(filePath);
-        } catch {
-            throw new Error(`File not found: ${filePath}`);
-        }
-
-        const stats = await fs.stat(filePath);
-        enforceSizeLimit(stats.size);
-
-        data = await fs.readFile(filePath);
-        mimeType = providedMimeType || detectMimeType(filePath, data);
-        uploadDescription = description || `Upload ${path.basename(filePath)}`;
-    }
-
-    // Calculate SHA256 hash
-    const sha256Hash = calculateSHA256(data);
-
-    logger.info("[upload_blob] Calculated SHA256", {
-        hash: sha256Hash,
-        size: data.length,
-        mimeType,
+    logger.info("[upload_blob] Resolved input", {
+        size: resolved.data.length,
+        mimeType: resolved.mimeType,
+        description: uploadDescription,
     });
 
-    // Create authorization event
-    const authEvent = await createAuthEvent(sha256Hash, uploadDescription, context);
-
-    logger.info("[upload_blob] Created authorization event", {
-        eventId: authEvent.id,
-        kind: authEvent.kind,
+    // Upload to Blossom using the service (delegates NDK usage to nostr layer)
+    // Layer 3 (tools) loads config and passes serverUrl to Layer 2 (nostr)
+    const blossomServerUrl = await loadBlossomServerUrl();
+    const blossomService = new BlossomService(context.agent);
+    const result = await blossomService.upload(resolved.data, resolved.mimeType, {
+        serverUrl: blossomServerUrl,
+        description: uploadDescription,
     });
 
-    try {
-        // Upload to Blossom server
-        const result = await uploadToBlossomServer(serverUrl, data, mimeType, authEvent);
+    logger.info("[upload_blob] Upload successful", {
+        url: result.url,
+        sha256: result.sha256,
+        size: result.size,
+    });
 
-        logger.info("[upload_blob] Upload successful", {
-            url: result.url,
-            sha256: result.sha256,
-            size: result.size,
-        });
-
-        return result;
-    } catch (error) {
-        logger.error("[upload_blob] Upload failed", { error });
-        throw error;
-    }
+    return result;
 }
 
 /**
@@ -481,30 +379,3 @@ export function createUploadBlobTool(context: ToolExecutionContext): AISdkTool {
 
     return aiTool as AISdkTool;
 }
-
-/**
- * upload_blob tool - Upload files, URLs, or base64 blobs to a Blossom server
- *
- * This tool enables agents to upload media to a Blossom server from various sources,
- * following the Blossom protocol specification for decentralized media storage.
- *
- * Features:
- * - Downloads and uploads media from URLs (http/https)
- * - Supports file uploads from the filesystem
- * - Supports base64-encoded blob uploads
- * - Automatic MIME type detection from file extensions, URL headers, or data
- * - Proper file extension handling in returned URLs
- * - Configurable Blossom server URL via .tenex/config.json
- * - Nostr event-based authentication (kind 24242)
- *
- * The tool handles the complete Blossom upload workflow:
- * 1. Downloads from URL, reads file, or decodes base64 data
- * 2. Calculates SHA256 hash
- * 3. Creates and signs authorization event
- * 4. Uploads to Blossom server with proper headers
- * 5. Returns the media URL with appropriate extension
- *
- * Configuration:
- * Add "blossomServerUrl" to .tenex/config.json to customize the server
- * Default server: https://blossom.primal.net
- */
