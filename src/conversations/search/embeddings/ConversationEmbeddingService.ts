@@ -50,6 +50,17 @@ export interface SemanticSearchResult {
 }
 
 /**
+ * Discriminated union result from buildDocument.
+ * Distinguishes between "no indexable content" and transient errors
+ * so the caller can decide whether to permanently mark as indexed
+ * or leave for retry.
+ */
+export type BuildDocumentResult =
+    | { kind: "ok"; document: RAGDocument }
+    | { kind: "noContent" }
+    | { kind: "error"; reason: string };
+
+/**
  * Options for semantic search
  */
 export interface SemanticSearchOptions {
@@ -161,6 +172,80 @@ export class ConversationEmbeddingService {
     }
 
     /**
+     * Build a RAGDocument for a conversation without writing it to the database.
+     *
+     * Returns a discriminated union:
+     * - `{ kind: 'ok', document }` when a document was successfully built
+     * - `{ kind: 'noContent' }` when the conversation has no indexable content
+     * - `{ kind: 'error', reason }` on transient failures (registry miss, etc.)
+     *
+     * Used by ConversationIndexingJob to collect documents for batch writing.
+     */
+    public buildDocument(
+        conversationId: string,
+        projectId: string,
+        store?: ConversationStore
+    ): BuildDocumentResult {
+        try {
+            // Load store if not provided
+            if (!store) {
+                store = conversationRegistry.get(conversationId);
+                if (!store) {
+                    // Not in registry means zero messages loaded — genuinely no content to embed
+                    logger.debug(`Conversation ${conversationId.substring(0, 8)} not in registry, no content`);
+                    return { kind: "noContent" };
+                }
+            }
+
+            const messages = store.getAllMessages();
+            const metadata = store.metadata;
+            const title = metadata.title ?? store.title;
+            const summary = metadata.summary;
+            const lastUserMessage = metadata.last_user_message;
+
+            // Build embedding content
+            const embeddingContent = this.buildEmbeddingContent(title, summary, lastUserMessage);
+
+            // Skip if no content to embed
+            if (!embeddingContent.trim()) {
+                logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
+                return { kind: "noContent" };
+            }
+
+            const firstMessage = messages[0];
+            const lastMessage = messages[messages.length - 1];
+
+            const documentId = `conv_${projectId}_${conversationId}`;
+
+            return {
+                kind: "ok",
+                document: {
+                    id: documentId,
+                    content: embeddingContent,
+                    metadata: {
+                        conversationId,
+                        projectId,
+                        title: title || "",
+                        summary: summary || "",
+                        messageCount: messages.length,
+                        createdAt: firstMessage?.timestamp,
+                        lastActivity: lastMessage?.timestamp,
+                    },
+                    timestamp: lastMessage?.timestamp || Date.now(),
+                    source: "conversation",
+                },
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.error("Failed to build document for conversation", {
+                conversationId: conversationId.substring(0, 8),
+                error: message,
+            });
+            return { kind: "error", reason: message };
+        }
+    }
+
+    /**
      * Index a single conversation
      * FIX #3: Returns boolean indicating success for accurate counting
      *
@@ -177,36 +262,17 @@ export class ConversationEmbeddingService {
         await this.ensureInitialized();
 
         try {
-            // Load store if not provided
-            if (!store) {
-                store = conversationRegistry.get(conversationId);
-                if (!store) {
-                    logger.debug(`Conversation ${conversationId.substring(0, 8)} not found, skipping indexing`);
-                    return false;
-                }
-            }
+            const result = this.buildDocument(conversationId, projectId, store);
 
-            const messages = store.getAllMessages();
-            const metadata = store.metadata;
-            const title = metadata.title ?? store.title;
-            const summary = metadata.summary;
-            const lastUserMessage = metadata.last_user_message;
-
-            // Build embedding content
-            const embeddingContent = this.buildEmbeddingContent(title, summary, lastUserMessage);
-
-            // Skip if no content to embed
-            if (!embeddingContent.trim()) {
-                logger.debug(`No content to embed for conversation ${conversationId.substring(0, 8)}`);
+            if (result.kind !== "ok") {
                 return false;
             }
 
-            const firstMessage = messages[0];
-            const lastMessage = messages[messages.length - 1];
+            const document = result.document;
+            // buildDocument always sets document.id — use it as the single source of truth
+            const documentId = document.id ?? `conv_${projectId}_${conversationId}`;
 
-            const documentId = `conv_${projectId}_${conversationId}`;
-
-            // FIX #2: Delete existing document before inserting (upsert semantics)
+            // Delete existing document before inserting (upsert semantics)
             // This prevents duplicate entries when re-indexing
             try {
                 await this.ragService.deleteDocumentById(CONVERSATION_COLLECTION, documentId);
@@ -214,23 +280,6 @@ export class ConversationEmbeddingService {
             } catch {
                 // Document might not exist - that's fine
             }
-
-            // Create RAG document
-            const document: RAGDocument = {
-                id: documentId,
-                content: embeddingContent,
-                metadata: {
-                    conversationId,
-                    projectId,
-                    title: title || "",
-                    summary: summary || "",
-                    messageCount: messages.length,
-                    createdAt: firstMessage?.timestamp,
-                    lastActivity: lastMessage?.timestamp,
-                },
-                timestamp: lastMessage?.timestamp || Date.now(),
-                source: "conversation",
-            };
 
             // Add to collection
             await this.ragService.addDocuments(CONVERSATION_COLLECTION, [document]);
@@ -246,6 +295,14 @@ export class ConversationEmbeddingService {
             // Don't throw - indexing failures shouldn't break the application
             return false;
         }
+    }
+
+    /**
+     * Get the collection name for conversation embeddings.
+     * Exposed for use by ConversationIndexingJob for batch operations.
+     */
+    public getCollectionName(): string {
+        return CONVERSATION_COLLECTION;
     }
 
     /**

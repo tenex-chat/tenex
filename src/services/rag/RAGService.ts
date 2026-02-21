@@ -3,7 +3,7 @@ import type { EmbeddingProvider } from "@/services/embedding";
 import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
 import { RAGDatabaseService } from "./RAGDatabaseService";
 import { RAGOperations } from "./RAGOperations";
-import type { LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
+import type { BulkUpsertResult, LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
 
 /**
  * Lightweight check for RAG collections without full service initialization.
@@ -137,6 +137,16 @@ export class RAGService {
     }
 
     /**
+     * Bulk upsert documents using mergeInsert for efficient batched writes.
+     * Creates one LanceDB version per chunk of BATCH_SIZE instead of 2N
+     * (delete+insert per doc). Failures are isolated per chunk.
+     */
+    public async bulkUpsert(collectionName: string, documents: RAGDocument[]): Promise<BulkUpsertResult> {
+        await this.ensureInitialized();
+        return this.operations.bulkUpsert(collectionName, documents);
+    }
+
+    /**
      * Delete a document by its ID
      */
     public async deleteDocumentById(collectionName: string, documentId: string): Promise<void> {
@@ -224,7 +234,7 @@ export class RAGService {
 }
 
 // Export the main types for convenience
-export type { RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
+export type { BulkUpsertResult, RAGDocument, RAGCollection, RAGQueryResult } from "./RAGOperations";
 export { RAGValidationError, RAGOperationError } from "./RAGOperations";
 export { RAGDatabaseError } from "./RAGDatabaseService";
 // hasRagCollections is exported at module level (above class)

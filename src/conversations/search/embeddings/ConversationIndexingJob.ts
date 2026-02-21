@@ -20,8 +20,10 @@ import { logger } from "@/utils/logger";
 import { getTenexBasePath } from "@/constants";
 import { join } from "path";
 import { getConversationEmbeddingService } from "./ConversationEmbeddingService";
+import type { BuildDocumentResult } from "./ConversationEmbeddingService";
 import { IndexingStateManager } from "./IndexingStateManager";
 import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
+import { RAGService, type RAGDocument } from "@/services/rag/RAGService";
 
 /** Default interval: 5 minutes (in milliseconds) */
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -116,8 +118,16 @@ export class ConversationIndexingJob {
     }
 
     /**
-     * Run a single indexing batch
-     * This identifies conversations that need indexing and processes them
+     * Run a single indexing batch.
+     *
+     * Collects all conversations needing re-indexing across all projects,
+     * builds RAGDocuments for each, then flushes them via bulkUpsert
+     * (mergeInsert). This creates one LanceDB version per chunk of
+     * BATCH_SIZE instead of 2N versions (delete+insert per conversation).
+     *
+     * Failures are isolated per chunk: documents in a successful chunk are
+     * marked indexed even when other chunks fail. Only truly failed
+     * documents are retried next cycle.
      */
     private async runIndexingBatch(): Promise<void> {
         // Prevent overlapping batches
@@ -135,22 +145,115 @@ export class ConversationIndexingJob {
             // Ensure the embedding service is initialized
             await conversationEmbeddingService.initialize();
 
-            let totalIndexed = 0;
             let totalChecked = 0;
             let totalSkipped = 0;
             let totalFailed = 0;
+
+            // Collect all documents that need indexing across all projects
+            const pendingDocuments: RAGDocument[] = [];
+            // Track which conversations were successfully built (for marking indexed after flush)
+            // Indices into pendingDocuments correspond 1:1 with pendingMarkIndexed
+            const pendingMarkIndexed: Array<{ projectId: string; conversationId: string }> = [];
+            const pendingMarkNoContent: Array<{ projectId: string; conversationId: string }> = [];
 
             // Get all projects directly from disk
             const projectIds = listProjectIdsFromDisk(this.projectsBasePath);
 
             for (const projectId of projectIds) {
-                const { indexed, checked, skipped, failed } = await this.indexProjectConversations(
-                    projectId
+                try {
+                    const conversationIds = listConversationIdsFromDiskForProject(
+                        this.projectsBasePath,
+                        projectId
+                    );
+
+                    for (const conversationId of conversationIds) {
+                        totalChecked++;
+
+                        // Check if conversation needs indexing using durable state
+                        const needsIndexing = this.stateManager.needsIndexing(
+                            this.projectsBasePath,
+                            projectId,
+                            conversationId
+                        );
+
+                        if (!needsIndexing) {
+                            totalSkipped++;
+                            continue;
+                        }
+
+                        // Build document without writing
+                        const result: BuildDocumentResult = conversationEmbeddingService.buildDocument(
+                            conversationId,
+                            projectId
+                        );
+
+                        switch (result.kind) {
+                            case "ok":
+                                pendingDocuments.push(result.document);
+                                pendingMarkIndexed.push({ projectId, conversationId });
+                                break;
+                            case "noContent":
+                                pendingMarkNoContent.push({ projectId, conversationId });
+                                break;
+                            case "error":
+                                // Transient error — leave unmarked so it retries next cycle
+                                totalFailed++;
+                                logger.warn("Transient error building document, will retry", {
+                                    conversationId: conversationId.substring(0, 8),
+                                    projectId,
+                                    reason: result.reason,
+                                });
+                                break;
+                        }
+                    }
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    logger.error("Failed to process project conversations", {
+                        projectId,
+                        error: message,
+                    });
+                }
+            }
+
+            // Flush all pending documents via bulkUpsert (per-chunk failure isolation)
+            let totalIndexed = 0;
+            if (pendingDocuments.length > 0) {
+                const ragService = RAGService.getInstance();
+                const collectionName = conversationEmbeddingService.getCollectionName();
+                const { upsertedCount, failedIndices } = await ragService.bulkUpsert(
+                    collectionName,
+                    pendingDocuments
                 );
-                totalIndexed += indexed;
-                totalChecked += checked;
-                totalSkipped += skipped;
-                totalFailed += failed;
+
+                totalIndexed = upsertedCount;
+
+                // Build a set of failed indices for O(1) lookup
+                const failedSet = new Set(failedIndices);
+                totalFailed += failedIndices.length;
+
+                // Mark only successfully flushed conversations as indexed
+                for (let i = 0; i < pendingMarkIndexed.length; i++) {
+                    if (failedSet.has(i)) {
+                        // This document's chunk failed — leave unmarked for retry
+                        continue;
+                    }
+                    const { projectId, conversationId } = pendingMarkIndexed[i];
+                    this.stateManager.markIndexed(
+                        this.projectsBasePath,
+                        projectId,
+                        conversationId
+                    );
+                }
+            }
+
+            // Mark no-content conversations to avoid re-trying every batch
+            for (const { projectId, conversationId } of pendingMarkNoContent) {
+                this.stateManager.markIndexed(
+                    this.projectsBasePath,
+                    projectId,
+                    conversationId,
+                    true
+                );
             }
 
             if (totalChecked > 0) {
@@ -171,93 +274,6 @@ export class ConversationIndexingJob {
         } finally {
             this.isBatchRunning = false;
         }
-    }
-
-    /**
-     * Index conversations for a single project
-     * Returns accurate metrics for indexed, skipped, and failed conversations
-     */
-    private async indexProjectConversations(projectId: string): Promise<{
-        indexed: number;
-        checked: number;
-        skipped: number;
-        failed: number;
-    }> {
-        const conversationEmbeddingService = getConversationEmbeddingService();
-
-        let indexed = 0;
-        let checked = 0;
-        let skipped = 0;
-        let failed = 0;
-
-        try {
-            // Read conversations directly from disk
-            const conversationIds = listConversationIdsFromDiskForProject(
-                this.projectsBasePath,
-                projectId
-            );
-
-            for (const conversationId of conversationIds) {
-                checked++;
-
-                // Check if conversation needs indexing using durable state
-                const needsIndexing = this.stateManager.needsIndexing(
-                    this.projectsBasePath,
-                    projectId,
-                    conversationId
-                );
-
-                if (!needsIndexing) {
-                    skipped++;
-                    continue;
-                }
-
-                // Try to index the conversation
-                try {
-                    const success = await conversationEmbeddingService.indexConversation(
-                        conversationId,
-                        projectId
-                    );
-
-                    if (success) {
-                        indexed++;
-                        // Mark as indexed in durable state
-                        this.stateManager.markIndexed(this.projectsBasePath, projectId, conversationId);
-                    } else {
-                        // indexConversation returns false for empty/missing content
-                        // Mark as indexed with noContent flag to avoid re-trying every batch
-                        this.stateManager.markIndexed(
-                            this.projectsBasePath,
-                            projectId,
-                            conversationId,
-                            true
-                        );
-                        failed++;
-                    }
-                } catch (error) {
-                    failed++;
-                    logger.error("Failed to index conversation", {
-                        conversationId: conversationId.substring(0, 8),
-                        projectId,
-                        error,
-                    });
-                }
-            }
-
-            if (indexed > 0) {
-                logger.debug(
-                    `Project ${projectId}: indexed ${indexed}, skipped ${skipped}, failed ${failed} (checked ${checked})`
-                );
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error("Failed to index project conversations", {
-                projectId,
-                error: message,
-            });
-        }
-
-        return { indexed, checked, skipped, failed };
     }
 
     /**

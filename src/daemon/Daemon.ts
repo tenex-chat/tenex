@@ -30,6 +30,7 @@ import { logDropped, logRouted } from "./utils/routing-log";
 import { UnixSocketTransport } from "./UnixSocketTransport";
 import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
+import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult } from "@/services/intervention";
 import { RALRegistry } from "@/services/ral/RALRegistry";
@@ -202,6 +203,10 @@ export class Daemon {
             // 11. Start automatic conversation indexing job
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
+
+            // 11b. Start LanceDB maintenance service (periodic compaction)
+            getLanceDBMaintenanceService().start();
+            logger.info("LanceDB maintenance service started");
 
             // 12. Initialize InterventionService (after projects are loaded)
             // This must happen after subscriptions start so agent slugs can be resolved
@@ -1228,6 +1233,11 @@ export class Daemon {
                 getConversationIndexingJob().stop();
                 console.log(" done");
 
+                // Stop LanceDB maintenance service
+                process.stdout.write("Stopping LanceDB maintenance service...");
+                getLanceDBMaintenanceService().stop();
+                console.log(" done");
+
                 // Stop intervention service
                 process.stdout.write("Stopping intervention service...");
                 InterventionService.getInstance().shutdown();
@@ -1659,6 +1669,9 @@ export class Daemon {
 
         // Stop conversation indexing job
         getConversationIndexingJob().stop();
+
+        // Stop LanceDB maintenance service
+        getLanceDBMaintenanceService().stop();
 
         // Stop intervention service
         InterventionService.getInstance().shutdown();
