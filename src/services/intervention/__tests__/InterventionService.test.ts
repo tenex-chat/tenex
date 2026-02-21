@@ -135,6 +135,9 @@ mock.module("@/services/trust-pubkeys/TrustPubkeyService", () => ({
 // Import after mocks are set up
 import { InterventionService } from "../InterventionService";
 
+/** Fixed timestamp for deterministic tests (avoids Date.now() non-determinism). */
+const FIXED_COMPLETION_TIME = 1_700_000_000_000;
+
 describe("InterventionService", () => {
     let tempDir: string;
     let projectAgents: Map<string, Array<{ slug: string; pubkey: string }>>;
@@ -1652,7 +1655,7 @@ describe("InterventionService", () => {
             // Completion should be queued despite resolver throwing
             service.onAgentCompletion(
                 "test-conv-1",
-                Date.now() + 10000,
+                FIXED_COMPLETION_TIME + 10000,
                 "agent-123",
                 "user-456",
                 "project-789"
@@ -1660,6 +1663,136 @@ describe("InterventionService", () => {
 
             // Should queue (exception mapped to transient runtime_unavailable)
             expect(service.getPendingCount()).toBe(1);
+        });
+    });
+
+    describe("active delegation checking", () => {
+        it("should skip intervention when agent has active delegations", async () => {
+            // Create a mock delegation checker that returns true (has active delegations)
+            const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => true);
+
+            const service = await initServiceWithResolver();
+            service.setActiveDelegationChecker(mockDelegationChecker);
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                FIXED_COMPLETION_TIME,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should NOT create a pending intervention (delegations are active)
+            expect(service.getPendingCount()).toBe(0);
+
+            // Verify the checker was called with correct params
+            expect(mockDelegationChecker).toHaveBeenCalledWith("agent-123", "test-conv-1");
+        });
+
+        it("should allow intervention when agent has no active delegations", async () => {
+            // Create a mock delegation checker that returns false (no active delegations)
+            const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => false);
+
+            const service = await initServiceWithResolver();
+            service.setActiveDelegationChecker(mockDelegationChecker);
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                FIXED_COMPLETION_TIME,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should create a pending intervention (no active delegations)
+            expect(service.getPendingCount()).toBe(1);
+
+            // Verify the checker was called
+            expect(mockDelegationChecker).toHaveBeenCalledWith("agent-123", "test-conv-1");
+        });
+
+        it("should allow intervention when no delegation checker is configured", async () => {
+            // No delegation checker set - backward compatible behavior
+            const service = await initServiceWithResolver();
+            // Explicitly NOT setting a delegation checker
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                FIXED_COMPLETION_TIME,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should create a pending intervention (no checker = no skip)
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should not call delegation checker for non-whitelisted users", async () => {
+            const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => true);
+
+            // Mock user as non-whitelisted
+            mockIsTrustedSync.mockReturnValue({
+                trusted: false,
+                reason: undefined,
+            });
+
+            const service = await initServiceWithResolver();
+            service.setActiveDelegationChecker(mockDelegationChecker);
+            await service.setProject("project-789");
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                FIXED_COMPLETION_TIME,
+                "agent-123",
+                "non-whitelisted-user",
+                "project-789"
+            );
+
+            // Should skip before reaching delegation check (user not whitelisted)
+            expect(service.getPendingCount()).toBe(0);
+
+            // Delegation checker should NOT be called (early return for non-whitelisted)
+            expect(mockDelegationChecker).not.toHaveBeenCalled();
+        });
+
+        it("should check delegations after user activity check", async () => {
+            // User was recently active (within threshold) - should skip before delegation check
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 100,
+                    conversationInactivityTimeoutSeconds: 120,
+                },
+            });
+
+            const mockDelegationChecker = mock((_agentPubkey: string, _conversationId: string) => true);
+
+            const service = await initServiceWithResolver();
+            service.setActiveDelegationChecker(mockDelegationChecker);
+            await service.setProject("project-789");
+
+            const now = Date.now();
+            const lastUserMessageTime = now - 10000; // User sent message 10 seconds ago
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                now, // completedAt
+                "agent-123",
+                "user-456",
+                "project-789",
+                lastUserMessageTime
+            );
+
+            // Should skip due to recent user activity (before reaching delegation check)
+            expect(service.getPendingCount()).toBe(0);
+
+            // Delegation checker should NOT be called (early return for recent activity)
+            expect(mockDelegationChecker).not.toHaveBeenCalled();
         });
     });
 });

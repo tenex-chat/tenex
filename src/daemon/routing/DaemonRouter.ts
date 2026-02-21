@@ -252,7 +252,7 @@ export class DaemonRouter {
     }
 
     /**
-     * Route event based on A-tags (explicit project references)
+     * Route event based on `a` tags (explicit project references)
      */
     private static routeByATag(
         event: NDKEvent,
@@ -262,7 +262,7 @@ export class DaemonRouter {
         const aTags = event.tags.filter((t) => t[0] === "a");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
-        logger.debug("Checking A-tags for project routing", {
+        logger.debug("Checking a-tags for project routing", {
             eventId: event.id.slice(0, 8),
             aTagsFound: projectATags.length,
             aTags: projectATags.map((t) => t[1]),
@@ -278,7 +278,7 @@ export class DaemonRouter {
                     );
                 }
 
-                logger.info("Routing event to project via A-tag", {
+                logger.info("Routing event to project via a-tag", {
                     eventId: event.id.slice(0, 8),
                     eventKind: event.kind,
                     projectId: aTagValue,
@@ -289,7 +289,7 @@ export class DaemonRouter {
                     projectId: aTagValue,
                     method: "a_tag",
                     matchedTags: [aTagValue],
-                    reason: `Matched project A-tag: ${aTagValue}`,
+                    reason: `Matched project a-tag: ${aTagValue}`,
                 };
             }
         }

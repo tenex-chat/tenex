@@ -37,6 +37,19 @@ export type AgentResolutionResult =
 export type AgentResolverFn = (projectId: string, agentSlug: string) => AgentResolutionResult;
 
 /**
+ * Function type for checking if a conversation has active outgoing delegations.
+ * Returns true if there are pending delegations that haven't completed yet.
+ *
+ * This abstraction allows InterventionService (Layer 3) to check delegation state
+ * without directly depending on RALRegistry internals.
+ *
+ * @param agentPubkey - The pubkey of the agent that completed
+ * @param conversationId - The conversation where the agent completed
+ * @returns true if there are active outgoing delegations
+ */
+export type ActiveDelegationCheckerFn = (agentPubkey: string, conversationId: string) => boolean;
+
+/**
  * Represents a pending intervention - an agent completed work
  * and we're waiting for the user to respond.
  */
@@ -95,6 +108,9 @@ export class InterventionService {
     // Injected resolver function for Layer 3/4 decoupling
     private agentResolver: AgentResolverFn | null = null;
 
+    // Injected checker for active delegations (to prevent premature intervention notifications)
+    private activeDelegationChecker: ActiveDelegationCheckerFn | null = null;
+
     private timeoutMs: number = DEFAULT_TIMEOUT_MS;
     private conversationInactivityTimeoutSeconds: number = DEFAULT_CONVERSATION_INACTIVITY_TIMEOUT_SECONDS;
     private enabled = false;
@@ -124,6 +140,19 @@ export class InterventionService {
      */
     public setAgentResolver(resolver: AgentResolverFn): void {
         this.agentResolver = resolver;
+    }
+
+    /**
+     * Set the active delegation checker function.
+     * This allows checking if a conversation has outgoing delegations that are still running.
+     *
+     * When an agent completes work but has active delegations, we should NOT trigger
+     * an intervention notification - the delegation tree is still in progress.
+     *
+     * @param checker - Function that checks for active delegations
+     */
+    public setActiveDelegationChecker(checker: ActiveDelegationCheckerFn): void {
+        this.activeDelegationChecker = checker;
     }
 
     /**
@@ -342,22 +371,6 @@ export class InterventionService {
     }
 
     /**
-     * Check if the intervention agent can be resolved for a given project.
-     * Used during onAgentCompletion to validate before scheduling the timer.
-     *
-     * Returns:
-     * - "can_resolve": Agent exists and can be resolved
-     * - "runtime_unavailable": Runtime temporarily unavailable (transient - should queue)
-     * - "agent_not_found": Agent slug doesn't exist in project (permanent failure)
-     *
-     * @param projectId - The project ID to check
-     */
-    private checkAgentResolution(projectId: string): AgentResolutionResult["status"] {
-        const result = this.resolveAgentPubkeyForProject(projectId);
-        return result.status;
-    }
-
-    /**
      * Check if the service is enabled and ready.
      */
     public isEnabled(): boolean {
@@ -396,16 +409,30 @@ export class InterventionService {
             return;
         }
 
-        // Check if we can resolve the intervention agent for this project
         // Distinguish between transient (runtime unavailable) and permanent (agent not found) failures
-        const resolutionStatus = this.checkAgentResolution(projectId);
+        const resolution = this.resolveAgentPubkeyForProject(projectId);
 
-        if (resolutionStatus === "agent_not_found") {
+        if (resolution.status === "agent_not_found") {
             // Permanent failure: agent slug doesn't exist in project
             logger.warn("InterventionService: skipping completion, agent not found in project", {
                 projectId: projectId.substring(0, 12),
                 slug: this.interventionAgentSlug,
             });
+            return;
+        }
+
+        // Skip if the completing agent IS the intervention agent (prevents feedback loop)
+        if (resolution.status === "resolved" && agentPubkey === resolution.pubkey) {
+            logger.debug("InterventionService: skipping intervention, completing agent is the intervention agent", {
+                conversationId: conversationId.substring(0, 12),
+                agentPubkey: agentPubkey.substring(0, 8),
+            });
+
+            trace.getActiveSpan()?.addEvent("intervention.skipped_intervention_agent_completion", {
+                "conversation.id": conversationId,
+                "agent.pubkey": agentPubkey.substring(0, 8),
+            });
+
             return;
         }
 
@@ -453,6 +480,24 @@ export class InterventionService {
                     "conversation.id": conversationId,
                     "time_since_last_user_message_ms": timeSinceLastUserMessageMs,
                     "threshold_ms": thresholdMs,
+                });
+
+                return;
+            }
+        }
+
+        // Skip if agent has active outgoing delegations (work not yet complete)
+        if (this.activeDelegationChecker) {
+            const hasActiveDelegations = this.activeDelegationChecker(agentPubkey, conversationId);
+            if (hasActiveDelegations) {
+                logger.debug("InterventionService: skipping intervention, agent has active delegations", {
+                    conversationId: conversationId.substring(0, 12),
+                    agentPubkey: agentPubkey.substring(0, 8),
+                });
+
+                trace.getActiveSpan()?.addEvent("intervention.skipped_active_delegations", {
+                    "conversation.id": conversationId,
+                    "agent.pubkey": agentPubkey.substring(0, 8),
                 });
 
                 return;
