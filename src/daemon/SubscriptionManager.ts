@@ -166,7 +166,7 @@ export class SubscriptionManager {
             kind: event.kind,
             author: event.pubkey,
             tagCount: event.tags.length,
-            aTags: event.tags.filter((t) => t[0] === "A" || t[0] === "a").map((t) => t[1]),
+            aTags: event.tags.filter((t) => t[0] === "a").map((t) => t[1]),
             pTags: event.tags.filter((t) => t[0] === "p").map((t) => t[1]?.slice(0, 8)),
             eTags: event.tags.filter((t) => t[0] === "e").map((t) => t[1]?.slice(0, 8)),
             contentLength: event.content?.length || 0,

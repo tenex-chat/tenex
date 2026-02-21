@@ -278,7 +278,7 @@ export class AgentEventDecoder {
      * @returns True if event has A-tags referencing projects (31933:...)
      */
     static hasProjectATags(event: NDKEvent): boolean {
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "a");
         return aTags.some((t) => t[1]?.startsWith("31933:"));
     }
 
@@ -288,7 +288,7 @@ export class AgentEventDecoder {
      * @returns Array of project IDs from A-tags
      */
     static extractProjectATags(event: NDKEvent): string[] {
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "a");
         return aTags
             .filter((t) => t[1]?.startsWith("31933:"))
             .map((t) => t[1])
