@@ -103,7 +103,7 @@ export class DaemonRouter {
             logger.debug("shouldTraceEvent: boot request event", {
                 kind: event.kind,
                 author: event.pubkey.slice(0, 8),
-                aTags: event.tags.filter(t => t[0] === "A" || t[0] === "a").map(t => t[1]),
+                aTags: event.tags.filter(t => t[0] === "a").map(t => t[1]),
             });
         }
 
@@ -123,8 +123,8 @@ export class DaemonRouter {
             return false;
         }
 
-        // Check for A-tags to our projects
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        // Check for a-tags to our projects (NIP-33 addressable event references)
+        const aTags = event.tags.filter((t) => t[0] === "a");
         for (const tag of aTags) {
             const aTagValue = tag[1];
             if (aTagValue && knownProjects.has(aTagValue)) {
@@ -227,7 +227,7 @@ export class DaemonRouter {
         }
 
         // No match found
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        const aTags = event.tags.filter((t) => t[0] === "a");
         const pTags = event.tags.filter((t) => t[0] === "p");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
@@ -258,8 +258,8 @@ export class DaemonRouter {
         event: NDKEvent,
         knownProjects: Map<string, NDKProject>
     ): RoutingDecision | null {
-        // Check both lowercase 'a' and uppercase 'A' tags (NIP convention: A for addressable events)
-        const aTags = event.tags.filter((t) => t[0] === "A" || t[0] === "a");
+        // NIP-33 addressable events use lowercase 'a' tags only
+        const aTags = event.tags.filter((t) => t[0] === "a");
         const projectATags = aTags.filter((t) => t[1]?.startsWith("31933:"));
 
         logger.debug("Checking A-tags for project routing", {

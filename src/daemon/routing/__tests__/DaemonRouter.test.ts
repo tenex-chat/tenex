@@ -225,10 +225,11 @@ describe("DaemonRouter.determineTargetProject", () => {
             expect(result.method).toBe("a_tag");
         });
 
-        test("should handle uppercase 'A' tags", () => {
-            // Some Nostr implementations use uppercase A for addressable events
+        test("should NOT handle uppercase 'A' tags (NIP-33 uses lowercase only)", () => {
+            // NIP-33 addressable events use lowercase 'a' tags only
+            // Uppercase 'A' is NIP-22 (comments) which we don't support
             const event = createMockEvent([
-                ["A", projectAId], // uppercase 'A'
+                ["A", projectAId], // uppercase 'A' - should NOT match
             ]);
 
             const result = DaemonRouter.determineTargetProject(
@@ -238,9 +239,9 @@ describe("DaemonRouter.determineTargetProject", () => {
                 activeRuntimes
             );
 
-            // Fixed: Now handles both 'a' and 'A' tags
-            expect(result.projectId).toBe(projectAId);
-            expect(result.method).toBe("a_tag");
+            // Uppercase 'A' tags should NOT be recognized as project references
+            expect(result.projectId).toBe(null);
+            expect(result.method).toBe("none");
         });
     });
 
