@@ -14,6 +14,14 @@ import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 
 /**
+ * Options for `updateDefaultConfig()`.
+ */
+export interface UpdateDefaultConfigOptions {
+    /** If true, clears all projectOverrides (default: false) */
+    clearProjectOverrides?: boolean;
+}
+
+/**
  * Agent data stored in ~/.tenex/agents/<pubkey>.json
  */
 export interface StoredAgent extends StoredAgentData {
@@ -901,11 +909,14 @@ export class AgentStorage {
      *
      * @param pubkey - Agent's public key
      * @param updates - Fields to update. Only defined fields are applied.
+     * @param options - Optional behavior flags
+     * @param options.clearProjectOverrides - If true, clears all projectOverrides (default: false)
      * @returns true if updated successfully, false if agent not found
      */
     async updateDefaultConfig(
         pubkey: string,
-        updates: AgentDefaultConfig
+        updates: AgentDefaultConfig,
+        options?: UpdateDefaultConfigOptions
     ): Promise<boolean> {
         const agent = await this.loadAgent(pubkey);
         if (!agent) {
@@ -932,6 +943,12 @@ export class AgentStorage {
         // Clean up empty default block
         if (agent.default && Object.keys(agent.default).length === 0) {
             delete agent.default;
+        }
+
+        // Clear all project overrides when a global config update is received
+        if (options?.clearProjectOverrides && agent.projectOverrides) {
+            delete agent.projectOverrides;
+            logger.info(`Cleared projectOverrides for agent ${agent.name} (global config update)`);
         }
 
         await this.saveAgent(agent);

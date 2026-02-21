@@ -441,7 +441,10 @@ export class EventHandler {
                 }
                 // If no tool tags, leave defaultUpdates.tools unset → no change
 
-                const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates);
+                // Global config update clears all project overrides
+                // This makes semantic sense: a global config update without project specifier
+                // resets the agent to have no project-specific overrides
+                const defaultUpdated = await agentStorage.updateDefaultConfig(agentPubkey, defaultUpdates, { clearProjectOverrides: true });
 
                 if (defaultUpdated) {
                     await agentRegistry.reloadAgent(agentPubkey);

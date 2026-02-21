@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
+import type { UpdateDefaultConfigOptions } from "@/agents/AgentStorage";
 
 /**
  * Tests for project-scoped agent configuration via kind 24020 TenexAgentConfigUpdate events.
@@ -19,7 +20,7 @@ let updateProjectOverrideCalls: Array<{
     override: AgentProjectConfig;
     reset: boolean;
 }> = [];
-let updateDefaultConfigCalls: Array<{ pubkey: string; updates: AgentDefaultConfig }> = [];
+let updateDefaultConfigCalls: Array<{ pubkey: string; updates: AgentDefaultConfig; options?: UpdateDefaultConfigOptions }> = [];
 let updateGlobalIsPMCalls: Array<{ pubkey: string; isPM: boolean | undefined }> = [];
 let updateProjectScopedIsPMCalls: Array<{
     pubkey: string;
@@ -57,8 +58,8 @@ mock.module("@/agents/AgentStorage", () => ({
             updateProjectOverrideCalls.push({ pubkey, projectDTag, override, reset });
             return true;
         },
-        updateDefaultConfig: async (pubkey: string, updates: AgentDefaultConfig) => {
-            updateDefaultConfigCalls.push({ pubkey, updates });
+        updateDefaultConfig: async (pubkey: string, updates: AgentDefaultConfig, options?: UpdateDefaultConfigOptions) => {
+            updateDefaultConfigCalls.push({ pubkey, updates, options });
             return true;
         },
         updateAgentIsPM: async (pubkey: string, isPM: boolean | undefined) => {
@@ -193,6 +194,9 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
         expect(updateDefaultConfigCalls.length).toBe(1);
         expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-opus-4");
         expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+
+        // Global config updates should clear project overrides
+        expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
 
         // PM should be handled via global isPM
         expect(updateGlobalIsPMCalls.length).toBe(1);
@@ -372,6 +376,8 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
         // tools should be present since tool tags were explicitly provided
         expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+        // All global updates should clear project overrides
+        expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
     });
 
     it("should NOT update tools when no tool tags are present (Issue 3: no unexpected clear)", async () => {
@@ -390,6 +396,8 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-opus-4");
         // tools should NOT be present - no tool tags means no change to tools
         expect(updateDefaultConfigCalls[0].updates.tools).toBeUndefined();
+        // All global updates should clear project overrides
+        expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
     });
 
     it("should update both model and tools when both tags are present", async () => {
@@ -407,6 +415,8 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         expect(updateDefaultConfigCalls.length).toBe(1);
         expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-sonnet-4");
         expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read", "shell"]);
+        // All global updates should clear project overrides
+        expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
     });
 
     it("should update neither model nor tools when only pm tag is present", async () => {
@@ -424,6 +434,8 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         // Neither model nor tools should be in updates
         expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
         expect(updateDefaultConfigCalls[0].updates.tools).toBeUndefined();
+        // All global updates should clear project overrides
+        expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
         // PM should still be set
         expect(updateGlobalIsPMCalls.length).toBe(1);
         expect(updateGlobalIsPMCalls[0].isPM).toBe(true);
