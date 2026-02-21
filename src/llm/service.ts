@@ -433,7 +433,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 // AI SDK's onChunk only fires for: text-delta, reasoning-delta, source,
                 // tool-call, tool-input-start, tool-input-delta, tool-result, raw.
                 // Events like "finish" and "tool-error" must be forwarded explicitly.
-                if (part.type === "finish" || part.type === "tool-error") {
+                if (part.type === "finish") {
+                    // Emit raw-chunk directly to reach StreamPublisher (for HTTP wrapper SSE)
+                    // WITHOUT going through ChunkHandler which would trigger chunk-type-change
+                    // and cause AgentExecutor to publish a duplicate kind:1 event.
+                    this.emit("raw-chunk", { chunk: part as TextStreamPart<Record<string, AISdkTool>> });
+                } else if (part.type === "tool-error") {
                     this.chunkHandler.handleChunk({ chunk: part as TextStreamPart<Record<string, AISdkTool>> });
                 }
             }
