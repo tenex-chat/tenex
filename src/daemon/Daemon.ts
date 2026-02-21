@@ -31,7 +31,7 @@ import { UnixSocketTransport } from "./UnixSocketTransport";
 import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { InterventionService, type AgentResolutionResult } from "@/services/intervention";
+import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 
@@ -211,6 +211,10 @@ export class Daemon {
             // Wire the agent resolver - allows InterventionService (Layer 3) to resolve agents
             // per-project without depending on @/daemon (Layer 4)
             interventionService.setAgentResolver(this.createAgentResolver());
+
+            // Wire the active delegation checker - prevents premature intervention notifications
+            // when an agent has delegated work that is still running
+            interventionService.setActiveDelegationChecker(this.createActiveDelegationChecker());
 
             await interventionService.initialize();
 
@@ -667,6 +671,29 @@ export class Daemon {
 
             // Successfully resolved
             return { status: "resolved", pubkey: agent.pubkey };
+        };
+    }
+
+    /**
+     * Create an active delegation checker function for InterventionService.
+     * This allows Layer 3 (InterventionService) to check if a conversation
+     * has active outgoing delegations without directly depending on RALRegistry.
+     *
+     * Returns a function that:
+     * - Returns true if the agent+conversation has pending delegations
+     * - Returns false otherwise
+     *
+     * CRITICAL: This prevents premature intervention notifications when an agent
+     * has delegated work that is still running. The intervention should only
+     * trigger when the entire delegation tree has completed.
+     */
+    private createActiveDelegationChecker(): ActiveDelegationCheckerFn {
+        return (agentPubkey: string, conversationId: string): boolean => {
+            const pendingDelegations = RALRegistry.getInstance().getConversationPendingDelegations(
+                agentPubkey,
+                conversationId
+            );
+            return pendingDelegations.length > 0;
         };
     }
 
