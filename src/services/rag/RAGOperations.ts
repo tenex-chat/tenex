@@ -50,6 +50,18 @@ export interface RAGQueryResult {
 }
 
 /**
+ * Result from bulkUpsert with per-chunk failure isolation.
+ * Successfully flushed documents are counted; failed document indices
+ * are reported so callers can decide which items to mark as complete.
+ */
+export interface BulkUpsertResult {
+    /** Number of documents successfully upserted */
+    upsertedCount: number;
+    /** 0-based indices into the original input array that failed */
+    failedIndices: number[];
+}
+
+/**
  * Custom errors for RAG operations
  */
 export class RAGValidationError extends Error {
@@ -542,6 +554,72 @@ export class RAGOperations {
         );
 
         return stats;
+    }
+
+    /**
+     * Bulk upsert documents into a collection using LanceDB mergeInsert.
+     *
+     * Uses the `id` column as the merge key:
+     * - Existing rows with matching `id` are updated in-place
+     * - New rows (no matching `id`) are inserted
+     *
+     * This creates one LanceDB version per chunk of BATCH_SIZE instead of
+     * 2N versions (1 delete + 1 insert per document) with the old approach.
+     *
+     * Failures are isolated per chunk: if one chunk throws, the remaining
+     * chunks still proceed. The returned `BulkUpsertResult.failedIndices`
+     * tells the caller exactly which input documents failed so only
+     * successful ones are marked as complete.
+     */
+    async bulkUpsert(collectionName: string, documents: RAGDocument[]): Promise<BulkUpsertResult> {
+        if (!documents || documents.length === 0) {
+            return { upsertedCount: 0, failedIndices: [] };
+        }
+
+        const table = await this.dbManager.getTable(collectionName);
+
+        let totalUpserted = 0;
+        const failedIndices: number[] = [];
+
+        // Process in batches for embedding generation
+        for (let i = 0; i < documents.length; i += RAGOperations.BATCH_SIZE) {
+            const chunkEnd = Math.min(i + RAGOperations.BATCH_SIZE, documents.length);
+            const batch = documents.slice(i, chunkEnd);
+
+            try {
+                const processedDocs = await this.processBatch(batch);
+
+                // Use mergeInsert with `id` as merge key for atomic upsert
+                const result = await table
+                    .mergeInsert("id")
+                    .whenMatchedUpdateAll()
+                    .whenNotMatchedInsertAll()
+                    .execute(processedDocs as unknown as Record<string, unknown>[]);
+
+                totalUpserted += result.numInsertedRows + result.numUpdatedRows;
+
+                logger.debug(
+                    `Bulk upsert batch: ${processedDocs.length} docs → ${result.numInsertedRows} inserted, ${result.numUpdatedRows} updated in '${collectionName}'`
+                );
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                logger.error(`Bulk upsert chunk failed (indices ${i}..${chunkEnd - 1})`, {
+                    collectionName,
+                    chunkSize: batch.length,
+                    error: message,
+                });
+                // Record every index in this failed chunk
+                for (let idx = i; idx < chunkEnd; idx++) {
+                    failedIndices.push(idx);
+                }
+            }
+        }
+
+        logger.info(
+            `Bulk upsert complete: ${totalUpserted} upserted, ${failedIndices.length} failed in '${collectionName}'`
+        );
+
+        return { upsertedCount: totalUpserted, failedIndices };
     }
 
     /**
