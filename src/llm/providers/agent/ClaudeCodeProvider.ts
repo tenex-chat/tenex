@@ -63,7 +63,7 @@ const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
 const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] as const;
 
 /** Built-in tools that TENEX always controls — agents get these only via TENEX's equivalents */
-const ALWAYS_DISABLED_BUILTINS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash"] as const;
+const ALWAYS_DISABLED_BUILTINS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput"] as const;
 
 /** Pattern to detect MCP tools that provide FS capability */
 const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
