@@ -301,6 +301,94 @@ describe("AgentStorage", () => {
             });
             expect(success).toBe(false);
         });
+
+        it("should clear projectOverrides when clearProjectOverrides is true", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                projectOverrides: {
+                    "project-1": { model: "anthropic:claude-opus-4" },
+                    "project-2": { tools: ["fs_read", "shell"] },
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            // Verify projectOverrides exist before update
+            let loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides).toBeDefined();
+            expect(Object.keys(loaded?.projectOverrides || {}).length).toBe(2);
+
+            // Update with clearProjectOverrides = true
+            const success = await storage.updateDefaultConfig(
+                signer.pubkey,
+                { model: "anthropic:claude-opus-4" },
+                { clearProjectOverrides: true }
+            );
+            expect(success).toBe(true);
+
+            // Verify projectOverrides are now cleared
+            loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
+            expect(loaded?.projectOverrides).toBeUndefined();
+        });
+
+        it("should NOT clear projectOverrides when clearProjectOverrides is false (default)", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                projectOverrides: {
+                    "project-1": { model: "anthropic:claude-opus-4" },
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            // Update without clearProjectOverrides (default is false)
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                model: "anthropic:claude-opus-4",
+            });
+            expect(success).toBe(true);
+
+            // Verify projectOverrides are still present
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides).toBeDefined();
+            expect(loaded?.projectOverrides?.["project-1"]?.model).toBe("anthropic:claude-opus-4");
+        });
+
+        it("should handle clearProjectOverrides when no projectOverrides exist", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                defaultConfig: { model: "anthropic:claude-sonnet-4" },
+                // No projectOverrides
+            });
+
+            await storage.saveAgent(agent);
+
+            // Update with clearProjectOverrides = true (should not error)
+            const success = await storage.updateDefaultConfig(
+                signer.pubkey,
+                { model: "anthropic:claude-opus-4" },
+                { clearProjectOverrides: true }
+            );
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.model).toBe("anthropic:claude-opus-4");
+            expect(loaded?.projectOverrides).toBeUndefined();
+        });
     });
 
     describe("updateAgentIsPM", () => {
