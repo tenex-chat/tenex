@@ -76,6 +76,7 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("LS");
                 expect(disallowed).toContain("NotebookEdit");
                 expect(disallowed).toContain("Bash");
+                expect(disallowed).toContain("TaskOutput");
             });
 
             it("should disable all TENEX-controlled built-ins regardless of agent tools", () => {
@@ -92,6 +93,7 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("LS");
                 expect(disallowed).toContain("NotebookEdit");
                 expect(disallowed).toContain("Bash");
+                expect(disallowed).toContain("TaskOutput");
             });
         });
 
@@ -152,6 +154,7 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("WebFetch");
                 expect(disallowed).toContain("WebSearch");
                 expect(disallowed).toContain("Bash");
+                expect(disallowed).toContain("TaskOutput");
                 expect(disallowed).toContain("Task");
                 expect(disallowed).toContain("TodoWrite");
             });
@@ -170,6 +173,7 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("LS");
                 expect(disallowed).toContain("NotebookEdit");
                 expect(disallowed).toContain("Bash");
+                expect(disallowed).toContain("TaskOutput");
 
                 // delegate is provided, so Task should be disabled
                 expect(disallowed).toContain("Task");
@@ -223,6 +227,7 @@ describe("ClaudeCodeProvider", () => {
             expect(settings.disallowedTools).toContain("LS");
             expect(settings.disallowedTools).toContain("NotebookEdit");
             expect(settings.disallowedTools).toContain("Bash");
+            expect(settings.disallowedTools).toContain("TaskOutput");
         });
     });
 });
