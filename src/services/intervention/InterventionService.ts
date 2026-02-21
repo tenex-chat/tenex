@@ -371,22 +371,6 @@ export class InterventionService {
     }
 
     /**
-     * Check if the intervention agent can be resolved for a given project.
-     * Used during onAgentCompletion to validate before scheduling the timer.
-     *
-     * Returns:
-     * - "can_resolve": Agent exists and can be resolved
-     * - "runtime_unavailable": Runtime temporarily unavailable (transient - should queue)
-     * - "agent_not_found": Agent slug doesn't exist in project (permanent failure)
-     *
-     * @param projectId - The project ID to check
-     */
-    private checkAgentResolution(projectId: string): AgentResolutionResult["status"] {
-        const result = this.resolveAgentPubkeyForProject(projectId);
-        return result.status;
-    }
-
-    /**
      * Check if the service is enabled and ready.
      */
     public isEnabled(): boolean {
@@ -425,7 +409,6 @@ export class InterventionService {
             return;
         }
 
-        // Check if we can resolve the intervention agent for this project
         // Distinguish between transient (runtime unavailable) and permanent (agent not found) failures
         const resolution = this.resolveAgentPubkeyForProject(projectId);
 

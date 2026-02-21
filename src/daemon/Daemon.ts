@@ -628,16 +628,7 @@ export class Daemon {
         }
     }
 
-    /**
-     * Create an agent resolver function for InterventionService.
-     * This allows Layer 3 (InterventionService) to resolve agents per-project
-     * without directly depending on Layer 4 (Daemon).
-     *
-     * Returns a function that:
-     * - Returns { status: "resolved", pubkey } when agent is found
-     * - Returns { status: "runtime_unavailable" } when project runtime not active (transient)
-     * - Returns { status: "agent_not_found" } when agent slug doesn't exist (permanent)
-     */
+    /** Create an agent resolver for InterventionService to resolve agents per-project. */
     private createAgentResolver(): (projectId: string, agentSlug: string) => AgentResolutionResult {
         return (projectId: string, agentSlug: string): AgentResolutionResult => {
             // Get active runtimes
