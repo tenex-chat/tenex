@@ -72,6 +72,17 @@ export interface TenexConfig {
         conversationInactivityTimeoutSeconds?: number; // Seconds since last user message to skip intervention (default: 120 = 2 minutes). If user was active within this window when agent tags them, skip intervention entirely.
     };
 
+    // NIP-46 remote signing configuration
+    nip46?: {
+        enabled?: boolean;                    // Master switch (default: false)
+        signingTimeoutMs?: number;            // Per-request timeout (default: 30000)
+        maxRetries?: number;                  // Per-request retries (default: 2)
+        fallbackToBackendSigning?: boolean;   // Fallback to backend key if NIP-46 fails (default: true)
+        owners?: Record<string, {             // Per-owner config, keyed by hex pubkey
+            bunkerUri?: string;               // bunker://pubkey?relay=wss://...
+        }>;
+    };
+
     // Project fields (optional for global config)
     description?: string;
     repoUrl?: string;
@@ -133,6 +144,22 @@ export const TenexConfigSchema = z.object({
             agent: z.string().optional(),
             timeout: z.number().optional(),
             conversationInactivityTimeoutSeconds: z.number().optional(),
+        })
+        .optional(),
+    nip46: z
+        .object({
+            enabled: z.boolean().optional(),
+            signingTimeoutMs: z.number().optional(),
+            maxRetries: z.number().optional(),
+            fallbackToBackendSigning: z.boolean().optional(),
+            owners: z
+                .record(
+                    z.string(),
+                    z.object({
+                        bunkerUri: z.string().optional(),
+                    })
+                )
+                .optional(),
         })
         .optional(),
     description: z.string().optional(),

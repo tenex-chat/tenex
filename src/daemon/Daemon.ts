@@ -33,6 +33,7 @@ import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceService";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
+import { Nip46SigningService } from "@/services/nip46";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 
@@ -173,6 +174,11 @@ export class Daemon {
             const backendSigner = await config.getBackendSigner();
             const backendName = loadedConfig.backendName || "tenex backend";
             await AgentProfilePublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
+
+            // 6b. Initialize NIP-46 signing service (lazy — signers created on first use)
+            if (loadedConfig.nip46?.enabled) {
+                logger.info("NIP-46 remote signing enabled");
+            }
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
@@ -1261,6 +1267,11 @@ export class Daemon {
                 InterventionService.getInstance().shutdown();
                 console.log(" done");
 
+                // Stop NIP-46 signing service
+                process.stdout.write("Stopping NIP-46 signing service...");
+                await Nip46SigningService.getInstance().shutdown();
+                console.log(" done");
+
                 if (this.subscriptionManager) {
                     process.stdout.write("Stopping subscriptions...");
                     this.subscriptionManager.stop();
@@ -1693,6 +1704,9 @@ export class Daemon {
 
         // Stop intervention service
         InterventionService.getInstance().shutdown();
+
+        // Stop NIP-46 signing service
+        await Nip46SigningService.getInstance().shutdown();
 
         // Stop subscription
         if (this.subscriptionManager) {
