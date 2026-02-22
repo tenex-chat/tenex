@@ -109,7 +109,7 @@ export class AgentProfilePublisher {
 
         const result: SignResult = await nip46Service.signEvent(ownerPubkey, ev);
 
-        if (result.ok) {
+        if (result.outcome === "signed") {
             try {
                 await ev.publish();
                 signingLog.log({
@@ -134,7 +134,7 @@ export class AgentProfilePublisher {
         }
 
         // User explicitly rejected — do NOT fall back to backend signing
-        if (result.reason === "rejected") {
+        if (result.outcome === "user_rejected") {
             logger.warn("[NIP-46] Signing rejected by user, skipping 14199 for this owner", {
                 ownerPubkey: ownerPubkey.substring(0, 12),
             });
@@ -159,12 +159,20 @@ export class AgentProfilePublisher {
                 eventKind: NDKKind.ProjectAgentSnapshot as number,
                 signerType: "backend",
             });
-            await AgentProfilePublisher.publishSnapshotWithBackendKey(
-                ndk,
-                whitelisted,
-                agentPubkeys,
-            );
-            return true;
+            try {
+                await AgentProfilePublisher.publishSnapshotWithBackendKey(
+                    ndk,
+                    whitelisted,
+                    agentPubkeys,
+                );
+                return true;
+            } catch (error) {
+                logger.error("[NIP-46] Backend fallback publish failed", {
+                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    error: error instanceof Error ? error.message : String(error),
+                });
+                return false;
+            }
         }
 
         logger.warn("[NIP-46] Skipping 14199 publish — signing failed and fallback disabled", {
