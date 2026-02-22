@@ -69,6 +69,81 @@ describe("SubscriptionFilterBuilder", () => {
         });
     });
 
+    describe("since filter", () => {
+        test("applies since to project-tagged filter when provided", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const config: SubscriptionConfig = {
+                whitelistedPubkeys: new Set(["whitelist1"]),
+                knownProjects: new Set(["31933:author:project"]),
+                agentPubkeys: new Set(["agent1"]),
+                agentDefinitionIds: new Set(),
+                since,
+            };
+
+            const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+            // Find the project-tagged filter (has #a but no specific kind like 30023)
+            const projectTaggedFilter = filters.find(
+                f => f["#a"] && !f.kinds?.includes(30023)
+            );
+            expect(projectTaggedFilter).toBeDefined();
+            expect(projectTaggedFilter?.since).toBe(since);
+        });
+
+        test("applies since to agent mentions filter when provided", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const config: SubscriptionConfig = {
+                whitelistedPubkeys: new Set(["whitelist1"]),
+                knownProjects: new Set(),
+                agentPubkeys: new Set(["agent1"]),
+                agentDefinitionIds: new Set(),
+                since,
+            };
+
+            const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+            const agentMentionsFilter = filters.find(f => f["#p"] && !f.kinds);
+            expect(agentMentionsFilter).toBeDefined();
+            expect(agentMentionsFilter?.since).toBe(since);
+        });
+
+        test("does not apply since when not provided", () => {
+            const config: SubscriptionConfig = {
+                whitelistedPubkeys: new Set(["whitelist1"]),
+                knownProjects: new Set(["31933:author:project"]),
+                agentPubkeys: new Set(["agent1"]),
+                agentDefinitionIds: new Set(),
+                // No since
+            };
+
+            const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+            // No filter should have a since property
+            for (const filter of filters) {
+                expect(filter.since).toBeUndefined();
+            }
+        });
+
+        test("does not apply since to project events filter (kind 31933)", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const config: SubscriptionConfig = {
+                whitelistedPubkeys: new Set(["whitelist1"]),
+                knownProjects: new Set(["31933:author:project"]),
+                agentPubkeys: new Set(["agent1"]),
+                agentDefinitionIds: new Set(),
+                since,
+            };
+
+            const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+            // Project events filter (kind 31933) should NOT have since
+            // (we always want the latest project definitions)
+            const projectFilter = filters.find(f => f.kinds?.includes(31933));
+            expect(projectFilter).toBeDefined();
+            expect(projectFilter?.since).toBeUndefined();
+        });
+    });
+
     describe("getFilterStats", () => {
         test("includes lessonCommentFilter in stats", () => {
             const config: SubscriptionConfig = {

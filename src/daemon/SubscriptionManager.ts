@@ -45,6 +45,12 @@ export class SubscriptionManager {
     private restartPending = false;
     private restartTimer: NodeJS.Timeout | null = null;
 
+    /**
+     * Timestamp of last subscription creation (Unix seconds).
+     * Used as `since` filter on restart to prevent historical event re-delivery.
+     */
+    private lastSubscriptionCreatedAt: number | null = null;
+
     constructor(
         ndk: NDK,
         eventHandler: (event: NDKEvent) => Promise<void>,
@@ -96,13 +102,21 @@ export class SubscriptionManager {
         }
 
         // Build filters using the centralized SubscriptionFilterBuilder
+        // On restart (not first creation), use the previous creation timestamp
+        // as `since` to prevent relays from re-delivering historical events
+        const sinceTimestamp = this.lastSubscriptionCreatedAt ?? undefined;
+
         const config: SubscriptionConfig = {
             whitelistedPubkeys: this.whitelistedPubkeys,
             knownProjects: this.knownProjects,
             agentPubkeys: this.agentPubkeys,
             agentDefinitionIds: this.agentDefinitionIds,
+            since: sinceTimestamp,
         };
         const filters = SubscriptionFilterBuilder.buildFilters(config);
+
+        // Record this subscription creation time for future restarts
+        this.lastSubscriptionCreatedAt = Math.floor(Date.now() / 1000);
 
         // Count lesson-specific filters
         const lessonFilters = filters.filter((f) => f.kinds?.includes(NDKKind.AgentLesson));
