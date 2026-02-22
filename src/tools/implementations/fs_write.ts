@@ -17,6 +17,12 @@ const writeFileSchema = z.object({
         .string()
         .describe("The absolute path to the file to write"),
     content: z.string().describe("The content to write to the file"),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're writing this file (5-10 words). Helps provide human-readable context for the operation."
+        ),
     allowOutsideWorkingDirectory: z
         .boolean()
         .optional()
@@ -77,7 +83,7 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
 
         inputSchema: writeFileSchema,
 
-        execute: async ({ path, content, allowOutsideWorkingDirectory }: { path: string; content: string; allowOutsideWorkingDirectory?: boolean }) => {
+        execute: async ({ path, content, description: _description, allowOutsideWorkingDirectory }: { path: string; content: string; description: string; allowOutsideWorkingDirectory?: boolean }) => {
             try {
                 return await executeWriteFile(path, content, context.workingDirectory, context.agent.pubkey, allowOutsideWorkingDirectory);
             } catch (error: unknown) {
@@ -96,8 +102,8 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path }: { path: string }) => {
-            return `Writing ${path}`;
+        value: ({ path, description }: { path: string; description: string }) => {
+            return `Writing ${path} (${description})`;
         },
         enumerable: false,
         configurable: true,

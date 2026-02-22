@@ -15,6 +15,12 @@ const editSchema = z.object({
     path: z
         .string()
         .describe("The absolute path to the file to edit"),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're editing this file (5-10 words). Helps provide human-readable context for the operation."
+        ),
     old_string: z.string().describe("The exact text to replace"),
     new_string: z.string().describe("The text to replace it with (must be different from old_string)"),
     replace_all: z
@@ -107,12 +113,14 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
 
         execute: async ({
             path,
+            description: _description,
             old_string,
             new_string,
             replace_all = false,
             allowOutsideWorkingDirectory,
         }: {
             path: string;
+            description: string;
             old_string: string;
             new_string: string;
             replace_all?: boolean;
@@ -143,8 +151,8 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path }: { path: string }) => {
-            return `Editing ${path}`;
+        value: ({ path, description }: { path: string; description: string }) => {
+            return `Editing ${path} (${description})`;
         },
         enumerable: false,
         configurable: true,

@@ -233,8 +233,8 @@ describe("fs_write tool", () => {
 
     describe("getHumanReadableContent", () => {
         it("should return human-readable description", () => {
-            const readable = writeTool.getHumanReadableContent?.({ path: "/test/file.txt" });
-            expect(readable).toBe("Writing /test/file.txt");
+            const readable = writeTool.getHumanReadableContent?.({ path: "/test/file.txt", description: "save config file" });
+            expect(readable).toBe("Writing /test/file.txt (save config file)");
         });
     });
 

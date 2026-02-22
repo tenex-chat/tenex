@@ -48,8 +48,10 @@ const homeReadSchema = z.object({
         ),
     description: z
         .string()
-        .min(1)
-        .describe("REQUIRED: Brief description of why you're reading this file (5-10 words)."),
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're reading this file (5-10 words). Helps provide human-readable context for the operation."
+        ),
     offset: z
         .number()
         .min(1)
@@ -179,6 +181,12 @@ const homeWriteSchema = z.object({
             "Path to the file to write. Can be relative (to your home) or absolute (must be within your home). Parent directories are created automatically."
         ),
     content: z.string().describe("The content to write to the file."),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're writing this file (5-10 words). Helps provide human-readable context for the operation."
+        ),
 });
 
 async function executeHomeWrite(
@@ -208,7 +216,7 @@ export function createHomeFsWriteTool(context: ToolExecutionContext): AISdkTool 
 
         inputSchema: homeWriteSchema,
 
-        execute: async ({ path, content }: { path: string; content: string }) => {
+        execute: async ({ path, content, description: _description }: { path: string; content: string; description: string }) => {
             try {
                 return await executeHomeWrite(path, content, context.agent.pubkey);
             } catch (error: unknown) {
@@ -232,8 +240,8 @@ export function createHomeFsWriteTool(context: ToolExecutionContext): AISdkTool 
     });
 
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path }: { path: string }) => {
-            return `Writing ${path}`;
+        value: ({ path, description }: { path: string; description: string }) => {
+            return `Writing ${path} (${description})`;
         },
         enumerable: false,
         configurable: true,
@@ -250,6 +258,12 @@ const homeGrepSchema = z.object({
     pattern: z
         .string()
         .describe("Regex pattern to search for in file contents (e.g., 'TODO', 'function\\s+\\w+')."),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're searching for this pattern (5-10 words). Helps provide human-readable context for the operation."
+        ),
     path: z
         .string()
         .optional()
@@ -491,7 +505,7 @@ export function createHomeFsGrepTool(context: ToolExecutionContext): AISdkTool {
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
         value: (input: HomeGrepInput) => {
             const pathInfo = input.path ? ` in ${input.path}` : " in home";
-            return `Searching for '${input.pattern}'${pathInfo}`;
+            return `Searching for '${input.pattern}'${pathInfo} (${input.description})`;
         },
         enumerable: false,
         configurable: true,
