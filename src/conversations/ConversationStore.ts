@@ -637,7 +637,6 @@ export class ConversationStore {
         }
 
         const activeRals = new Set(this.getActiveRals(agentPubkey));
-        const rootAuthorPubkey = this.state.messages[0]?.pubkey;
 
         // Apply compression segments if they exist
         const segments = this.conversationId ? this.loadCompressionLog(this.conversationId) : [];
@@ -656,7 +655,7 @@ export class ConversationStore {
             ralNumber,
             activeRals,
             totalMessages: entries.length,
-            rootAuthorPubkey,
+            agentPubkeys: ConversationStore.agentPubkeys,
             projectRoot,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
@@ -686,7 +685,6 @@ export class ConversationStore {
 
         if (startIndex >= allEntries.length) return [];
         const entries = allEntries.slice(startIndex);
-        const rootAuthorPubkey = allEntries[0]?.pubkey;
 
         // Callback to get delegation messages for marker expansion
         const getDelegationMessages = (delegationConversationId: string) => {
@@ -700,7 +698,7 @@ export class ConversationStore {
             activeRals,
             indexOffset: startIndex,
             totalMessages: allEntries.length,
-            rootAuthorPubkey,
+            agentPubkeys: ConversationStore.agentPubkeys,
             projectRoot,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
