@@ -1666,6 +1666,356 @@ describe("InterventionService", () => {
         });
     });
 
+    describe("duplicate notification prevention", () => {
+        it("should not re-notify a conversation that was already notified", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            const conversationId = "test-conv-1";
+            // Use already-expired time to trigger intervention immediately
+            const pastTime = Date.now() - 10000;
+
+            service.onAgentCompletion(
+                conversationId,
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Wait for intervention to trigger and publish
+            await new Promise((resolve) => setTimeout(resolve, 200));
+
+            expect(mockPublishReviewRequest).toHaveBeenCalledTimes(1);
+            expect(service.isNotified(conversationId)).toBe(true);
+            expect(service.getPendingCount()).toBe(0);
+
+            // Simulate re-delivered completion event for the same conversation
+            mockPublishReviewRequest.mockClear();
+            service.onAgentCompletion(
+                conversationId,
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should NOT create a new pending intervention
+            expect(service.getPendingCount()).toBe(0);
+
+            // Wait to ensure no second publish happens
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should persist notified state across restarts", async () => {
+            const projectId = "persist-notified-project";
+            projectAgents.set(projectId, defaultTestAgents);
+
+            const service = await initServiceWithResolver();
+            await service.setProject(projectId);
+
+            // Trigger intervention immediately
+            const pastTime = Date.now() - 10000;
+            service.onAgentCompletion(
+                "notified-conv",
+                pastTime,
+                "agent-123",
+                "user-456",
+                projectId
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(mockPublishReviewRequest).toHaveBeenCalledTimes(1);
+            expect(service.isNotified("notified-conv")).toBe(true);
+
+            // Wait for state to be saved
+            await service.waitForWrites();
+
+            // Verify the state file contains notified entries
+            const stateFile = path.join(tempDir, `intervention_state_${projectId}.json`);
+            const data = await fs.readFile(stateFile, "utf-8");
+            const state = JSON.parse(data);
+            expect(state.notified).toBeDefined();
+            expect(state.notified.length).toBe(1);
+            expect(state.notified[0].conversationId).toBe("notified-conv");
+
+            // Reset and reload
+            await InterventionService.resetInstance();
+            const service2 = await initServiceWithResolver();
+            await service2.setProject(projectId);
+
+            // Should still know about the notified conversation
+            expect(service2.isNotified("notified-conv")).toBe(true);
+            expect(service2.getNotifiedCount()).toBe(1);
+
+            // Re-delivered completion should be rejected
+            mockPublishReviewRequest.mockClear();
+            service2.onAgentCompletion(
+                "notified-conv",
+                pastTime,
+                "agent-123",
+                "user-456",
+                projectId
+            );
+
+            expect(service2.getPendingCount()).toBe(0);
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should allow notification for different conversations", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // First conversation triggers and publishes
+            const pastTime = Date.now() - 10000;
+            service.onAgentCompletion(
+                "conv-1",
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(mockPublishReviewRequest).toHaveBeenCalledTimes(1);
+            expect(service.isNotified("conv-1")).toBe(true);
+
+            // Second conversation should still be allowed
+            mockPublishReviewRequest.mockClear();
+            service.onAgentCompletion(
+                "conv-2",
+                pastTime,
+                "agent-789",
+                "user-456",
+                "project-789"
+            );
+
+            // Should create a pending intervention for conv-2
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            expect(mockPublishReviewRequest).toHaveBeenCalledTimes(1);
+            expect(service.isNotified("conv-2")).toBe(true);
+        });
+
+        it("should guard triggerIntervention against concurrent execution", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Make publishReviewRequest slow to simulate concurrency window
+            let publishCallCount = 0;
+            mockPublishReviewRequest.mockImplementation(async () => {
+                publishCallCount++;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                return "published-event-id";
+            });
+
+            const pastTime = Date.now() - 10000;
+            service.onAgentCompletion(
+                "race-conv",
+                pastTime,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Wait for everything to settle
+            await new Promise((resolve) => setTimeout(resolve, 300));
+
+            // Should only have published once despite potential race
+            expect(publishCallCount).toBe(1);
+        });
+    });
+
+    describe("in-memory notifiedConversations pruning", () => {
+        it("should prune stale notified entries when checking in addPendingIntervention", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Inject a stale notified entry (older than 24h)
+            const staleTimestamp = Date.now() - (25 * 60 * 60 * 1000); // 25 hours ago
+            service.setNotifiedForTesting("stale-conv", staleTimestamp);
+
+            expect(service.isNotified("stale-conv")).toBe(true);
+            expect(service.getNotifiedCount()).toBe(1);
+
+            // Trigger a new completion (calls addPendingIntervention which prunes stale entries)
+            service.onAgentCompletion(
+                "new-conv",
+                Date.now() + 60000, // Far future
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Stale entry should have been pruned
+            expect(service.isNotified("stale-conv")).toBe(false);
+            expect(service.getNotifiedCount()).toBe(0);
+
+            // New completion should have been accepted
+            expect(service.getPendingCount()).toBe(1);
+        });
+
+        it("should allow re-notification for a conversation whose notified entry expired", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Inject a stale notified entry for the SAME conversation we want to re-notify
+            const staleTimestamp = Date.now() - (25 * 60 * 60 * 1000); // 25 hours ago
+            service.setNotifiedForTesting("test-conv-1", staleTimestamp);
+
+            expect(service.isNotified("test-conv-1")).toBe(true);
+
+            // Try to re-trigger for the same conversation
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Stale entry should have been pruned, and re-notification should be accepted
+            expect(service.getPendingCount()).toBe(1);
+            expect(service.getPending("test-conv-1")).toBeDefined();
+        });
+
+        it("should NOT prune non-stale notified entries", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Inject a fresh notified entry (only 1 hour old)
+            const freshTimestamp = Date.now() - (1 * 60 * 60 * 1000); // 1 hour ago
+            service.setNotifiedForTesting("fresh-conv", freshTimestamp);
+
+            expect(service.isNotified("fresh-conv")).toBe(true);
+
+            // Trigger a new completion to invoke pruning
+            service.onAgentCompletion(
+                "new-conv",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Fresh entry should still be present
+            expect(service.isNotified("fresh-conv")).toBe(true);
+            expect(service.getNotifiedCount()).toBe(1);
+        });
+
+        it("should still block re-notification for fresh notified entries", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Inject a fresh notified entry
+            const freshTimestamp = Date.now() - (1 * 60 * 60 * 1000); // 1 hour ago
+            service.setNotifiedForTesting("test-conv-1", freshTimestamp);
+
+            // Try to re-trigger the same conversation
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Should be blocked (entry is still fresh)
+            expect(service.getPendingCount()).toBe(0);
+        });
+
+        it("should prune multiple stale entries at once", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-789");
+
+            // Inject multiple stale entries
+            const staleTimestamp = Date.now() - (25 * 60 * 60 * 1000);
+            service.setNotifiedForTesting("stale-1", staleTimestamp);
+            service.setNotifiedForTesting("stale-2", staleTimestamp - 1000);
+            service.setNotifiedForTesting("stale-3", staleTimestamp - 2000);
+
+            // And one fresh entry
+            const freshTimestamp = Date.now() - (1 * 60 * 60 * 1000);
+            service.setNotifiedForTesting("fresh-1", freshTimestamp);
+
+            expect(service.getNotifiedCount()).toBe(4);
+
+            // Trigger pruning via a new completion
+            service.onAgentCompletion(
+                "trigger-conv",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-789"
+            );
+
+            // Only the fresh entry should remain
+            expect(service.getNotifiedCount()).toBe(1);
+            expect(service.isNotified("fresh-1")).toBe(true);
+            expect(service.isNotified("stale-1")).toBe(false);
+            expect(service.isNotified("stale-2")).toBe(false);
+            expect(service.isNotified("stale-3")).toBe(false);
+        });
+    });
+
+    describe("triggeringConversations cleared on project switch", () => {
+        it("should clear triggeringConversations when switching projects", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Simulate a triggering conversation in-flight
+            service.setTriggeringForTesting("inflight-conv");
+            expect(service.isTriggering("inflight-conv")).toBe(true);
+
+            // Switch to a different project
+            await service.setProject("project-2");
+
+            // triggeringConversations should be cleared
+            expect(service.isTriggering("inflight-conv")).toBe(false);
+        });
+
+        it("should clear multiple triggeringConversations entries on project switch", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            service.setTriggeringForTesting("conv-a");
+            service.setTriggeringForTesting("conv-b");
+
+            expect(service.isTriggering("conv-a")).toBe(true);
+            expect(service.isTriggering("conv-b")).toBe(true);
+
+            // Switch to different project
+            await service.setProject("project-2");
+
+            // All triggering entries from previous project should be cleared
+            expect(service.isTriggering("conv-a")).toBe(false);
+            expect(service.isTriggering("conv-b")).toBe(false);
+        });
+
+        it("should not interfere with new triggers after project switch", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Set up stale triggering state
+            service.setTriggeringForTesting("old-conv");
+
+            // Switch projects
+            await service.setProject("project-2");
+
+            // New completions should work normally (no stale triggeringConversations blocking)
+            service.onAgentCompletion(
+                "new-conv",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-2"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+        });
+    });
+
     describe("active delegation checking", () => {
         it("should skip intervention when agent has active delegations", async () => {
             // Create a mock delegation checker that returns true (has active delegations)

@@ -13,6 +13,8 @@ export interface SubscriptionConfig {
     agentPubkeys: Set<Hexpubkey>;
     /** Agent definition event IDs for lesson monitoring */
     agentDefinitionIds: Set<string>;
+    /** Optional since timestamp to prevent historical event re-delivery (Unix seconds) */
+    since?: number;
 }
 
 /**
@@ -34,14 +36,14 @@ export class SubscriptionFilterBuilder {
             filters.push(projectFilter);
         }
 
-        // Add project-tagged events filter
-        const projectTaggedFilter = this.buildProjectTaggedFilter(config.knownProjects);
+        // Add project-tagged events filter (with since to prevent historical re-delivery)
+        const projectTaggedFilter = this.buildProjectTaggedFilter(config.knownProjects, config.since);
         if (projectTaggedFilter) {
             filters.push(projectTaggedFilter);
         }
 
-        // Add agent mentions filter
-        const agentMentionsFilter = this.buildAgentMentionsFilter(config.agentPubkeys);
+        // Add agent mentions filter (with since to prevent historical re-delivery)
+        const agentMentionsFilter = this.buildAgentMentionsFilter(config.agentPubkeys, config.since);
         if (agentMentionsFilter) {
             filters.push(agentMentionsFilter);
         }
@@ -99,17 +101,24 @@ export class SubscriptionFilterBuilder {
      * Receives all events tagged to our projects - the Daemon decides
      * which events can boot a cold project vs which require a running one
      * @param knownProjects - Set of project IDs (format: "31933:authorPubkey:dTag")
+     * @param since - Optional Unix timestamp (seconds) to filter out historical events
      * @returns NDKFilter for project-tagged events or null if no projects
      */
-    static buildProjectTaggedFilter(knownProjects: Set<string>): NDKFilter | null {
+    static buildProjectTaggedFilter(knownProjects: Set<string>, since?: number): NDKFilter | null {
         if (knownProjects.size === 0) {
             return null;
         }
 
-        return {
+        const filter: NDKFilter = {
             "#a": Array.from(knownProjects),
             limit: 0, // Continuous subscription
         };
+
+        if (since !== undefined) {
+            filter.since = since;
+        }
+
+        return filter;
     }
 
     /**
@@ -117,17 +126,24 @@ export class SubscriptionFilterBuilder {
      * Receives all events mentioning our agents - the Daemon decides
      * which events can boot a cold project vs which require a running one
      * @param agentPubkeys - Set of agent pubkeys to monitor
+     * @param since - Optional Unix timestamp (seconds) to filter out historical events
      * @returns NDKFilter for agent mentions or null if no agents
      */
-    static buildAgentMentionsFilter(agentPubkeys: Set<Hexpubkey>): NDKFilter | null {
+    static buildAgentMentionsFilter(agentPubkeys: Set<Hexpubkey>, since?: number): NDKFilter | null {
         if (agentPubkeys.size === 0) {
             return null;
         }
 
-        return {
+        const filter: NDKFilter = {
             "#p": Array.from(agentPubkeys),
             limit: 0, // Continuous subscription
         };
+
+        if (since !== undefined) {
+            filter.since = since;
+        }
+
+        return filter;
     }
 
     /**
