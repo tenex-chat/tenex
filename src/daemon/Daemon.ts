@@ -35,6 +35,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
+import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 
 const lessonTracer = trace.getTracer("tenex.lessons");
 
@@ -71,6 +72,9 @@ export class Daemon {
 
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
+
+    // Agent definition auto-upgrade monitor
+    private agentDefinitionMonitor: AgentDefinitionMonitor | null = null;
 
     // Graceful restart state
     private pendingRestart = false;
@@ -232,7 +236,17 @@ export class Daemon {
                 this.setupRALCompletionListener();
             }
 
-            // 15. Setup graceful shutdown
+            // 15. Start agent definition monitor for auto-upgrades
+            logger.debug("Starting agent definition monitor");
+            this.agentDefinitionMonitor = new AgentDefinitionMonitor(
+                this.ndk,
+                { whitelistedPubkeys: this.whitelistedPubkeys },
+                () => this.runtimeLifecycle?.getActiveRuntimes() || new Map(),
+            );
+            await this.agentDefinitionMonitor.start();
+            logger.info("Agent definition monitor started");
+
+            // 16. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -1255,6 +1269,14 @@ export class Daemon {
                 process.stdout.write("Stopping LanceDB maintenance service...");
                 getLanceDBMaintenanceService().stop();
                 console.log(" done");
+
+                // Stop agent definition monitor
+                if (this.agentDefinitionMonitor) {
+                    process.stdout.write("Stopping agent definition monitor...");
+                    this.agentDefinitionMonitor.stop();
+                    this.agentDefinitionMonitor = null;
+                    console.log(" done");
+                }
 
                 // Stop intervention service
                 process.stdout.write("Stopping intervention service...");
