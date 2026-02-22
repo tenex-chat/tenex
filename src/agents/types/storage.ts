@@ -83,6 +83,14 @@ export interface StoredAgentData {
     definitionAuthor?: string;
 
     /**
+     * The `created_at` timestamp of the source agent definition event.
+     * Used by AgentDefinitionMonitor to ensure only strictly newer
+     * definition events trigger upgrades, preventing rollbacks from
+     * older events arriving out of order.
+     */
+    definitionCreatedAt?: number;
+
+    /**
      * Legacy top-level LLM config field.
      * @deprecated Use `default.model` instead.
      */

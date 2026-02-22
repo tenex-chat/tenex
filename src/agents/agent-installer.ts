@@ -83,6 +83,7 @@ interface ParsedAgentEvent {
     defaultConfig: { model: string; tools?: string[] };
     definitionDTag?: string;
     definitionAuthor?: string;
+    definitionCreatedAt?: number;
 }
 
 function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
@@ -125,6 +126,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
         },
         definitionDTag,
         definitionAuthor,
+        definitionCreatedAt: event.created_at,
     };
 }
 
@@ -247,6 +249,7 @@ export async function installAgentFromNostr(
         eventId: agentData.eventId,
         definitionDTag: agentData.definitionDTag,
         definitionAuthor: agentData.definitionAuthor,
+        definitionCreatedAt: agentData.definitionCreatedAt,
     });
 
     // Save to storage

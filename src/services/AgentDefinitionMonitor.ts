@@ -38,7 +38,8 @@ interface MonitoredAgent {
  * and auto-upgrades active agents when newer definitions are published.
  *
  * ## How It Works
- * 1. On startup, scans all stored agents for those with `definitionDTag` + `definitionAuthor`
+ * 1. On startup, scans all installed agents (regardless of active/inactive status)
+ *    for those with `definitionDTag` + `definitionAuthor` metadata
  * 2. Creates an NDK subscription for kind:4199 events matching those d-tags
  * 3. When a new event arrives:
  *    - Verifies the author is authorized (original author or whitelisted)
@@ -148,6 +149,13 @@ export class AgentDefinitionMonitor {
 
         logger.debug("[AgentDefinitionMonitor] Refreshing monitored agent list");
 
+        // Clear stale pending state from the previous subscription
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+        this.pendingEvents.clear();
+
         // Stop existing subscription
         if (this.subscription) {
             this.subscription.stop();
@@ -179,19 +187,27 @@ export class AgentDefinitionMonitor {
                 continue;
             }
 
-            // Derive pubkey from nsec for the agent
-            const signer = new NDKPrivateKeySigner(agent.nsec);
-            const pubkey = signer.pubkey;
+            try {
+                // Derive pubkey from nsec for the agent
+                const signer = new NDKPrivateKeySigner(agent.nsec);
+                const pubkey = signer.pubkey;
 
-            const key = this.buildMonitorKey(agent.definitionDTag, agent.definitionAuthor);
-            this.monitoredAgents.set(key, {
-                pubkey,
-                slug: agent.slug,
-                definitionDTag: agent.definitionDTag,
-                definitionAuthor: agent.definitionAuthor,
-                currentEventId: agent.eventId,
-                currentCreatedAt: undefined, // We don't store created_at, rely on eventId comparison
-            });
+                const key = this.buildMonitorKey(agent.definitionDTag, agent.definitionAuthor);
+                this.monitoredAgents.set(key, {
+                    pubkey,
+                    slug: agent.slug,
+                    definitionDTag: agent.definitionDTag,
+                    definitionAuthor: agent.definitionAuthor,
+                    currentEventId: agent.eventId,
+                    currentCreatedAt: agent.definitionCreatedAt,
+                });
+            } catch (error) {
+                logger.warn("[AgentDefinitionMonitor] Failed to process agent, skipping", {
+                    slug: agent.slug,
+                    definitionDTag: agent.definitionDTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
         }
     }
 
@@ -229,6 +245,8 @@ export class AgentDefinitionMonitor {
 
     /**
      * Handle an incoming kind:4199 event.
+     * Filters unauthorized events before staging to prevent them from
+     * resetting the debounce timer and deferring legitimate updates.
      * Applies debounce to batch events during initial catch-up.
      */
     private handleIncomingEvent(event: NDKEvent): void {
@@ -241,7 +259,6 @@ export class AgentDefinitionMonitor {
         }
 
         const author = event.pubkey;
-        const key = this.buildMonitorKey(dTag, author);
 
         // Check if this matches a monitored agent (by d-tag, author checked separately)
         const monitoredAgent = this.findMonitoredAgentByDTag(dTag);
@@ -252,6 +269,20 @@ export class AgentDefinitionMonitor {
             });
             return;
         }
+
+        // Authorization check BEFORE staging — unauthorized events must not
+        // reset the debounce timer or displace legitimate pending events
+        if (!this.isAuthorized(author, monitoredAgent.definitionAuthor)) {
+            logger.debug("[AgentDefinitionMonitor] Ignoring event from unauthorized author", {
+                dTag,
+                author: author?.substring(0, 12),
+                expectedAuthor: monitoredAgent.definitionAuthor.substring(0, 12),
+                agentSlug: monitoredAgent.slug,
+            });
+            return;
+        }
+
+        const key = this.buildMonitorKey(dTag, author);
 
         logger.debug("[AgentDefinitionMonitor] New definition event detected", {
             dTag,
@@ -310,7 +341,8 @@ export class AgentDefinitionMonitor {
     }
 
     /**
-     * Process a single definition event: authorize, validate, upgrade, reload.
+     * Process a single definition event: validate, check recency, upgrade, reload.
+     * Authorization is already verified in handleIncomingEvent before staging.
      */
     private async processDefinitionEvent(key: string, event: NDKEvent): Promise<void> {
         const dTag = event.tagValue("d");
@@ -328,19 +360,7 @@ export class AgentDefinitionMonitor {
             return;
         }
 
-        // Authorization check
-        const authorized = this.isAuthorized(author, monitoredAgent.definitionAuthor);
-        if (!authorized) {
-            logger.warn("[AgentDefinitionMonitor] Unauthorized definition update rejected", {
-                dTag,
-                author: author.substring(0, 12),
-                expectedAuthor: monitoredAgent.definitionAuthor.substring(0, 12),
-                agentSlug: monitoredAgent.slug,
-            });
-            return;
-        }
-
-        // Check if this event is actually newer
+        // Skip if this is the exact same event we already have
         if (monitoredAgent.currentEventId === event.id) {
             logger.debug("[AgentDefinitionMonitor] Event is the same as current, skipping", {
                 dTag,
@@ -357,6 +377,21 @@ export class AgentDefinitionMonitor {
                 slug: monitoredAgent.slug,
             });
             return;
+        }
+
+        // Reject events that are not strictly newer than the stored definition.
+        // This prevents out-of-order older events from rolling back fields.
+        if (storedAgent.definitionCreatedAt && event.created_at) {
+            if (event.created_at <= storedAgent.definitionCreatedAt) {
+                logger.debug("[AgentDefinitionMonitor] Skipping event older than current definition", {
+                    dTag,
+                    eventId: event.id?.substring(0, 12),
+                    eventCreatedAt: event.created_at,
+                    storedCreatedAt: storedAgent.definitionCreatedAt,
+                    agentSlug: monitoredAgent.slug,
+                });
+                return;
+            }
         }
 
         // Apply the upgrade
@@ -455,6 +490,15 @@ export class AgentDefinitionMonitor {
             changedFields.push("eventId");
         }
 
+        // Update definitionCreatedAt for future recency checks
+        if (event.created_at) {
+            const oldCreatedAt = storedAgent.definitionCreatedAt;
+            storedAgent.definitionCreatedAt = event.created_at;
+            if (oldCreatedAt !== event.created_at) {
+                changedFields.push("definitionCreatedAt");
+            }
+        }
+
         // Update the definition author if the event comes from a different (whitelisted) author
         if (event.pubkey !== storedAgent.definitionAuthor) {
             // Only update definitionAuthor if the event d-tag is from a whitelisted pubkey
@@ -476,6 +520,7 @@ export class AgentDefinitionMonitor {
 
         // Update monitored agent tracking
         monitoredAgent.currentEventId = event.id;
+        monitoredAgent.currentCreatedAt = event.created_at;
 
         // Capture after state for logging
         const afterState = {

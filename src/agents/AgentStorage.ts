@@ -110,6 +110,7 @@ export function createStoredAgent(config: {
     projectOverrides?: Record<string, AgentProjectConfig>;
     definitionDTag?: string;
     definitionAuthor?: string;
+    definitionCreatedAt?: number;
 }): StoredAgent {
     return {
         eventId: config.eventId,
@@ -127,6 +128,7 @@ export function createStoredAgent(config: {
         projectOverrides: config.projectOverrides,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
+        definitionCreatedAt: config.definitionCreatedAt,
     };
 }
 
