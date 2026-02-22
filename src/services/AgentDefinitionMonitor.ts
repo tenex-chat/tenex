@@ -344,7 +344,7 @@ export class AgentDefinitionMonitor {
      * Process a single definition event: validate, check recency, upgrade, reload.
      * Authorization is already verified in handleIncomingEvent before staging.
      */
-    private async processDefinitionEvent(key: string, event: NDKEvent): Promise<void> {
+    private async processDefinitionEvent(_key: string, event: NDKEvent): Promise<void> {
         const dTag = event.tagValue("d");
         const author = event.pubkey;
 
