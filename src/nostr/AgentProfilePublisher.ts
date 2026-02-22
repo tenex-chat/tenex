@@ -4,9 +4,9 @@ import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import { Nip46SigningService, Nip46SigningLog, type SignResult } from "@/services/nip46";
+import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { logger } from "@/utils/logger";
-import NDK, {
+import {
     NDKEvent,
     NDKPrivateKeySigner,
     type NDKProject,
@@ -45,14 +45,14 @@ export class AgentProfilePublisher {
      * Reads agent associations from AgentStorage instead of maintaining a separate registry.
      *
      * When NIP-46 is enabled, each whitelisted owner gets their own 14199 event signed
-     * by that owner via NIP-46 remote signing. When NIP-46 is disabled (or fails with
-     * fallback enabled), the event is signed with the backend key.
+     * by that owner via NIP-46 remote signing. If signing fails, the event is simply
+     * not published — there is no fallback to backend key signing.
+     *
+     * When NIP-46 is disabled, the event is signed with the backend key.
      */
     static async publishProjectAgentSnapshot(projectTag: string): Promise<void> {
         const agents = await agentStorage.getProjectAgents(projectTag);
-        const ndk = getNDK();
         const whitelisted = config.getWhitelistedPubkeys(undefined, config.getConfig());
-        const signingLog = Nip46SigningLog.getInstance();
 
         // Collect agent pubkeys
         const agentPubkeys: string[] = [];
@@ -65,25 +65,17 @@ export class AgentProfilePublisher {
 
         if (nip46Service.isEnabled()) {
             // NIP-46 mode: each whitelisted owner gets their own 14199 event.
-            // Track whether a backend fallback has been published to avoid duplicates.
-            let backendFallbackPublished = false;
-
             for (const ownerPubkey of whitelisted) {
-                const didFallback = await AgentProfilePublisher.publishSnapshotForOwner(
-                    ndk,
+                await AgentProfilePublisher.publishSnapshotForOwner(
                     ownerPubkey,
                     whitelisted,
                     agentPubkeys,
                     nip46Service,
-                    signingLog,
-                    backendFallbackPublished,
                 );
-                if (didFallback) backendFallbackPublished = true;
             }
         } else {
-            // Backend signing mode (current behavior)
+            // Backend signing mode (NIP-46 not enabled)
             await AgentProfilePublisher.publishSnapshotWithBackendKey(
-                ndk,
                 whitelisted,
                 agentPubkeys,
             );
@@ -92,22 +84,19 @@ export class AgentProfilePublisher {
 
     /**
      * Publish a 14199 snapshot signed by a specific owner via NIP-46.
-     * Falls back to backend signing if configured and NIP-46 fails (but NOT on user rejection).
-     *
-     * @returns true if a backend fallback snapshot was published, false otherwise
+     * If signing fails for any reason, the event is not published.
      */
     private static async publishSnapshotForOwner(
-        ndk: NDK,
         ownerPubkey: string,
         whitelisted: string[],
         agentPubkeys: string[],
         nip46Service: Nip46SigningService,
-        signingLog: Nip46SigningLog,
-        backendFallbackPublished: boolean,
-    ): Promise<boolean> {
+    ): Promise<void> {
+        const ndk = getNDK();
+        const signingLog = Nip46SigningLog.getInstance();
         const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, whitelisted, agentPubkeys);
 
-        const result: SignResult = await nip46Service.signEvent(ownerPubkey, ev);
+        const result = await nip46Service.signEvent(ownerPubkey, ev);
 
         if (result.outcome === "signed") {
             try {
@@ -130,65 +119,26 @@ export class AgentProfilePublisher {
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
-            return false;
+            return;
         }
 
-        // User explicitly rejected — do NOT fall back to backend signing
-        if (result.outcome === "user_rejected") {
-            logger.warn("[NIP-46] Signing rejected by user, skipping 14199 for this owner", {
-                ownerPubkey: ownerPubkey.substring(0, 12),
-            });
-            return false;
-        }
-
-        // Transient failure — fall back to backend signing if configured and not already done
-        if (nip46Service.shouldFallbackToBackend()) {
-            if (backendFallbackPublished) {
-                logger.info("[NIP-46] Skipping duplicate backend fallback for 14199", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
-                });
-                return false;
-            }
-
-            logger.warn("[NIP-46] Falling back to backend signing for 14199", {
-                ownerPubkey: ownerPubkey.substring(0, 12),
-            });
-            signingLog.log({
-                op: "sign_fallback",
-                ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
-                eventKind: NDKKind.ProjectAgentSnapshot as number,
-                signerType: "backend",
-            });
-            try {
-                await AgentProfilePublisher.publishSnapshotWithBackendKey(
-                    ndk,
-                    whitelisted,
-                    agentPubkeys,
-                );
-                return true;
-            } catch (error) {
-                logger.error("[NIP-46] Backend fallback publish failed", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
-                    error: error instanceof Error ? error.message : String(error),
-                });
-                return false;
-            }
-        }
-
-        logger.warn("[NIP-46] Skipping 14199 publish — signing failed and fallback disabled", {
+        // Signing failed (rejected or transient error) — do not publish
+        logger.warn("[NIP-46] Skipping 14199 publish — signing failed", {
             ownerPubkey: ownerPubkey.substring(0, 12),
+            outcome: result.outcome,
+            reason: result.reason,
         });
-        return false;
     }
 
     /**
-     * Publish a 14199 snapshot signed with the backend key (legacy behavior).
+     * Publish a 14199 snapshot signed with the backend key.
+     * Used when NIP-46 is not enabled.
      */
     private static async publishSnapshotWithBackendKey(
-        ndk: NDK,
         whitelisted: string[],
         agentPubkeys: string[],
     ): Promise<void> {
+        const ndk = getNDK();
         const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, whitelisted, agentPubkeys);
         const tenexNsec = await config.ensureBackendPrivateKey();
         const signer = new NDKPrivateKeySigner(tenexNsec);
@@ -208,7 +158,7 @@ export class AgentProfilePublisher {
      * Build an unsigned 14199 snapshot event with p-tags for all owners and agents.
      */
     private static buildSnapshotEvent(
-        ndk: NDK,
+        ndk: ReturnType<typeof getNDK>,
         whitelisted: string[],
         agentPubkeys: string[],
     ): NDKEvent {
