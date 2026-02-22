@@ -12,7 +12,6 @@ export type Nip46LogOperation =
     | "sign_timeout"
     | "sign_rejected"
     | "sign_error"
-    | "sign_fallback"
     | "event_published";
 
 /**
@@ -27,7 +26,7 @@ export interface Nip46LogEntry {
     agentAction?: string;
     agentPubkey?: string;       // First 12 chars
     pTagCount?: number;
-    signerType?: "nip46" | "backend";
+    signerType?: "nip46";
     durationMs?: number;
     error?: string;
     eventId?: string;

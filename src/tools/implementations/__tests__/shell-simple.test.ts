@@ -34,7 +34,7 @@ describe("shellTool - simple test", () => {
         const result = await shellTool.execute({
             command: "echo hello",
             cwd: null,
-            timeout: 60000,
+            timeout: 60,
         });
 
         expect(result).toContain("hello");
@@ -98,7 +98,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should validate when cwd is omitted", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: 5000 });
+            const result = schema.safeParse({ command: "echo test", timeout: 5 });
             expect(result.success).toBe(true);
         });
 
@@ -114,19 +114,19 @@ describe("shellTool - schema validation", () => {
     });
 
     describe("timeout coercion from numeric strings", () => {
-        it("should coerce string '60000' to number 60000", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "60000" });
+        it("should coerce string '60' to number 60", () => {
+            const result = schema.safeParse({ command: "echo test", timeout: "60" });
             expect(result.success).toBe(true);
             if (result.success) {
-                expect(result.data.timeout).toBe(60000);
+                expect(result.data.timeout).toBe(60);
             }
         });
 
-        it("should coerce string '5000' to number 5000", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "5000" });
+        it("should coerce string '5' to number 5", () => {
+            const result = schema.safeParse({ command: "echo test", timeout: "5" });
             expect(result.success).toBe(true);
             if (result.success) {
-                expect(result.data.timeout).toBe(5000);
+                expect(result.data.timeout).toBe(5);
             }
         });
 
@@ -147,10 +147,10 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should preserve actual numbers", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: 30000 });
+            const result = schema.safeParse({ command: "echo test", timeout: 30 });
             expect(result.success).toBe(true);
             if (result.success) {
-                expect(result.data.timeout).toBe(30000);
+                expect(result.data.timeout).toBe(30);
             }
         });
 

@@ -4,7 +4,6 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ExecutionConfig } from "@/agents/execution/constants";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
@@ -149,7 +148,7 @@ const shellSchema = z.object({
             z.number().nullable().optional()
         )
         .describe(
-            `Command timeout in milliseconds (default: ${ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS}). Optional for background processes.`
+            `Command timeout in seconds (default: 30, max: 600). Optional for background processes.`
         ),
     run_in_background: z
         .boolean()
@@ -174,7 +173,7 @@ type ShellOutput = string | ShellExpectedNonZeroResult | ShellErrorResult | Shel
  * 4. Background execution: Returns task info immediately, output written to file
  */
 async function executeShell(input: ShellInput, context: ToolExecutionContext): Promise<ShellOutput> {
-    const { command, description, cwd, timeout = ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS, run_in_background } = input;
+    const { command, description, cwd, timeout = 30, run_in_background } = input;
 
     // Resolve cwd: if provided and relative, resolve against context.workingDirectory
     // If not provided, use context.workingDirectory directly
@@ -198,7 +197,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
         "shell.context.project_base_path": context.projectBasePath || "(empty)",
         "shell.context.current_branch": context.currentBranch || "(empty)",
         "shell.agent": context.agent.name,
-        "shell.timeout": timeout ?? ExecutionConfig.DEFAULT_COMMAND_TIMEOUT_MS,
+        "shell.timeout": (timeout ?? 30) * 1000,
         "shell.run_in_background": run_in_background ?? false,
     });
     span?.addEvent("shell.execute_start", {
@@ -311,7 +310,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
     try {
         const { stdout, stderr } = await execAsync(command, {
             cwd: workingDir,
-            timeout: timeout ?? undefined,
+            timeout: timeout != null ? timeout * 1000 : undefined,
             env: {
                 ...process.env,
                 PATH: process.env.PATH,
@@ -446,7 +445,7 @@ WHEN NOT TO USE SHELL:
 
 OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
-- Commands run with timeout (default 2 minutes, max 10 minutes)
+- Commands run with timeout in seconds (default: 30s, max: 600s / 10 minutes)
 
 Use for: git operations, npm/build tools, docker, system commands where specialized tools don't exist.
 - Time-based delays: Use shell(sleep N) to wait N seconds (e.g., shell(sleep 5) for 5 seconds).`,
