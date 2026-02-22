@@ -151,7 +151,7 @@ export class ProjectRuntime {
             this.context.localReportStore = this.localReportStore;
 
             // Initialize nudge whitelist subscription (project owner's bookmarked nudges/skills)
-            await this.context.initializeNudgeWhitelist();
+            this.context.initializeNudgeWhitelist();
 
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);

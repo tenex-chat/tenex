@@ -277,11 +277,11 @@ export class ProjectContext {
      *
      * @param additionalPubkeys - Additional pubkeys beyond the project owner to whitelist
      */
-    async initializeNudgeWhitelist(additionalPubkeys: string[] = []): Promise<void> {
+    initializeNudgeWhitelist(additionalPubkeys: string[] = []): void {
         const ownerPubkey = this.project.pubkey;
         const whitelistPubkeys = [ownerPubkey, ...additionalPubkeys];
 
-        await this.nudgeWhitelist.initialize(whitelistPubkeys);
+        this.nudgeWhitelist.initialize(whitelistPubkeys);
 
         logger.info("Nudge whitelist initialized for project", {
             projectId: this.project.id?.substring(0, 12),
