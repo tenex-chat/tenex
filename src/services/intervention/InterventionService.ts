@@ -19,6 +19,9 @@ const DEFAULT_RETRY_INTERVAL_MS = 30_000;
 /** Maximum retry attempts before giving up */
 const MAX_RETRY_ATTEMPTS = 5;
 
+/** TTL for notified conversation entries: 24 hours */
+const NOTIFIED_TTL_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Result of attempting to resolve an agent for a project.
  */
@@ -63,11 +66,21 @@ export interface PendingIntervention {
 }
 
 /**
+ * Entry tracking a conversation that has already been notified.
+ * Used to prevent duplicate notifications on event re-delivery.
+ */
+interface NotifiedEntry {
+    conversationId: string;
+    notifiedAt: number; // timestamp (ms)
+}
+
+/**
  * Persisted state for InterventionService.
  * Stored in ~/.tenex/intervention_state_<projectId>.json (project-scoped)
  */
 interface InterventionState {
     pending: PendingIntervention[];
+    notified?: NotifiedEntry[];
 }
 
 /**
@@ -101,6 +114,12 @@ export class InterventionService {
     private timers: Map<string, NodeJS.Timeout> = new Map();
     private configDir: string;
     private currentProjectId: string | null = null;
+
+    // Tracks conversations that have already been notified (prevents duplicates)
+    private notifiedConversations: Map<string, number> = new Map();
+
+    // Guards against concurrent triggerIntervention() calls for the same conversation
+    private triggeringConversations: Set<string> = new Set();
 
     // Agent slug for resolution (resolved per-project at trigger time)
     private interventionAgentSlug: string | null = null;
@@ -540,6 +559,26 @@ export class InterventionService {
         userPubkey: string,
         projectId: string
     ): void {
+        // Prune stale entries from notifiedConversations (prevents unbounded growth
+        // and ensures entries older than TTL no longer block new notifications)
+        this.pruneStaleNotifications();
+
+        // Check if this conversation was already notified (deduplication guard)
+        const notifiedAt = this.notifiedConversations.get(conversationId);
+        if (notifiedAt !== undefined) {
+            logger.debug("InterventionService: skipping already-notified conversation", {
+                conversationId: conversationId.substring(0, 12),
+                notifiedAt,
+            });
+
+            trace.getActiveSpan()?.addEvent("intervention.skipped_already_notified", {
+                "conversation.id": conversationId,
+                "notified_at": notifiedAt,
+            });
+
+            return;
+        }
+
         // Check if we already have a pending intervention for this conversation
         const existing = this.pendingInterventions.get(conversationId);
         if (existing) {
@@ -697,8 +736,46 @@ export class InterventionService {
      * Called when the timer expires.
      * Includes retry logic with exponential backoff on publish failure
      * and transient runtime unavailability.
+     * Guarded against concurrent execution for the same conversationId.
      */
     private async triggerIntervention(pending: PendingIntervention): Promise<void> {
+        // Guard against concurrent triggerIntervention for the same conversation
+        if (this.triggeringConversations.has(pending.conversationId)) {
+            logger.debug("InterventionService: triggerIntervention already in progress, skipping", {
+                conversationId: pending.conversationId.substring(0, 12),
+            });
+            return;
+        }
+
+        // Check if already notified (race between timer expiry and re-delivered event)
+        // Also verify TTL — expired entries should not block triggers
+        const notifiedAt = this.notifiedConversations.get(pending.conversationId);
+        if (notifiedAt !== undefined && (Date.now() - notifiedAt) < NOTIFIED_TTL_MS) {
+            logger.debug("InterventionService: conversation already notified, skipping trigger", {
+                conversationId: pending.conversationId.substring(0, 12),
+            });
+            this.pendingInterventions.delete(pending.conversationId);
+            this.saveState();
+            return;
+        }
+        // If the entry existed but was stale, remove it so we proceed with the trigger
+        if (notifiedAt !== undefined) {
+            this.notifiedConversations.delete(pending.conversationId);
+        }
+
+        this.triggeringConversations.add(pending.conversationId);
+
+        try {
+            await this.executeTrigger(pending);
+        } finally {
+            this.triggeringConversations.delete(pending.conversationId);
+        }
+    }
+
+    /**
+     * Execute the actual trigger logic (separated for concurrency guard).
+     */
+    private async executeTrigger(pending: PendingIntervention): Promise<void> {
         // Resolve the intervention agent pubkey for this specific project
         // This ensures we target the correct agent even when different projects
         // have different agent configurations
@@ -797,6 +874,9 @@ export class InterventionService {
                 eventId: eventId.substring(0, 8),
                 conversationId: pending.conversationId.substring(0, 12),
             });
+
+            // Record as notified to prevent duplicate notifications
+            this.notifiedConversations.set(pending.conversationId, Date.now());
 
             // Remove from pending after successful publish
             this.pendingInterventions.delete(pending.conversationId);
@@ -906,12 +986,15 @@ export class InterventionService {
     private async loadState(projectId: string): Promise<void> {
         const stateFilePath = this.getStateFilePath(projectId);
 
+        // Clear all project-scoped state before loading new project
+        // (must happen unconditionally, even if state file doesn't exist)
+        this.pendingInterventions.clear();
+        this.notifiedConversations.clear();
+        this.triggeringConversations.clear();
+
         try {
             const data = await fs.readFile(stateFilePath, "utf-8");
             const state = JSON.parse(data) as InterventionState;
-
-            // Clear existing pending interventions (for project switch)
-            this.pendingInterventions.clear();
 
             for (const pending of state.pending) {
                 // Migrate old projectPubkey field to projectId if present
@@ -921,14 +1004,26 @@ export class InterventionService {
                 this.pendingInterventions.set(pending.conversationId, pending);
             }
 
+            // Load notified conversations, evicting entries older than 24h
+            if (state.notified) {
+                const cutoff = Date.now() - NOTIFIED_TTL_MS;
+                for (const entry of state.notified) {
+                    if (entry.notifiedAt >= cutoff) {
+                        this.notifiedConversations.set(entry.conversationId, entry.notifiedAt);
+                    }
+                }
+            }
+
             logger.debug("Loaded intervention state", {
                 projectId: projectId.substring(0, 12),
                 pendingCount: this.pendingInterventions.size,
+                notifiedCount: this.notifiedConversations.size,
             });
 
             trace.getActiveSpan()?.addEvent("intervention.state_loaded", {
                 "intervention.project_id": projectId.substring(0, 12),
                 "intervention.pending_count": this.pendingInterventions.size,
+                "intervention.notified_count": this.notifiedConversations.size,
             });
         } catch (error: unknown) {
             if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
@@ -998,6 +1093,19 @@ export class InterventionService {
     }
 
     /**
+     * Remove entries from notifiedConversations that are older than NOTIFIED_TTL_MS.
+     * Prevents unbounded map growth and ensures stale entries stop blocking notifications.
+     */
+    private pruneStaleNotifications(): void {
+        const cutoff = Date.now() - NOTIFIED_TTL_MS;
+        for (const [conversationId, notifiedAt] of this.notifiedConversations) {
+            if (notifiedAt < cutoff) {
+                this.notifiedConversations.delete(conversationId);
+            }
+        }
+    }
+
+    /**
      * Atomically write state to disk using temp file and rename.
      */
     private async writeStateAtomically(): Promise<void> {
@@ -1009,8 +1117,16 @@ export class InterventionService {
         const tempFilePath = `${stateFilePath}.tmp.${Date.now()}`;
 
         try {
+            // Evict expired notified entries from in-memory map and serialize valid ones
+            this.pruneStaleNotifications();
+            const notifiedEntries: NotifiedEntry[] = [];
+            for (const [conversationId, notifiedAt] of this.notifiedConversations) {
+                notifiedEntries.push({ conversationId, notifiedAt });
+            }
+
             const state: InterventionState = {
                 pending: Array.from(this.pendingInterventions.values()),
+                notified: notifiedEntries.length > 0 ? notifiedEntries : undefined,
             };
 
             // Ensure directory exists before writing
@@ -1120,6 +1236,20 @@ export class InterventionService {
     }
 
     /**
+     * Get count of already-notified conversations (for diagnostics).
+     */
+    public getNotifiedCount(): number {
+        return this.notifiedConversations.size;
+    }
+
+    /**
+     * Check if a conversation has been notified (for testing).
+     */
+    public isNotified(conversationId: string): boolean {
+        return this.notifiedConversations.has(conversationId);
+    }
+
+    /**
      * Get a pending intervention by conversation ID (for testing).
      */
     public getPending(conversationId: string): PendingIntervention | undefined {
@@ -1163,6 +1293,28 @@ export class InterventionService {
      */
     public async waitForWrites(): Promise<void> {
         await this.flushWriteQueue();
+    }
+
+    /**
+     * Manually mark a conversation as notified with a given timestamp (for testing).
+     * Allows tests to inject stale entries to verify pruning behavior.
+     */
+    public setNotifiedForTesting(conversationId: string, notifiedAt: number): void {
+        this.notifiedConversations.set(conversationId, notifiedAt);
+    }
+
+    /**
+     * Check if a conversation ID is in the triggeringConversations set (for testing).
+     */
+    public isTriggering(conversationId: string): boolean {
+        return this.triggeringConversations.has(conversationId);
+    }
+
+    /**
+     * Add a conversation to the triggeringConversations set (for testing).
+     */
+    public setTriggeringForTesting(conversationId: string): void {
+        this.triggeringConversations.add(conversationId);
     }
 
     /**
