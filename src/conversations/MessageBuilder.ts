@@ -64,14 +64,16 @@ export interface MessageBuilderContext {
      */
     totalMessages: number;
     /**
-     * Root author pubkey for attribution detection
-     */
-    rootAuthorPubkey?: string;
-    /**
      * Project root directory for AGENTS.md discovery.
      * If provided, enables system reminder injection after file-read tool results.
      */
     projectRoot?: string;
+    /**
+     * Set of pubkeys that belong to agents (non-whitelisted).
+     * Used by computeAttributionPrefix to distinguish agent messages from user messages.
+     * If not provided, all non-self pubkeys are treated as users (no agent attribution).
+     */
+    agentPubkeys?: Set<string>;
     /**
      * The conversation ID being built.
      * Required for delegation marker expansion - markers are only expanded
@@ -135,15 +137,77 @@ function deriveRole(
 }
 
 /**
+ * Compute an attribution prefix for a conversation entry.
+ *
+ * Returns a string prefix (or empty string) to prepend to the message content,
+ * enabling the LLM to distinguish who said what in multi-agent shared conversations.
+ *
+ * Priority rules (ordered, first match wins):
+ * 1. Self message → "" (no prefix)
+ * 2. Non-text entry (tool-call, tool-result, delegation-marker, role-override) → "" (no prefix)
+ * 3. Has targetedPubkeys NOT including viewing agent → "[@sender -> @recipient] " (routing)
+ * 4. Sender is agent (in agentPubkeys set) → "[@sender] " (attribution)
+ * 5. Otherwise (user message targeted to me, or no targeting) → "" (no prefix)
+ *
+ * **Purity note:** This function is pure when a custom `resolveDisplayName` is provided
+ * (as done in unit tests). The default resolver calls `PubkeyService.getNameSync()`, which
+ * reads from a global service singleton—this is intentional for production use but means
+ * the default invocation is not referentially transparent.
+ *
+ * @param entry - The conversation entry to compute prefix for
+ * @param viewingAgentPubkey - The pubkey of the agent viewing/building messages
+ * @param agentPubkeys - Set of pubkeys that belong to agents (used to distinguish agents from users)
+ * @param resolveDisplayName - Optional injectable name resolver (defaults to PubkeyService.getNameSync)
+ * @returns The prefix string to prepend, or empty string for no prefix
+ */
+export function computeAttributionPrefix(
+    entry: ConversationEntry,
+    viewingAgentPubkey: string,
+    agentPubkeys: Set<string>,
+    resolveDisplayName?: (pubkey: string) => string
+): string {
+    const resolve = resolveDisplayName ?? ((pk: string) => {
+        try {
+            const name = getPubkeyService().getNameSync(pk);
+            return name || pk.substring(0, 8);
+        } catch {
+            return pk.substring(0, 8);
+        }
+    });
+
+    // Determine the actual sender (injected messages track original sender via senderPubkey)
+    const senderPubkey = entry.senderPubkey ?? entry.pubkey;
+
+    // Rule 1: Self message → no prefix
+    if (senderPubkey === viewingAgentPubkey) return "";
+
+    // Rule 2: Non-text entry → no prefix
+    if (entry.messageType !== "text") return "";
+    if (entry.role) return ""; // Explicit role override (synthetic entries like compressed summaries)
+
+    // Rule 3: Has targetedPubkeys NOT including viewing agent → routing prefix
+    const targetedPubkeys = entry.targetedPubkeys ?? [];
+    if (targetedPubkeys.length > 0 && !targetedPubkeys.includes(viewingAgentPubkey)) {
+        const senderName = resolve(senderPubkey);
+        const recipientName = resolve(targetedPubkeys[0]);
+        return `[@${senderName} -> @${recipientName}] `;
+    }
+
+    // Rule 4: Sender is agent → attribution prefix
+    if (agentPubkeys.has(senderPubkey)) {
+        const senderName = resolve(senderPubkey);
+        return `[@${senderName}] `;
+    }
+
+    // Rule 5: Otherwise (user message targeted to me, or no targeting) → no prefix
+    return "";
+}
+
+/**
  * Convert a ConversationEntry to a ModelMessage for the viewing agent.
  *
- * Note: Most attribution prefixes are NOT added to LLM input to avoid models
- * copying the format. However, when a message comes from an UNEXPECTED sender
- * (different from the root conversation author), we add a prose-style prefix:
- *   [Note: Message from {senderName}]
- *
- * This allows agents to know when they receive messages from someone other
- * than their delegator (e.g., project owner intervening in a delegation).
+ * Attribution prefixes are added for multi-agent shared conversations using
+ * computeAttributionPrefix() to help the LLM distinguish who said what.
  *
  * For text messages containing image URLs, the content is converted to
  * multimodal format (TextPart + ImagePart array) for AI SDK compatibility.
@@ -162,7 +226,7 @@ async function entryToMessage(
     entry: ConversationEntry,
     viewingAgentPubkey: string,
     truncationContext: TruncationContext | undefined,
-    rootAuthorPubkey: string | undefined,
+    agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
     agentsMdContext?: AgentsMdContext
 ): Promise<ModelMessage> {
@@ -246,16 +310,9 @@ async function entryToMessage(
         } as unknown as ModelMessage;
     }
 
-    // Text message - check if attribution prefix needed for unexpected sender
-    let messageContent = entry.content;
-
-    // Add attribution prefix when:
-    // 1. Message has a senderPubkey (was injected with sender tracking)
-    // 2. senderPubkey differs from root conversation author (unexpected sender)
-    if (entry.senderPubkey && rootAuthorPubkey && entry.senderPubkey !== rootAuthorPubkey) {
-        const senderName = getPubkeyService().getNameSync(entry.senderPubkey);
-        messageContent = `[Note: Message from ${senderName}]\n${messageContent}`;
-    }
+    // Text message - compute attribution prefix for multi-agent conversations
+    const prefix = computeAttributionPrefix(entry, viewingAgentPubkey, agentPubkeys);
+    let messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
 
     // Track any images in text messages (but don't replace them - user content)
     // This ensures that if the same image appears later in a tool result,
@@ -447,7 +504,7 @@ export async function buildMessagesFromEntries(
         activeRals,
         indexOffset = 0,
         totalMessages,
-        rootAuthorPubkey,
+        agentPubkeys = new Set<string>(),
         projectRoot,
     } = ctx;
 
@@ -574,7 +631,7 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -588,7 +645,7 @@ export async function buildMessagesFromEntries(
 
         // TOOL-RESULT: Add to result and mark tool-call as resolved
         if (entry.messageType === "tool-result" && entry.toolData) {
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
 
             for (const part of entry.toolData as ToolResultPart[]) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -597,7 +654,7 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
+                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext));
                 }
                 deferredMessages.length = 0;
             }
@@ -699,7 +756,7 @@ export async function buildMessagesFromEntries(
         if (pendingToolCalls.size > 0) {
             deferredMessages.push({ entry, truncationContext });
         } else {
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
         }
     }
 
@@ -743,7 +800,7 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, rootAuthorPubkey, imageTracker, agentsMdContext));
+        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext));
     }
 
     if (prunedDelegationCompletions > 0) {

@@ -115,7 +115,7 @@ describe("ConversationStore - Multimodal Support", () => {
         it("should convert multimodal content even without attribution prefix", async () => {
             // Note: Using real-looking domain because example.com is now skipped
             // Attribution prefixes are only added under specific conditions
-            // (e.g., when senderPubkey differs from rootAuthorPubkey)
+            // (e.g., when sender is a known agent via computeAttributionPrefix)
             store.addMessage({
                 pubkey: USER_PUBKEY,
                 content: "Check this: https://images.unsplash.com/image.png",

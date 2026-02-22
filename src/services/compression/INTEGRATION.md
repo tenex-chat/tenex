@@ -77,7 +77,6 @@ const conversationMessages = await buildMessagesFromEntries(entries, {
     ralNumber: context.ralNumber,
     activeRals,
     totalMessages: entries.length,
-    rootAuthorPubkey,
     projectRoot: context.projectBasePath,
 });
 ```
