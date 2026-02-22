@@ -68,6 +68,21 @@ export interface StoredAgentData {
     mcpServers?: Record<string, MCPServerConfig>;
 
     /**
+     * The d-tag of the source agent definition event (kind:4199).
+     * Used by AgentDefinitionMonitor to detect when a newer version
+     * of the same definition is published.
+     * Backward-compatible: agents without this field are silently ignored.
+     */
+    definitionDTag?: string;
+
+    /**
+     * The pubkey of the author of the source agent definition event.
+     * Used by AgentDefinitionMonitor to verify that incoming definition
+     * updates come from the original (or whitelisted) author.
+     */
+    definitionAuthor?: string;
+
+    /**
      * Legacy top-level LLM config field.
      * @deprecated Use `default.model` instead.
      */

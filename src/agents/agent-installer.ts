@@ -81,6 +81,8 @@ interface ParsedAgentEvent {
     instructions: string;
     useCriteria: string;
     defaultConfig: { model: string; tools?: string[] };
+    definitionDTag?: string;
+    definitionAuthor?: string;
 }
 
 function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
@@ -95,6 +97,10 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
     const role = agentDef.role || "assistant";
     const instructions = agentDef.instructions || "";
     const useCriteria = agentDef.useCriteria || "";
+
+    // Extract definition tracking metadata for auto-upgrade monitoring
+    const definitionDTag = event.tagValue("d") || undefined;
+    const definitionAuthor = event.pubkey || undefined;
 
     // Extract tool requirements from the agent definition event
     const toolTags = event.tags
@@ -117,6 +123,8 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
             model: DEFAULT_AGENT_LLM_CONFIG,
             tools: toolTags.length > 0 ? toolTags : undefined,
         },
+        definitionDTag,
+        definitionAuthor,
     };
 }
 
@@ -237,6 +245,8 @@ export async function installAgentFromNostr(
         useCriteria: agentData.useCriteria,
         defaultConfig: agentData.defaultConfig,
         eventId: agentData.eventId,
+        definitionDTag: agentData.definitionDTag,
+        definitionAuthor: agentData.definitionAuthor,
     });
 
     // Save to storage
