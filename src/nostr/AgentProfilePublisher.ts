@@ -40,9 +40,37 @@ export class AgentProfilePublisher {
         const avatarStyle = AgentProfilePublisher.AVATAR_FAMILIES[familyIndex];
         return `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
     }
+    /** Debounce timers for 14199 snapshot publishing, keyed by project tag */
+    private static snapshotDebounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    private static readonly SNAPSHOT_DEBOUNCE_MS = 5000;
+
     /**
-     * Publishes a kind:14199 snapshot event for a project, listing all associated agents.
-     * Reads agent associations from AgentStorage instead of maintaining a separate registry.
+     * Schedule a kind:14199 snapshot publish for a project.
+     * Debounced: multiple calls within SNAPSHOT_DEBOUNCE_MS collapse into one publish,
+     * ensuring all agents are aggregated into a single event with all p-tags.
+     */
+    static publishProjectAgentSnapshot(projectTag: string): void {
+        const existing = AgentProfilePublisher.snapshotDebounceTimers.get(projectTag);
+        if (existing) {
+            clearTimeout(existing);
+        }
+
+        const timer = setTimeout(() => {
+            AgentProfilePublisher.snapshotDebounceTimers.delete(projectTag);
+            AgentProfilePublisher.executeSnapshotPublish(projectTag).catch((error) => {
+                logger.warn("Debounced 14199 snapshot publish failed", {
+                    projectTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+        }, AgentProfilePublisher.SNAPSHOT_DEBOUNCE_MS);
+
+        AgentProfilePublisher.snapshotDebounceTimers.set(projectTag, timer);
+    }
+
+    /**
+     * Execute the actual 14199 snapshot publish.
+     * Reads ALL agents from storage and publishes a single event with all their p-tags.
      *
      * When NIP-46 is enabled, each whitelisted owner gets their own 14199 event signed
      * by that owner via NIP-46 remote signing. If signing fails, the event is simply
@@ -50,7 +78,7 @@ export class AgentProfilePublisher {
      *
      * When NIP-46 is disabled, the event is signed with the backend key.
      */
-    static async publishProjectAgentSnapshot(projectTag: string): Promise<void> {
+    private static async executeSnapshotPublish(projectTag: string): Promise<void> {
         const agents = await agentStorage.getProjectAgents(projectTag);
         const whitelisted = config.getWhitelistedPubkeys(undefined, config.getConfig());
 
@@ -61,6 +89,11 @@ export class AgentProfilePublisher {
             agentPubkeys.push(agentSigner.pubkey);
         }
 
+        logger.info("Publishing debounced 14199 snapshot", {
+            projectTag,
+            agentCount: agentPubkeys.length,
+        });
+
         const nip46Service = Nip46SigningService.getInstance();
 
         if (nip46Service.isEnabled()) {
@@ -68,17 +101,13 @@ export class AgentProfilePublisher {
             for (const ownerPubkey of whitelisted) {
                 await AgentProfilePublisher.publishSnapshotForOwner(
                     ownerPubkey,
-                    whitelisted,
                     agentPubkeys,
                     nip46Service,
                 );
             }
         } else {
             // Backend signing mode (NIP-46 not enabled)
-            await AgentProfilePublisher.publishSnapshotWithBackendKey(
-                whitelisted,
-                agentPubkeys,
-            );
+            await AgentProfilePublisher.publishSnapshotWithBackendKey(agentPubkeys);
         }
     }
 
@@ -88,13 +117,12 @@ export class AgentProfilePublisher {
      */
     private static async publishSnapshotForOwner(
         ownerPubkey: string,
-        whitelisted: string[],
         agentPubkeys: string[],
         nip46Service: Nip46SigningService,
     ): Promise<void> {
         const ndk = getNDK();
         const signingLog = Nip46SigningLog.getInstance();
-        const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, whitelisted, agentPubkeys);
+        const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, agentPubkeys);
 
         const result = await nip46Service.signEvent(ownerPubkey, ev);
 
@@ -112,6 +140,7 @@ export class AgentProfilePublisher {
                 logger.info("[NIP-46] Published owner-signed 14199", {
                     ownerPubkey: ownerPubkey.substring(0, 12),
                     eventId: ev.id?.substring(0, 12),
+                    agentCount: agentPubkeys.length,
                 });
             } catch (error) {
                 logger.warn("[NIP-46] Failed to publish owner-signed 14199", {
@@ -135,11 +164,10 @@ export class AgentProfilePublisher {
      * Used when NIP-46 is not enabled.
      */
     private static async publishSnapshotWithBackendKey(
-        whitelisted: string[],
         agentPubkeys: string[],
     ): Promise<void> {
         const ndk = getNDK();
-        const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, whitelisted, agentPubkeys);
+        const ev = AgentProfilePublisher.buildSnapshotEvent(ndk, agentPubkeys);
         const tenexNsec = await config.ensureBackendPrivateKey();
         const signer = new NDKPrivateKeySigner(tenexNsec);
 
@@ -155,20 +183,15 @@ export class AgentProfilePublisher {
     }
 
     /**
-     * Build an unsigned 14199 snapshot event with p-tags for all owners and agents.
+     * Build an unsigned 14199 snapshot event with p-tags for agents only.
      */
     private static buildSnapshotEvent(
         ndk: ReturnType<typeof getNDK>,
-        whitelisted: string[],
         agentPubkeys: string[],
     ): NDKEvent {
         const ev = new NDKEvent(ndk, {
             kind: NDKKind.ProjectAgentSnapshot,
         });
-
-        for (const pk of whitelisted) {
-            ev.tag(["p", pk]);
-        }
 
         for (const pk of agentPubkeys) {
             ev.tag(["p", pk]);
@@ -326,10 +349,10 @@ export class AgentProfilePublisher {
                 });
             }
 
-            // Publish kind:14199 snapshot for this project after successful profile publish
+            // Schedule debounced 14199 snapshot publish for this project
             const projectTag = projectEvent.tagId();
             if (projectTag) {
-                await AgentProfilePublisher.publishProjectAgentSnapshot(projectTag);
+                AgentProfilePublisher.publishProjectAgentSnapshot(projectTag);
             }
         } catch (error) {
             logger.error("Failed to create agent profile", {
