@@ -4,8 +4,15 @@
  * This singleton manages the lifecycle of ConversationStore instances:
  * - Loading and caching conversation stores
  * - Event caching for fast lookup
- * - Project-level initialization
+ * - Project-level initialization (multi-project safe)
  * - Cross-project conversation discovery
+ *
+ * Multi-project support:
+ * initialize() accumulates per-project configs instead of overwriting.
+ * Methods that need a project ID resolve it via three-tier strategy:
+ *   1. Explicit projectId parameter (if passed)
+ *   2. AsyncLocalStorage projectContextStore lookup
+ *   3. Legacy fallback (last initialized) with warning log
  *
  * The heavy lifting is delegated to individual ConversationStore instances.
  */
@@ -15,6 +22,10 @@ import { basename, dirname, join } from "path";
 import { getTenexBasePath } from "@/constants";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { logger } from "@/utils/logger";
+// Import directly from the module file (not the barrel) to avoid circular
+// dependency: barrel re-exports ProjectContext → @/agents → ConversationStore
+// → ConversationRegistry (this file), which would trigger a ReferenceError.
+import { projectContextStore } from "@/services/projects/ProjectContextStore";
 import type { ConversationMetadata } from "./types";
 import type { ConversationStore } from "./ConversationStore";
 // Note: FullEventId type is available via @/types/event-ids for future typed method signatures
@@ -46,29 +57,131 @@ function getConversationStoreClass(): typeof ConversationStore {
 }
 
 /**
+ * Per-project configuration stored by the registry.
+ */
+interface ProjectRegistryConfig {
+    agentPubkeys: Set<string>;
+}
+
+/**
  * Singleton registry for managing conversation stores
  */
 class ConversationRegistryImpl {
     private stores: Map<string, ConversationStore> = new Map();
     private eventCache: Map<string, NDKEvent> = new Map();
     private _basePath: string = join(getTenexBasePath(), "projects");
-    private _projectId: string | null = null;
-    private _agentPubkeys: Set<string> = new Set();
+
+    /**
+     * Per-project configurations keyed by projectId (dTag).
+     * Accumulated by initialize() — never overwritten.
+     */
+    private _projectConfigs: Map<string, ProjectRegistryConfig> = new Map();
+
+    /**
+     * Union of all agent pubkeys across all initialized projects.
+     * Maintained alongside _projectConfigs for efficient lookup.
+     */
+    private _allAgentPubkeys: Set<string> = new Set();
+
+    /**
+     * Legacy fallback: the last projectId set via initialize().
+     * Used only when AsyncLocalStorage context is unavailable (backward compat).
+     */
+    private _legacyProjectId: string | null = null;
 
     get basePath(): string {
         return this._basePath;
     }
 
+    /**
+     * Get the current project ID via three-tier resolution.
+     * Prefer resolveProjectId() for new code paths.
+     */
     get projectId(): string | null {
-        return this._projectId;
+        return this.resolveProjectId();
     }
 
+    /**
+     * Get agent pubkeys for the current resolved project.
+     * Falls back to all known agent pubkeys if no project can be resolved.
+     */
     get agentPubkeys(): Set<string> {
-        return this._agentPubkeys;
+        return this.getAgentPubkeysForProject(this.resolveProjectId());
     }
 
     setConversationStoreClass(StoreClass: typeof ConversationStore): void {
         ConversationStoreClass = StoreClass;
+    }
+
+    /**
+     * Resolve the current project ID via three-tier strategy:
+     *   1. Explicit projectId parameter (if passed)
+     *   2. AsyncLocalStorage projectContextStore lookup
+     *   3. Legacy fallback (last initialized) with warning log
+     *
+     * @param explicitProjectId - Optional explicit project ID to use directly
+     * @returns The resolved project ID, or null if none can be determined
+     */
+    resolveProjectId(explicitProjectId?: string): string | null {
+        // Tier 1: Explicit parameter
+        if (explicitProjectId) {
+            return explicitProjectId;
+        }
+
+        // Tier 2: AsyncLocalStorage context
+        try {
+            const context = projectContextStore.getContext();
+            if (context) {
+                const dTag = context.project.tagValue("d");
+                if (dTag && this._projectConfigs.has(dTag)) {
+                    return dTag;
+                }
+            }
+        } catch (error) {
+            logger.debug("[ConversationRegistry] Failed to read AsyncLocalStorage context", { error });
+        }
+
+        // Tier 3: Legacy fallback with warning
+        if (this._legacyProjectId) {
+            // Only warn if there are multiple projects (single project is expected)
+            if (this._projectConfigs.size > 1) {
+                logger.warn(
+                    "[ConversationRegistry] Using legacy projectId fallback — " +
+                    "this may resolve to the wrong project in multi-project mode",
+                    { projectId: this._legacyProjectId, knownProjects: this._projectConfigs.size }
+                );
+            }
+            return this._legacyProjectId;
+        }
+
+        return null;
+    }
+
+    /**
+     * Rebuild the union of all agent pubkeys from all project configs.
+     * Called after any mutation to _projectConfigs to keep _allAgentPubkeys in sync.
+     */
+    private rebuildAllAgentPubkeys(): void {
+        this._allAgentPubkeys = new Set();
+        for (const config of this._projectConfigs.values()) {
+            for (const pk of config.agentPubkeys) {
+                this._allAgentPubkeys.add(pk);
+            }
+        }
+    }
+
+    /**
+     * Get the agent pubkeys for a specific resolved project ID.
+     * Returns the project-specific set if found, otherwise the union of all.
+     */
+    private getAgentPubkeysForProject(projectId: string | null): Set<string> {
+        if (projectId) {
+            const config = this._projectConfigs.get(projectId);
+            if (config) {
+                return config.agentPubkeys;
+            }
+        }
+        return this._allAgentPubkeys;
     }
 
     /**
@@ -100,13 +213,26 @@ class ConversationRegistryImpl {
 
     /**
      * Initialize the registry for a project.
-     * Must be called once at startup before using any stores.
+     * In multi-project mode (daemon), this is called once per project.
+     * Accumulates per-project configs rather than overwriting.
      */
     initialize(metadataPath: string, agentPubkeys?: Iterable<string>): void {
         this._basePath = dirname(metadataPath);
-        this._projectId = basename(metadataPath);
-        this._agentPubkeys = new Set(agentPubkeys ?? []);
-        logger.info(`[ConversationRegistry] Initialized for project ${this._projectId}`);
+        const projectId = basename(metadataPath);
+        const pubkeys = new Set(agentPubkeys ?? []);
+
+        // Accumulate per-project config
+        this._projectConfigs.set(projectId, { agentPubkeys: pubkeys });
+
+        // Rebuild the union of all agent pubkeys
+        this.rebuildAllAgentPubkeys();
+
+        // Track last initialized for legacy fallback
+        this._legacyProjectId = projectId;
+
+        logger.info(`[ConversationRegistry] Initialized for project ${projectId}`, {
+            totalProjects: this._projectConfigs.size,
+        });
     }
 
     /**
@@ -120,12 +246,13 @@ class ConversationRegistryImpl {
 
         let store = this.stores.get(resolvedId);
         if (!store) {
-            if (!this._projectId) {
+            const currentProjectId = this.resolveProjectId();
+            if (!currentProjectId) {
                 throw new Error("ConversationRegistry.initialize() must be called before getOrLoad()");
             }
             const StoreClass = getConversationStoreClass();
             store = new StoreClass(this._basePath);
-            store.load(this._projectId, resolvedId);
+            store.load(currentProjectId, resolvedId);
             this.stores.set(resolvedId, store);
         }
         return store;
@@ -144,11 +271,12 @@ class ConversationRegistryImpl {
         if (cached) return cached;
 
         // Try current project first
-        if (this._projectId) {
+        const currentProjectId = this.resolveProjectId();
+        if (currentProjectId) {
             const StoreClass = getConversationStoreClass();
             const store = new StoreClass(this._basePath);
             try {
-                store.load(this._projectId, resolvedId);
+                store.load(currentProjectId, resolvedId);
                 if (store.getAllMessages().length > 0) {
                     this.stores.set(resolvedId, store);
                     return store;
@@ -159,7 +287,7 @@ class ConversationRegistryImpl {
         }
 
         // Search other projects
-        const otherProjectId = this.findProjectForConversation(resolvedId);
+        const otherProjectId = this.findProjectForConversation(resolvedId, currentProjectId);
         if (otherProjectId) {
             const StoreClass = getConversationStoreClass();
             const store = new StoreClass(this._basePath);
@@ -181,13 +309,13 @@ class ConversationRegistryImpl {
     /**
      * Find which project contains a conversation.
      */
-    private findProjectForConversation(conversationId: string): string | undefined {
+    private findProjectForConversation(conversationId: string, skipProjectId?: string | null): string | undefined {
         try {
             if (!existsSync(this._basePath)) return undefined;
 
             const projectDirs = readdirSync(this._basePath);
             for (const projectDir of projectDirs) {
-                if (projectDir === this._projectId) continue;
+                if (projectDir === skipProjectId) continue;
                 if (projectDir === "metadata") continue;
 
                 const conversationFile = join(
@@ -217,6 +345,7 @@ class ConversationRegistryImpl {
     /**
      * Create a new conversation from an NDKEvent.
      * Indexes the conversation ID in PrefixKVStore for prefix lookups.
+     * Uses three-tier project resolution to determine the correct project.
      */
     async create(event: NDKEvent): Promise<ConversationStore> {
         const eventId = event.id;
@@ -230,15 +359,17 @@ class ConversationRegistryImpl {
             return existing;
         }
 
-        if (!this._projectId) {
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) {
             throw new Error("ConversationRegistry.initialize() must be called before create()");
         }
 
         const StoreClass = getConversationStoreClass();
         const store = new StoreClass(this._basePath);
-        store.load(this._projectId, eventId);
+        store.load(currentProjectId, eventId);
 
-        const isFromAgent = this._agentPubkeys.has(event.pubkey);
+        const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
+        const isFromAgent = projectAgentPubkeys.has(event.pubkey);
         store.addEventMessage(event, isFromAgent);
 
         this.eventCache.set(eventId, event);
@@ -269,7 +400,9 @@ class ConversationRegistryImpl {
             }
         }
 
-        logger.info(`Starting conversation ${eventId.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`);
+        logger.info(`Starting conversation ${eventId.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`, {
+            projectId: currentProjectId,
+        });
 
         return store;
     }
@@ -314,7 +447,9 @@ class ConversationRegistryImpl {
      */
     async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
         const store = this.getOrLoad(conversationId);
-        const isFromAgent = this._agentPubkeys.has(event.pubkey);
+        const currentProjectId = this.resolveProjectId();
+        const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
+        const isFromAgent = projectAgentPubkeys.has(event.pubkey);
         store.addEventMessage(event, isFromAgent);
 
         if (event.id) {
@@ -416,7 +551,8 @@ class ConversationRegistryImpl {
      * @returns AdvancedSearchResult with explicit success/error information
      */
     searchAdvanced(input: RawSearchInput, limit: number = 20): AdvancedSearchResult {
-        if (!this._projectId) {
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) {
             logger.warn("[ConversationRegistry] searchAdvanced called before initialization");
             return {
                 success: false,
@@ -430,7 +566,7 @@ class ConversationRegistryImpl {
             const query = parseQuery(input);
 
             // Get or create the index manager for this project
-            const indexManager = getIndexManager(this._basePath, this._projectId);
+            const indexManager = getIndexManager(this._basePath, currentProjectId);
 
             // Get the index (loads from disk or rebuilds if needed)
             const index = indexManager.getIndex();
@@ -441,7 +577,7 @@ class ConversationRegistryImpl {
             logger.debug("[ConversationRegistry] Advanced search completed", {
                 query: input.query,
                 resultCount: results.length,
-                projectId: this._projectId,
+                projectId: currentProjectId,
             });
 
             return {
@@ -468,10 +604,11 @@ class ConversationRegistryImpl {
      * Updates are debounced (30 seconds) to avoid excessive I/O.
      */
     triggerIndexUpdate(conversationId: string): void {
-        if (!this._projectId) return;
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return;
 
         try {
-            const indexManager = getIndexManager(this._basePath, this._projectId);
+            const indexManager = getIndexManager(this._basePath, currentProjectId);
             indexManager.triggerUpdate(conversationId);
         } catch (error) {
             logger.warn("[ConversationRegistry] Failed to trigger index update", {
@@ -486,10 +623,11 @@ class ConversationRegistryImpl {
      * Use sparingly as this scans all conversation files.
      */
     rebuildSearchIndex(): void {
-        if (!this._projectId) return;
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return;
 
         try {
-            const indexManager = getIndexManager(this._basePath, this._projectId);
+            const indexManager = getIndexManager(this._basePath, currentProjectId);
             indexManager.rebuildIndex();
         } catch (error) {
             logger.error("[ConversationRegistry] Failed to rebuild search index", { error });
@@ -500,16 +638,18 @@ class ConversationRegistryImpl {
      * Get the conversations directory for the current project.
      */
     getConversationsDir(): string | null {
-        if (!this._projectId) return null;
-        return join(this._basePath, this._projectId, "conversations");
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return null;
+        return join(this._basePath, currentProjectId, "conversations");
     }
 
     /**
      * List conversation IDs from disk for current project.
      */
     listConversationIdsFromDisk(): string[] {
-        if (!this._projectId) return [];
-        return listConversationIdsFromDiskForProject(this._basePath, this._projectId);
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return [];
+        return listConversationIdsFromDiskForProject(this._basePath, currentProjectId);
     }
 
     /**
@@ -527,34 +667,37 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Check if a pubkey belongs to an agent.
+     * Check if a pubkey belongs to an agent (across all initialized projects).
      */
     isAgentPubkey(pubkey: string): boolean {
-        return this._agentPubkeys.has(pubkey);
+        return this._allAgentPubkeys.has(pubkey);
     }
 
     /**
      * Read lightweight metadata without loading full store.
      */
     readLightweightMetadata(conversationId: string): ReturnType<typeof readLightweightMetadata> {
-        if (!this._projectId) return null;
-        return readLightweightMetadata(this._basePath, this._projectId, conversationId);
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return null;
+        return readLightweightMetadata(this._basePath, currentProjectId, conversationId);
     }
 
     /**
      * Read messages from disk without caching.
      */
     readMessagesFromDisk(conversationId: string): ReturnType<typeof readMessagesFromDisk> {
-        if (!this._projectId) return null;
-        return readMessagesFromDisk(this._basePath, this._projectId, conversationId);
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return null;
+        return readMessagesFromDisk(this._basePath, currentProjectId, conversationId);
     }
 
     /**
      * Read conversation preview data.
      */
     readConversationPreview(conversationId: string, agentPubkey: string): ReturnType<typeof readConversationPreviewForProject> {
-        if (!this._projectId) return null;
-        return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, this._projectId);
+        const currentProjectId = this.resolveProjectId();
+        if (!currentProjectId) return null;
+        return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, currentProjectId);
     }
 
     /**
@@ -575,8 +718,9 @@ class ConversationRegistryImpl {
         this.stores.clear();
         this.eventCache.clear();
         this._basePath = join(getTenexBasePath(), "projects");
-        this._projectId = null;
-        this._agentPubkeys.clear();
+        this._projectConfigs.clear();
+        this._allAgentPubkeys.clear();
+        this._legacyProjectId = null;
     }
 }
 
