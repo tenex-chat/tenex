@@ -23,14 +23,14 @@ const DEFAULTS = {
 /**
  * Result of a NIP-46 signing attempt.
  *
- * - `ok: true` — signing succeeded
- * - `ok: false, reason: 'rejected'` — user/bunker explicitly rejected; caller should NOT fall back
- * - `ok: false, reason: 'failed'` — timeout/network error; fallback is appropriate
+ * - `signed` — signing succeeded
+ * - `user_rejected` — user/bunker explicitly rejected; caller should NOT fall back
+ * - `failed` — timeout/network error; fallback is appropriate
  */
 export type SignResult =
-    | { ok: true }
-    | { ok: false; reason: "rejected" }
-    | { ok: false; reason: "failed" };
+    | { outcome: "signed" }
+    | { outcome: "user_rejected"; reason: string }
+    | { outcome: "failed"; reason: string };
 
 /**
  * Race a promise against a timeout, cleaning up the timer regardless of outcome.
@@ -347,7 +347,7 @@ export class Nip46SigningService {
                     attempt,
                 });
 
-                return { ok: true };
+                return { outcome: "signed" };
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
                 const errorMsg = lastError.message;
@@ -371,7 +371,7 @@ export class Nip46SigningService {
                         error: errorMsg,
                     });
 
-                    return { ok: false, reason: "rejected" };
+                    return { outcome: "user_rejected", reason: errorMsg };
                 }
 
                 // Timeout or relay error — retry if attempts remain
@@ -427,7 +427,7 @@ export class Nip46SigningService {
             durationMs,
         });
 
-        return { ok: false, reason: "failed" };
+        return { outcome: "failed", reason: errorMsg };
     }
 
     /**
