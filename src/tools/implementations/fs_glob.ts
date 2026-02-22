@@ -10,6 +10,12 @@ const globSchema = z.object({
     pattern: z
         .string()
         .describe("Glob pattern to match files (e.g., '**/*.ts', 'src/**/*.tsx', '*.json')"),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're searching for these files (5-10 words). Helps provide human-readable context for the operation."
+        ),
     path: z
         .string()
         .optional()
@@ -166,7 +172,7 @@ export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
         value: (input: GlobInput) => {
             const pathInfo = input.path ? ` in ${input.path}` : "";
-            return `Finding files matching '${input.pattern}'${pathInfo}`;
+            return `Finding files matching '${input.pattern}'${pathInfo} (${input.description})`;
         },
         enumerable: false,
         configurable: true,

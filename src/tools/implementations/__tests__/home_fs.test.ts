@@ -258,8 +258,8 @@ describe("home_fs tools", () => {
                 .getHumanReadableContent;
             expect(getHumanReadable).toBeDefined();
 
-            const humanContent = getHumanReadable!({ path: "notes.txt", content: "stuff" });
-            expect(humanContent).toBe("Writing notes.txt");
+            const humanContent = getHumanReadable!({ path: "notes.txt", content: "stuff", description: "saving notes" });
+            expect(humanContent).toBe("Writing notes.txt (saving notes)");
         });
     });
 
@@ -367,11 +367,11 @@ describe("home_fs tools", () => {
                 .getHumanReadableContent;
             expect(getHumanReadable).toBeDefined();
 
-            const humanContent = getHumanReadable!({ pattern: "TODO", path: "notes" });
-            expect(humanContent).toBe("Searching for 'TODO' in notes");
+            const humanContent = getHumanReadable!({ pattern: "TODO", path: "notes", description: "find pending items" });
+            expect(humanContent).toBe("Searching for 'TODO' in notes (find pending items)");
 
-            const humanContentNoPath = getHumanReadable!({ pattern: "TODO" });
-            expect(humanContentNoPath).toBe("Searching for 'TODO' in home");
+            const humanContentNoPath = getHumanReadable!({ pattern: "TODO", description: "find pending items" });
+            expect(humanContentNoPath).toBe("Searching for 'TODO' in home (find pending items)");
         });
 
         it("should safely handle patterns with shell metacharacters", async () => {
