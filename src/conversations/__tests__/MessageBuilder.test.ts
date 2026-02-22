@@ -23,7 +23,6 @@ describe("MessageBuilder", () => {
             activeRals: new Set([1]),
             totalMessages: 10,
             indexOffset: 0,
-            rootAuthorPubkey: userPubkey,
             ...overrides,
         };
     }

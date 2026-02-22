@@ -998,56 +998,62 @@ describe("ConversationStore", () => {
         });
     });
 
-    describe("Unexpected Sender Attribution", () => {
-        // Test the [Note: Message from {name}] prefix for messages from unexpected senders
-        // Expected sender = author of the root conversation event
+    describe("Multi-Agent Attribution (computeAttributionPrefix)", () => {
+        // Test the new computeAttributionPrefix system that replaced the old
+        // [Note: Message from {name}] prefix. The new system uses 5 priority rules:
+        // 1. Self → no prefix
+        // 2. Non-text → no prefix
+        // 3. Targeted elsewhere → routing prefix [@sender -> @recipient]
+        // 4. Agent sender → attribution prefix [@sender]
+        // 5. User sender → no prefix
         const OWNER_PUBKEY = "owner-pubkey";
         const INTERLOPER_PUBKEY = "interloper-pubkey";
 
         beforeEach(() => {
+            // Reset agent registry to empty set to prevent inter-test leakage
+            ConversationStore.initialize(TEST_DIR);
             store.load(PROJECT_ID, CONVERSATION_ID);
             mockGetNameSync.mockClear();
         });
 
-        it("should NOT add attribution prefix when sender matches root author", async () => {
-            // First message establishes the root author (owner)
+        it("should NOT add attribution prefix when sender matches root author (non-agent user)", async () => {
+            // User messages get no prefix regardless of senderPubkey
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
                 content: "Initial message from owner",
                 messageType: "text",
             });
 
-            // Subsequent message from owner with senderPubkey (e.g., from injection)
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
                 content: "Follow-up from owner",
                 messageType: "text",
-                senderPubkey: OWNER_PUBKEY, // Same as root author
+                senderPubkey: OWNER_PUBKEY,
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
             const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
-            // Both messages should have NO attribution prefix
             expect(messages).toHaveLength(2);
             expect(messages[0].content).toBe("Initial message from owner");
             expect(messages[1].content).toBe("Follow-up from owner");
         });
 
-        it("should add attribution prefix when sender differs from root author", async () => {
-            // First message establishes the root author (owner)
+        it("should NOT add attribution for non-agent senderPubkey (user intervention)", async () => {
+            // With the new system, non-agent senders (users) get no prefix
+            // regardless of whether they differ from the conversation initiator
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
                 content: "Initial message from owner",
                 messageType: "text",
             });
 
-            // Message injected by someone else (interloper)
+            // Message injected by another user (interloper is not an agent)
             store.addMessage({
-                pubkey: OWNER_PUBKEY, // pubkey in store still reflects context
+                pubkey: OWNER_PUBKEY,
                 content: "Message from interloper",
                 messageType: "text",
-                senderPubkey: INTERLOPER_PUBKEY, // Different from root author!
+                senderPubkey: INTERLOPER_PUBKEY,
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
@@ -1055,82 +1061,82 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(2);
             expect(messages[0].content).toBe("Initial message from owner");
-            // Second message should have attribution prefix
-            expect(messages[1].content).toBe("[Note: Message from Interloper]\nMessage from interloper");
+            // Non-agent senderPubkey → Rule 5 → no prefix
+            expect(messages[1].content).toBe("Message from interloper");
         });
 
         it("should NOT add attribution prefix when senderPubkey is not set", async () => {
-            // Messages without senderPubkey (historical or non-injected) get no prefix
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
                 content: "Message one",
                 messageType: "text",
-                // No senderPubkey
             });
 
             store.addMessage({
                 pubkey: INTERLOPER_PUBKEY,
                 content: "Message two",
                 messageType: "text",
-                // No senderPubkey
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
             const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             expect(messages).toHaveLength(2);
-            // No prefix for either message
             expect(messages[0].content).toBe("Message one");
             expect(messages[1].content).toBe("Message two");
         });
 
-        it("should use PubkeyService.getNameSync to resolve sender name", async () => {
+        it("should add attribution prefix when sender is a known agent", async () => {
+            // Register agents for this test (beforeEach resets to empty)
+            ConversationStore.initialize(TEST_DIR, [AGENT1_PUBKEY, "agent2-pk"]);
+
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
                 content: "Initial message",
                 messageType: "text",
             });
 
+            // Message from a known agent
             store.addMessage({
                 pubkey: OWNER_PUBKEY,
-                content: "Interloper message",
+                content: "Agent message",
                 messageType: "text",
-                senderPubkey: INTERLOPER_PUBKEY,
+                senderPubkey: "agent2-pk",
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
-            await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
+            const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
-            // PubkeyService.getNameSync should have been called with the interloper pubkey
-            expect(mockGetNameSync).toHaveBeenCalledWith(INTERLOPER_PUBKEY);
+            expect(messages).toHaveLength(2);
+            // Agent senderPubkey → Rule 4 → attribution prefix
+            const content = messages[1].content as string;
+            expect(content).toContain("Agent message");
+            expect(content).toMatch(/^\[@/); // Has attribution prefix
         });
 
         it("should handle empty conversation gracefully", async () => {
-            // No messages in conversation
             const ral = store.createRal(AGENT1_PUBKEY);
             const messages = await store.buildMessagesForRal(AGENT1_PUBKEY, ral);
 
             expect(messages).toHaveLength(0);
         });
 
-        it("should attribute project owner intervention in delegated conversation", async () => {
-            // Simulate a delegation: delegator starts conversation
+        it("should not attribute user intervention (user is non-agent)", async () => {
             const DELEGATOR_PUBKEY = "agent1-pubkey-abc";
             const PROJECT_OWNER = "owner-pubkey";
 
-            // Delegator's initial message (root author)
             store.addMessage({
                 pubkey: DELEGATOR_PUBKEY,
                 content: "Please research this topic",
                 messageType: "text",
             });
 
-            // Project owner intervenes with injected message
+            // Project owner intervenes - not an agent, so no attribution prefix
             store.addMessage({
-                pubkey: DELEGATOR_PUBKEY, // Context pubkey
+                pubkey: DELEGATOR_PUBKEY,
                 content: "Actually, focus on the architecture",
                 messageType: "text",
-                senderPubkey: PROJECT_OWNER, // Real sender is project owner
+                senderPubkey: PROJECT_OWNER,
             });
 
             const ral = store.createRal(AGENT1_PUBKEY);
@@ -1138,15 +1144,18 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(2);
             expect(messages[0].content).toBe("Please research this topic");
-            expect(messages[1].content).toBe("[Note: Message from ProjectOwner]\nActually, focus on the architecture");
+            // User senderPubkey → Rule 5 → no prefix
+            expect(messages[1].content).toBe("Actually, focus on the architecture");
         });
     });
 
-    describe("Message Attribution Formatting (Deprecated - No Prefixes)", () => {
-        // These tests verify that the OLD [@sender -> @recipient] format is NO LONGER added.
-        // Less capable models were copying the prefix format in their outputs.
-        // Attribution prefixes are now ONLY added for unexpected senders via senderPubkey.
-        // See "Unexpected Sender Attribution" tests for the current attribution system.
+    describe("Message Attribution Formatting (Multi-Agent)", () => {
+        // These tests verify the new computeAttributionPrefix behavior:
+        // - Self messages → no prefix
+        // - User messages targeted to me → no prefix
+        // - Agent messages targeted to me → [@agent] prefix
+        // - Messages targeted elsewhere → [@sender -> @recipient] routing prefix
+        // - User broadcasts → no prefix
         const TRANSPARENT_PK = "transparent-pk";
         const AGENT1_PK = "agent1-pk";
         const AGENT2_PK = "agent2-pk";
@@ -1159,8 +1168,8 @@ describe("ConversationStore", () => {
             mockGetName.mockClear();
         });
 
-        it("should NOT add attribution prefix to own messages (deprecated)", async () => {
-            // Transparent sends a message to Pablo - no prefix added
+        it("should NOT add attribution prefix to own messages", async () => {
+            // Transparent sends a message to Pablo - no prefix (self = Rule 1)
             store.addMessage({
                 pubkey: TRANSPARENT_PK,
                 ral: 1,
@@ -1174,11 +1183,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("assistant");
-            expect(messages[0].content).toBe("Hello Pablo!"); // No prefix
+            expect(messages[0].content).toBe("Hello Pablo!"); // No prefix (self)
         });
 
-        it("should NOT add attribution prefix to own broadcast (deprecated)", async () => {
-            // Transparent broadcasts (no recipient) - no prefix added
+        it("should NOT add attribution prefix to own broadcast", async () => {
+            // Transparent broadcasts (no recipient) - no prefix (self = Rule 1)
             store.addMessage({
                 pubkey: TRANSPARENT_PK,
                 ral: 1,
@@ -1191,11 +1200,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("assistant");
-            expect(messages[0].content).toBe("Announcement to all"); // No prefix
+            expect(messages[0].content).toBe("Announcement to all"); // No prefix (self)
         });
 
-        it("should NOT add attribution prefix to user messages (deprecated)", async () => {
-            // Pablo sends message to Transparent - no prefix added
+        it("should NOT add attribution prefix to user messages targeted to me", async () => {
+            // Pablo sends message to Transparent - no prefix (user targeted to me = Rule 5)
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Hello Transparent!",
@@ -1208,11 +1217,11 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("Hello Transparent!"); // No prefix
+            expect(messages[0].content).toBe("Hello Transparent!"); // No prefix (user → me)
         });
 
-        it("should NOT add attribution prefix to agent-to-agent messages (deprecated)", async () => {
-            // Agent1 sends message to Transparent - no prefix added
+        it("should add attribution prefix to agent-to-agent messages targeted to me", async () => {
+            // Agent1 sends message to Transparent - attribution prefix (agent → me = Rule 4)
             store.addMessage({
                 pubkey: AGENT1_PK,
                 ral: 1,
@@ -1227,11 +1236,14 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("Hey Transparent, can you help?"); // No prefix
+            // Agent sender → Rule 4 → [@agent] attribution prefix
+            const content = messages[0].content as string;
+            expect(content).toContain("Hey Transparent, can you help?");
+            expect(content).toMatch(/^\[@/); // Has attribution prefix
         });
 
-        it("should NOT add attribution prefix to observed messages (deprecated)", async () => {
-            // Pablo sends message to Agent1, Transparent is observing - no prefix
+        it("should add routing prefix to messages targeted elsewhere", async () => {
+            // Pablo sends message to Agent1, Transparent is observing - routing prefix (Rule 3)
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Agent1, what color?",
@@ -1244,11 +1256,14 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("Agent1, what color?"); // No prefix
+            // Targeted elsewhere → Rule 3 → routing prefix
+            const content = messages[0].content as string;
+            expect(content).toContain("Agent1, what color?");
+            expect(content).toMatch(/^\[@.*->.*@/); // Has routing prefix
         });
 
-        it("should NOT add attribution prefix to user broadcasts (deprecated)", async () => {
-            // Pablo broadcasts to all agents - no prefix added
+        it("should NOT add attribution prefix to user broadcasts", async () => {
+            // Pablo broadcasts to all agents - no prefix (user, no targeting = Rule 5)
             store.addMessage({
                 pubkey: PABLO_PK,
                 content: "Everyone, listen up!",
@@ -1260,7 +1275,7 @@ describe("ConversationStore", () => {
 
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("user");
-            expect(messages[0].content).toBe("Everyone, listen up!"); // No prefix
+            expect(messages[0].content).toBe("Everyone, listen up!"); // No prefix (user broadcast)
         });
 
         it("should exclude other active RAL messages from buildMessagesForRal", async () => {
