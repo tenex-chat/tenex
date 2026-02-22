@@ -344,6 +344,18 @@ export class AgentRegistry {
         this.agentsByPubkey.delete(agent.pubkey);
 
         logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
+
+        // Re-publish 14199 snapshot so the removed agent's p-tag is dropped
+        try {
+            await AgentProfilePublisher.publishProjectAgentSnapshot(this.projectDTag);
+        } catch (error) {
+            logger.warn("Failed to re-publish 14199 snapshot after agent removal", {
+                slug,
+                projectDTag: this.projectDTag,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+
         return true;
     }
 
