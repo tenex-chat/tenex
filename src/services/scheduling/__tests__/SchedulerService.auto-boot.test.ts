@@ -54,7 +54,7 @@ class TestableSchedulerService extends SchedulerService {
     /**
      * Public wrapper to test the private ensureProjectRunning method.
      */
-    public async testEnsureProjectRunning(projectId: string): Promise<void> {
+    public async testEnsureProjectRunning(projectId: string): Promise<boolean> {
         // biome-ignore lint/suspicious/noExplicitAny: Testing requires private access
         return (this as any).ensureProjectRunning(projectId);
     }
@@ -115,7 +115,7 @@ function getTestableInstance(): TestableSchedulerService {
 
     // Add testable methods to the singleton
     // biome-ignore lint/suspicious/noExplicitAny: Testing requires prototype manipulation
-    (instance as any).testEnsureProjectRunning = async function(projectId: string): Promise<void> {
+    (instance as any).testEnsureProjectRunning = async function(projectId: string): Promise<boolean> {
         return TestableSchedulerService.prototype.testEnsureProjectRunning.call(this, projectId);
     };
 
@@ -184,7 +184,9 @@ describe("SchedulerService Auto-Boot", () => {
             const projectId = "31933:owner:test-project";
 
             // Don't register any callbacks
-            await service.testEnsureProjectRunning(projectId);
+            const result = await service.testEnsureProjectRunning(projectId);
+
+            expect(result).toBe(true);
 
             // Should log debug message about callbacks not being registered
             expect(mockLogger.debug).toHaveBeenCalledWith(
@@ -201,8 +203,9 @@ describe("SchedulerService Auto-Boot", () => {
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            await service.testEnsureProjectRunning(projectId);
+            const result = await service.testEnsureProjectRunning(projectId);
 
+            expect(result).toBe(true);
             // State was checked but boot was NOT called
             expect(mockStateResolver).toHaveBeenCalledWith(projectId);
             expect(mockBootHandler).not.toHaveBeenCalled();
@@ -220,8 +223,9 @@ describe("SchedulerService Auto-Boot", () => {
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            await service.testEnsureProjectRunning(projectId);
+            const result = await service.testEnsureProjectRunning(projectId);
 
+            expect(result).toBe(true);
             // Both state check and boot should be called
             expect(mockStateResolver).toHaveBeenCalledWith(projectId);
             expect(mockBootHandler).toHaveBeenCalledWith(projectId);
@@ -235,7 +239,7 @@ describe("SchedulerService Auto-Boot", () => {
             );
         });
 
-        it("should log warning and continue when boot handler fails", async () => {
+        it("should return false and log warning when boot handler fails and project still not running", async () => {
             const projectId = "31933:owner:test-project";
             const mockError = new Error("Failed to start runtime");
             const mockBootHandler = vi.fn().mockRejectedValue(mockError);
@@ -244,18 +248,21 @@ describe("SchedulerService Auto-Boot", () => {
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            // Execute - should NOT throw
-            await service.testEnsureProjectRunning(projectId);
+            // Execute - should NOT throw, but should return false
+            const result = await service.testEnsureProjectRunning(projectId);
 
-            // Warning logged, no error thrown
+            expect(result).toBe(false);
             expect(mockBootHandler).toHaveBeenCalledWith(projectId);
+            // Warning logged without "continuing anyway" - task will be skipped by caller
             expect(mockLogger.warn).toHaveBeenCalledWith(
-                "Failed to auto-boot project for scheduled task, continuing anyway",
+                "Failed to auto-boot project for scheduled task",
                 {
                     projectId,
                     error: "Failed to start runtime",
                 }
             );
+            // State checked twice: initial check + final check after error
+            expect(mockStateResolver).toHaveBeenCalledTimes(2);
         });
 
         it("should treat ProjectAlreadyRunningError as benign (race condition)", async () => {
@@ -270,9 +277,10 @@ describe("SchedulerService Auto-Boot", () => {
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            // Execute - should NOT throw
-            await service.testEnsureProjectRunning(projectId);
+            // Execute - should NOT throw, and should succeed since project is now running
+            const result = await service.testEnsureProjectRunning(projectId);
 
+            expect(result).toBe(true);
             // Should re-check state after "already running" error
             expect(mockStateResolver).toHaveBeenCalledTimes(2);
             // Should log debug (not warn) for race condition
@@ -284,23 +292,25 @@ describe("SchedulerService Auto-Boot", () => {
             expect(mockLogger.warn).not.toHaveBeenCalled();
         });
 
-        it("should log warning if ProjectAlreadyRunningError but project still not running", async () => {
+        it("should return false if ProjectAlreadyRunningError but project still not running after all checks", async () => {
             const projectId = "31933:owner:test-project";
             const mockError = new ProjectAlreadyRunningError(projectId);
             const mockBootHandler = vi.fn().mockRejectedValue(mockError);
-            // Both calls: not running (edge case - error but project not actually running)
+            // All calls: not running (edge case - error but project not actually running)
             const mockStateResolver = vi.fn().mockReturnValue(false);
             const mockTargetResolver = vi.fn();
 
             service.setCallbacks(mockBootHandler, mockStateResolver, mockTargetResolver);
 
-            await service.testEnsureProjectRunning(projectId);
+            const result = await service.testEnsureProjectRunning(projectId);
 
-            // Should re-check state
-            expect(mockStateResolver).toHaveBeenCalledTimes(2);
-            // Should log warning since project is NOT running
+            expect(result).toBe(false);
+            // Should check state 3 times: initial check, re-check after ProjectAlreadyRunningError,
+            // and final check after logging the warning
+            expect(mockStateResolver).toHaveBeenCalledTimes(3);
+            // Should log warning since project is NOT running (no "continuing anyway")
             expect(mockLogger.warn).toHaveBeenCalledWith(
-                "Failed to auto-boot project for scheduled task, continuing anyway",
+                "Failed to auto-boot project for scheduled task",
                 {
                     projectId,
                     error: expect.stringContaining("already running"),
@@ -502,9 +512,10 @@ describe("SchedulerService Auto-Boot", () => {
             // Track call order
             const callOrder: string[] = [];
 
-            // Spy on ensureProjectRunning
+            // Spy on ensureProjectRunning - must return true so task proceeds to publish
             const ensureProjectRunningSpy = vi.fn().mockImplementation(async () => {
                 callOrder.push("ensureProjectRunning");
+                return true;
             });
             service.spyOnEnsureProjectRunning(ensureProjectRunningSpy);
 
@@ -529,10 +540,9 @@ describe("SchedulerService Auto-Boot", () => {
             expect(callOrder).toEqual(["ensureProjectRunning", "publishAgentTriggerEvent"]);
         });
 
-        it("should continue to publishAgentTriggerEvent even when ensureProjectRunning throws an error", async () => {
-            // Test graceful degradation: if ensureProjectRunning throws,
-            // executeTask should catch it and still call publishAgentTriggerEvent.
-            // This verifies resilience - boot failures don't block task execution.
+        it("should skip task when ensureProjectRunning throws, without calling publishAgentTriggerEvent", async () => {
+            // When ensureProjectRunning throws, executeTask skips publishing
+            // to prevent executing in an unknown project state.
 
             const service = getTestableInstance();
 
@@ -545,32 +555,33 @@ describe("SchedulerService Auto-Boot", () => {
                 projectId: "31933:owner:test-project",
             };
 
-            // Track call order
-            const callOrder: string[] = [];
-
             // Spy on ensureProjectRunning - simulate it THROWING an error
-            // This tests that executeTask handles failures gracefully
             const ensureProjectRunningSpy = vi.fn().mockImplementation(async () => {
-                callOrder.push("ensureProjectRunning");
                 throw new Error("Boot failed: unable to start project");
             });
             service.spyOnEnsureProjectRunning(ensureProjectRunningSpy);
 
-            // Spy on publishAgentTriggerEvent - should STILL be called after failure
-            const publishSpy = vi.fn().mockImplementation(async () => {
-                callOrder.push("publishAgentTriggerEvent");
-            });
+            // Spy on publishAgentTriggerEvent - should NOT be called when project can't start
+            const publishSpy = vi.fn();
             service.spyOnPublishAgentTriggerEvent(publishSpy);
 
             // Execute the task - should NOT throw despite ensureProjectRunning failing
             await service.testExecuteTask(task);
 
-            // Both methods should have been called
+            // ensureProjectRunning was called and threw
             expect(ensureProjectRunningSpy).toHaveBeenCalledTimes(1);
-            expect(publishSpy).toHaveBeenCalledTimes(1);
 
-            // Verify order: ensureProjectRunning ran (and failed), then publish proceeded
-            expect(callOrder).toEqual(["ensureProjectRunning", "publishAgentTriggerEvent"]);
+            // publishAgentTriggerEvent should NOT be called - task is skipped
+            expect(publishSpy).not.toHaveBeenCalled();
+
+            // Should log skip warning
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                expect.stringContaining("Skipping scheduled task execution"),
+                expect.objectContaining({
+                    taskId: task.id,
+                    projectId: task.projectId,
+                })
+            );
         });
     });
 });
