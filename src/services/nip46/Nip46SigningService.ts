@@ -17,15 +17,14 @@ const DEFAULTS = {
     SIGNING_TIMEOUT_MS: 30_000,
     CONNECT_TIMEOUT_MS: 30_000,
     MAX_RETRIES: 2,
-    FALLBACK_TO_BACKEND: true,
 } as const;
 
 /**
  * Result of a NIP-46 signing attempt.
  *
  * - `signed` — signing succeeded
- * - `user_rejected` — user/bunker explicitly rejected; caller should NOT fall back
- * - `failed` — timeout/network error; fallback is appropriate
+ * - `user_rejected` — user/bunker explicitly rejected
+ * - `failed` — timeout/network error; event will not be published
  */
 export type SignResult =
     | { outcome: "signed" }
@@ -53,7 +52,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
  * - Lazy initialization of NDKNip46Signer per owner pubkey
  * - Timeout-wrapped signing with configurable retries
  * - Per-owner mutex to serialize signing requests
- * - Graceful fallback to backend signing when NIP-46 is unavailable
+ * - Clear failure logging when signing fails (no fallback to backend key)
  */
 export class Nip46SigningService {
     private static instance: Nip46SigningService | null = null;
@@ -137,14 +136,6 @@ export class Nip46SigningService {
             return config.getConfig().nip46?.maxRetries ?? DEFAULTS.MAX_RETRIES;
         } catch {
             return DEFAULTS.MAX_RETRIES;
-        }
-    }
-
-    shouldFallbackToBackend(): boolean {
-        try {
-            return config.getConfig().nip46?.fallbackToBackendSigning ?? DEFAULTS.FALLBACK_TO_BACKEND;
-        } catch {
-            return DEFAULTS.FALLBACK_TO_BACKEND;
         }
     }
 

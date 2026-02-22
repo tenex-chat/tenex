@@ -77,7 +77,6 @@ export interface TenexConfig {
         enabled?: boolean;                    // Master switch (default: false)
         signingTimeoutMs?: number;            // Per-request timeout (default: 30000)
         maxRetries?: number;                  // Per-request retries (default: 2)
-        fallbackToBackendSigning?: boolean;   // Fallback to backend key if NIP-46 fails (default: true)
         owners?: Record<string, {             // Per-owner config, keyed by hex pubkey
             bunkerUri?: string;               // bunker://pubkey?relay=wss://...
         }>;
@@ -151,7 +150,6 @@ export const TenexConfigSchema = z.object({
             enabled: z.boolean().optional(),
             signingTimeoutMs: z.number().optional(),
             maxRetries: z.number().optional(),
-            fallbackToBackendSigning: z.boolean().optional(),
             owners: z
                 .record(
                     z.string(),
