@@ -17,6 +17,12 @@ const grepSchema = z.object({
         .describe(
             "Regex pattern to search for in file contents (e.g., 'function\\s+\\w+', 'TODO', 'log.*Error')"
         ),
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're searching for this pattern (5-10 words). Helps provide human-readable context for the operation."
+        ),
     path: z
         .string()
         .optional()
@@ -497,7 +503,7 @@ export function createFsGrepTool(context: ToolExecutionContext): AISdkTool {
     Object.defineProperty(toolInstance, "getHumanReadableContent", {
         value: (input: GrepInput) => {
             const pathInfo = input.path ? ` in ${input.path}` : "";
-            return `Searching for '${input.pattern}'${pathInfo}`;
+            return `Searching for '${input.pattern}'${pathInfo} (${input.description})`;
         },
         enumerable: false,
         configurable: true,
