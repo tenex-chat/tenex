@@ -189,8 +189,14 @@ export class AgentRegistry {
         logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
 
         // Republish kind:0 profiles for all agents now that the project has booted
+        // Fire-and-forget: don't block boot waiting for profile publishes (especially NIP-46 signing)
         if (ndkProject) {
-            await this.republishAgentProfiles(ndkProject);
+            this.republishAgentProfiles(ndkProject).catch((error) => {
+                logger.warn("Background agent profile republishing failed", {
+                    projectDTag: this.projectDTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
         }
     }
 
@@ -345,16 +351,8 @@ export class AgentRegistry {
 
         logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
 
-        // Re-publish 14199 snapshot so the removed agent's p-tag is dropped
-        try {
-            await AgentProfilePublisher.publishProjectAgentSnapshot(this.projectDTag);
-        } catch (error) {
-            logger.warn("Failed to re-publish 14199 snapshot after agent removal", {
-                slug,
-                projectDTag: this.projectDTag,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
+        // Schedule debounced 14199 snapshot re-publish so the removed agent's p-tag is dropped
+        AgentProfilePublisher.publishProjectAgentSnapshot(this.projectDTag);
 
         return true;
     }
