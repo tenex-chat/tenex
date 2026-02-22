@@ -710,22 +710,23 @@ export class SchedulerService {
      * are fully initialized.
      *
      * @param projectId - The project ID to ensure is running
+     * @returns true if the project is confirmed running, false if it could not be started
      */
-    private async ensureProjectRunning(projectId: string): Promise<void> {
+    private async ensureProjectRunning(projectId: string): Promise<boolean> {
         // If no callbacks registered, we're running outside daemon mode
-        // (e.g., in tests or standalone CLI) - skip auto-boot
+        // (e.g., in tests or standalone CLI) - skip auto-boot, assume ok
         if (!this.projectStateResolver || !this.projectBootHandler) {
             logger.debug("Project callbacks not registered, skipping auto-boot", {
                 projectId,
             });
-            return;
+            return true;
         }
 
         try {
             // Check if project is already running
             if (this.projectStateResolver(projectId)) {
                 // Project already running, nothing to do
-                return;
+                return true;
             }
 
             logger.info("Project not running, booting for scheduled task", {
@@ -748,6 +749,8 @@ export class SchedulerService {
             trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_complete", {
                 "project.id": projectId,
             });
+
+            return true;
         } catch (error) {
             // Check if this is a benign "already running" error (race condition)
             // This can happen if the project started between our check and boot attempt
@@ -762,13 +765,12 @@ export class SchedulerService {
                     trace.getActiveSpan()?.addEvent("scheduler.project_auto_boot_race_resolved", {
                         "project.id": projectId,
                     });
-                    return;
+                    return true;
                 }
             }
 
-            // Log warning but continue - the task may still work or fail gracefully
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.warn("Failed to auto-boot project for scheduled task, continuing anyway", {
+            logger.warn("Failed to auto-boot project for scheduled task", {
                 projectId,
                 error: errorMessage,
             });
@@ -777,12 +779,23 @@ export class SchedulerService {
                 "project.id": projectId,
                 "error": errorMessage,
             });
+
+            // Final check: is the project running despite the error?
+            if (this.projectStateResolver(projectId)) {
+                return true;
+            }
+
+            return false;
         }
     }
 
     /**
      * Execute a scheduled task. Throws on failure to allow callers to handle errors.
      * Updates lastRun only AFTER successful publish to ensure failed tasks can be retried.
+     *
+     * Skips execution if the task's project cannot be started, preventing events
+     * from being published into an ambiguous routing state where they might be
+     * routed to the wrong project via P-tag fallback.
      */
     private async executeTask(task: ScheduledTask): Promise<void> {
         trace.getActiveSpan()?.addEvent("scheduler.task_executing", {
@@ -790,14 +803,13 @@ export class SchedulerService {
         });
 
         // Ensure project is running before executing task (auto-boot if needed)
-        // Defense in depth: catch any unexpected errors from ensureProjectRunning
-        // The method should never throw (catches internally), but if it does,
-        // we still want to attempt publishing the trigger event.
+        // If the project can't be started, skip execution to prevent wrong-project routing
+        let projectRunning = false;
         try {
-            await this.ensureProjectRunning(task.projectId);
+            projectRunning = await this.ensureProjectRunning(task.projectId);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.warn("Unexpected error from ensureProjectRunning, continuing with task execution", {
+            logger.warn("Unexpected error from ensureProjectRunning", {
                 taskId: task.id,
                 projectId: task.projectId,
                 error: errorMessage,
@@ -807,6 +819,24 @@ export class SchedulerService {
                 "project.id": task.projectId,
                 "error": errorMessage,
             });
+        }
+
+        if (!projectRunning) {
+            logger.warn(
+                "Skipping scheduled task execution — project not running and could not be started. " +
+                "Task will be retried on next scheduled run or daemon restart.",
+                {
+                    taskId: task.id,
+                    projectId: task.projectId,
+                    schedule: task.schedule,
+                    title: task.title,
+                }
+            );
+            trace.getActiveSpan()?.addEvent("scheduler.task_skipped_no_project", {
+                "task.id": task.id,
+                "project.id": task.projectId,
+            });
+            return;
         }
 
         // Try to get NDK instance if not already set
