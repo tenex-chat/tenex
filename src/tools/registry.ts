@@ -57,6 +57,7 @@ import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscript
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
 import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
 import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
+import { createMcpResourceReadTool } from "./implementations/mcp_resource_read";
 import { createReportDeleteTool } from "./implementations/report_delete";
 import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
@@ -124,6 +125,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     rag_query: { hasSideEffects: false },
     rag_subscription_list: { hasSideEffects: false },
     rag_subscription_get: { hasSideEffects: false },
+    mcp_resource_read: { hasSideEffects: false },
     bug_list: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
@@ -217,6 +219,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     rag_subscription_get: createRAGSubscriptionGetTool,
     rag_subscription_delete: createRAGSubscriptionDeleteTool,
 
+    // MCP tools
+    mcp_resource_read: createMcpResourceReadTool,
+
     // Alpha mode bug reporting tools
     bug_list: createBugListTool,
     bug_report_create: createBugReportCreateTool,
@@ -299,6 +304,9 @@ const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_ad
 
 /** File editing tools - auto-injected when fs_write is available */
 const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
+
+/** File search tools - auto-injected when fs_read is available */
+const FILE_SEARCH_TOOLS: ToolName[] = ["fs_glob", "fs_grep"];
 
 /** Todo tools - for restricted agent execution (reminder mode) */
 const TODO_TOOLS: ToolName[] = ["todo_write"];
@@ -468,6 +476,16 @@ export function getToolsObject(
         for (const editToolName of FILE_EDIT_TOOLS) {
             if (!regularTools.includes(editToolName)) {
                 regularTools.push(editToolName);
+            }
+        }
+    }
+
+    // Auto-inject search tools when fs_read is available
+    // fs_read implies full read capability: glob + grep
+    if (regularTools.includes("fs_read")) {
+        for (const searchToolName of FILE_SEARCH_TOOLS) {
+            if (!regularTools.includes(searchToolName)) {
+                regularTools.push(searchToolName);
             }
         }
     }

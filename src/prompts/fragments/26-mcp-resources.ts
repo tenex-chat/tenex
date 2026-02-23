@@ -1,4 +1,6 @@
 import type { experimental_MCPClient } from "@ai-sdk/mcp";
+import type { MCPManager } from "@/services/mcp/MCPManager";
+import { logger } from "@/utils/logger";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
@@ -16,6 +18,67 @@ interface McpResourcesFragmentArgs {
     agentPubkey: string;
     mcpEnabled: boolean;
     resourcesPerServer: ResourcesPerServer[];
+}
+
+/**
+ * Extract unique MCP server names from agent's tool list.
+ * MCP tools are namespaced as: mcp__serverName__toolName
+ */
+export function extractAgentMcpServers(agentTools: string[]): string[] {
+    const servers = new Set<string>();
+    for (const tool of agentTools) {
+        if (tool.startsWith("mcp__")) {
+            const parts = tool.split("__");
+            if (parts.length >= 3) {
+                servers.add(parts[1]); // parts[1] is server name
+            }
+        }
+    }
+    return Array.from(servers);
+}
+
+/**
+ * Fetch resources from MCP servers that the agent has access to.
+ * Agent has access to a server if it has any tools from that server (mcp__serverName__*).
+ */
+export async function fetchAgentMcpResources(
+    agentTools: string[],
+    mcpManager: MCPManager
+): Promise<ResourcesPerServer[]> {
+    const agentMcpServers = extractAgentMcpServers(agentTools);
+
+    if (agentMcpServers.length === 0) {
+        return [];
+    }
+
+    const runningServers = mcpManager.getRunningServers();
+
+    // Only show resources from servers the agent has tools for AND are running
+    const agentRunningServers = agentMcpServers.filter(s => runningServers.includes(s));
+
+    if (agentRunningServers.length === 0) {
+        return [];
+    }
+
+    const resourcesPerServer = await Promise.all(
+        agentRunningServers.map(async (serverName: string) => {
+            try {
+                const [resources, templates] = await Promise.all([
+                    mcpManager.listResources(serverName),
+                    mcpManager.listResourceTemplates(serverName),
+                ]);
+                logger.debug(
+                    `Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`
+                );
+                return { serverName, resources, templates };
+            } catch (error) {
+                logger.warn(`Failed to fetch MCP resources from '${serverName}':`, error);
+                return { serverName, resources: [], templates: [] };
+            }
+        })
+    );
+
+    return resourcesPerServer;
 }
 
 /**
@@ -129,20 +192,22 @@ export const mcpResourcesFragment: PromptFragment<McpResourcesFragmentArgs> = {
         }
 
         // Add usage instructions
-        sections.push("## How to Subscribe to Resources\n");
-        sections.push("Use the `rag_subscription_create` tool with the following parameters:\n");
-        sections.push(
-            '- **subscriptionId**: Unique ID for your subscription (e.g., "global-feed")'
-        );
-        sections.push('- **mcpServerId**: The server name shown above (e.g., "nostr-provider")');
-        sections.push("- **resourceUri**: The exact URI shown in parentheses above");
-        sections.push("- **ragCollection**: Name of the RAG collection to ingest updates into");
-        sections.push("- **description**: What this subscription does\n");
+        sections.push("## How to Use MCP Resources\n");
 
-        sections.push(
-            "**For templates:** You must expand the URI template by replacing `{parameter}` placeholders with actual values."
-        );
-        sections.push("For example: `nostr://feed/{pubkey}/1` → `nostr://feed/abc123.../1`\n");
+        sections.push("### On-Demand Reading\n");
+        sections.push("Use the `mcp_resource_read` tool to fetch resource content immediately:\n");
+        sections.push('- **serverName**: The server name shown above (e.g., "nostr-provider")');
+        sections.push("- **resourceUri**: The exact URI shown in parentheses");
+        sections.push("- **description**: Why you're reading this resource\n");
+        sections.push("For templates, provide `templateParams` to expand `{placeholders}`.\n");
+
+        sections.push("### Persistent Subscriptions\n");
+        sections.push("Use the `rag_subscription_create` tool to stream updates into RAG collections:\n");
+        sections.push('- **subscriptionId**: Unique ID for your subscription (e.g., "global-feed")');
+        sections.push('- **mcpServerId**: The server name shown above (e.g., "nostr-provider")');
+        sections.push("- **resourceUri**: The exact URI (templates must be expanded first)");
+        sections.push("- **ragCollection**: RAG collection name");
+        sections.push("- **description**: What this subscription does\n");
 
         sections.push(
             `**Summary:** ${totalResources} direct resource${totalResources === 1 ? "" : "s"}, ${totalTemplates} template${totalTemplates === 1 ? "" : "s"} available`

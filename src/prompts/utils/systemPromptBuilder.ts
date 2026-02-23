@@ -18,6 +18,7 @@ import type { ModelMessage } from "ai";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
+import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
 
 /**
  * Module-level cache for PromptCompilerService instances per project+agent.
@@ -233,37 +234,17 @@ async function addCoreAgentFragments(
         logger.debug("Could not get memorized reports from cache:", error);
     }
 
-    // Add MCP resources if agent has RAG subscription tools and mcpManager is available
-    const hasRagSubscriptionTools = agent.tools.includes("rag_subscription_create");
 
-    if (hasRagSubscriptionTools && mcpManager) {
-        const runningServers = mcpManager.getRunningServers();
-
-        // Fetch resources from all running servers
-        const resourcesPerServer = await Promise.all(
-            runningServers.map(async (serverName: string) => {
-                try {
-                    const [resources, templates] = await Promise.all([
-                        mcpManager.listResources(serverName),
-                        mcpManager.listResourceTemplates(serverName),
-                    ]);
-                    logger.debug(
-                        `Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`
-                    );
-                    return { serverName, resources, templates };
-                } catch (error) {
-                    logger.warn(`Failed to fetch MCP resources from '${serverName}':`, error);
-                    // Return empty resources if server fails
-                    return { serverName, resources: [], templates: [] };
-                }
-            })
-        );
-
-        builder.add("mcp-resources", {
-            agentPubkey: agent.pubkey,
-            mcpEnabled: true,
-            resourcesPerServer,
-        });
+    // Add MCP resources if agent has any MCP tools and mcpManager is available
+    if (mcpManager) {
+        const resourcesPerServer = await fetchAgentMcpResources(agent.tools, mcpManager);
+        if (resourcesPerServer.length > 0) {
+            builder.add("mcp-resources", {
+                agentPubkey: agent.pubkey,
+                mcpEnabled: true,
+                resourcesPerServer,
+            });
+        }
     }
 
     // Add RAG collection attribution - shows agents their contributions to RAG collections

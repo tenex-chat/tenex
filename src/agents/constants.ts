@@ -21,6 +21,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "conversation_list", // All agents should list conversations
     // Process control
     "kill", // All agents should be able to terminate processes
+    // MCP resource reading (self-gating: only works if agent has MCP tools from that server)
+    "mcp_resource_read", // All agents can read MCP resources from servers they have tools for
 ] as const;
 
 /**
@@ -33,6 +35,12 @@ export const DELEGATE_TOOLS: ToolName[] = [
     "delegate_followup",
 ] as const;
 
+
+/**
+ * Tools auto-injected at runtime based on capability (not announced in 24010).
+ * fs_read implies fs_glob + fs_grep; fs_write implies fs_edit.
+ */
+export const AUTO_INJECTED_TOOLS: ToolName[] = ["fs_edit", "fs_glob", "fs_grep"];
 
 /**
  * Context-sensitive tools that are auto-injected based on runtime conditions.
