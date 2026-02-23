@@ -68,7 +68,6 @@ describe("ClaudeCodeProvider", () => {
             it("should disable all TENEX-controlled built-ins unconditionally", () => {
                 const disallowed = getDisallowedTools([], []);
 
-                expect(disallowed).toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -79,13 +78,21 @@ describe("ClaudeCodeProvider", () => {
                 expect(disallowed).toContain("TaskOutput");
             });
 
+            it("should NEVER disable Read (needed for Claude Code's large tool result files)", () => {
+                // Even with fs_read, Read must stay enabled so the agent can
+                // access large MCP tool results that Claude Code saves to files
+                expect(getDisallowedTools([], [])).not.toContain("Read");
+                expect(getDisallowedTools(["fs_read"], [])).not.toContain("Read");
+                expect(getDisallowedTools(["fs_read", "fs_write", "shell"], [])).not.toContain("Read");
+            });
+
             it("should disable all TENEX-controlled built-ins regardless of agent tools", () => {
                 const disallowed = getDisallowedTools(
                     ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep", "shell"],
                     []
                 );
 
-                expect(disallowed).toContain("Read");
+                expect(disallowed).not.toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -145,7 +152,7 @@ describe("ClaudeCodeProvider", () => {
                 );
 
                 expect(disallowed).toContain("AskUserQuestion");
-                expect(disallowed).toContain("Read");
+                expect(disallowed).not.toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -165,7 +172,6 @@ describe("ClaudeCodeProvider", () => {
                 const disallowed = getDisallowedTools(["delegate", "ask", "lesson_learn"], []);
 
                 // Always disabled
-                expect(disallowed).toContain("Read");
                 expect(disallowed).toContain("Write");
                 expect(disallowed).toContain("Edit");
                 expect(disallowed).toContain("Glob");
@@ -177,6 +183,10 @@ describe("ClaudeCodeProvider", () => {
 
                 // delegate is provided, so Task should be disabled
                 expect(disallowed).toContain("Task");
+
+                // No fs_read provided, so Read should NOT be disabled
+                // (needed for Claude Code's large tool result files)
+                expect(disallowed).not.toContain("Read");
 
                 // No web tools provided, so those built-ins should NOT be disabled
                 expect(disallowed).not.toContain("WebFetch");
@@ -202,7 +212,8 @@ describe("ClaudeCodeProvider", () => {
             const settings = model.agentSettings as { disallowedTools?: string[] };
             expect(settings.disallowedTools).toBeDefined();
             expect(settings.disallowedTools).toContain("AskUserQuestion");
-            expect(settings.disallowedTools).toContain("Read");
+            // Read is never disabled — needed for Claude Code's large tool result files
+            expect(settings.disallowedTools).not.toContain("Read");
             expect(settings.disallowedTools).toContain("Write");
             expect(settings.disallowedTools).toContain("Task");
         });
@@ -219,7 +230,8 @@ describe("ClaudeCodeProvider", () => {
             });
 
             const settings = model.agentSettings as { disallowedTools?: string[] };
-            expect(settings.disallowedTools).toContain("Read");
+            // Read is NOT disabled here because no fs_read is provided
+            expect(settings.disallowedTools).not.toContain("Read");
             expect(settings.disallowedTools).toContain("Write");
             expect(settings.disallowedTools).toContain("Edit");
             expect(settings.disallowedTools).toContain("Glob");
