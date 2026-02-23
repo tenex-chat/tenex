@@ -210,7 +210,7 @@ export class RagSubscriptionService {
             // Try to subscribe to resource updates
             let subscriptionSupported = true;
             try {
-                // Register notification handler
+                // CRITICAL: Register handler FIRST, then subscribe
                 mcpManager.onResourceNotification(subscription.mcpServerId, listener);
 
                 // Subscribe to resource updates
@@ -234,12 +234,14 @@ export class RagSubscriptionService {
                     error instanceof Error &&
                     error.message.includes("does not support resource subscriptions")
                 ) {
-                    // Server doesn't support subscriptions, use polling instead
+                    // Server doesn't support subscriptions, gracefully degrade to polling
                     subscriptionSupported = false;
                     logger.warn(
-                        `Server '${subscription.mcpServerId}' does not support resource subscriptions. Subscription '${subscription.subscriptionId}' will use polling mode. Call pollResource() manually or set up a polling interval.`
+                        `Server '${subscription.mcpServerId}' does not support resource subscriptions. ` +
+                        `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
+                        `Call pollResource() manually or set up a polling interval.`
                     );
-                    process.exit(1);
+                    // Don't exit - gracefully degrade to polling mode
                 } else {
                     throw error;
                 }

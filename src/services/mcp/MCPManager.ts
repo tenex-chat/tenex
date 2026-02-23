@@ -1,7 +1,7 @@
 /**
- * MCPManager - AI SDK Native MCP Integration
+ * MCPManager - Official MCP SDK Integration
  *
- * Uses AI SDK's experimental MCP client for cleaner, more maintainable integration
+ * Uses the official @modelcontextprotocol/sdk for full MCP spec compliance
  */
 
 import * as path from "node:path";
@@ -10,26 +10,24 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import { config as configService } from "@/services/ConfigService";
-import {
-    type experimental_MCPClient,
-    experimental_createMCPClient,
-} from "@ai-sdk/mcp";
-import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type {
+    Tool as MCPTool,
+    ReadResourceResult,
+    Resource,
+    ResourceTemplate,
+} from "@modelcontextprotocol/sdk/types.js";
+import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { tool } from "ai";
+import type { Tool as CoreTool } from "ai";
+import { z } from "zod";
 
-// Extract types from the MCPClient method return types
-type experimental_MCPResource = Awaited<ReturnType<experimental_MCPClient["listResources"]>>["resources"][number];
-type experimental_MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
-type experimental_MCPReadResourceResult = Awaited<ReturnType<experimental_MCPClient["readResource"]>>;
-type MCPToolSet = Awaited<ReturnType<experimental_MCPClient["tools"]>>;
-type MCPResourceSubscriptionClient = {
-    subscribeResource?: (resourceUri: string) => Promise<void>;
-    unsubscribeResource?: (resourceUri: string) => Promise<void>;
-    onResourceUpdated?: (handler: (notification: { uri: string }) => void | Promise<void>) => void;
-};
+type MCPToolSet = Record<string, CoreTool<unknown, unknown>>;
 
 interface MCPClientEntry {
-    client: experimental_MCPClient;
-    transport: Experimental_StdioMCPTransport;
+    client: Client;
+    transport: StdioClientTransport;
     serverName: string;
     config: MCPServerConfig;
 }
@@ -40,6 +38,59 @@ export class MCPManager {
     private metadataPath?: string;
     private workingDirectory?: string;
     private cachedTools: MCPToolSet = {};
+
+    /**
+     * Convert an MCP tool (JSON Schema) to an AI SDK tool (Zod)
+     * Uses Zod's built-in fromJSONSchema converter
+     */
+    private convertMCPToolToAISdkTool(
+        mcpTool: MCPTool,
+        serverName: string,
+        toolName: string
+    ): CoreTool<unknown, unknown> {
+        // Convert JSON Schema to Zod schema
+        // The inputSchema from MCP is compatible with JSONSchema type
+        const inputSchema = z.fromJSONSchema(mcpTool.inputSchema as any) as z.ZodTypeAny;
+
+        const result = tool({
+            description: mcpTool.description || `Tool ${toolName} from ${serverName}`,
+            parameters: inputSchema,
+            execute: async (args: any) => {
+                const entry = this.clients.get(serverName);
+                if (!entry) {
+                    throw new Error(`MCP server '${serverName}' not found`);
+                }
+
+                try {
+                    const callResult = await entry.client.callTool({
+                        name: toolName,
+                        arguments: args as Record<string, unknown>
+                    });
+
+                    // Extract text content from MCP CallToolResult
+                    if (callResult.content && Array.isArray(callResult.content)) {
+                        const textContent = callResult.content
+                            .filter((c): c is { type: 'text'; text: string } =>
+                                typeof c === 'object' && 'text' in c
+                            )
+                            .map(c => c.text)
+                            .join('\n');
+                        return textContent || JSON.stringify(callResult);
+                    }
+
+                    return JSON.stringify(callResult);
+                } catch (error) {
+                    logger.error(
+                        `Failed to call MCP tool '${toolName}':`,
+                        formatAnyError(error)
+                    );
+                    throw error;
+                }
+            }
+        });
+
+        return result as CoreTool<unknown, unknown>;
+    }
 
     /**
      * Initialize MCP manager with project paths
@@ -152,7 +203,8 @@ export class MCPManager {
             "server.command": config.command,
         });
 
-        const transport = new Experimental_StdioMCPTransport({
+        // Create transport
+        const transport = new StdioClientTransport({
             command: config.command,
             args: config.args,
             env: mergedEnv,
@@ -160,24 +212,34 @@ export class MCPManager {
         });
 
         try {
-            const client = await experimental_createMCPClient({
-                transport,
-                name: `tenex-${name}`,
-            });
+            // Create client
+            const client = new Client(
+                {
+                    name: `tenex-${name}`,
+                    version: '1.0.0'
+                },
+                {
+                    capabilities: {}
+                }
+            );
 
-            // Perform health check - try to get tools
+            // Connect to server
+            await client.connect(transport);
+
+            // Health check - try listing tools with timeout
             const timeoutPromise = new Promise((_, reject) =>
                 setTimeout(() => reject(new Error("Health check timeout")), 5000)
             );
 
             try {
-                await Promise.race([client.tools(), timeoutPromise]);
+                await Promise.race([client.listTools(), timeoutPromise]);
             } catch (error) {
                 logger.error(`MCP server '${name}' failed health check:`, error);
-                await transport.close();
+                await client.close();
                 return;
             }
 
+            // Store client entry
             this.clients.set(name, {
                 client,
                 transport,
@@ -185,16 +247,15 @@ export class MCPManager {
                 config,
             });
 
+            logger.info(`MCP server '${name}' started successfully`);
+
+            // Emit telemetry
             trace.getActiveSpan()?.addEvent("mcp.server_started", {
                 "server.name": name,
             });
         } catch (error) {
-            logger.error(`Failed to create MCP client for '${name}':`, formatAnyError(error));
-            try {
-                await transport.close();
-            } catch {
-                // Ignore close errors
-            }
+            logger.error(`Failed to start MCP server '${name}':`, formatAnyError(error));
+            throw error;
         }
     }
 
@@ -203,18 +264,22 @@ export class MCPManager {
 
         for (const [serverName, entry] of this.clients) {
             try {
-                const serverTools = await entry.client.tools({
-                });
+                // List tools from MCP server (official SDK method)
+                const { tools: mcpTools } = await entry.client.listTools();
 
-                // Namespace the tools with server name
-                for (const [toolName, tool] of Object.entries(serverTools)) {
-                    const namespacedName = `mcp__${serverName}__${toolName}`;
-                    tools[namespacedName] = tool;
+                // Convert each MCP tool to AI SDK tool
+                for (const mcpTool of mcpTools) {
+                    const namespacedName = `mcp__${serverName}__${mcpTool.name}`;
+                    tools[namespacedName] = this.convertMCPToolToAISdkTool(
+                        mcpTool,
+                        serverName,
+                        mcpTool.name
+                    );
                 }
 
                 trace.getActiveSpan()?.addEvent("mcp.tools_discovered", {
                     "server.name": serverName,
-                    "tools.count": Object.keys(serverTools).length,
+                    "tools.count": mcpTools.length,
                 });
             } catch (error) {
                 logger.error(
@@ -260,7 +325,9 @@ export class MCPManager {
 
     private async shutdownServer(name: string, entry: MCPClientEntry): Promise<void> {
         try {
-            await entry.transport.close();
+            // Official SDK: close() closes both client and transport
+            await entry.client.close();
+
             trace.getActiveSpan()?.addEvent("mcp.server_shutdown", {
                 "server.name": name,
             });
@@ -326,7 +393,7 @@ export class MCPManager {
      * @param serverName - Name of the MCP server
      * @returns Array of resources from that server
      */
-    async listResources(serverName: string): Promise<experimental_MCPResource[]> {
+    async listResources(serverName: string): Promise<Resource[]> {
         const entry = this.clients.get(serverName);
         if (!entry) {
             const validServers = this.getRunningServers();
@@ -350,8 +417,8 @@ export class MCPManager {
      * List all resources from all connected MCP servers
      * @returns Map of server names to their resources
      */
-    async listAllResources(): Promise<Map<string, experimental_MCPResource[]>> {
-        const resourcesMap = new Map<string, experimental_MCPResource[]>();
+    async listAllResources(): Promise<Map<string, Resource[]>> {
+        const resourcesMap = new Map<string, Resource[]>();
 
         for (const [serverName] of this.clients) {
             try {
@@ -374,7 +441,7 @@ export class MCPManager {
      * @param serverName - Name of the MCP server
      * @returns Array of resource templates from that server
      */
-    async listResourceTemplates(serverName: string): Promise<experimental_MCPResourceTemplate[]> {
+    async listResourceTemplates(serverName: string): Promise<ResourceTemplate[]> {
         const entry = this.clients.get(serverName);
         if (!entry) {
             const validServers = this.getRunningServers();
@@ -401,8 +468,8 @@ export class MCPManager {
      * List all resource templates from all connected MCP servers
      * @returns Map of server names to their resource templates
      */
-    async listAllResourceTemplates(): Promise<Map<string, experimental_MCPResourceTemplate[]>> {
-        const templatesMap = new Map<string, experimental_MCPResourceTemplate[]>();
+    async listAllResourceTemplates(): Promise<Map<string, ResourceTemplate[]>> {
+        const templatesMap = new Map<string, ResourceTemplate[]>();
 
         for (const [serverName] of this.clients) {
             try {
@@ -429,7 +496,7 @@ export class MCPManager {
     async readResource(
         serverName: string,
         uri: string
-    ): Promise<experimental_MCPReadResourceResult> {
+    ): Promise<ReadResourceResult> {
         const entry = this.clients.get(serverName);
         if (!entry) {
             const validServers = this.getRunningServers();
@@ -495,16 +562,13 @@ export class MCPManager {
                 validServers.length > 0
                     ? `Valid servers: ${validServers.join(", ")}`
                     : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
+            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
         }
 
         try {
-            // Experimental MCP feature not yet in AI SDK types
-            const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
-            if (!resourceClient.subscribeResource) {
-                throw new Error(`MCP client for '${serverName}' does not support resource subscriptions`);
-            }
-            await resourceClient.subscribeResource(resourceUri);
+            // Official SDK method - properly supported
+            await entry.client.subscribeResource({ uri: resourceUri });
+
             trace.getActiveSpan()?.addEvent("mcp.resource_subscribed", {
                 "server.name": serverName,
                 "resource.uri": resourceUri,
@@ -531,16 +595,13 @@ export class MCPManager {
                 validServers.length > 0
                     ? `Valid servers: ${validServers.join(", ")}`
                     : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
+            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
         }
 
         try {
-            // Experimental MCP feature not yet in AI SDK types
-            const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
-            if (!resourceClient.unsubscribeResource) {
-                throw new Error(`MCP client for '${serverName}' does not support resource unsubscriptions`);
-            }
-            await resourceClient.unsubscribeResource(resourceUri);
+            // Official SDK method - properly supported
+            await entry.client.unsubscribeResource({ uri: resourceUri });
+
             trace.getActiveSpan()?.addEvent("mcp.resource_unsubscribed", {
                 "server.name": serverName,
                 "resource.uri": resourceUri,
@@ -556,8 +617,7 @@ export class MCPManager {
 
     /**
      * Register a handler for resource update notifications
-     * @param serverName - Name of the MCP server
-     * @param handler - Callback to handle resource updates
+     * Must be called BEFORE subscribeToResource
      */
     onResourceNotification(
         serverName: string,
@@ -565,20 +625,21 @@ export class MCPManager {
     ): void {
         const entry = this.clients.get(serverName);
         if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found or not running. ${serverList}`);
+            throw new Error(`MCP server '${serverName}' not found`);
         }
 
-        // Experimental MCP feature not yet in AI SDK types
-        const resourceClient = entry.client as experimental_MCPClient & MCPResourceSubscriptionClient;
-        if (!resourceClient.onResourceUpdated) {
-            throw new Error(`MCP client for '${serverName}' does not support resource notifications`);
-        }
-        resourceClient.onResourceUpdated(handler);
+        // Register notification handler with the MCP client
+        entry.client.setNotificationHandler(
+            ResourceUpdatedNotificationSchema,
+            async (notification) => {
+                // Extract URI from notification params
+                const uri = notification.params.uri;
+                if (uri) {
+                    await handler({ uri });
+                }
+            }
+        );
+
         trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {
             "server.name": serverName,
         });

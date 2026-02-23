@@ -843,7 +843,8 @@ export class Daemon {
         }
 
         // Register with global 14199 service
-        OwnerAgentListService.getInstance().registerAgents([agent.pubkey]);
+        const dTag = projectId.split(":").slice(2).join(":");
+        OwnerAgentListService.getInstance().registerAgents(dTag, [agent.pubkey]);
 
         logger.info("Dynamic agent added to routing", {
             projectId,
