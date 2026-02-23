@@ -1809,20 +1809,22 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       });
     }
 
-    // Abort the target agent
+    // Abort the target agent's RAL controllers and LLM stream
     const directAbortCount = this.abortAllForAgent(agentPubkey, conversationId);
-    if (directAbortCount > 0) {
+    const llmAborted = llmOpsRegistry.stopByAgentAndConversation(agentPubkey, conversationId, reason);
+
+    // Always mark killed + block — we were asked to stop this agent.
+    // Unconditional to handle the timing window where an LLM op exists but RAL controller doesn't yet.
+    this.markAgentConversationKilled(agentPubkey, conversationId);
+    const conversation = ConversationStore.get(conversationId);
+    if (conversation) {
+      conversation.blockAgent(agentPubkey);
+    }
+
+    if (directAbortCount > 0 || llmAborted) {
       abortedTuples.push({ conversationId, agentPubkey });
 
-      // RACE CONDITION FIX #2: Mark agent+conversation as killed to prevent late completion events.
-      // If the agent is in a long-running tool execution when killed, it may eventually
-      // finish and try to call complete(). This flag ensures we skip that completion.
-      // ISSUE 3 FIX: Use agent-scoped key to avoid affecting other agents in same conversation.
-      this.markAgentConversationKilled(agentPubkey, conversationId);
-
-      // FIX #1: Update parent's delegation state when killing a child conversation.
-      // The conversationId being killed is the delegation conversation for some parent.
-      // Use delegationToRal to find and update the parent's pending delegation.
+      // Update parent's delegation state when killing a child conversation.
       this.markParentDelegationKilled(conversationId);
 
       // Add to cooldown registry if provided
@@ -1831,7 +1833,6 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       }
 
       // Persist abort message in conversation store
-      const conversation = ConversationStore.get(conversationId);
       if (conversation) {
         const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason ?? "manual abort"}`;
         conversation.addMessage({
@@ -1939,7 +1940,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     });
 
     return {
-      abortedCount: directAbortCount,
+      abortedCount: directAbortCount + (llmAborted ? 1 : 0),
       descendantConversations: abortedTuples,
     };
   }

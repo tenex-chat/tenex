@@ -15,13 +15,11 @@ import { getLocalReportStore } from "@/services/reports";
 import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
-import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
-import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
 /**
  * Index event ID and pubkey into the prefix KV store.
@@ -508,44 +506,29 @@ export class EventHandler {
             return;
         }
 
-        let totalStopped = 0;
-        let agentsBlocked = 0;
         let ralsAborted = 0;
 
         const projectCtx = getProjectContext();
+        const ralRegistry = RALRegistry.getInstance();
         const stopTracer = trace.getTracer("tenex.event-handler");
+        const reason = `stop signal from ${event.pubkey.substring(0, 8)}`;
 
-        // For each e-tag (conversation ID), block the p-tagged agents
         for (const [, conversationId] of eTags) {
-            // Stop LLM operations (existing behavior)
-            const stopped = llmOpsRegistry.stopByEventId(conversationId);
-            totalStopped += stopped;
-
-            // Get the conversation
             const conversation = ConversationStore.get(conversationId);
-            if (!conversation) {
-                continue;
-            }
+            if (!conversation) continue;
+            const projectId = conversation.getProjectId();
+            if (!projectId) continue;
 
-            // Block each p-tagged agent in this conversation
             for (const [, agentPubkey] of pTags) {
                 const agent = projectCtx.getAgentByPubkey(agentPubkey);
                 if (agent) {
-                    // Block the agent
-                    AgentRouter.processStopSignal(event, conversation, projectCtx);
-                    agentsBlocked++;
-
                     // Get the RAL's trace context to parent the stop span under agent execution
-                    const ralRegistry = RALRegistry.getInstance();
                     const activeRals = ralRegistry.getActiveRALs(agentPubkey, conversationId);
                     const targetRal = activeRals[0];
-
-                    console.log(`[STOP] RAL trace context: activeRals=${activeRals.length} traceId=${targetRal?.traceId?.substring(0, 8)} spanId=${targetRal?.executionSpanId?.substring(0, 8)}`);
 
                     // Build parent context from stored trace info
                     let parentContext = otelContext.active();
                     if (targetRal?.traceId && targetRal?.executionSpanId) {
-                        // Create a parent span context from the stored trace info
                         const parentSpanContext = {
                             traceId: targetRal.traceId,
                             spanId: targetRal.executionSpanId,
@@ -555,7 +538,6 @@ export class EventHandler {
                         parentContext = trace.setSpanContext(otelContext.active(), parentSpanContext);
                     }
 
-                    // Create a span for the stop - parented under the agent execution
                     const stopSpan = stopTracer.startSpan(
                         "tenex.stop_command",
                         {
@@ -572,27 +554,24 @@ export class EventHandler {
                         parentContext
                     );
 
-                    // Abort all running RALs for this agent
-                    const aborted = ralRegistry.abortAllForAgent(agentPubkey, conversationId);
-                    ralsAborted += aborted;
+                    const result = await ralRegistry.abortWithCascade(
+                        agentPubkey, conversationId, projectId, reason
+                    );
+                    ralsAborted += result.abortedCount;
 
-                    stopSpan.setAttribute("stop.rals_aborted", aborted);
+                    stopSpan.setAttribute("stop.rals_aborted", result.abortedCount);
+                    stopSpan.setAttribute("stop.descendants_aborted", result.descendantConversations.length);
                     stopSpan.end();
 
-                    const stopSpanContext = stopSpan.spanContext();
-                    console.log(`[STOP] Created span: traceId=${stopSpanContext.traceId?.substring(0, 8)} spanId=${stopSpanContext.spanId?.substring(0, 8)} parent=${targetRal?.executionSpanId?.substring(0, 8) || "none"}`);
-
                     logger.info(`[EventHandler] Stopped agent ${agent.slug} in conversation ${conversationId.substring(0, 8)}`, {
-                        ralsAborted: aborted,
+                        ralsAborted: result.abortedCount,
+                        descendantsAborted: result.descendantConversations.length,
                     });
                 }
             }
         }
 
         trace.getActiveSpan()?.addEvent("event_handler.stop_operations", {
-            "operations.stopped": totalStopped,
-            "operations.remaining": llmOpsRegistry.getActiveOperationsCount(),
-            "agents.blocked": agentsBlocked,
             "rals.aborted": ralsAborted,
         });
     }
