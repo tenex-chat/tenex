@@ -14,7 +14,7 @@ import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { ConversationEntry, DelegationMarker } from "./types";
 import { getPubkeyService } from "@/services/PubkeyService";
-import { convertToMultimodalContent } from "./utils/multimodal-content";
+import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
 import { processToolResult, shouldTruncateToolResult, type TruncationContext } from "./utils/tool-result-truncator";
 import {
     createImageTracker,
@@ -228,7 +228,8 @@ async function entryToMessage(
     truncationContext: TruncationContext | undefined,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
-    agentsMdContext?: AgentsMdContext
+    agentsMdContext?: AgentsMdContext,
+    enableMultimodal: boolean = true
 ): Promise<ModelMessage> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
@@ -322,9 +323,17 @@ async function entryToMessage(
         imageTracker.markAsSeen(url);
     }
 
-    // Convert to multimodal format if content contains image URLs
-    // This allows the AI SDK to fetch and process images automatically
-    const content = convertToMultimodalContent(messageContent);
+    // Convert to multimodal format if content contains image URLs, but ONLY for user messages
+    // AND only when enableMultimodal is true (i.e., the most recent user message with images).
+    //
+    // The AI SDK ModelMessage[] schema only allows ImagePart in user role messages (UserModelMessage).
+    // AssistantModelMessage content only supports TextPart, ReasoningPart, ToolCallPart, etc. — no ImagePart.
+    // Applying multimodal conversion to assistant messages causes:
+    //   AI_InvalidPromptError: Invalid prompt: The messages do not match the ModelMessage[] schema.
+    //
+    // For older user messages that contained images, we keep the URL as plain text in the string —
+    // the LLM has already seen them, no need to re-fetch and waste context window on image tokens.
+    const content = (role === "user" && enableMultimodal) ? convertToMultimodalContent(messageContent) : messageContent;
 
     return { role, content } as ModelMessage;
 }
@@ -543,6 +552,20 @@ export async function buildMessagesFromEntries(
         }
     }
 
+    // Pre-scan: find the last user text message that contains image URLs.
+    // Only that message gets multimodal conversion (ImagePart objects that trigger image fetching).
+    // Older user messages with images keep URLs as plain text — the LLM already saw them,
+    // no need to re-fetch and consume context window with image tokens.
+    let lastUserImageEntryIndex = -1;
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        if (entry.messageType !== "text") continue;
+        if (deriveRole(entry, viewingAgentPubkey) !== "user") continue;
+        if (hasImageUrls(entry.content)) {
+            lastUserImageEntryIndex = i;
+        }
+    }
+
     let prunedDelegationCompletions = 0;
 
     // ============================================================================
@@ -588,7 +611,7 @@ export async function buildMessagesFromEntries(
     const pendingToolCalls = new Map<string, { toolName: string; resultIndex: number }>();
 
     // Messages deferred because they arrived while tool-calls were pending
-    const deferredMessages: Array<{ entry: ConversationEntry; truncationContext: TruncationContext }> = [];
+    const deferredMessages: Array<{ entry: ConversationEntry; truncationContext: TruncationContext; enableMultimodal: boolean }> = [];
 
     for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
@@ -654,7 +677,7 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext));
+                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext, deferred.enableMultimodal));
                 }
                 deferredMessages.length = 0;
             }
@@ -704,6 +727,7 @@ export async function buildMessagesFromEntries(
                             ral: entry.ral,
                         },
                         truncationContext,
+                        enableMultimodal: false,
                     });
                 } else {
                     result.push(expandedMessage);
@@ -734,6 +758,7 @@ export async function buildMessagesFromEntries(
                             ral: entry.ral,
                         },
                         truncationContext,
+                        enableMultimodal: false,
                     });
                 } else {
                     result.push(nestedMarkerMessage);
@@ -752,11 +777,13 @@ export async function buildMessagesFromEntries(
         }
 
         // NON-TOOL MESSAGE (user/assistant text, system, etc.)
+        // Only the most recent user message with images gets multimodal conversion
+        const enableMultimodal = i === lastUserImageEntryIndex;
         // If tool-calls are pending, defer this message
         if (pendingToolCalls.size > 0) {
-            deferredMessages.push({ entry, truncationContext });
+            deferredMessages.push({ entry, truncationContext, enableMultimodal });
         } else {
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
+            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext, enableMultimodal));
         }
     }
 
@@ -800,7 +827,7 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext));
+        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext, deferred.enableMultimodal));
     }
 
     if (prunedDelegationCompletions > 0) {

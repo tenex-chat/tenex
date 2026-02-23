@@ -133,9 +133,12 @@ describe("ConversationStore - Multimodal Support", () => {
             expect(textPart.text).toContain("Check this:");
         });
 
-        it("should handle agent messages with image URLs", async () => {
-            // Agent 1 sends message with image
-            // Note: Using real-looking domain because cdn.example.com is now skipped
+        it("should NOT convert assistant messages with image URLs to multimodal", async () => {
+            // Agent messages (role=assistant) must NOT get ImagePart injected.
+            // The AI SDK ModelMessage[] schema only allows ImagePart in user role messages.
+            // Applying multimodal conversion to assistant messages causes:
+            //   AI_InvalidPromptError: The messages do not match the ModelMessage[] schema.
+            // Regression test for: https://github.com/pablof7z/tenex/issues/xxx
             store.createRal(AGENT_PUBKEY);
             store.addMessage({
                 pubkey: AGENT_PUBKEY,
@@ -152,9 +155,11 @@ describe("ConversationStore - Multimodal Support", () => {
             expect(messages).toHaveLength(1);
             expect(messages[0].role).toBe("assistant");
 
-            const content = messages[0].content as Array<TextPart | ImagePart>;
-            expect(Array.isArray(content)).toBe(true);
-            expect(content[1].type).toBe("image");
+            // CRITICAL: content must be a plain string, NOT a multimodal array.
+            // The image URL is preserved as text in the string — the agent can still
+            // read it, but the AI SDK won't try to fetch it as an image part.
+            expect(typeof messages[0].content).toBe("string");
+            expect(messages[0].content as string).toContain("https://cdn.realsite.io/output.png");
         });
 
         it("should not convert tool messages to multimodal", async () => {
@@ -241,6 +246,66 @@ describe("ConversationStore - Multimodal Support", () => {
             expect((imagePart.image as URL).href).toBe(
                 "https://cdn.realsite.io/photo.jpg?size=large&quality=high"
             );
+        });
+
+        it("should only convert the most recent user message with images to multimodal", async () => {
+            // First user message with image
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Look at this: https://images.unsplash.com/first.png",
+                messageType: "text",
+            });
+
+            // Agent response
+            store.createRal(AGENT_PUBKEY);
+            store.addMessage({
+                pubkey: AGENT_PUBKEY,
+                ral: 1,
+                content: "I see the image, it looks great!",
+                messageType: "text",
+            });
+            store.completeRal(AGENT_PUBKEY, 1);
+
+            // Second user message with image (most recent)
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Now look at this one: https://images.unsplash.com/second.png",
+                messageType: "text",
+            });
+
+            const ral2 = store.createRal(AGENT_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT_PUBKEY, ral2);
+
+            // Message 0: first user message — should be plain string (URL as text, NOT multimodal)
+            expect(messages[0].role).toBe("user");
+            expect(typeof messages[0].content).toBe("string");
+            expect(messages[0].content as string).toContain("https://images.unsplash.com/first.png");
+
+            // Message 1: agent response
+            expect(messages[1].role).toBe("assistant");
+
+            // Message 2: second user message — should be multimodal (has ImagePart)
+            expect(messages[2].role).toBe("user");
+            expect(Array.isArray(messages[2].content)).toBe(true);
+            const parts = messages[2].content as Array<TextPart | ImagePart>;
+            expect(parts.some(p => p.type === "image")).toBe(true);
+        });
+
+        it("should convert single user message with image to multimodal", async () => {
+            // Only one user message with an image — it IS the most recent, so it should be multimodal
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "What's in this? https://images.unsplash.com/photo.png",
+                messageType: "text",
+            });
+
+            const ral = store.createRal(AGENT_PUBKEY);
+            const messages = await store.buildMessagesForRal(AGENT_PUBKEY, ral);
+
+            expect(messages[0].role).toBe("user");
+            expect(Array.isArray(messages[0].content)).toBe(true);
+            const parts = messages[0].content as Array<TextPart | ImagePart>;
+            expect(parts.some(p => p.type === "image")).toBe(true);
         });
 
         it("should ignore non-image URLs", async () => {
