@@ -1,8 +1,13 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
+import type { EffectiveInstructionsCacheEntry } from "@/services/prompt-compiler";
+import { PromptCompilerService } from "@/services/prompt-compiler";
 import { getProjectContext } from "@/services/projects";
+import { ReportService } from "@/services/reports";
 import { logger } from "@/utils/logger";
+import * as fs from "node:fs/promises";
 import { tool } from "ai";
 import { z } from "zod";
+
 // Define the input schema
 const agentsReadSchema = z.object({
     slug: z.string().describe("The slug identifier of the agent to read"),
@@ -10,7 +15,15 @@ const agentsReadSchema = z.object({
 
 type AgentsReadInput = z.infer<typeof agentsReadSchema>;
 
-// Define the output type
+// Define the report shape returned in the response
+interface MemorizedReport {
+    slug: string;
+    title?: string;
+    content?: string;
+    publishedAt?: number;
+}
+
+// Define the output type — all fields are always present for a consistent response contract
 interface AgentsReadOutput {
     success: boolean;
     message?: string;
@@ -21,6 +34,8 @@ interface AgentsReadOutput {
         role: string;
         description?: string;
         instructions?: string;
+        compiledInstructions: string | null;
+        memorizedReports: MemorizedReport[];
         useCriteria?: string;
         llmConfig?: string;
         tools?: string[];
@@ -30,12 +45,60 @@ interface AgentsReadOutput {
 }
 
 /**
- * Tool: agents_read
- * Read a local agent definition from JSON file
+ * Read compiled (effective) instructions from the PromptCompilerService disk cache.
+ * Uses the shared static helper from PromptCompilerService for the cache path.
+ *
+ * @returns The compiled instructions string, or null if no cache exists
  */
+async function readCompiledInstructions(agentPubkey: string): Promise<string | null> {
+    try {
+        const cachePath = PromptCompilerService.getCachePathForAgent(agentPubkey);
+        const data = await fs.readFile(cachePath, "utf-8");
+        const entry = JSON.parse(data) as EffectiveInstructionsCacheEntry;
+        return entry.effectiveAgentInstructions;
+    } catch {
+        // No cache file or invalid JSON — compiled instructions not available
+        return null;
+    }
+}
+
 /**
- * Core implementation of reading agents
- * Shared between AI SDK and legacy Tool interfaces
+ * Read memorized reports for an agent from the ReportService cache.
+ * Returns team reports first, then agent-specific reports (deduped by slug).
+ * Each report includes publishedAt for chronological ordering by consumers.
+ *
+ * @returns Array of memorized report summaries, or empty array
+ */
+function readMemorizedReports(agentPubkey: string): MemorizedReport[] {
+    try {
+        const reportService = new ReportService();
+        const agentReports = reportService.getMemorizedReportsForAgent(agentPubkey);
+        const teamReports = reportService.getTeamMemorizedReports();
+
+        // Deduplicate: team reports take precedence over agent reports with the same slug
+        const teamSlugs = new Set(teamReports.map(r => r.slug));
+        const combined = [
+            ...teamReports,
+            ...agentReports.filter(r => !teamSlugs.has(r.slug)),
+        ];
+
+        return combined
+            .filter(r => !r.isDeleted)
+            .map(r => ({
+                slug: r.slug,
+                title: r.title,
+                content: r.content,
+                publishedAt: r.publishedAt,
+            }));
+    } catch {
+        // ReportService may fail if no project context — return empty
+        return [];
+    }
+}
+
+/**
+ * Core implementation of reading agents.
+ * Returns both the base agent definition and compiled runtime data when available.
  */
 async function executeAgentsRead(
     input: AgentsReadInput,
@@ -55,8 +118,16 @@ async function executeAgentsRead(
         throw new Error(`Agent with slug "${slug}" not found in current project`);
     }
 
-    logger.info(`Successfully read agent definition for "${agent.name}" (${slug})`);
-    logger.info(`  Pubkey: ${agent.pubkey}`);
+    // Fetch compiled instructions from disk cache (non-blocking, best-effort)
+    const compiledInstructions = await readCompiledInstructions(agent.pubkey);
+
+    // Fetch memorized reports from in-memory cache (synchronous, best-effort)
+    const memorizedReports = readMemorizedReports(agent.pubkey);
+
+    logger.info(`Successfully read agent definition for "${agent.name}" (${slug})`, {
+        hasCompiledInstructions: compiledInstructions !== null,
+        memorizedReportsCount: memorizedReports.length,
+    });
 
     return {
         success: true,
@@ -67,6 +138,8 @@ async function executeAgentsRead(
             role: agent.role,
             description: agent.description,
             instructions: agent.instructions,
+            compiledInstructions,
+            memorizedReports,
             useCriteria: agent.useCriteria,
             llmConfig: agent.llmConfig,
             tools: agent.tools,
@@ -82,7 +155,8 @@ async function executeAgentsRead(
  */
 export function createAgentsReadTool(context: ToolExecutionContext): AISdkTool {
     return tool({
-        description: "Read a local agent definition from its JSON file",
+        description:
+            "Read a local agent definition, including base instructions and compiled runtime instructions when available",
         inputSchema: agentsReadSchema,
         execute: async (input: AgentsReadInput) => {
             try {
@@ -96,4 +170,4 @@ export function createAgentsReadTool(context: ToolExecutionContext): AISdkTool {
             }
         },
     }) as AISdkTool;
-} 
+}
