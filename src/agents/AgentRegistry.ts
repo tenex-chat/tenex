@@ -3,6 +3,7 @@ import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loade
 import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
 import { loadEscalationAgentIntoRegistry } from "@/services/agents/EscalationService";
 import { config } from "@/services/ConfigService";
+import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner, type NDKProject } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "./AgentStorage";
@@ -63,6 +64,7 @@ export class AgentRegistry {
     private projectPath: string; // Git repo path
     private metadataPath: string; // TENEX metadata path
     private ndkProject?: NDKProject;
+    private isLoading: boolean = false;
 
     /**
      * Creates a new AgentRegistry instance.
@@ -99,6 +101,14 @@ export class AgentRegistry {
     }
 
     /**
+     * Check if the registry is currently loading agents.
+     * Status publishers should skip if true to avoid reading partial state.
+     */
+    getIsLoading(): boolean {
+        return this.isLoading;
+    }
+
+    /**
      * Load agents for a project from unified storage (~/.tenex/agents/) and Nostr.
      * Complete agent loading workflow:
      * 1. Load agents from unified ~/.tenex/agents/ storage by event ID
@@ -114,9 +124,13 @@ export class AgentRegistry {
             return;
         }
 
-        // Clear existing agents to ensure fresh load from project tags
-        this.agents.clear();
-        this.agentsByPubkey.clear();
+        // Set loading flag to prevent concurrent reads
+        this.isLoading = true;
+
+        try {
+            // Clear existing agents to ensure fresh load from project tags
+            this.agents.clear();
+            this.agentsByPubkey.clear();
 
         // Initialize storage
         await agentStorage.initialize();
@@ -186,17 +200,21 @@ export class AgentRegistry {
         // This ensures the escalation agent appears in "Available Agents" for all projects
         await loadEscalationAgentIntoRegistry(this, this.projectDTag);
 
-        logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
+            logger.info(`Loaded ${this.agents.size} total agents for project ${this.projectDTag}`);
 
-        // Republish kind:0 profiles for all agents now that the project has booted
-        // Fire-and-forget: don't block boot waiting for profile publishes (especially NIP-46 signing)
-        if (ndkProject) {
-            this.republishAgentProfiles(ndkProject).catch((error) => {
-                logger.warn("Background agent profile republishing failed", {
-                    projectDTag: this.projectDTag,
-                    error: error instanceof Error ? error.message : String(error),
+            // Republish kind:0 profiles for all agents now that the project has booted
+            // Fire-and-forget: don't block boot waiting for profile publishes (especially NIP-46 signing)
+            if (ndkProject) {
+                this.republishAgentProfiles(ndkProject).catch((error) => {
+                    logger.warn("Background agent profile republishing failed", {
+                        projectDTag: this.projectDTag,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
                 });
-            });
+            }
+        } finally {
+            // Clear loading flag even if loading fails
+            this.isLoading = false;
         }
     }
 
@@ -246,6 +264,10 @@ export class AgentRegistry {
         logger.info(
             `Republished kind:0 profiles for project ${this.projectDTag}: ${publishedCount.success} succeeded, ${publishedCount.failed} failed`
         );
+
+        // Register all project agents with global 14199 service
+        const allPubkeys = Array.from(this.agents.values()).map((a) => a.pubkey);
+        OwnerAgentListService.getInstance().registerAgents(this.projectDTag!, allPubkeys);
     }
 
 
@@ -345,14 +367,14 @@ export class AgentRegistry {
         // Remove from storage
         await agentStorage.removeAgentFromProject(agent.pubkey, this.projectDTag);
 
+        // Unregister from global 14199 service
+        OwnerAgentListService.getInstance().unregisterAgent(this.projectDTag, agent.pubkey);
+
         // Remove from memory
         this.agents.delete(slug);
         this.agentsByPubkey.delete(agent.pubkey);
 
         logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
-
-        // Schedule debounced 14199 snapshot re-publish so the removed agent's p-tag is dropped
-        AgentProfilePublisher.publishProjectAgentSnapshot(this.projectDTag);
 
         return true;
     }
