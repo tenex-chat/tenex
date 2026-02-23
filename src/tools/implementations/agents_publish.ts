@@ -7,6 +7,7 @@ import { config } from "@/services/ConfigService";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { getNDK } from "@/nostr/ndkClient";
 import { Nip46SigningService } from "@/services/nip46";
+import { agentStorage } from "@/agents/AgentStorage";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner, type NDKSigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
@@ -543,6 +544,39 @@ async function executeAgentsPublish(
             pubkey: backendSigner!.pubkey,
             signerType: "backend",
             filesAttached: fileMetadataEvents.length,
+        });
+    }
+
+    // Sync published metadata back to local storage so the AgentDefinitionMonitor
+    // can track this agent for future updates (needs definitionDTag + definitionAuthor).
+    // Use the published agent's pubkey (resolved by slug), NOT context.agent.pubkey
+    // which is the *calling* agent — they may differ when one agent publishes another.
+    try {
+        const storedAgent = await agentStorage.loadAgent(agent.pubkey);
+        if (storedAgent) {
+            storedAgent.eventId = agentDefinition.id;
+            storedAgent.definitionDTag = agentDefinition.tagValue("d") ?? slug;
+            storedAgent.definitionAuthor = agentDefinition.pubkey;
+            storedAgent.definitionCreatedAt = agentDefinition.created_at;
+            await agentStorage.saveAgent(storedAgent);
+
+            logger.info("[agents_publish] Synced publish metadata to local storage", {
+                slug,
+                eventId: agentDefinition.id?.substring(0, 12),
+                definitionDTag: storedAgent.definitionDTag,
+                definitionAuthor: storedAgent.definitionAuthor?.substring(0, 12),
+            });
+        } else {
+            logger.warn("[agents_publish] Could not find stored agent to sync publish metadata", {
+                slug,
+                pubkey: agent.pubkey?.substring(0, 12),
+            });
+        }
+    } catch (error) {
+        // Never block publish success due to a storage sync failure
+        logger.error("[agents_publish] Failed to sync publish metadata to local storage", {
+            slug,
+            error: error instanceof Error ? error.message : String(error),
         });
     }
 

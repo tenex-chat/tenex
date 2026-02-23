@@ -176,14 +176,24 @@ export class AgentDefinitionMonitor {
 
     /**
      * Scan all stored agents and collect those with definition tracking metadata.
+     * Runs bootstrapLegacyAgents first to migrate agents missing definitionDTag/definitionAuthor.
      */
     private async collectMonitoredAgents(): Promise<void> {
         this.monitoredAgents.clear();
 
         const allAgents = await agentStorage.getAllAgents();
 
+        // Migrate legacy agents before the main loop so they can be monitored
+        await this.bootstrapLegacyAgents(allAgents);
+
         for (const agent of allAgents) {
             if (!agent.definitionDTag || !agent.definitionAuthor) {
+                logger.debug("[AgentDefinitionMonitor] Skipping agent without definition tracking metadata", {
+                    slug: agent.slug,
+                    hasEventId: !!agent.eventId,
+                    hasDTag: !!agent.definitionDTag,
+                    hasAuthor: !!agent.definitionAuthor,
+                });
                 continue;
             }
 
@@ -205,6 +215,91 @@ export class AgentDefinitionMonitor {
                 logger.warn("[AgentDefinitionMonitor] Failed to process agent, skipping", {
                     slug: agent.slug,
                     definitionDTag: agent.definitionDTag,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+    }
+
+    /**
+     * Bootstrap legacy agents that were installed before definitionDTag/definitionAuthor existed.
+     *
+     * For agents missing these fields but having an eventId (meaning they came from a kind:4199 event):
+     * - definitionDTag is inferred from the agent's slug (convention enforced by agents_publish)
+     * - definitionAuthor is recovered by fetching the original event from relays
+     *
+     * Mutations are applied directly to the provided agent objects AND persisted to storage.
+     * This ensures the main loop in collectMonitoredAgents sees the updated fields immediately.
+     */
+    private async bootstrapLegacyAgents(agents: StoredAgent[]): Promise<void> {
+        const candidates = agents.filter(
+            (a) => a.eventId && (!a.definitionDTag || !a.definitionAuthor),
+        );
+
+        if (candidates.length === 0) return;
+
+        logger.info("[AgentDefinitionMonitor] Bootstrapping legacy agents", {
+            count: candidates.length,
+            slugs: candidates.map((a) => a.slug),
+        });
+
+        for (const agent of candidates) {
+            try {
+                let changed = false;
+
+                // Infer definitionDTag from slug (convention: d-tag = slug)
+                if (!agent.definitionDTag) {
+                    agent.definitionDTag = agent.slug;
+                    changed = true;
+                    logger.info("[AgentDefinitionMonitor] Inferred definitionDTag from slug", {
+                        slug: agent.slug,
+                        definitionDTag: agent.definitionDTag,
+                    });
+                }
+
+                // Recover definitionAuthor by fetching the original event
+                if (!agent.definitionAuthor && agent.eventId) {
+                    try {
+                        const event = await this.ndk.fetchEvent(agent.eventId);
+                        if (event) {
+                            agent.definitionAuthor = event.pubkey;
+                            // Also backfill definitionCreatedAt if missing
+                            if (!agent.definitionCreatedAt && event.created_at) {
+                                agent.definitionCreatedAt = event.created_at;
+                            }
+                            changed = true;
+                            logger.info("[AgentDefinitionMonitor] Recovered definitionAuthor from relay", {
+                                slug: agent.slug,
+                                eventId: agent.eventId.substring(0, 12),
+                                definitionAuthor: agent.definitionAuthor.substring(0, 12),
+                            });
+                        } else {
+                            logger.warn("[AgentDefinitionMonitor] Could not fetch event for legacy agent — skipping author recovery", {
+                                slug: agent.slug,
+                                eventId: agent.eventId.substring(0, 12),
+                            });
+                        }
+                    } catch (fetchError) {
+                        logger.warn("[AgentDefinitionMonitor] Failed to fetch event for legacy agent — skipping author recovery", {
+                            slug: agent.slug,
+                            eventId: agent.eventId.substring(0, 12),
+                            error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+                        });
+                    }
+                }
+
+                if (changed) {
+                    await agentStorage.saveAgent(agent);
+                    logger.info("[AgentDefinitionMonitor] Migrated legacy agent", {
+                        slug: agent.slug,
+                        definitionDTag: agent.definitionDTag,
+                        definitionAuthor: agent.definitionAuthor?.substring(0, 12) ?? "(unknown)",
+                    });
+                }
+            } catch (error) {
+                // Never block startup for a single agent's migration failure
+                logger.warn("[AgentDefinitionMonitor] Failed to bootstrap legacy agent, skipping", {
+                    slug: agent.slug,
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
