@@ -390,9 +390,12 @@ async function executeAgentsPublish(
 
     const ndk = getNDK();
 
-    // Lazy-load backend signer only when actually needed (file uploads or backend signing)
-    const needsBackendSigner = !publish_as_user || (files && files.length > 0);
-    const backendSigner = needsBackendSigner ? await config.getBackendSigner() : undefined;
+    // Backend signer is only needed when NOT publishing as user (backend signs the 4199 event).
+    // File uploads are always signed by the agent's own signer when publish_as_user=true.
+    const backendSigner = !publish_as_user ? await config.getBackendSigner() : undefined;
+
+    // Choose the signer for file uploads: agent's own signer when publishing as user, backend signer otherwise
+    const fileSigner: NDKSigner = publish_as_user ? context.agent.signer : backendSigner!;
 
     // Upload files and create kind:1063 events if provided
     const fileMetadataEvents: FileMetadataEvent[] = [];
@@ -404,7 +407,7 @@ async function executeAgentsPublish(
                 const metadata = await uploadFileAndCreateMetadata(
                     file.path,
                     file.name,
-                    backendSigner!,
+                    fileSigner,
                     ndk
                 );
                 fileMetadataEvents.push(metadata);
@@ -515,10 +518,12 @@ async function executeAgentsPublish(
             clearTimeout(signingTimer);
         }
 
-        await agentDefinition.publish();
-
-        // Clean up the NIP-46 signer after successful publish
-        try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        try {
+            await agentDefinition.publish();
+        } finally {
+            // Clean up the NIP-46 signer whether publish succeeds or fails
+            try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        }
 
         logger.info(`Successfully published user-signed agent definition for "${agent.name}" (${slug})`, {
             eventId: agentDefinition.id,
