@@ -3,85 +3,137 @@
  *
  * When an MCP resource update notification is received, this module:
  * 1. Formats the notification as a system-reminder message
- * 2. Publishes a kind:1 NDK event that replies to the conversation root
- * 3. The existing event routing infrastructure picks up the event and
- *    dispatches it to the correct agent in the correct conversation
+ * 2. Adds a user-role message directly to the ConversationStore
+ * 3. Invokes the AgentExecutor to wake up the agent in the existing conversation
  *
- * This approach leverages the existing AgentDispatchService flow rather than
- * directly calling AgentExecutor, ensuring consistent behavior with
- * cooldowns, RAL management, and conversation state.
+ * This approach directly starts a new agent run without publishing Nostr events,
+ * ensuring the agent processes only the new content from the resource update.
  */
 
-import type { McpSubscription } from "./McpSubscriptionService";
+import { AgentExecutor } from "@/agents/execution/AgentExecutor";
+import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { getNDK } from "@/nostr/ndkClient";
-import { config } from "@/services/ConfigService";
+import { getProjectContext } from "@/services/projects";
+import { RALRegistry } from "@/services/ral";
 import { wrapInSystemReminder } from "@/services/system-reminder";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
+import type { McpSubscription } from "./McpSubscriptionService";
 
 /**
- * Deliver an MCP resource notification to the subscription's conversation.
+ * Deliver an MCP resource notification by directly invoking the AgentExecutor.
  *
- * Publishes a kind:1 event that routes through the existing dispatch infrastructure:
- * - References the conversation root via "e" tag (reply threading)
- * - Targets the subscribing agent via "p" tag
- * - Tags with the project "a" tag for project routing
- * - Wraps content in a system-reminder format
+ * Adds a user-role message to the conversation and starts a new agent run:
+ * - Wraps content in a system-reminder format with subscription metadata
+ * - Adds the message to ConversationStore as a user-role entry
+ * - Creates an execution context and runs the agent directly
+ * - If the agent is already streaming, queues the message for pickup
  */
 export async function deliverMcpNotification(
     subscription: McpSubscription,
     content: string
 ): Promise<void> {
-    const ndk = getNDK();
-    if (!ndk) {
-        throw new Error("NDK not available for MCP notification delivery");
+    const projectCtx = getProjectContext();
+
+    // Look up the subscribing agent
+    const agent = projectCtx.getAgentByPubkey(subscription.agentPubkey);
+    if (!agent) {
+        throw new Error(
+            `Agent not found for MCP notification delivery: pubkey=${subscription.agentPubkey.substring(0, 12)}`
+        );
     }
 
-    // Format notification content using the shared system-reminder utility.
-    // Metadata is placed inside the tags (not as XML attributes) for parser compatibility.
+    // Format notification content as a system-reminder
     const reminderBody =
         `[MCP Resource Update | server: ${subscription.serverName} ` +
         `| resource: ${subscription.resourceUri} ` +
         `| subscription: ${subscription.id}]\n\n${content}`;
     const formattedContent = wrapInSystemReminder(reminderBody);
 
-    // Create a kind:1 event that replies to the conversation root
-    const event = new NDKEvent(ndk);
-    event.kind = 1;
-    event.content = formattedContent;
+    // Get or load the conversation store
+    const store = ConversationStore.getOrLoad(subscription.conversationId);
 
-    const tags: string[][] = [
-        // Reply to conversation root event (threading)
-        ["e", subscription.rootEventId, "", "root"],
-        // Target the subscribing agent
-        ["p", subscription.agentPubkey],
-        // Project reference for routing
-        ["a", subscription.projectId],
-        // Metadata tags for identification
-        ["mcp-subscription-id", subscription.id],
-    ];
+    // Check if the agent already has an active streaming RAL in this conversation.
+    // If so, queue the message as an injection rather than starting a new execution.
+    const ralRegistry = RALRegistry.getInstance();
+    const activeRal = ralRegistry.getState(agent.pubkey, subscription.conversationId);
 
-    event.tags = tags;
+    if (activeRal?.isStreaming) {
+        // Agent is actively streaming — queue the notification for the active execution
+        ralRegistry.queueUserMessage(
+            agent.pubkey,
+            subscription.conversationId,
+            activeRal.ralNumber,
+            formattedContent
+        );
 
-    // Sign with backend signer (same pattern as SchedulerService)
-    const privateKey = await config.ensureBackendPrivateKey();
-    const signer = new NDKPrivateKeySigner(privateKey);
+        logger.info("MCP notification queued for active streaming execution", {
+            subscriptionId: subscription.id,
+            agent: agent.slug,
+            ralNumber: activeRal.ralNumber,
+            contentLength: content.length,
+        });
 
-    await event.sign(signer);
-    await event.publish();
+        trace.getActiveSpan()?.addEvent("mcp_notification.queued_for_active_stream", {
+            "subscription.id": subscription.id,
+            "ral.number": activeRal.ralNumber,
+        });
+        return;
+    }
 
-    logger.info("Published MCP notification event", {
+    // Add the notification as a user-role message in the conversation
+    store.addMessage({
+        pubkey: subscription.agentPubkey,
+        content: formattedContent,
+        messageType: "text",
+        role: "user",
+        timestamp: Math.floor(Date.now() / 1000),
+        targetedPubkeys: [subscription.agentPubkey],
+    });
+    await store.save();
+
+    // Create a synthetic triggering event for the execution context.
+    // This carries the conversation's branch tag so the executor resolves
+    // the correct working directory (worktree or project root).
+    const ndk = getNDK();
+    const syntheticEvent = new NDKEvent(ndk);
+    syntheticEvent.id = subscription.rootEventId;
+    syntheticEvent.kind = 1;
+    syntheticEvent.pubkey = subscription.agentPubkey;
+    syntheticEvent.created_at = Math.floor(Date.now() / 1000);
+    syntheticEvent.content = formattedContent;
+
+    // Carry forward the branch tag from conversation metadata
+    const metadata = store.getMetadata();
+    const tags: string[][] = [];
+    if (metadata.branch) {
+        tags.push(["branch", metadata.branch]);
+    }
+    syntheticEvent.tags = tags;
+
+    // Create execution context and run the agent
+    const executionContext = await createExecutionContext({
+        agent,
+        conversationId: subscription.conversationId,
+        projectBasePath: projectCtx.agentRegistry.getBasePath(),
+        triggeringEvent: syntheticEvent,
+        mcpManager: projectCtx.mcpManager,
+    });
+
+    const agentExecutor = new AgentExecutor();
+    await agentExecutor.execute(executionContext);
+
+    logger.info("Delivered MCP notification via direct AgentExecutor invocation", {
         subscriptionId: subscription.id,
-        eventId: event.id?.substring(0, 12),
-        conversationRoot: subscription.rootEventId.substring(0, 12),
-        agent: subscription.agentSlug,
+        agent: agent.slug,
+        conversationId: subscription.conversationId.substring(0, 12),
         contentLength: content.length,
     });
 
-    trace.getActiveSpan()?.addEvent("mcp_notification.event_published", {
+    trace.getActiveSpan()?.addEvent("mcp_notification.delivered_direct", {
         "subscription.id": subscription.id,
-        "event.id": event.id || "",
         "notification.content_length": content.length,
     });
 }
