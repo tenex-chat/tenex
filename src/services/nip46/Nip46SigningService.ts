@@ -283,13 +283,13 @@ export class Nip46SigningService {
      * @param event - The NDKEvent to sign (will be mutated: pubkey set to ownerPubkey)
      * @returns SignResult indicating success, explicit rejection, or transient failure
      */
-    async signEvent(ownerPubkey: string, event: NDKEvent): Promise<SignResult> {
+    async signEvent(ownerPubkey: string, event: NDKEvent, trigger?: string): Promise<SignResult> {
         return this.withOwnerLock(ownerPubkey, () =>
-            this.signEventInternal(ownerPubkey, event)
+            this.signEventInternal(ownerPubkey, event, trigger)
         );
     }
 
-    private async signEventInternal(ownerPubkey: string, event: NDKEvent): Promise<SignResult> {
+    private async signEventInternal(ownerPubkey: string, event: NDKEvent, trigger?: string): Promise<SignResult> {
         const requestId = crypto.randomUUID().substring(0, 8);
         const signingTimeout = this.getSigningTimeout();
         const maxRetries = this.getMaxRetries();
@@ -301,6 +301,9 @@ export class Nip46SigningService {
             ownerPubkey: Nip46SigningLog.truncatePubkey(ownerPubkey),
             eventKind: event.kind,
             pTagCount: event.tags.filter((t) => t[0] === "p").length,
+            trigger,
+            eventTags: event.tags,
+            eventContent: event.content,
         });
 
         let lastError: Error | null = null;
@@ -311,6 +314,15 @@ export class Nip46SigningService {
 
                 // Set the event pubkey to the owner before signing
                 event.pubkey = ownerPubkey;
+
+                logger.info("[NIP-46] Pre-sign payload", {
+                    requestId,
+                    attempt,
+                    kind: event.kind,
+                    pubkey: event.pubkey?.substring(0, 12),
+                    tags: JSON.stringify(event.tags),
+                    content: event.content,
+                });
 
                 await withTimeout(
                     event.sign(signer),
