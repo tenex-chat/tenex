@@ -6,13 +6,16 @@ import { getProjectContext } from "@/services/projects";
 import { config } from "@/services/ConfigService";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { getNDK } from "@/nostr/ndkClient";
+import { Nip46SigningService } from "@/services/nip46";
 import { logger } from "@/utils/logger";
-import { NDKEvent, type NDKSigner } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner, type NDKSigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 const UPLOAD_TIMEOUT_MS = 60_000;
+const NIP46_CONNECT_TIMEOUT_MS = 30_000; // 30 seconds for NIP-46 connection
+const NIP46_SIGNING_TIMEOUT_MS = 120_000; // 2 minutes for NIP-46 remote signing
 
 const fileReferenceSchema = z.object({
     path: z.string().describe("Absolute path to the file on disk"),
@@ -24,6 +27,18 @@ const agentsPublishSchema = z.object({
     description: z.string().describe("Short one-line description of the agent definition"),
     category: z.string().describe("Category for the agent (e.g., 'developer', 'analyst', 'assistant')"),
     rich_description: z.string().describe("Comprehensive homepage-style description of what the agent definition is all about (markdown). This becomes the event content."),
+    image: z
+        .string()
+        .url("image must be a valid URL")
+        .optional()
+        .describe("Optional image URL for the agent definition. Published as an 'image' tag in the kind:4199 event."),
+    publish_as_user: z
+        .boolean()
+        .default(true)
+        .describe(
+            "When true (default), the kind:4199 event is signed by the project owner via NIP-46 remote signing " +
+            "(the agent sends the signing request). When false, the event is signed with the TENEX backend key."
+        ),
     files: z
         .array(fileReferenceSchema)
         .optional()
@@ -288,12 +303,79 @@ async function uploadFileAndCreateMetadata(
 }
 
 /**
- * Publishes an agent definition (kind 4199) to Nostr using the TENEX backend signer.
+ * Create an NDKNip46Signer using the agent's private key as the local signer
+ * and the owner's pubkey as the remote signer target.
+ * Returns the signer after connecting (with timeout).
+ */
+async function createAgentNip46Signer(
+    agentSigner: NDKPrivateKeySigner,
+    ownerPubkey: string,
+): Promise<NDKNip46Signer> {
+    const ndk = getNDK();
+    const nip46Service = Nip46SigningService.getInstance();
+    const bunkerUri = nip46Service.getBunkerUri(ownerPubkey);
+
+    if (!bunkerUri || !bunkerUri.startsWith("bunker://")) {
+        throw new Error(
+            `Invalid bunker URI for owner ${ownerPubkey.substring(0, 12)}: ` +
+            `expected a "bunker://" URI but got "${bunkerUri || "(empty)"}"`
+        );
+    }
+
+    logger.info("[agents_publish] Creating NIP-46 signer for remote signing", {
+        ownerPubkey: ownerPubkey.substring(0, 12),
+        bunkerUri: bunkerUri.substring(0, 60),
+    });
+
+    const signer = NDKNip46Signer.bunker(ndk, bunkerUri, agentSigner);
+
+    signer.on("authUrl", (url: string) => {
+        logger.info("[agents_publish] NIP-46 auth URL required", {
+            ownerPubkey: ownerPubkey.substring(0, 12),
+            url,
+        });
+    });
+
+    // Connect with timeout — cancel timer on success to avoid leaked handles
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        await Promise.race([
+            signer.blockUntilReady(),
+            new Promise<never>((_, reject) => {
+                connectTimer = setTimeout(
+                    () => reject(new Error(
+                        `NIP-46 connect timed out after ${NIP46_CONNECT_TIMEOUT_MS / 1000}s`
+                    )),
+                    NIP46_CONNECT_TIMEOUT_MS,
+                );
+            }),
+        ]);
+    } catch (error) {
+        // On timeout or connection failure, close the signer to release relay subscriptions
+        try { signer.stop(); } catch { /* best-effort cleanup */ }
+        throw error;
+    } finally {
+        clearTimeout(connectTimer);
+    }
+
+    return signer;
+}
+
+/**
+ * Publishes an agent definition (kind 4199) to Nostr.
+ *
+ * When `publish_as_user` is true, uses NIP-46 remote signing so the event
+ * is signed by the project owner (the agent acts as the NIP-46 client).
+ * When false, signs with the TENEX backend key.
+ *
  * Optionally uploads files and references them via e-tags.
  * Returns the event ID on success.
  */
-async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> {
-    const { slug, description, category, rich_description, files } = input;
+async function executeAgentsPublish(
+    input: AgentsPublishInput,
+    context: ToolExecutionContext,
+): Promise<string> {
+    const { slug, description, category, rich_description, image, publish_as_user, files } = input;
 
     if (!slug) {
         throw new Error("Agent slug is required");
@@ -306,8 +388,14 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
         throw new Error(`Agent with slug "${slug}" not found in current project`);
     }
 
-    const signer = await config.getBackendSigner();
     const ndk = getNDK();
+
+    // Backend signer is only needed when NOT publishing as user (backend signs the 4199 event).
+    // File uploads are always signed by the agent's own signer when publish_as_user=true.
+    const backendSigner = !publish_as_user ? await config.getBackendSigner() : undefined;
+
+    // Choose the signer for file uploads: agent's own signer when publishing as user, backend signer otherwise
+    const fileSigner: NDKSigner = publish_as_user ? context.agent.signer : backendSigner!;
 
     // Upload files and create kind:1063 events if provided
     const fileMetadataEvents: FileMetadataEvent[] = [];
@@ -319,7 +407,7 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
                 const metadata = await uploadFileAndCreateMetadata(
                     file.path,
                     file.name,
-                    signer,
+                    fileSigner,
                     ndk
                 );
                 fileMetadataEvents.push(metadata);
@@ -333,7 +421,6 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
 
     // Create the agent definition event
     const agentDefinition = new NDKAgentDefinition(ndk);
-    agentDefinition.pubkey = signer.pubkey;
 
     agentDefinition.title = agent.name;
     agentDefinition.role = agent.role;
@@ -341,6 +428,11 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
     agentDefinition.category = category;
     // Rich description goes into event content, not a tag
     agentDefinition.content = rich_description;
+
+    if (image) {
+        agentDefinition.removeTag("image");
+        agentDefinition.tags.push(["image", image]);
+    }
 
     if (agent.instructions) {
         agentDefinition.instructions = agent.instructions;
@@ -359,14 +451,100 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
         agentDefinition.tags.push(["e", fileMetadata.eventId]);
     }
 
-    await agentDefinition.sign(signer, { pTags: false });
-    await agentDefinition.publish();
+    // Determine signing strategy
+    if (publish_as_user) {
+        // NIP-46 remote signing: the agent sends the signing request to the owner
+        const nip46Service = Nip46SigningService.getInstance();
 
-    logger.info(`Successfully published agent definition for "${agent.name}" (${slug})`, {
-        eventId: agentDefinition.id,
-        pubkey: signer.pubkey,
-        filesAttached: fileMetadataEvents.length,
-    });
+        if (!nip46Service.isEnabled()) {
+            throw new Error(
+                "Cannot publish as user: NIP-46 remote signing is not enabled in the configuration. " +
+                "Enable it by setting nip46.enabled=true in your TENEX config, or set publish_as_user=false " +
+                "to publish with the backend signer instead."
+            );
+        }
+
+        const ownerPubkey = projectCtx?.project?.pubkey;
+        if (!ownerPubkey) {
+            throw new Error(
+                "Cannot publish as user: no project owner pubkey found. " +
+                "Set publish_as_user=false to publish with the backend signer instead."
+            );
+        }
+
+        // Runtime type guard: verify agent signer is NDKPrivateKeySigner (required for NIP-46 local key)
+        const agentSigner: unknown = context.agent.signer;
+        if (!(agentSigner instanceof NDKPrivateKeySigner)) {
+            throw new Error(
+                `Expected agent signer to be NDKPrivateKeySigner for NIP-46 signing, ` +
+                `but got ${(agentSigner as { constructor?: { name?: string } })?.constructor?.name ?? "undefined"}. ` +
+                `Agent "${slug}" may have an incompatible signer configuration.`
+            );
+        }
+
+        logger.info(`Publishing agent definition as user via NIP-46`, {
+            slug,
+            ownerPubkey: ownerPubkey.substring(0, 12),
+            agentPubkey: context.agent.pubkey.substring(0, 12),
+        });
+
+        // Create NIP-46 signer using the agent's own signer as local key
+        const nip46Signer = await createAgentNip46Signer(
+            context.agent.signer,
+            ownerPubkey,
+        );
+
+        // Set pubkey to the owner's before signing
+        agentDefinition.pubkey = ownerPubkey;
+
+        // Sign with NIP-46 (with timeout) — cancel timer and close signer on failure
+        let signingTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                agentDefinition.sign(nip46Signer, { pTags: false }),
+                new Promise<never>((_, reject) => {
+                    signingTimer = setTimeout(
+                        () => reject(new Error(
+                            `NIP-46 remote signing timed out after ${NIP46_SIGNING_TIMEOUT_MS / 1000}s`
+                        )),
+                        NIP46_SIGNING_TIMEOUT_MS,
+                    );
+                }),
+            ]);
+        } catch (error) {
+            try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+            throw error;
+        } finally {
+            clearTimeout(signingTimer);
+        }
+
+        try {
+            await agentDefinition.publish();
+        } finally {
+            // Clean up the NIP-46 signer whether publish succeeds or fails
+            try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        }
+
+        logger.info(`Successfully published user-signed agent definition for "${agent.name}" (${slug})`, {
+            eventId: agentDefinition.id,
+            pubkey: ownerPubkey,
+            signerType: "nip46",
+            filesAttached: fileMetadataEvents.length,
+        });
+    } else {
+        // Backend signer (original behavior)
+        agentDefinition.pubkey = backendSigner!.pubkey;
+
+        await agentDefinition.sign(backendSigner!, { pTags: false });
+        await agentDefinition.publish();
+
+        logger.info(`Successfully published backend-signed agent definition for "${agent.name}" (${slug})`, {
+            eventId: agentDefinition.id,
+            pubkey: backendSigner!.pubkey,
+            signerType: "backend",
+            filesAttached: fileMetadataEvents.length,
+        });
+    }
 
     return agentDefinition.id;
 }
@@ -374,17 +552,19 @@ async function executeAgentsPublish(input: AgentsPublishInput): Promise<string> 
 /**
  * Create an AI SDK tool for publishing agent definitions
  */
-export function createAgentsPublishTool(_context: ToolExecutionContext): AISdkTool {
+export function createAgentsPublishTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Publish an agent definition (kind 4199) to Nostr using the TENEX backend signer. " +
-            "Takes an agent slug and optionally an array of files to bundle with the agent. " +
+            "Publish an agent definition (kind 4199) to Nostr. " +
+            "By default, the event is signed by the project owner via NIP-46 remote signing " +
+            "(the agent sends the signing request). Set publish_as_user=false to sign with the TENEX backend key instead. " +
+            "Optionally include an image URL and/or an array of files to bundle with the agent. " +
             "Each file is uploaded to Blossom, a kind:1063 NIP-94 event is created, and an e-tag " +
             "is added to the agent definition referencing the file. Returns the event ID on success.",
         inputSchema: agentsPublishSchema,
         execute: async (input: AgentsPublishInput) => {
             try {
-                return await executeAgentsPublish(input);
+                return await executeAgentsPublish(input, context);
             } catch (error) {
                 logger.error("Failed to publish agent definition", { error });
                 throw new Error(
