@@ -24,9 +24,9 @@ export class SubscriptionFilterBuilder {
         const authors = Array.from(whitelistedPubkeys);
 
         return [
-            // Project discovery + agent config updates
+            // Project discovery + agent config updates + agent deletions
             {
-                kinds: [31933, NDKKind.TenexAgentConfigUpdate],
+                kinds: [31933, NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete],
                 authors,
             },
             // Lesson comments from whitelisted authors
