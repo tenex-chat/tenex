@@ -9,14 +9,14 @@ describe("SubscriptionFilterBuilder", () => {
             expect(filters).toEqual([]);
         });
 
-        test("returns project discovery + config update filter and lesson comment filter", () => {
+        test("returns project discovery + config update + agent deletion filter and lesson comment filter", () => {
             const filters = SubscriptionFilterBuilder.buildStaticFilters(
                 new Set(["whitelist1", "whitelist2"])
             );
             expect(filters).toHaveLength(2);
 
-            // First filter: project discovery + config updates
-            expect(filters[0].kinds).toEqual([31933, NDKKind.TenexAgentConfigUpdate]);
+            // First filter: project discovery + config updates + agent deletions
+            expect(filters[0].kinds).toEqual([31933, NDKKind.TenexAgentConfigUpdate, NDKKind.TenexAgentDelete]);
             expect(filters[0].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
 
             // Second filter: lesson comments (no #p filter)

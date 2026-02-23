@@ -19,6 +19,7 @@ import { llmOpsRegistry } from "../services/LLMOperationsRegistry";
 import { logger } from "../utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
+import { handleAgentDeletion } from "./agentDeletion";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
@@ -182,6 +183,10 @@ export class EventHandler {
 
             case NDKKind.TenexAgentConfigUpdate:
                 await this.handleAgentConfigUpdate(event);
+                break;
+
+            case NDKKind.TenexAgentDelete:
+                await handleAgentDeletion(event);
                 break;
 
             case 513: // NDKEventMetadata
