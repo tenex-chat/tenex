@@ -34,6 +34,7 @@ import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceS
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
+import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
@@ -183,6 +184,13 @@ export class Daemon {
             if (loadedConfig.nip46?.enabled) {
                 logger.info("NIP-46 remote signing enabled");
             }
+
+            // 6c. Initialize OwnerAgentListService (global 14199 management)
+            const nip46Service = Nip46SigningService.getInstance();
+            const ownerPubkeys = nip46Service.isEnabled()
+                ? [...this.whitelistedPubkeys]
+                : [backendSigner.pubkey];
+            OwnerAgentListService.getInstance().initialize(ownerPubkeys);
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
@@ -834,6 +842,9 @@ export class Daemon {
             }
         }
 
+        // Register with global 14199 service
+        OwnerAgentListService.getInstance().registerAgents([agent.pubkey]);
+
         logger.info("Dynamic agent added to routing", {
             projectId,
             agentSlug: agent.slug,
@@ -927,6 +938,33 @@ export class Daemon {
      */
     private async handleProjectEvent(event: NDKEvent): Promise<void> {
         const projectId = this.buildProjectId(event);
+
+        const isDeleted = event.tags.some((tag: string[]) => tag[0] === "deleted");
+        if (isDeleted) {
+            if (this.knownProjects.has(projectId)) {
+                this.knownProjects.delete(projectId);
+                this.pendingRestartBootProjects.delete(projectId);
+
+                if (this.runtimeLifecycle?.getRuntime(projectId)) {
+                    try {
+                        await this.killRuntime(projectId);
+                    } catch (error) {
+                        logger.error("Failed to stop runtime for deleted project", {
+                            projectId,
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+                    }
+                }
+
+                if (this.subscriptionManager) {
+                    this.subscriptionManager.updateKnownProjects(Array.from(this.knownProjects.keys()));
+                }
+            }
+
+            logger.info("Ignored deleted project event", { projectId });
+            return;
+        }
+
         const project = new NDKProject(getNDK(), event.rawEvent());
         const isNewProject = !this.knownProjects.has(projectId);
 
@@ -1287,6 +1325,11 @@ export class Daemon {
                 // Stop intervention service
                 process.stdout.write("Stopping intervention service...");
                 InterventionService.getInstance().shutdown();
+                console.log(" done");
+
+                // Stop owner agent list service
+                process.stdout.write("Stopping owner agent list service...");
+                OwnerAgentListService.getInstance().shutdown();
                 console.log(" done");
 
                 // Stop NIP-46 signing service
@@ -1726,6 +1769,9 @@ export class Daemon {
 
         // Stop intervention service
         InterventionService.getInstance().shutdown();
+
+        // Stop owner agent list service
+        OwnerAgentListService.getInstance().shutdown();
 
         // Stop NIP-46 signing service
         await Nip46SigningService.getInstance().shutdown();
