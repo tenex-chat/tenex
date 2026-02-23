@@ -1,7 +1,7 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import { AUTO_INJECTED_TOOLS, DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
+import { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
 import type { StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
@@ -153,12 +153,6 @@ export class ProjectStatusService {
         try {
             // Use stored context (this.projectContext is always set when publishing)
             const projectCtx = this.projectContext;
-
-            // Skip publishing if agent registry is currently reloading (prevents race condition)
-            if (projectCtx.agentRegistry.getIsLoading()) {
-                logger.debug("Skipping status publish - agent registry is loading");
-                return;
-            }
 
             // Build status intent
             const intent: StatusIntent = {
@@ -332,8 +326,7 @@ export class ProjectStatusService {
                 if (
                     !DELEGATE_TOOLS.includes(toolName) &&
                     !CORE_AGENT_TOOLS.includes(toolName) &&
-                    !CONTEXT_INJECTED_TOOLS.includes(toolName) &&
-                    !AUTO_INJECTED_TOOLS.includes(toolName)
+                    !CONTEXT_INJECTED_TOOLS.includes(toolName)
                 ) {
                     toolAgentMap.set(toolName, new Set());
                 }
