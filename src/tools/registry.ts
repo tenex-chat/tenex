@@ -58,6 +58,9 @@ import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscript
 import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
 import { createRAGSubscriptionListTool } from "./implementations/rag_subscription_list";
 import { createMcpResourceReadTool } from "./implementations/mcp_resource_read";
+import { createMcpSubscribeTool } from "./implementations/mcp_subscribe";
+import { createMcpSubscriptionStopTool } from "./implementations/mcp_subscription_stop";
+import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { createReportDeleteTool } from "./implementations/report_delete";
 import { createReportReadTool } from "./implementations/report_read";
 import { createReportWriteTool } from "./implementations/report_write";
@@ -126,6 +129,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     rag_subscription_list: { hasSideEffects: false },
     rag_subscription_get: { hasSideEffects: false },
     mcp_resource_read: { hasSideEffects: false },
+    // mcp_subscribe and mcp_subscription_stop have side effects (not listed = true by default)
     bug_list: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
@@ -140,6 +144,7 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
     "todo_write",
     "conversation_get", // Needs conversation for current-conversation optimization
     "change_model", // Needs conversation to persist variant override
+    "mcp_subscribe", // Needs conversation to bind subscription to it
 ]);
 
 /**
@@ -221,6 +226,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // MCP tools
     mcp_resource_read: createMcpResourceReadTool,
+    mcp_subscribe: createMcpSubscribeTool as ToolFactory,
+    mcp_subscription_stop: createMcpSubscriptionStopTool,
 
     // Alpha mode bug reporting tools
     bug_list: createBugListTool,
@@ -319,6 +326,19 @@ const HOME_FS_TOOLS: ToolName[] = ["home_fs_read", "home_fs_write", "home_fs_gre
 
 /** Full filesystem tool names - used to check if agent has fs access */
 const FS_TOOL_NAMES: ToolName[] = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"];
+
+/**
+ * Check if an agent has stoppable MCP subscriptions (ACTIVE or ERROR).
+ * Wrapped in a function to handle cases where the service isn't initialized.
+ */
+function mcpSubscriptionServiceHasStoppableSubscriptions(agentPubkey: string): boolean {
+    try {
+        const service = McpSubscriptionService.getInstance();
+        return service.hasStoppableSubscriptions(agentPubkey);
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Get tools as a keyed object (for AI SDK usage)
@@ -515,6 +535,19 @@ export function getToolsObject(
             if (!regularTools.includes(homeFsToolName)) {
                 regularTools.push(homeFsToolName);
             }
+        }
+    }
+
+    // Auto-inject mcp_subscription_stop when agent has active MCP subscriptions
+    if (hasConversation && "agent" in context && context.agent?.pubkey) {
+        try {
+            if (mcpSubscriptionServiceHasStoppableSubscriptions(context.agent.pubkey)) {
+                if (!regularTools.includes("mcp_subscription_stop")) {
+                    regularTools.push("mcp_subscription_stop");
+                }
+            }
+        } catch {
+            // McpSubscriptionService not initialized - skip injection
         }
     }
 

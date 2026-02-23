@@ -32,12 +32,16 @@ interface MCPClientEntry {
     config: MCPServerConfig;
 }
 
+type ResourceNotificationHandler = (notification: { uri: string }) => void | Promise<void>;
+
 export class MCPManager {
     private clients: Map<string, MCPClientEntry> = new Map();
     private isInitialized = false;
     private metadataPath?: string;
     private workingDirectory?: string;
     private cachedTools: MCPToolSet = {};
+    /** Per-server list of notification handlers (dispatcher pattern to avoid clobbering) */
+    private resourceNotificationHandlers: Map<string, ResourceNotificationHandler[]> = new Map();
 
     /**
      * Convert an MCP tool (JSON Schema) to an AI SDK tool (Zod)
@@ -320,6 +324,8 @@ export class MCPManager {
         await Promise.all(shutdownPromises);
         this.clients.clear();
         this.cachedTools = {};
+        // Clear notification handlers so reload() re-registers them on new clients
+        this.resourceNotificationHandlers.clear();
         this.isInitialized = false;
     }
 
@@ -616,33 +622,67 @@ export class MCPManager {
     }
 
     /**
-     * Register a handler for resource update notifications
-     * Must be called BEFORE subscribeToResource
+     * Add a handler for resource update notifications on a server.
+     * Multiple handlers can be registered per server (dispatcher pattern).
+     * Must be called BEFORE subscribeToResource.
+     *
+     * @returns A removal function to unregister this specific handler
      */
-    onResourceNotification(
+    addResourceNotificationHandler(
         serverName: string,
-        handler: (notification: { uri: string }) => void | Promise<void>
-    ): void {
+        handler: ResourceNotificationHandler
+    ): () => void {
         const entry = this.clients.get(serverName);
         if (!entry) {
             throw new Error(`MCP server '${serverName}' not found`);
         }
 
-        // Register notification handler with the MCP client
-        entry.client.setNotificationHandler(
-            ResourceUpdatedNotificationSchema,
-            async (notification) => {
-                // Extract URI from notification params
-                const uri = notification.params.uri;
-                if (uri) {
-                    await handler({ uri });
+        // Initialize handler list for this server if needed
+        if (!this.resourceNotificationHandlers.has(serverName)) {
+            this.resourceNotificationHandlers.set(serverName, []);
+
+            // Register the SDK-level notification handler ONCE per server.
+            // This dispatcher fans out to all registered handlers.
+            entry.client.setNotificationHandler(
+                ResourceUpdatedNotificationSchema,
+                async (notification) => {
+                    const uri = notification.params.uri;
+                    if (!uri) return;
+
+                    const handlers = this.resourceNotificationHandlers.get(serverName) ?? [];
+                    for (const h of handlers) {
+                        try {
+                            await h({ uri });
+                        } catch (error) {
+                            logger.error("Resource notification handler error", {
+                                server: serverName,
+                                uri,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
+                        }
+                    }
                 }
-            }
-        );
+            );
+        }
+
+        const handlers = this.resourceNotificationHandlers.get(serverName)!;
+        handlers.push(handler);
 
         trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {
             "server.name": serverName,
+            "handlers.count": handlers.length,
         });
+
+        // Return removal function
+        return () => {
+            const currentHandlers = this.resourceNotificationHandlers.get(serverName);
+            if (currentHandlers) {
+                const index = currentHandlers.indexOf(handler);
+                if (index !== -1) {
+                    currentHandlers.splice(index, 1);
+                }
+            }
+        };
     }
 }
 
