@@ -37,10 +37,12 @@ interface ToolMapping {
     mcpPatterns?: RegExp[];
 }
 
-/** Claude Code built-in tools and their TENEX/MCP equivalents */
+/** Claude Code built-in tools and their TENEX/MCP equivalents.
+ * Note: Read is deliberately absent. Claude Code saves large MCP tool results
+ * to files and expects the model to use its built-in Read to access them.
+ * Disabling Read leaves agents unable to retrieve any large tool result. */
 const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
-    // File system tools
-    Read: { tenex: "fs_read", mcpPatterns: [/^mcp__.*__fs_read$/, /^mcp__.*__read_file$/] },
+    // File system tools (Read excluded — see comment above)
     Write: { tenex: "fs_write", mcpPatterns: [/^mcp__.*__fs_write$/, /^mcp__.*__write_file$/] },
     Edit: { tenex: "fs_edit", mcpPatterns: [/^mcp__.*__fs_edit$/, /^mcp__.*__edit_file$/] },
     Glob: { tenex: "fs_glob", mcpPatterns: [/^mcp__.*__fs_glob$/, /^mcp__.*__glob$/] },
@@ -62,8 +64,10 @@ const TOOL_MAPPINGS: Readonly<Record<string, ToolMapping>> = {
 /** File system tool names that indicate FS capability */
 const FS_TOOL_NAMES = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"] as const;
 
-/** Built-in tools that TENEX always controls — agents get these only via TENEX's equivalents */
-const ALWAYS_DISABLED_BUILTINS = ["Read", "Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput"] as const;
+/** Built-in tools that TENEX always controls — agents get these only via TENEX's equivalents.
+ * Read is excluded: Claude Code saves large MCP tool results to files and needs
+ * its built-in Read to let the model access them. */
+const ALWAYS_DISABLED_BUILTINS = ["Write", "Edit", "Glob", "Grep", "LS", "NotebookEdit", "Bash", "TaskOutput"] as const;
 
 /** Pattern to detect MCP tools that provide FS capability */
 const MCP_FS_CAPABILITY_PATTERN = /mcp__.*__(fs_read|fs_write|fs_edit|fs_glob|fs_grep|read_file|write_file|edit_file|list_directory)/;
