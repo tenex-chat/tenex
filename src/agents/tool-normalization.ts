@@ -137,6 +137,29 @@ export function resolveMCPTools(mcpToolRequests: string[], agentSlug: string, mc
 }
 
 /**
+ * Expand filesystem capability groups:
+ * - fs_read implies fs_glob + fs_grep (reading without searching is impractical)
+ * - fs_write implies fs_edit (writing without editing is impractical)
+ *
+ * This is a pure expansion — it never removes tools, only adds implied ones.
+ * Does not mutate the input array.
+ */
+export function expandFsCapabilities(tools: string[]): string[] {
+    const expanded = [...tools];
+
+    if (expanded.includes("fs_read")) {
+        if (!expanded.includes("fs_glob")) expanded.push("fs_glob");
+        if (!expanded.includes("fs_grep")) expanded.push("fs_grep");
+    }
+
+    if (expanded.includes("fs_write")) {
+        if (!expanded.includes("fs_edit")) expanded.push("fs_edit");
+    }
+
+    return expanded;
+}
+
+/**
  * Complete tool processing pipeline:
  * 1. Normalize (add core, delegate, filter)
  * 2. Validate
