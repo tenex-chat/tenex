@@ -1,55 +1,44 @@
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
-import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
-import type { Hexpubkey, NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
+import type { Hexpubkey, NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
-import { SubscriptionFilterBuilder, type SubscriptionConfig } from "./filters/SubscriptionFilterBuilder";
-import { trace } from "@opentelemetry/api";
-
-const lessonTracer = trace.getTracer("tenex.lessons");
+import { SubscriptionFilterBuilder } from "./filters/SubscriptionFilterBuilder";
 
 /**
- * Manages a single subscription for all projects and agents.
+ * Manages independent subscriptions for different event categories.
+ *
+ * Instead of a single monolithic subscription that is torn down and recreated
+ * whenever any tracked set changes, this manager maintains four independent
+ * subscription groups:
+ *
+ * 1. Static — project discovery, config updates, lesson comments (never recreated)
+ * 2. Known-projects — events tagged with project a-tags (recreated on project changes)
+ * 3. Agent-mentions — events p-tagging agents (recreated on agent pubkey changes)
+ * 4. Per-agent lessons — one per agent definition ID (individually managed)
  */
 export class SubscriptionManager {
     private ndk: NDK;
-    private subscription: NDKSubscription | null = null;
     private eventHandler: (event: NDKEvent) => Promise<void>;
     private routingLogger: EventRoutingLogger;
-
-    /**
-     * Whitelisted pubkeys that can create/manage projects
-     */
     private whitelistedPubkeys: Set<Hexpubkey>;
 
-    /**
-     * Known project A-tags we're monitoring
-     * Format: "31933:authorPubkey:dTag"
-     */
-    private knownProjects: Set<string> = new Set();
+    // Dedup: multiple subscriptions can deliver the same event
+    private recentEventIds = new Set<string>();
+    private recentEventTimer: NodeJS.Timeout | null = null;
 
-    /**
-     * Agent pubkeys we're monitoring across all projects
-     */
-    private agentPubkeys: Set<Hexpubkey> = new Set();
+    // Independent subscription groups
+    private staticSubscription: NDKSubscription | null = null;
+    private projectSubscription: NDKSubscription | null = null;
+    private agentMentionsSubscription: NDKSubscription | null = null;
+    private lessonSubscriptions = new Map<string, NDKSubscription>();
 
-    /**
-     * Agent definition event IDs we're monitoring for lessons
-     * Format: event ID of the NDKAgentDefinition (kind 4199)
-     */
-    private agentDefinitionIds: Set<string> = new Set();
+    // Per-subscription since tracking
+    private lastProjectSubCreatedAt: number | null = null;
+    private lastAgentMentionsSubCreatedAt: number | null = null;
 
-    /**
-     * Track if we need to restart the subscription
-     */
-    private restartPending = false;
-    private restartTimer: NodeJS.Timeout | null = null;
-
-    /**
-     * Timestamp of last subscription creation (Unix seconds).
-     * Used as `since` filter on restart to prevent historical event re-delivery.
-     */
-    private lastSubscriptionCreatedAt: number | null = null;
+    // Debounce for agent mentions updates
+    private agentMentionsTimer: NodeJS.Timeout | null = null;
+    private pendingAgentMentionsPubkeys: Set<Hexpubkey> | null = null;
 
     constructor(
         ndk: NDK,
@@ -64,290 +53,256 @@ export class SubscriptionManager {
     }
 
     /**
-     * Start the subscription
+     * Start subscriptions. Creates the static subscription immediately.
+     * Project and agent-mentions subscriptions are created later as data arrives.
      */
     async start(): Promise<void> {
         logger.debug("Starting subscription manager", {
             whitelistedPubkeys: Array.from(this.whitelistedPubkeys).map((p) => p.slice(0, 8)),
-            knownProjects: this.knownProjects.size,
-            agentPubkeys: this.agentPubkeys.size,
-            agentDefinitionIds: this.agentDefinitionIds.size,
         });
 
-        await this.createSubscription();
-    }
-
-    /**
-     * Create or recreate the NDK subscription
-     */
-    private async createSubscription(): Promise<void> {
-        const span = lessonTracer.startSpan("tenex.lesson.subscription_create", {
-            attributes: {
-                "subscription.agent_pubkeys_count": this.agentPubkeys.size,
-                "subscription.agent_definition_ids_count": this.agentDefinitionIds.size,
-                "subscription.agent_definition_ids": JSON.stringify(
-                    Array.from(this.agentDefinitionIds).map((id) => id.substring(0, 16))
-                ),
-                "subscription.agent_pubkeys": JSON.stringify(
-                    Array.from(this.agentPubkeys).map((pk) => pk.substring(0, 16))
-                ),
-            },
-        });
-
-        // Stop existing subscription if any
-        if (this.subscription) {
-            span.addEvent("stopping_existing_subscription");
-            this.subscription.stop();
-            this.subscription = null;
+        const filters = SubscriptionFilterBuilder.buildStaticFilters(this.whitelistedPubkeys);
+        if (filters.length > 0) {
+            this.staticSubscription = this.createSub(filters, "static");
         }
 
-        // Build filters using the centralized SubscriptionFilterBuilder
-        // On restart (not first creation), use the previous creation timestamp
-        // as `since` to prevent relays from re-delivering historical events
-        const sinceTimestamp = this.lastSubscriptionCreatedAt ?? undefined;
-
-        const config: SubscriptionConfig = {
-            whitelistedPubkeys: this.whitelistedPubkeys,
-            knownProjects: this.knownProjects,
-            agentPubkeys: this.agentPubkeys,
-            agentDefinitionIds: this.agentDefinitionIds,
-            since: sinceTimestamp,
-        };
-        const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-        // Record this subscription creation time for future restarts
-        this.lastSubscriptionCreatedAt = Math.floor(Date.now() / 1000);
-
-        // Count lesson-specific filters
-        const lessonFilters = filters.filter((f) => f.kinds?.includes(NDKKind.AgentLesson));
-        span.setAttribute("subscription.lesson_filters_count", lessonFilters.length);
-        span.setAttribute("subscription.total_filters_count", filters.length);
-
-        logger.debug("Creating subscription with filters", {
-            filterCount: filters.length,
-            whitelistedAuthors: this.whitelistedPubkeys.size,
-            trackedProjects: this.knownProjects.size,
-            trackedAgents: this.agentPubkeys.size,
-            trackedDefinitions: this.agentDefinitionIds.size,
-        });
-
-        // Log the actual filters being used
         await this.routingLogger.logSubscriptionFilters({
             filters,
             whitelistedAuthors: this.whitelistedPubkeys.size,
-            trackedProjects: this.knownProjects.size,
-            trackedAgents: this.agentPubkeys.size,
+            trackedProjects: 0,
+            trackedAgents: 0,
         });
+    }
 
-        this.subscription = this.ndk.subscribe(filters, {
+    /**
+     * Update known projects. Recreates the project subscription with new project IDs.
+     * Uses `since` on restarts to prevent historical event re-delivery.
+     */
+    updateKnownProjects(projectIds: string[]): void {
+        const knownProjects = new Set(projectIds);
+
+        // Stop existing project subscription
+        if (this.projectSubscription) {
+            this.projectSubscription.stop();
+            this.projectSubscription = null;
+        }
+
+        if (knownProjects.size === 0) {
+            return;
+        }
+
+        const since = this.lastProjectSubCreatedAt ?? undefined;
+        this.lastProjectSubCreatedAt = Math.floor(Date.now() / 1000);
+
+        const filters: NDKFilter[] = [];
+
+        const taggedFilter = SubscriptionFilterBuilder.buildProjectTaggedFilter(knownProjects, since);
+        if (taggedFilter) filters.push(taggedFilter);
+
+        const reportFilter = SubscriptionFilterBuilder.buildReportFilter(knownProjects);
+        if (reportFilter) filters.push(reportFilter);
+
+        if (filters.length > 0) {
+            this.projectSubscription = this.createSub(filters, "projects");
+            logger.debug("Project subscription updated", {
+                projects: knownProjects.size,
+                since,
+            });
+        }
+    }
+
+    /**
+     * Update agent mentions subscription. Debounced with 2s timer since
+     * agent additions can batch (e.g. during project boot with multiple agents).
+     */
+    updateAgentMentions(pubkeys: Hexpubkey[]): void {
+        this.pendingAgentMentionsPubkeys = new Set(pubkeys);
+
+        if (this.agentMentionsTimer) {
+            clearTimeout(this.agentMentionsTimer);
+        }
+
+        this.agentMentionsTimer = setTimeout(() => {
+            this.agentMentionsTimer = null;
+            this.applyAgentMentionsUpdate();
+        }, 2000);
+    }
+
+    private applyAgentMentionsUpdate(): void {
+        const pubkeys = this.pendingAgentMentionsPubkeys;
+        this.pendingAgentMentionsPubkeys = null;
+
+        if (!pubkeys) return;
+
+        // Stop existing agent mentions subscription
+        if (this.agentMentionsSubscription) {
+            this.agentMentionsSubscription.stop();
+            this.agentMentionsSubscription = null;
+        }
+
+        if (pubkeys.size === 0) {
+            return;
+        }
+
+        const since = this.lastAgentMentionsSubCreatedAt ?? undefined;
+        this.lastAgentMentionsSubCreatedAt = Math.floor(Date.now() / 1000);
+
+        const filter = SubscriptionFilterBuilder.buildAgentMentionsFilter(pubkeys, since);
+        if (filter) {
+            this.agentMentionsSubscription = this.createSub([filter], "agent-mentions");
+            logger.debug("Agent mentions subscription updated", {
+                agents: pubkeys.size,
+                since,
+            });
+        }
+    }
+
+    /**
+     * Add a lesson subscription for a specific agent definition ID.
+     * Uses NDK groupable to merge with other lesson subscriptions.
+     */
+    addLessonSubscription(definitionId: string): void {
+        if (this.lessonSubscriptions.has(definitionId)) {
+            return;
+        }
+
+        const filter = SubscriptionFilterBuilder.buildLessonFilter(definitionId);
+        const sub = this.ndk.subscribe([filter], {
             closeOnEose: false,
             groupable: true,
         });
 
-        this.subscription.on("event", async (event: NDKEvent) => {
-            try {
-                await this.handleEvent(event);
-            } catch (error) {
-                logger.error("Error handling event in subscription", {
-                    error: error instanceof Error ? error.message : String(error),
-                    eventId: event.id,
-                    eventKind: event.kind,
-                });
-            }
-        });
+        sub.on("event", (event: NDKEvent) => this.handleEvent(event));
 
-        this.subscription.on("eose", () => {
-            // Note: Can't add to span here - it's already ended by the time eose fires
-            logger.debug("Subscription EOSE received", {
-                agentDefinitionIdsCount: this.agentDefinitionIds.size,
-                agentPubkeysCount: this.agentPubkeys.size,
+        this.lessonSubscriptions.set(definitionId, sub);
+        logger.debug("Lesson subscription added", {
+            definitionId: definitionId.substring(0, 12),
+            totalLessonSubs: this.lessonSubscriptions.size,
+        });
+    }
+
+    /**
+     * Remove a lesson subscription for a specific agent definition ID.
+     */
+    removeLessonSubscription(definitionId: string): void {
+        const sub = this.lessonSubscriptions.get(definitionId);
+        if (sub) {
+            sub.stop();
+            this.lessonSubscriptions.delete(definitionId);
+            logger.debug("Lesson subscription removed", {
+                definitionId: definitionId.substring(0, 12),
+                totalLessonSubs: this.lessonSubscriptions.size,
             });
-        });
-
-        span.addEvent("subscription_created", {
-            "subscription.filters_count": filters.length,
-            "subscription.lesson_filters_count": lessonFilters.length,
-        });
-        span.end();
-    }
-
-    /**
-     * Handle incoming events
-     */
-    private async handleEvent(event: NDKEvent): Promise<void> {
-        logger.debug("Subscription received event", {
-            id: event.id,
-            kind: event.kind,
-            author: event.pubkey,
-            tagCount: event.tags.length,
-            aTags: event.tags.filter((t) => t[0] === "a").map((t) => t[1]),
-            pTags: event.tags.filter((t) => t[0] === "p").map((t) => t[1]?.slice(0, 8)),
-            eTags: event.tags.filter((t) => t[0] === "e").map((t) => t[1]?.slice(0, 8)),
-            contentLength: event.content?.length || 0,
-        });
-
-        // Route the event to the handler
-        await this.eventHandler(event);
-
-        // Check if this event requires subscription updates
-        await this.checkForSubscriptionUpdates(event);
-    }
-
-    /**
-     * Check if an event requires updating our subscription
-     * Note: Project events (kind 31933) are handled by Daemon.handleProjectEvent
-     * which calls updateKnownProjects() to update the subscription.
-     * This method is kept for potential future use with other event types.
-     */
-    private async checkForSubscriptionUpdates(_event: NDKEvent): Promise<void> {
-        // Project discovery is now handled by Daemon.handleProjectEvent
-        // which will call updateKnownProjects() when new projects are discovered
-    }
-
-    /**
-     * Schedule a subscription restart (debounced to avoid rapid restarts)
-     */
-    private scheduleRestart(): void {
-        if (this.restartPending) return;
-
-        this.restartPending = true;
-
-        // Clear existing timer
-        if (this.restartTimer) {
-            clearTimeout(this.restartTimer);
-        }
-
-        // Restart after 2 seconds to batch multiple updates
-        this.restartTimer = setTimeout(async () => {
-            logger.debug("Restarting subscription with updated filters");
-            this.restartPending = false;
-            this.restartTimer = null;
-            await this.createSubscription();
-        }, 2000);
-    }
-
-    /**
-     * Manually update known projects (called by Daemon)
-     */
-    updateKnownProjects(projectIds: string[]): void {
-        const oldSize = this.knownProjects.size;
-        this.knownProjects = new Set(projectIds);
-
-        if (oldSize !== this.knownProjects.size) {
-            logger.debug("Known projects updated", {
-                old: oldSize,
-                new: this.knownProjects.size,
-            });
-            this.scheduleRestart();
         }
     }
 
     /**
-     * Manually update agent pubkeys (called by Daemon)
-     */
-    updateAgentPubkeys(pubkeys: Hexpubkey[]): void {
-        const oldSize = this.agentPubkeys.size;
-        this.agentPubkeys = new Set(pubkeys);
-
-        if (oldSize !== this.agentPubkeys.size) {
-            logger.debug("Agent pubkeys updated", {
-                old: oldSize,
-                new: this.agentPubkeys.size,
-            });
-            this.scheduleRestart();
-        }
-    }
-
-    /**
-     * Manually update agent definition IDs (called by Daemon)
-     */
-    updateAgentDefinitionIds(eventIds: string[]): void {
-        const span = lessonTracer.startSpan("tenex.lesson.subscription_update", {
-            attributes: {
-                "subscription.old_definition_ids_count": this.agentDefinitionIds.size,
-                "subscription.new_definition_ids_count": eventIds.length,
-                "subscription.old_definition_ids": JSON.stringify(
-                    Array.from(this.agentDefinitionIds).map((id) => id.substring(0, 16))
-                ),
-                "subscription.new_definition_ids": JSON.stringify(
-                    eventIds.map((id) => id.substring(0, 16))
-                ),
-            },
-        });
-
-        const oldSize = this.agentDefinitionIds.size;
-        const oldIds = new Set(this.agentDefinitionIds);
-        this.agentDefinitionIds = new Set(eventIds);
-
-        // Check both size change AND content change
-        const sizeChanged = oldSize !== this.agentDefinitionIds.size;
-        const contentChanged = !this.setsEqual(oldIds, this.agentDefinitionIds);
-
-        span.setAttribute("subscription.size_changed", sizeChanged);
-        span.setAttribute("subscription.content_changed", contentChanged);
-        span.setAttribute("subscription.will_restart", sizeChanged || contentChanged);
-
-        if (sizeChanged || contentChanged) {
-            logger.debug("Agent definition IDs updated", {
-                old: oldSize,
-                new: this.agentDefinitionIds.size,
-                contentChanged,
-            });
-            span.addEvent("scheduling_restart", {
-                "reason": contentChanged ? "content_changed" : "size_changed",
-            });
-            this.scheduleRestart();
-        }
-
-        span.end();
-    }
-
-    /**
-     * Helper to compare two sets for equality
-     */
-    private setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
-        if (a.size !== b.size) return false;
-        for (const item of a) {
-            if (!b.has(item)) return false;
-        }
-        return true;
-    }
-
-    /**
-     * Stop the subscription
+     * Stop all subscriptions.
      */
     stop(): void {
-        if (this.restartTimer) {
-            clearTimeout(this.restartTimer);
-            this.restartTimer = null;
+        if (this.agentMentionsTimer) {
+            clearTimeout(this.agentMentionsTimer);
+            this.agentMentionsTimer = null;
         }
 
-        if (this.subscription) {
-            this.subscription.stop();
-            this.subscription = null;
+        if (this.recentEventTimer) {
+            clearTimeout(this.recentEventTimer);
+            this.recentEventTimer = null;
+        }
+        this.recentEventIds.clear();
+
+        if (this.staticSubscription) {
+            this.staticSubscription.stop();
+            this.staticSubscription = null;
         }
 
-        logger.debug("Subscription stopped");
+        if (this.projectSubscription) {
+            this.projectSubscription.stop();
+            this.projectSubscription = null;
+        }
+
+        if (this.agentMentionsSubscription) {
+            this.agentMentionsSubscription.stop();
+            this.agentMentionsSubscription = null;
+        }
+
+        for (const [, sub] of this.lessonSubscriptions) {
+            sub.stop();
+        }
+        this.lessonSubscriptions.clear();
+
+        logger.debug("All subscriptions stopped");
     }
 
     /**
-     * Get current subscription status
+     * Get current subscription status.
      */
     getStatus(): {
         active: boolean;
         whitelistedPubkeys: number;
-        knownProjects: number;
-        agentPubkeys: number;
-        agentDefinitionIds: number;
-        restartPending: boolean;
+        staticActive: boolean;
+        projectActive: boolean;
+        agentMentionsActive: boolean;
+        lessonSubscriptions: number;
     } {
         return {
-            active: this.subscription !== null,
+            active: this.staticSubscription !== null,
             whitelistedPubkeys: this.whitelistedPubkeys.size,
-            knownProjects: this.knownProjects.size,
-            agentPubkeys: this.agentPubkeys.size,
-            agentDefinitionIds: this.agentDefinitionIds.size,
-            restartPending: this.restartPending,
+            staticActive: this.staticSubscription !== null,
+            projectActive: this.projectSubscription !== null,
+            agentMentionsActive: this.agentMentionsSubscription !== null,
+            lessonSubscriptions: this.lessonSubscriptions.size,
         };
+    }
+
+    /**
+     * Create an NDK subscription with the shared event handler.
+     */
+    private createSub(filters: NDKFilter[], label: string): NDKSubscription {
+        const sub = this.ndk.subscribe(filters, {
+            closeOnEose: false,
+            groupable: false,
+        });
+
+        sub.on("event", (event: NDKEvent) => this.handleEvent(event));
+
+        sub.on("eose", () => {
+            logger.debug(`Subscription EOSE received [${label}]`);
+        });
+
+        return sub;
+    }
+
+    /**
+     * Handle incoming events from any subscription.
+     * Deduplicates across independent subscriptions — the same event can match
+     * both the project (#a) and agent-mentions (#p) filters.
+     */
+    private async handleEvent(event: NDKEvent): Promise<void> {
+        if (this.recentEventIds.has(event.id)) return;
+        this.recentEventIds.add(event.id);
+        this.scheduleEventIdCleanup();
+
+        try {
+            await this.eventHandler(event);
+        } catch (error) {
+            logger.error("Error handling event in subscription", {
+                error: error instanceof Error ? error.message : String(error),
+                eventId: event.id,
+                eventKind: event.kind,
+            });
+        }
+    }
+
+    /**
+     * Periodically flush the seen-event set to prevent unbounded growth.
+     * Batches cleanup into 60s intervals.
+     */
+    private scheduleEventIdCleanup(): void {
+        if (this.recentEventTimer) return;
+        this.recentEventTimer = setTimeout(() => {
+            this.recentEventIds.clear();
+            this.recentEventTimer = null;
+        }, 60_000);
     }
 }

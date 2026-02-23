@@ -2,103 +2,46 @@ import { NDKKind } from "@/nostr/kinds";
 import type { Hexpubkey, NDKFilter } from "@nostr-dev-kit/ndk";
 
 /**
- * Configuration for building subscription filters
- */
-export interface SubscriptionConfig {
-    /** Whitelisted pubkeys that can create/manage projects */
-    whitelistedPubkeys: Set<Hexpubkey>;
-    /** Known project A-tags (format: "31933:authorPubkey:dTag") */
-    knownProjects: Set<string>;
-    /** Agent pubkeys across all projects */
-    agentPubkeys: Set<Hexpubkey>;
-    /** Agent definition event IDs for lesson monitoring */
-    agentDefinitionIds: Set<string>;
-    /** Optional since timestamp to prevent historical event re-delivery (Unix seconds) */
-    since?: number;
-}
-
-/**
  * Static utility class for building NDK subscription filters.
- * Follows the AgentEventDecoder pattern of static utility methods.
+ *
+ * Each method builds filters for one independent subscription group.
+ * The SubscriptionManager calls these individually rather than
+ * combining them into a single monolithic filter set.
  */
 export class SubscriptionFilterBuilder {
     /**
-     * Build all subscription filters from configuration
-     * @param config - Subscription configuration
-     * @returns Array of NDKFilter objects for subscription
+     * Build filters for the static subscription (created once at boot, never recreated).
+     * Includes:
+     * - Project discovery (kind 31933) from whitelisted pubkeys
+     * - Agent config updates (kind 24020) from whitelisted pubkeys
+     * - Lesson comments (kind 1111, #K: 4129) from whitelisted pubkeys
      */
-    static buildFilters(config: SubscriptionConfig): NDKFilter[] {
-        const filters: NDKFilter[] = [];
-
-        // Add project events filter
-        const projectFilter = this.buildProjectFilter(config.whitelistedPubkeys);
-        if (projectFilter) {
-            filters.push(projectFilter);
-        }
-
-        // Add project-tagged events filter (with since to prevent historical re-delivery)
-        const projectTaggedFilter = this.buildProjectTaggedFilter(config.knownProjects, config.since);
-        if (projectTaggedFilter) {
-            filters.push(projectTaggedFilter);
-        }
-
-        // Add agent mentions filter (with since to prevent historical re-delivery)
-        const agentMentionsFilter = this.buildAgentMentionsFilter(config.agentPubkeys, config.since);
-        if (agentMentionsFilter) {
-            filters.push(agentMentionsFilter);
-        }
-
-        // Add lesson filters
-        const lessonFilters = this.buildLessonFilters(
-            config.agentPubkeys,
-            config.agentDefinitionIds
-        );
-        filters.push(...lessonFilters);
-
-        // Add lesson comment filters (for prompt compilation)
-        const lessonCommentFilter = this.buildLessonCommentFilter(
-            config.agentPubkeys,
-            config.whitelistedPubkeys
-        );
-        if (lessonCommentFilter) {
-            filters.push(lessonCommentFilter);
-        }
-
-        // Add agent config update filter (kind 24020 from whitelisted users)
-        const configUpdateFilter = this.buildConfigUpdateFilter(config.whitelistedPubkeys);
-        if (configUpdateFilter) {
-            filters.push(configUpdateFilter);
-        }
-
-        // Add report filter
-        const reportFilter = this.buildReportFilter(config.knownProjects);
-        if (reportFilter) {
-            filters.push(reportFilter);
-        }
-
-        return filters;
-    }
-
-    /**
-     * Build filter for project events (kind 31933) from whitelisted pubkeys
-     * This ensures we receive project creation and update events
-     * @param whitelistedPubkeys - Set of whitelisted author pubkeys
-     * @returns NDKFilter for project events or null if no pubkeys
-     */
-    static buildProjectFilter(whitelistedPubkeys: Set<Hexpubkey>): NDKFilter | null {
+    static buildStaticFilters(whitelistedPubkeys: Set<Hexpubkey>): NDKFilter[] {
         if (whitelistedPubkeys.size === 0) {
-            return null;
+            return [];
         }
 
-        return {
-            kinds: [31933], // Project events
-            authors: Array.from(whitelistedPubkeys),
-        };
+        const authors = Array.from(whitelistedPubkeys);
+
+        return [
+            // Project discovery + agent config updates
+            {
+                kinds: [31933, NDKKind.TenexAgentConfigUpdate],
+                authors,
+            },
+            // Lesson comments from whitelisted authors
+            // No #p filter — the Daemon uses the E tag to route to the correct agent
+            {
+                kinds: [NDKKind.Comment],
+                "#K": [String(NDKKind.AgentLesson)],
+                authors,
+            },
+        ];
     }
 
     /**
      * Build filter for events tagging known projects via A-tags
-     * Receives all events tagged to our projects - the Daemon decides
+     * Receives all events tagged to our projects — the Daemon decides
      * which events can boot a cold project vs which require a running one
      * @param knownProjects - Set of project IDs (format: "31933:authorPubkey:dTag")
      * @param since - Optional Unix timestamp (seconds) to filter out historical events
@@ -111,118 +54,14 @@ export class SubscriptionFilterBuilder {
 
         const filter: NDKFilter = {
             "#a": Array.from(knownProjects),
-            limit: 0, // Continuous subscription
-        };
-
-        if (since !== undefined) {
-            filter.since = since;
-        }
-
-        return filter;
-    }
-
-    /**
-     * Build filter for events mentioning agents via P-tags
-     * Receives all events mentioning our agents - the Daemon decides
-     * which events can boot a cold project vs which require a running one
-     * @param agentPubkeys - Set of agent pubkeys to monitor
-     * @param since - Optional Unix timestamp (seconds) to filter out historical events
-     * @returns NDKFilter for agent mentions or null if no agents
-     */
-    static buildAgentMentionsFilter(agentPubkeys: Set<Hexpubkey>, since?: number): NDKFilter | null {
-        if (agentPubkeys.size === 0) {
-            return null;
-        }
-
-        const filter: NDKFilter = {
-            "#p": Array.from(agentPubkeys),
-            limit: 0, // Continuous subscription
-        };
-
-        if (since !== undefined) {
-            filter.since = since;
-        }
-
-        return filter;
-    }
-
-    /**
-     * Build filters for agent lessons
-     * Monitors both:
-     * - Lessons published by our agents
-     * - Lessons referencing our agent definitions (via e-tag)
-     * @param agentPubkeys - Set of agent pubkeys (for authored lessons)
-     * @param agentDefinitionIds - Set of agent definition event IDs (for referenced lessons)
-     * @returns Array of NDKFilter objects for lesson monitoring
-     */
-    static buildLessonFilters(
-        agentPubkeys: Set<Hexpubkey>,
-        agentDefinitionIds: Set<string>
-    ): NDKFilter[] {
-        const filters: NDKFilter[] = [];
-
-        // Filter for lessons authored by our agents
-        if (agentPubkeys.size > 0) {
-            filters.push({
-                kinds: [NDKKind.AgentLesson],
-                authors: Array.from(agentPubkeys),
-            });
-        }
-
-        // Filter for lessons referencing our agent definitions
-        if (agentDefinitionIds.size > 0) {
-            filters.push({
-                kinds: [NDKKind.AgentLesson],
-                "#e": Array.from(agentDefinitionIds),
-            });
-        }
-
-        return filters;
-    }
-
-    /**
-     * Build filter for lesson comments (kind 1111 - NIP-22)
-     * Monitors comments on lessons from whitelisted authors that mention our agents.
-     * These comments are used by the PromptCompilerService to refine lessons.
-     * @param agentPubkeys - Set of agent pubkeys (for filtering by #p tag)
-     * @param whitelistedPubkeys - Set of whitelisted author pubkeys
-     * @returns NDKFilter for lesson comments or null if no agents
-     */
-    static buildLessonCommentFilter(
-        agentPubkeys: Set<Hexpubkey>,
-        whitelistedPubkeys: Set<Hexpubkey>
-    ): NDKFilter | null {
-        if (agentPubkeys.size === 0 || whitelistedPubkeys.size === 0) {
-            return null;
-        }
-
-        // NIP-22 comment filter:
-        // - kind: NDKKind.Comment (1111)
-        // - #K: [NDKKind.AgentLesson] (comments on lesson events)
-        // - authors: whitelisted pubkeys only
-        // - #p: agent pubkeys (comments mentioning our agents)
-        return {
-            kinds: [NDKKind.Comment],
-            "#K": [String(NDKKind.AgentLesson)], // Comments on kind 4129 (lessons)
-            "#p": Array.from(agentPubkeys),
-            authors: Array.from(whitelistedPubkeys),
-        };
-    }
-
-    /**
-     * Build filter for agent config update events (kind 24020) from whitelisted users.
-     * These are handled at daemon level and don't depend on agent pubkeys being populated.
-     */
-    static buildConfigUpdateFilter(whitelistedPubkeys: Set<Hexpubkey>): NDKFilter | null {
-        if (whitelistedPubkeys.size === 0) {
-            return null;
-        }
-
-        return {
-            kinds: [NDKKind.TenexAgentConfigUpdate],
-            authors: Array.from(whitelistedPubkeys),
             limit: 0,
         };
+
+        if (since !== undefined) {
+            filter.since = since;
+        }
+
+        return filter;
     }
 
     /**
@@ -237,79 +76,44 @@ export class SubscriptionFilterBuilder {
         }
 
         return {
-            kinds: [30023], // NDKArticle kind - reports
-            "#a": Array.from(knownProjects), // Reports tagged with our project(s)
+            kinds: [30023],
+            "#a": Array.from(knownProjects),
         };
     }
 
     /**
-     * Compare two filter sets to determine if they're equivalent
-     * @param filters1 - First set of filters
-     * @param filters2 - Second set of filters
-     * @returns True if filters are equivalent
+     * Build filter for events mentioning agents via P-tags
+     * @param agentPubkeys - Set of agent pubkeys to monitor
+     * @param since - Optional Unix timestamp (seconds) to filter out historical events
+     * @returns NDKFilter for agent mentions or null if no agents
      */
-    static areFiltersEqual(filters1: NDKFilter[], filters2: NDKFilter[]): boolean {
-        if (filters1.length !== filters2.length) {
-            return false;
+    static buildAgentMentionsFilter(agentPubkeys: Set<Hexpubkey>, since?: number): NDKFilter | null {
+        if (agentPubkeys.size === 0) {
+            return null;
         }
 
-        // Sort filters by JSON representation for comparison
-        const sorted1 = filters1.map((f) => JSON.stringify(f)).sort();
-        const sorted2 = filters2.map((f) => JSON.stringify(f)).sort();
+        const filter: NDKFilter = {
+            "#p": Array.from(agentPubkeys),
+            limit: 0,
+        };
 
-        return sorted1.every((f, i) => f === sorted2[i]);
+        if (since !== undefined) {
+            filter.since = since;
+        }
+
+        return filter;
     }
 
     /**
-     * Debug helper: Get human-readable description of filters
-     * @param filters - Array of NDKFilter objects
-     * @returns Object with filter statistics
+     * Build filter for a single agent's lessons by definition event ID.
+     * Uses #e tag to match lessons that reference the agent definition.
+     * @param definitionId - Agent definition event ID
+     * @returns NDKFilter for this agent's lessons
      */
-    static getFilterStats(filters: NDKFilter[]): {
-        totalFilters: number;
-        projectFilter: boolean;
-        projectTaggedCount: number;
-        agentMentionsCount: number;
-        lessonFilters: number;
-        lessonCommentFilter: boolean;
-        reportFilter: boolean;
-    } {
-        let projectFilter = false;
-        let projectTaggedCount = 0;
-        let agentMentionsCount = 0;
-        let lessonFilters = 0;
-        let lessonCommentFilter = false;
-        let reportFilter = false;
-
-        for (const filter of filters) {
-            if (filter.kinds?.includes(31933)) {
-                projectFilter = true;
-            }
-            if (filter["#a"] && !filter.kinds?.includes(30023)) {
-                projectTaggedCount = (filter["#a"] as string[]).length;
-            }
-            if (filter["#p"] && !filter.kinds?.includes(NDKKind.Comment)) {
-                agentMentionsCount = (filter["#p"] as string[]).length;
-            }
-            if (filter.kinds?.includes(NDKKind.AgentLesson)) {
-                lessonFilters++;
-            }
-            if (filter.kinds?.includes(NDKKind.Comment)) {
-                lessonCommentFilter = true;
-            }
-            if (filter.kinds?.includes(30023)) {
-                reportFilter = true;
-            }
-        }
-
+    static buildLessonFilter(definitionId: string): NDKFilter {
         return {
-            totalFilters: filters.length,
-            projectFilter,
-            projectTaggedCount,
-            agentMentionsCount,
-            lessonFilters,
-            lessonCommentFilter,
-            reportFilter,
+            kinds: [NDKKind.AgentLesson],
+            "#e": [definitionId],
         };
     }
 }

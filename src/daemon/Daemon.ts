@@ -38,7 +38,6 @@ import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
-
 const lessonTracer = trace.getTracer("tenex.lessons");
 
 /**
@@ -71,6 +70,9 @@ export class Daemon {
 
     // Agent pubkey mapping for routing (pubkey -> project IDs)
     private agentPubkeyToProjects = new Map<Hexpubkey, Set<string>>();
+
+    // Tracked agent definition IDs for lesson subscription sync
+    private trackedLessonDefinitionIds = new Set<string>();
 
     // Auto-boot patterns - projects whose d-tag contains any of these patterns will be auto-started
     private autoBootPatterns: string[] = [];
@@ -433,6 +435,7 @@ export class Daemon {
         );
 
         if (!routingResult.projectId) {
+            // Log routing failures for kind:1 events to diagnose agent "disappearing"
             addRoutingEvent(span, "dropped", { reason: routingResult.reason });
             await logDropped(this.routingLogger, event, routingResult.reason);
             return;
@@ -745,8 +748,6 @@ export class Daemon {
             for (const agent of agents) {
                 pubkeys.add(agent.pubkey);
 
-                // Collect agent definition event IDs for lesson monitoring
-                // Note: eventId may be null for locally-created agents
                 if (agent.eventId) {
                     definitionIds.add(agent.eventId);
                 }
@@ -770,6 +771,9 @@ export class Daemon {
         try {
             const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
                 this.collectAgentData();
+
+            // Rebuild the routing map from scratch
+            this.agentPubkeyToProjects.clear();
 
             // Track which projects each agent belongs to
             const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
@@ -797,8 +801,11 @@ export class Daemon {
                 }
             }
 
-            this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
-            this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
+            // Update agent mentions subscription
+            this.subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
+
+            // Sync per-agent lesson subscriptions: add new, remove stale
+            this.syncLessonSubscriptions(allAgentDefinitionIds);
 
             // Set up callback for dynamic agent additions (e.g., via agents_write tool)
             // This ensures new agents are immediately routable without requiring a restart
@@ -817,6 +824,33 @@ export class Daemon {
     }
 
     /**
+     * Sync per-agent lesson subscriptions: add subscriptions for new definition IDs,
+     * remove subscriptions for definition IDs no longer active.
+     */
+    private syncLessonSubscriptions(currentDefinitionIds: Set<string>): void {
+        if (!this.subscriptionManager) return;
+
+        // Collect existing lesson subscription IDs from the subscription manager
+        const existingIds = this.trackedLessonDefinitionIds;
+
+        // Add new
+        for (const id of currentDefinitionIds) {
+            if (!existingIds.has(id)) {
+                this.subscriptionManager.addLessonSubscription(id);
+            }
+        }
+
+        // Remove stale
+        for (const id of existingIds) {
+            if (!currentDefinitionIds.has(id)) {
+                this.subscriptionManager.removeLessonSubscription(id);
+            }
+        }
+
+        this.trackedLessonDefinitionIds = new Set(currentDefinitionIds);
+    }
+
+    /**
      * Handle a dynamically added agent (e.g., created via agents_write tool).
      * Updates the routing map and subscription to make the agent immediately routable.
      */
@@ -830,15 +864,15 @@ export class Daemon {
             projectSet.add(projectId);
         }
 
-        // Update subscription with the new pubkey
+        // Update subscriptions
         if (this.subscriptionManager) {
             const allPubkeys = Array.from(this.agentPubkeyToProjects.keys());
-            this.subscriptionManager.updateAgentPubkeys(allPubkeys);
+            this.subscriptionManager.updateAgentMentions(allPubkeys);
 
-            // Also update definition IDs if this agent has one
+            // Add lesson subscription if this agent has a definition ID
             if (agent.eventId) {
-                const { definitionIds } = this.collectAgentData();
-                this.subscriptionManager.updateAgentDefinitionIds(Array.from(definitionIds));
+                this.subscriptionManager.addLessonSubscription(agent.eventId);
+                this.trackedLessonDefinitionIds.add(agent.eventId);
             }
         }
 
@@ -1180,6 +1214,10 @@ export class Daemon {
     /**
      * Handle lesson comment events (kind 1111 with #K: ["4129"])
      * Routes comments to the appropriate PromptCompilerService for prompt refinement.
+     *
+     * The static subscription receives ALL lesson comments from whitelisted authors
+     * (no #p pre-filtering). We use the e-tag (lesson event ID) to find which
+     * agent the comment belongs to, falling back to p-tag if present.
      */
     private async handleLessonCommentEvent(event: NDKEvent): Promise<void> {
         const span = lessonTracer.startSpan("tenex.lesson_comment.received", {
@@ -1199,11 +1237,16 @@ export class Daemon {
                 return;
             }
 
-            // Extract the lesson event ID from the root 'e' tag
+            // Extract the lesson event ID from the root 'e' tag (NIP-22)
+            // Try uppercase E tag first (NIP-22 root reference), then lowercase e
+            const upperETag = event.tags.find(
+                (tag) => tag[0] === "E"
+            );
             const rootETag = event.tags.find(
                 (tag) => tag[0] === "e" && tag[3] === "root"
             );
-            const lessonEventId = rootETag?.[1] || event.tags.find((tag) => tag[0] === "e")?.[1];
+            const anyETag = event.tags.find((tag) => tag[0] === "e");
+            const lessonEventId = upperETag?.[1] || rootETag?.[1] || anyETag?.[1];
 
             if (!lessonEventId) {
                 span.setAttribute("comment.rejected", true);
@@ -1214,17 +1257,6 @@ export class Daemon {
 
             span.setAttribute("comment.lesson_event_id", lessonEventId.substring(0, 16));
 
-            // Get the agent pubkey from p-tag
-            const agentPubkey = event.tagValue("p");
-            if (!agentPubkey) {
-                span.setAttribute("comment.rejected", true);
-                span.setAttribute("comment.rejection_reason", "no_agent_reference");
-                span.end();
-                return;
-            }
-
-            span.setAttribute("comment.agent_pubkey", agentPubkey.substring(0, 16));
-
             // Build the LessonComment object
             const comment = {
                 id: event.id || "",
@@ -1234,7 +1266,9 @@ export class Daemon {
                 createdAt: event.created_at || 0,
             };
 
-            // Route to active runtimes that have this agent
+            // Route to active runtimes. Use p-tag if available for direct lookup,
+            // otherwise scan agents to find those with matching lesson event IDs.
+            const agentPubkey = event.tagValue("p");
             const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
             let routedCount = 0;
 
@@ -1242,19 +1276,35 @@ export class Daemon {
                 const context = runtime.getContext();
                 if (!context) continue;
 
-                const agent = context.getAgentByPubkey(agentPubkey);
-                if (!agent) continue;
-
-                // Store the comment in ProjectContext for pickup by lazy PromptCompilerService
-                context.addComment(agentPubkey, comment);
-
-                logger.debug("Stored lesson comment for agent", {
-                    projectId,
-                    agentSlug: agent.slug,
-                    commentId: event.id?.substring(0, 8),
-                    lessonEventId: lessonEventId.substring(0, 8),
-                });
-                routedCount++;
+                if (agentPubkey) {
+                    // Direct lookup by p-tag
+                    const agent = context.getAgentByPubkey(agentPubkey);
+                    if (agent) {
+                        context.addComment(agentPubkey, comment);
+                        routedCount++;
+                        logger.debug("Stored lesson comment for agent", {
+                            projectId,
+                            agentSlug: agent.slug,
+                            commentId: event.id?.substring(0, 8),
+                            lessonEventId: lessonEventId.substring(0, 8),
+                        });
+                    }
+                } else {
+                    // No p-tag: scan agents for those whose lessons match this event ID
+                    for (const agent of context.agentRegistry.getAllAgents()) {
+                        const lessons = context.getLessonsForAgent(agent.pubkey);
+                        if (lessons.some((l: NDKAgentLesson) => l.id === lessonEventId)) {
+                            context.addComment(agent.pubkey, comment);
+                            routedCount++;
+                            logger.debug("Stored lesson comment for agent (via lesson scan)", {
+                                projectId,
+                                agentSlug: agent.slug,
+                                commentId: event.id?.substring(0, 8),
+                                lessonEventId: lessonEventId.substring(0, 8),
+                            });
+                        }
+                    }
+                }
             }
 
             span.setAttribute("comment.routed_count", routedCount);
@@ -1723,7 +1773,6 @@ export class Daemon {
             // Rebuild agent pubkey mapping without the removed project
             this.agentPubkeyToProjects.forEach((projectSet, agentPubkey) => {
                 projectSet.delete(projectId);
-                // If this agent no longer belongs to any project, remove it
                 if (projectSet.size === 0) {
                     this.agentPubkeyToProjects.delete(agentPubkey);
                 }
@@ -1733,8 +1782,8 @@ export class Daemon {
             const { pubkeys: allAgentPubkeys, definitionIds: allAgentDefinitionIds } =
                 this.collectAgentData();
 
-            this.subscriptionManager.updateAgentPubkeys(Array.from(allAgentPubkeys));
-            this.subscriptionManager.updateAgentDefinitionIds(Array.from(allAgentDefinitionIds));
+            this.subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
+            this.syncLessonSubscriptions(allAgentDefinitionIds);
         } catch (error) {
             logger.error("Failed to update subscription after runtime removed", {
                 projectId,

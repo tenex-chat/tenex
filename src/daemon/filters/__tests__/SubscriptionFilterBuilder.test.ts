@@ -1,176 +1,108 @@
 import { describe, test, expect } from "bun:test";
-import { SubscriptionFilterBuilder, type SubscriptionConfig } from "../SubscriptionFilterBuilder";
+import { SubscriptionFilterBuilder } from "../SubscriptionFilterBuilder";
 import { NDKKind } from "@/nostr/kinds";
 
 describe("SubscriptionFilterBuilder", () => {
-    describe("buildLessonCommentFilter", () => {
-        test("returns null when no agent pubkeys", () => {
-            const result = SubscriptionFilterBuilder.buildLessonCommentFilter(
-                new Set(),
-                new Set(["whitelist1"])
+    describe("buildStaticFilters", () => {
+        test("returns empty array when no whitelisted pubkeys", () => {
+            const filters = SubscriptionFilterBuilder.buildStaticFilters(new Set());
+            expect(filters).toEqual([]);
+        });
+
+        test("returns project discovery + config update filter and lesson comment filter", () => {
+            const filters = SubscriptionFilterBuilder.buildStaticFilters(
+                new Set(["whitelist1", "whitelist2"])
             );
+            expect(filters).toHaveLength(2);
+
+            // First filter: project discovery + config updates
+            expect(filters[0].kinds).toEqual([31933, NDKKind.TenexAgentConfigUpdate]);
+            expect(filters[0].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
+
+            // Second filter: lesson comments (no #p filter)
+            expect(filters[1].kinds).toEqual([NDKKind.Comment]);
+            expect(filters[1]["#K"]).toEqual([String(NDKKind.AgentLesson)]);
+            expect(filters[1].authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
+            expect(filters[1]["#p"]).toBeUndefined();
+        });
+    });
+
+    describe("buildProjectTaggedFilter", () => {
+        test("returns null when no projects", () => {
+            const result = SubscriptionFilterBuilder.buildProjectTaggedFilter(new Set());
             expect(result).toBeNull();
         });
 
-        test("returns null when no whitelisted pubkeys", () => {
-            const result = SubscriptionFilterBuilder.buildLessonCommentFilter(
-                new Set(["agent1"]),
-                new Set()
+        test("returns filter with #a tags", () => {
+            const result = SubscriptionFilterBuilder.buildProjectTaggedFilter(
+                new Set(["31933:author:project"])
             );
-            expect(result).toBeNull();
-        });
-
-        test("returns filter with correct structure", () => {
-            const agentPubkeys = new Set(["agent1", "agent2"]);
-            const whitelistedPubkeys = new Set(["whitelist1", "whitelist2"]);
-
-            const result = SubscriptionFilterBuilder.buildLessonCommentFilter(
-                agentPubkeys,
-                whitelistedPubkeys
-            );
-
             expect(result).not.toBeNull();
-            expect(result?.kinds).toEqual([NDKKind.Comment]);
-            expect(result?.["#K"]).toEqual(["4129"]); // Lessons
-            expect(result?.["#p"]).toEqual(expect.arrayContaining(["agent1", "agent2"]));
-            expect(result?.authors).toEqual(expect.arrayContaining(["whitelist1", "whitelist2"]));
-        });
-    });
-
-    describe("buildFilters", () => {
-        test("includes lesson comment filter when agents and whitelist present", () => {
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(["def1"]),
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            // Check that a lesson comment filter exists
-            const commentFilter = filters.find(f => f.kinds?.includes(NDKKind.Comment));
-            expect(commentFilter).toBeDefined();
-            expect(commentFilter?.["#K"]).toEqual(["4129"]);
+            expect(result!["#a"]).toEqual(["31933:author:project"]);
         });
 
-        test("excludes lesson comment filter when no agents", () => {
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(), // no agents
-                agentDefinitionIds: new Set(),
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            const commentFilter = filters.find(f => f.kinds?.includes(NDKKind.Comment));
-            expect(commentFilter).toBeUndefined();
-        });
-    });
-
-    describe("since filter", () => {
-        test("applies since to project-tagged filter when provided", () => {
+        test("applies since when provided", () => {
             const since = Math.floor(Date.now() / 1000);
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(),
-                since,
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            // Find the project-tagged filter (has #a but no specific kind like 30023)
-            const projectTaggedFilter = filters.find(
-                f => f["#a"] && !f.kinds?.includes(30023)
+            const result = SubscriptionFilterBuilder.buildProjectTaggedFilter(
+                new Set(["31933:author:project"]),
+                since
             );
-            expect(projectTaggedFilter).toBeDefined();
-            expect(projectTaggedFilter?.since).toBe(since);
-        });
-
-        test("applies since to agent mentions filter when provided", () => {
-            const since = Math.floor(Date.now() / 1000);
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(),
-                since,
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            const agentMentionsFilter = filters.find(f => f["#p"] && !f.kinds);
-            expect(agentMentionsFilter).toBeDefined();
-            expect(agentMentionsFilter?.since).toBe(since);
+            expect(result?.since).toBe(since);
         });
 
         test("does not apply since when not provided", () => {
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(),
-                // No since
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            // No filter should have a since property
-            for (const filter of filters) {
-                expect(filter.since).toBeUndefined();
-            }
-        });
-
-        test("does not apply since to project events filter (kind 31933)", () => {
-            const since = Math.floor(Date.now() / 1000);
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(),
-                since,
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-
-            // Project events filter (kind 31933) should NOT have since
-            // (we always want the latest project definitions)
-            const projectFilter = filters.find(f => f.kinds?.includes(31933));
-            expect(projectFilter).toBeDefined();
-            expect(projectFilter?.since).toBeUndefined();
+            const result = SubscriptionFilterBuilder.buildProjectTaggedFilter(
+                new Set(["31933:author:project"])
+            );
+            expect(result?.since).toBeUndefined();
         });
     });
 
-    describe("getFilterStats", () => {
-        test("includes lessonCommentFilter in stats", () => {
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(["agent1"]),
-                agentDefinitionIds: new Set(["def1"]),
-            };
-
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-            const stats = SubscriptionFilterBuilder.getFilterStats(filters);
-
-            expect(stats.lessonCommentFilter).toBe(true);
+    describe("buildReportFilter", () => {
+        test("returns null when no projects", () => {
+            const result = SubscriptionFilterBuilder.buildReportFilter(new Set());
+            expect(result).toBeNull();
         });
 
-        test("shows false for lessonCommentFilter when not present", () => {
-            const config: SubscriptionConfig = {
-                whitelistedPubkeys: new Set(["whitelist1"]),
-                knownProjects: new Set(["31933:author:project"]),
-                agentPubkeys: new Set(),
-                agentDefinitionIds: new Set(),
-            };
+        test("returns filter with kind 30023 and #a tags", () => {
+            const result = SubscriptionFilterBuilder.buildReportFilter(
+                new Set(["31933:author:project"])
+            );
+            expect(result).not.toBeNull();
+            expect(result!.kinds).toEqual([30023]);
+            expect(result!["#a"]).toEqual(["31933:author:project"]);
+        });
+    });
 
-            const filters = SubscriptionFilterBuilder.buildFilters(config);
-            const stats = SubscriptionFilterBuilder.getFilterStats(filters);
+    describe("buildAgentMentionsFilter", () => {
+        test("returns null when no agent pubkeys", () => {
+            const result = SubscriptionFilterBuilder.buildAgentMentionsFilter(new Set());
+            expect(result).toBeNull();
+        });
 
-            expect(stats.lessonCommentFilter).toBe(false);
+        test("returns filter with #p tags", () => {
+            const result = SubscriptionFilterBuilder.buildAgentMentionsFilter(
+                new Set(["agent1", "agent2"])
+            );
+            expect(result).not.toBeNull();
+            expect(result!["#p"]).toEqual(expect.arrayContaining(["agent1", "agent2"]));
+        });
+
+        test("applies since when provided", () => {
+            const since = Math.floor(Date.now() / 1000);
+            const result = SubscriptionFilterBuilder.buildAgentMentionsFilter(
+                new Set(["agent1"]),
+                since
+            );
+            expect(result?.since).toBe(since);
+        });
+    });
+
+    describe("buildLessonFilter", () => {
+        test("returns filter with kind 4129 and #e tag", () => {
+            const result = SubscriptionFilterBuilder.buildLessonFilter("def123");
+            expect(result.kinds).toEqual([NDKKind.AgentLesson]);
+            expect(result["#e"]).toEqual(["def123"]);
         });
     });
 });
