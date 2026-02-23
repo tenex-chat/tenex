@@ -30,6 +30,9 @@ export interface Nip46LogEntry {
     durationMs?: number;
     error?: string;
     eventId?: string;
+    trigger?: string;           // What triggered this signing request
+    eventTags?: string[][];     // Full tags array of the event being signed
+    eventContent?: string;      // Content field of the event being signed
 }
 
 /**
