@@ -83,6 +83,8 @@ export class McpSubscriptionService {
     private handlerRemovers: Map<string, () => void> = new Map();
     /** Ref-count of active subscriptions per "server::resource" key */
     private resourceRefCounts: Map<string, number> = new Map();
+    /** Previously-seen content item IDs per subscription (for delta tracking) */
+    private contentSnapshots: Map<string, Set<string>> = new Map();
 
     private constructor() {
         const tenexDir = config.getConfigPath();
@@ -229,6 +231,7 @@ export class McpSubscriptionService {
 
             // Remove from in-memory state
             this.subscriptions.delete(subscriptionId);
+            this.contentSnapshots.delete(subscriptionId);
             await this.saveSubscriptions();
 
             logger.info(`Stopped MCP subscription '${subscriptionId}'`);
@@ -241,6 +244,7 @@ export class McpSubscriptionService {
             logger.error(`Failed to stop subscription '${subscriptionId}'`, { error });
             // Still remove from our tracking even if unsubscribe fails
             this.subscriptions.delete(subscriptionId);
+            this.contentSnapshots.delete(subscriptionId);
             await this.saveSubscriptions();
             return true;
         }
@@ -452,7 +456,15 @@ export class McpSubscriptionService {
                 return;
             }
 
-            await this.deliverNotificationContent(subscription, content);
+            // Extract only new items by comparing against previously-seen content
+            const newContent = this.extractNewItems(subscription.id, content);
+
+            if (!newContent) {
+                logger.debug(`No new items in notification for subscription '${subscription.id}'`);
+                return;
+            }
+
+            await this.deliverNotificationContent(subscription, newContent);
         } catch (error) {
             subscription.status = McpSubscriptionStatus.ERROR;
             subscription.lastError = error instanceof Error ? error.message : String(error);
@@ -523,6 +535,75 @@ export class McpSubscriptionService {
             "notification.content_length": content.length,
             "notification.total": subscription.notificationsReceived,
         });
+    }
+
+    // ========== Delta Tracking ==========
+
+    /**
+     * Extract only new items from resource content by comparing against previously-seen IDs.
+     *
+     * Content is expected to be a list of JSON objects (one per line).
+     * Each item is identified by its `id` field; if absent, the full line is used as the key.
+     *
+     * Returns only the lines that are new since the last notification, or null if no new items.
+     * Updates the snapshot for the next comparison.
+     */
+    private extractNewItems(subscriptionId: string, content: string): string | null {
+        const lines = content.split("\n").filter((line) => line.trim() !== "");
+
+        // Build a map of itemId -> line for the current content
+        const currentItems = new Map<string, string>();
+        for (const line of lines) {
+            const itemId = this.extractItemId(line);
+            currentItems.set(itemId, line);
+        }
+
+        const previousIds = this.contentSnapshots.get(subscriptionId);
+
+        // Update the snapshot with the current set of IDs
+        this.contentSnapshots.set(subscriptionId, new Set(currentItems.keys()));
+
+        // If no previous snapshot exists (first notification), deliver everything
+        if (!previousIds) {
+            return content;
+        }
+
+        // Find items present now but not in the previous snapshot
+        const newLines: string[] = [];
+        for (const [itemId, line] of currentItems) {
+            if (!previousIds.has(itemId)) {
+                newLines.push(line);
+            }
+        }
+
+        if (newLines.length === 0) {
+            return null;
+        }
+
+        logger.debug(`Delta tracking for subscription '${subscriptionId}'`, {
+            totalItems: currentItems.size,
+            previousItems: previousIds.size,
+            newItems: newLines.length,
+        });
+
+        return newLines.join("\n");
+    }
+
+    /**
+     * Extract a unique identifier from a content line.
+     * Attempts to parse the line as JSON and use the `id` field.
+     * Falls back to using the full line content as the identifier.
+     */
+    private extractItemId(line: string): string {
+        try {
+            const parsed = JSON.parse(line);
+            if (parsed && typeof parsed === "object" && "id" in parsed && parsed.id != null) {
+                return String(parsed.id);
+            }
+        } catch {
+            // Not valid JSON — fall through to use the full line
+        }
+        return line.trim();
     }
 
     // ========== Persistence ==========
