@@ -1,12 +1,12 @@
-import type { experimental_MCPClient } from "@ai-sdk/mcp";
+import type { Resource, ResourceTemplate } from "@modelcontextprotocol/sdk/types.js";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { logger } from "@/utils/logger";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
-// Extract resource types from the MCPClient method return types
-type MCPResource = Awaited<ReturnType<experimental_MCPClient["listResources"]>>["resources"][number];
-type MCPResourceTemplate = Awaited<ReturnType<experimental_MCPClient["listResourceTemplates"]>>["resourceTemplates"][number];
+// Use official SDK types
+type MCPResource = Resource;
+type MCPResourceTemplate = ResourceTemplate;
 
 interface ResourcesPerServer {
     serverName: string;
