@@ -234,7 +234,7 @@ describe("Stop Signal (kind 24134)", () => {
     });
 
     describe("RAL abortion on stop signal", () => {
-        it("aborts all running RALs for the blocked agent in conversation", () => {
+        it("aborts all running RALs and blocks agent via abortWithCascade", async () => {
             // Given: RALRegistry has active RALs for the agent
             const ralRegistry = RALRegistry.getInstance();
             ralRegistry.clearAll(); // Clean state
@@ -244,23 +244,16 @@ describe("Stop Signal (kind 24134)", () => {
             const ralNumber = ralRegistry.create(agentPubkey, conversationId, projectId, "trigger-event-id");
             ralRegistry.registerAbortController(agentPubkey, conversationId, ralNumber, abortController);
 
-            const mockConversation = createMockConversationStore(conversationId, blockedAgents);
-
-            // When: Stop signal is processed
-            const stopEvent = new NDKEvent();
-            stopEvent.kind = NDKKind.TenexStopCommand;
-            stopEvent.pubkey = userPubkey;
-            stopEvent.tags = [
-                ["p", agentPubkey],
-                ["e", conversationId],
-            ];
-
-            // Process stop signal and abort RALs
-            AgentRouter.processStopSignal(stopEvent, mockConversation, mockProjectContext);
-            ralRegistry.abortAllForAgent(agentPubkey, conversationId);
+            // When: abortWithCascade is called (as the stop handler now does)
+            const result = await ralRegistry.abortWithCascade(
+                agentPubkey, conversationId, projectId, "stop signal from user456p"
+            );
 
             // Then: The abort controller should be aborted
             expect(abortController.signal.aborted).toBe(true);
+            expect(result.abortedCount).toBeGreaterThan(0);
+            // Agent should be marked as killed
+            expect(ralRegistry.isAgentConversationKilled(agentPubkey, conversationId)).toBe(true);
         });
     });
 });
