@@ -149,10 +149,17 @@ export class ProjectRuntime {
             this.context.mcpManager = this.mcpManager;
 
             // Initialize MCP subscription service for resource notification subscriptions
-            // Must be done after mcpManager is set on context (subscriptions need MCP access)
+            // Must be done after mcpManager is set on context (subscriptions need MCP access).
+            // The notification handler is wrapped in projectContextStore.run() because MCP
+            // push notifications fire from SDK transport callbacks outside AsyncLocalStorage scope.
+            const capturedContext = this.context;
             await projectContextStore.run(this.context, async () => {
                 const mcpSubService = McpSubscriptionService.getInstance();
-                mcpSubService.setNotificationHandler(deliverMcpNotification);
+                mcpSubService.setNotificationHandler(async (subscription, content) => {
+                    await projectContextStore.run(capturedContext, async () => {
+                        await deliverMcpNotification(subscription, content);
+                    });
+                });
                 await mcpSubService.initialize();
             });
 
