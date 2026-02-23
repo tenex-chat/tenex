@@ -18,6 +18,7 @@ import { prefixKVStore } from "@/services/storage";
 import { logger } from "../utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
+import { handleAgentDeletion } from "./agentDeletion";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
@@ -180,6 +181,10 @@ export class EventHandler {
 
             case NDKKind.TenexAgentConfigUpdate:
                 await this.handleAgentConfigUpdate(event);
+                break;
+
+            case NDKKind.TenexAgentDelete:
+                await handleAgentDeletion(event);
                 break;
 
             case 513: // NDKEventMetadata
