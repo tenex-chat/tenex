@@ -21,8 +21,9 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "conversation_list", // All agents should list conversations
     // Process control
     "kill", // All agents should be able to terminate processes
-    // MCP resource reading (self-gating: only works if agent has MCP tools from that server)
+    // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)
     "mcp_resource_read", // All agents can read MCP resources from servers they have tools for
+    "mcp_subscribe", // All agents can subscribe to MCP resource notifications
 ] as const;
 
 /**
@@ -58,6 +59,8 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     "home_fs_read",
     "home_fs_write",
     "home_fs_grep",
+    // MCP subscription stop (injected when agent has active MCP subscriptions)
+    "mcp_subscription_stop",
 ];
 
 /**

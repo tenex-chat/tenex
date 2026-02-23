@@ -55,6 +55,8 @@ export type ToolName =
     | "rag_subscription_get"
     | "rag_subscription_delete"
     | "mcp_resource_read"
+    | "mcp_subscribe"
+    | "mcp_subscription_stop"
     | "conversation_search"
     | "bug_list"
     | "bug_report_create"
