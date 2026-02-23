@@ -29,6 +29,7 @@ export const NDKKind = {
     TenexBootProject: 24000 as BaseNDKKind, // Boot project via a-tag
     TenexProjectStatus: 24010 as BaseNDKKind,
     TenexAgentConfigUpdate: 24020 as BaseNDKKind,
+    TenexConfigUpdate: 25000 as BaseNDKKind, // Encrypted config updates (e.g., APNs device tokens)
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
 } as const;

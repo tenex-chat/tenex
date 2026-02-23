@@ -72,6 +72,16 @@ export interface TenexConfig {
         conversationInactivityTimeoutSeconds?: number; // Seconds since last user message to skip intervention (default: 120 = 2 minutes). If user was active within this window when agent tags them, skip intervention entirely.
     };
 
+    // APNs push notification configuration
+    apns?: {
+        enabled?: boolean;                // Master switch (default: false)
+        keyPath?: string;                 // Path to .p8 key file from Apple
+        keyId?: string;                   // Apple Key ID (from developer portal)
+        teamId?: string;                  // Apple Team ID
+        bundleId?: string;                // App Bundle ID (e.g., com.example.tenex)
+        production?: boolean;             // true = api.push.apple.com, false = api.sandbox.push.apple.com
+    };
+
     // NIP-46 remote signing configuration
     nip46?: {
         enabled?: boolean;                    // Master switch (default: false)
@@ -143,6 +153,16 @@ export const TenexConfigSchema = z.object({
             agent: z.string().optional(),
             timeout: z.number().optional(),
             conversationInactivityTimeoutSeconds: z.number().optional(),
+        })
+        .optional(),
+    apns: z
+        .object({
+            enabled: z.boolean().optional(),
+            keyPath: z.string().optional(),
+            keyId: z.string().optional(),
+            teamId: z.string().optional(),
+            bundleId: z.string().optional(),
+            production: z.boolean().optional(),
         })
         .optional(),
     nip46: z
