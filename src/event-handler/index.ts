@@ -4,6 +4,7 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
 import { computeToolsDelta } from "@/agents/ConfigResolver";
+import { expandFsCapabilities } from "@/agents/tool-normalization";
 import { agentStorage } from "../agents/AgentStorage";
 import { AgentExecutor } from "../agents/execution/AgentExecutor";
 import { ConversationStore } from "../conversations/ConversationStore";
@@ -22,7 +23,6 @@ import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { trace, context as otelContext, TraceFlags } from "@opentelemetry/api";
-
 /**
  * Index event ID and pubkey into the prefix KV store.
  * Skips ephemeral events (kinds 20000-29999) since their IDs are transient.
@@ -316,7 +316,9 @@ export class EventHandler {
             // Extract configuration values from the event
             const newModel = event.tagValue("model");
             const toolTags = TagExtractor.getToolTags(event);
-            const newToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
+            const rawToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
+            // Expand FS capability groups: fs_read implies glob+grep, fs_write implies edit
+            const newToolNames = expandFsCapabilities(rawToolNames);
             const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
             const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
