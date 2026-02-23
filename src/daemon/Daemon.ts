@@ -38,6 +38,7 @@ import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
+import { APNsService } from "@/services/apns";
 const lessonTracer = trace.getTracer("tenex.lessons");
 
 /**
@@ -242,6 +243,10 @@ export class Daemon {
             interventionService.setActiveDelegationChecker(this.createActiveDelegationChecker());
 
             await interventionService.initialize();
+
+            // 12b. Initialize APNs push notification service
+            logger.debug("Initializing APNs service");
+            await APNsService.getInstance().initialize();
 
             // 13. Initialize restart state manager
             logger.debug("Initializing restart state manager");
