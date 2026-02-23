@@ -54,6 +54,8 @@ export class RagSubscriptionService {
     private ragService: RAGService;
     private isInitialized = false;
     private resourceListeners: Map<string, (notification: Notification) => void> = new Map();
+    /** Removal functions returned by MCPManager.addResourceNotificationHandler() */
+    private handlerRemovers: Map<string, () => void> = new Map();
 
     private constructor() {
         // Use global location for RAG subscriptions since it's a singleton
@@ -182,8 +184,13 @@ export class RagSubscriptionService {
     private async setupResourceSubscription(subscription: RagSubscription): Promise<void> {
         const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
 
-        // Create listener for this resource
+        // Create listener for this resource.
+        // IMPORTANT: MCPManager fans out notifications to ALL handlers on a server,
+        // so we must filter by URI to avoid cross-subscription contamination.
         const listener = async (notification: { uri: string; content?: string }): Promise<void> => {
+            if (notification.uri !== subscription.resourceUri) {
+                return;
+            }
             await this.handleResourceUpdate(subscription, {
                 method: "notifications/resources/updated",
                 params: notification,
@@ -211,7 +218,7 @@ export class RagSubscriptionService {
             let subscriptionSupported = true;
             try {
                 // CRITICAL: Register handler FIRST, then subscribe
-                mcpManager.onResourceNotification(subscription.mcpServerId, listener);
+                const removeHandler = mcpManager.addResourceNotificationHandler(subscription.mcpServerId, listener);
 
                 // Subscribe to resource updates
                 await mcpManager.subscribeToResource(
@@ -219,11 +226,12 @@ export class RagSubscriptionService {
                     subscription.resourceUri
                 );
 
-                // Store listener reference for cleanup
+                // Store listener reference and removal function for cleanup
                 this.resourceListeners.set(
                     listenerKey,
                     listener as unknown as (notification: Notification) => void
                 );
+                this.handlerRemovers.set(listenerKey, removeHandler);
 
                 logger.info(
                     `RAG subscription '${subscription.subscriptionId}' active with push notifications. ` +
@@ -394,10 +402,17 @@ export class RagSubscriptionService {
         }
 
         try {
-            // Unsubscribe from MCP resource
+            // Unsubscribe from MCP resource and remove handler
             const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
-            const listener = this.resourceListeners.get(listenerKey);
 
+            // Remove notification handler from MCPManager dispatcher
+            const removeHandler = this.handlerRemovers.get(listenerKey);
+            if (removeHandler) {
+                removeHandler();
+                this.handlerRemovers.delete(listenerKey);
+            }
+
+            const listener = this.resourceListeners.get(listenerKey);
             if (listener) {
                 const projectCtx = getProjectContext();
                 const mcpManager = projectCtx.mcpManager;

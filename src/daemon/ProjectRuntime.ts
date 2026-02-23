@@ -10,6 +10,8 @@ import { getNDK } from "@/nostr";
 import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
 import { MCPManager } from "@/services/mcp/MCPManager";
+import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
+import { deliverMcpNotification } from "@/services/mcp/McpNotificationDelivery";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
 import { createLocalReportStore, LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
@@ -145,6 +147,14 @@ export class ProjectRuntime {
 
             // Set mcpManager on context for use by tools and services
             this.context.mcpManager = this.mcpManager;
+
+            // Initialize MCP subscription service for resource notification subscriptions
+            // Must be done after mcpManager is set on context (subscriptions need MCP access)
+            await projectContextStore.run(this.context, async () => {
+                const mcpSubService = McpSubscriptionService.getInstance();
+                mcpSubService.setNotificationHandler(deliverMcpNotification);
+                await mcpSubService.initialize();
+            });
 
             // Initialize and set local report store on context for project-scoped storage
             this.localReportStore.initialize(this.metadataPath);
@@ -297,6 +307,14 @@ export class ProjectRuntime {
             await this.eventHandler.cleanup();
             this.eventHandler = null;
             console.log(chalk.gray(" done"));
+        }
+
+        // Shutdown MCP subscription service
+        try {
+            const mcpSubService = McpSubscriptionService.getInstance();
+            await mcpSubService.shutdown();
+        } catch {
+            // Service may not be initialized
         }
 
         // Save conversation state
