@@ -12,7 +12,6 @@
  * - Per-conversation subscription tracking
  */
 
-import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { config } from "@/services/ConfigService";
@@ -53,8 +52,6 @@ export interface McpSubscription {
     lastNotificationAt?: number;
     /** Last error message if status is ERROR */
     lastError?: string;
-    /** SHA-256 hash of the last-seen resource content (for poll-based change detection) */
-    lastContentHash?: string;
     /** Creation timestamp */
     createdAt: number;
     /** Last update timestamp */
@@ -70,6 +67,12 @@ export type NotificationDeliveryHandler = (
     content: string
 ) => Promise<void>;
 
+/** Minimal MCPManager interface needed for reading resources */
+interface MCPManagerLike {
+    readResource(serverName: string, uri: string): Promise<{ contents: Array<Record<string, unknown>> }>;
+    isServerRunning(serverName: string): boolean;
+}
+
 export class McpSubscriptionService {
     private static instance: McpSubscriptionService;
     private subscriptions: Map<string, McpSubscription> = new Map();
@@ -80,11 +83,6 @@ export class McpSubscriptionService {
     private handlerRemovers: Map<string, () => void> = new Map();
     /** Ref-count of active subscriptions per "server::resource" key */
     private resourceRefCounts: Map<string, number> = new Map();
-    /** Active polling timers keyed by subscription ID */
-    private pollTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
-
-    /** Default polling interval in milliseconds */
-    private static readonly POLL_INTERVAL_MS = 30_000;
 
     private constructor() {
         const tenexDir = config.getConfigPath();
@@ -300,6 +298,11 @@ export class McpSubscriptionService {
     /**
      * Setup MCP resource subscription and notification listener.
      * Uses dispatcher pattern for handlers (no clobbering) and ref-counting for resources.
+     *
+     * IMPORTANT: Captures mcpManager reference at setup time so push notification
+     * handlers can read resources without depending on AsyncLocalStorage context.
+     * MCPManager.initialize() runs outside projectContextStore.run(), so push
+     * notification callbacks from the MCP SDK fire without project context.
      */
     private async setupMcpSubscription(subscription: McpSubscription): Promise<void> {
         if (!isProjectContextInitialized()) {
@@ -317,6 +320,12 @@ export class McpSubscriptionService {
             throw new Error(`MCP server '${subscription.serverName}' is not running`);
         }
 
+        // Capture mcpManager reference for use in the notification callback.
+        // Push notifications fire from MCP SDK's transport read callbacks, which
+        // execute outside projectContextStore.run() scope. Without this capture,
+        // the handler would fail to get mcpManager via getProjectContext().
+        const capturedMcpManager: MCPManagerLike = mcpManager;
+
         // Register per-subscription notification handler (dispatcher-safe, no clobbering)
         const removeHandler = mcpManager.addResourceNotificationHandler(
             subscription.serverName,
@@ -324,39 +333,33 @@ export class McpSubscriptionService {
                 if (notification.uri !== subscription.resourceUri) {
                     return;
                 }
-                await this.handleNotification(subscription, notification.uri);
+                await this.handleNotification(subscription, notification.uri, capturedMcpManager);
             }
         );
 
         // Ref-count: only subscribe to the MCP server resource if this is the first subscription.
+        // IMPORTANT: handlerRemovers is set AFTER subscribeToResource succeeds so that
+        // teardownMcpSubscription can reliably infer setupSucceeded from its presence.
         const refKey = this.makeResourceRefKey(subscription.serverName, subscription.resourceUri);
         const currentCount = this.resourceRefCounts.get(refKey) ?? 0;
         if (currentCount === 0) {
             try {
                 await mcpManager.subscribeToResource(subscription.serverName, subscription.resourceUri);
             } catch (error) {
-                // Gracefully degrade — server may not support resource subscriptions.
-                // Polling (below) will be the actual change-detection mechanism.
-                logger.warn(`subscribeToResource failed for '${subscription.id}', relying on polling`, {
-                    error: error instanceof Error ? error.message : String(error),
-                });
+                // subscribeToResource failed — clean up the handler we already registered
+                removeHandler();
+                throw error;
             }
         }
 
+        // Only record state AFTER subscribe succeeds (or was already active via ref-count)
         this.handlerRemovers.set(subscription.id, removeHandler);
         this.resourceRefCounts.set(refKey, currentCount + 1);
 
-        // Seed the content hash so the first poll doesn't fire a spurious notification
-        await this.seedContentHash(subscription, mcpManager);
-
-        // Start polling for resource changes
-        this.startPolling(subscription);
-
-        logger.info(`MCP subscription '${subscription.id}' active (with polling)`, {
+        logger.info(`MCP subscription '${subscription.id}' active`, {
             server: subscription.serverName,
             resource: subscription.resourceUri,
             resourceRefCount: currentCount + 1,
-            pollIntervalMs: McpSubscriptionService.POLL_INTERVAL_MS,
         });
     }
 
@@ -366,9 +369,6 @@ export class McpSubscriptionService {
      * Only unsubscribes from the MCP server when the last subscription for a resource is removed.
      */
     private async teardownMcpSubscription(subscription: McpSubscription): Promise<void> {
-        // Stop polling timer
-        this.stopPolling(subscription.id);
-
         // Remove per-subscription notification handler
         const removeHandler = this.handlerRemovers.get(subscription.id);
         const setupSucceeded = removeHandler !== undefined;
@@ -427,23 +427,24 @@ export class McpSubscriptionService {
     /**
      * Handle an MCP resource push notification.
      * Reads the updated resource content and delivers it to the conversation.
-     * Guarded against missing project context (push notifications may arrive asynchronously).
+     *
+     * Uses the captured mcpManager reference from setup time rather than
+     * getProjectContext(), since push notifications fire from the MCP SDK's
+     * transport callbacks which execute outside AsyncLocalStorage scope.
      */
-    private async handleNotification(subscription: McpSubscription, uri: string): Promise<void> {
-        // Guard: push notifications may fire outside projectContextStore.run() scope
-        if (!isProjectContextInitialized()) {
-            logger.warn(`Ignoring push notification for '${subscription.id}': project context not available`);
+    private async handleNotification(
+        subscription: McpSubscription,
+        uri: string,
+        mcpManager: MCPManagerLike
+    ): Promise<void> {
+        // Guard: if the MCP server is no longer running (e.g. during shutdown),
+        // there's no point attempting to read the resource.
+        if (!mcpManager.isServerRunning(subscription.serverName)) {
+            logger.debug(`Ignoring notification for '${subscription.id}': server '${subscription.serverName}' no longer running`);
             return;
         }
 
         try {
-            const projectCtx = getProjectContext();
-            const mcpManager = projectCtx.mcpManager;
-
-            if (!mcpManager) {
-                throw new Error("MCPManager not available");
-            }
-
             const content = await this.readResourceContent(mcpManager, subscription.serverName, uri);
 
             if (!content) {
@@ -468,7 +469,7 @@ export class McpSubscriptionService {
      * Read a resource and return its text content.
      */
     private async readResourceContent(
-        mcpManager: { readResource(serverName: string, uri: string): Promise<{ contents: Array<Record<string, unknown>> }> },
+        mcpManager: MCPManagerLike,
         serverName: string,
         uri: string
     ): Promise<string> {
@@ -524,117 +525,6 @@ export class McpSubscriptionService {
         });
     }
 
-    // ========== Polling ==========
-
-    /**
-     * Seed the content hash for a new subscription by reading the current resource.
-     * Prevents the first poll from triggering a spurious notification.
-     */
-    private async seedContentHash(
-        subscription: McpSubscription,
-        mcpManager: { readResource(serverName: string, uri: string): Promise<{ contents: Array<Record<string, unknown>> }> }
-    ): Promise<void> {
-        try {
-            const content = await this.readResourceContent(
-                mcpManager,
-                subscription.serverName,
-                subscription.resourceUri
-            );
-            if (content) {
-                subscription.lastContentHash = createHash("sha256").update(content).digest("hex");
-            }
-        } catch (error) {
-            logger.debug(`Failed to seed content hash for subscription '${subscription.id}'`, {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            // Non-fatal: first poll will simply trigger a notification
-        }
-    }
-
-    /**
-     * Start periodic polling for a subscription.
-     */
-    private startPolling(subscription: McpSubscription): void {
-        // Clear any existing timer for this subscription
-        this.stopPolling(subscription.id);
-
-        const timer = setInterval(
-            () => void this.pollSubscription(subscription),
-            McpSubscriptionService.POLL_INTERVAL_MS
-        );
-
-        // Allow the Node.js process to exit even if timers are still active
-        timer.unref();
-
-        this.pollTimers.set(subscription.id, timer);
-    }
-
-    /**
-     * Stop polling for a subscription.
-     */
-    private stopPolling(subscriptionId: string): void {
-        const timer = this.pollTimers.get(subscriptionId);
-        if (timer) {
-            clearInterval(timer);
-            this.pollTimers.delete(subscriptionId);
-        }
-    }
-
-    /**
-     * Poll a single subscription: read the resource, compare hash, deliver if changed.
-     */
-    private async pollSubscription(subscription: McpSubscription): Promise<void> {
-        if (subscription.status !== McpSubscriptionStatus.ACTIVE) {
-            return;
-        }
-
-        if (!isProjectContextInitialized()) {
-            return;
-        }
-
-        try {
-            const projectCtx = getProjectContext();
-            const mcpManager = projectCtx.mcpManager;
-
-            if (!mcpManager || !mcpManager.isServerRunning(subscription.serverName)) {
-                return;
-            }
-
-            const content = await this.readResourceContent(
-                mcpManager,
-                subscription.serverName,
-                subscription.resourceUri
-            );
-
-            if (!content) {
-                return;
-            }
-
-            const contentHash = createHash("sha256").update(content).digest("hex");
-
-            // No change since last read
-            if (subscription.lastContentHash === contentHash) {
-                return;
-            }
-
-            // Content changed — update hash and deliver
-            subscription.lastContentHash = contentHash;
-            subscription.updatedAt = Date.now();
-            await this.saveSubscriptions();
-
-            logger.info(`Poll detected change for subscription '${subscription.id}'`, {
-                server: subscription.serverName,
-                resource: subscription.resourceUri,
-            });
-
-            await this.deliverNotificationContent(subscription, content);
-        } catch (error) {
-            logger.warn(`Poll failed for subscription '${subscription.id}'`, {
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }
-
     // ========== Persistence ==========
 
     private async loadSubscriptions(): Promise<void> {
@@ -671,11 +561,6 @@ export class McpSubscriptionService {
      * Shutdown all active subscriptions.
      */
     public async shutdown(): Promise<void> {
-        // Stop all polling timers first (collect keys to avoid mutation during iteration)
-        for (const subscriptionId of [...this.pollTimers.keys()]) {
-            this.stopPolling(subscriptionId);
-        }
-
         for (const subscription of this.subscriptions.values()) {
             if (subscription.status === McpSubscriptionStatus.ACTIVE) {
                 await this.teardownMcpSubscription(subscription);
