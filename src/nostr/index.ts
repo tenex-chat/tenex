@@ -26,3 +26,4 @@ export {
     isEventFromUser,
 } from "./utils";
 export { pubkeyFromNsec } from "./keys";
+export { nip44Decrypt } from "./encryption";
