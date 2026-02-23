@@ -169,7 +169,7 @@ export class PromptCompilerService {
         this.ndk = ndk;
 
         // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
-        this.cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
+        this.cacheDir = path.dirname(PromptCompilerService.getCachePathForAgent(agentPubkey));
     }
 
     /**
@@ -1076,10 +1076,19 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
     // =====================================================================================
 
     /**
+     * Get the cache file path for a given agent pubkey.
+     * Static variant for external consumers that need to read the cache directly.
+     */
+    static getCachePathForAgent(agentPubkey: string): string {
+        const cacheDir = path.join(config.getConfigPath(), "agents", "prompts");
+        return path.join(cacheDir, `${agentPubkey}.json`);
+    }
+
+    /**
      * Get the cache file path for this agent
      */
     private getCachePath(): string {
-        return path.join(this.cacheDir, `${this.agentPubkey}.json`);
+        return PromptCompilerService.getCachePathForAgent(this.agentPubkey);
     }
 
     /**
