@@ -4,16 +4,18 @@
  * Responsibilities:
  * 1. Subscribe to kind 25000 events (encrypted config updates) p-tagging the backend
  * 2. Decrypt NIP-44 content to extract APNs device tokens
- * 3. Manage in-memory token store: Map<pubkey, Set<deviceToken>>
+ * 3. Manage token store: Map<pubkey, Set<deviceToken>>, persisted to disk
  * 4. Expose notifyIfNeeded() for the ask tool to trigger push notifications
  * 5. Handle token lifecycle (register, refresh, disable, invalidation)
  */
 
+import { readJsonFile, writeJsonFile } from "@/lib/fs/filesystem";
 import { getNDK } from "@/nostr/ndkClient";
 import { nip44Decrypt } from "@/nostr/encryption";
 import { NDKKind } from "@/nostr/kinds";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import * as path from "node:path";
 import type { NDKEvent, NDKSubscription, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { APNsClient, type APNsClientConfig } from "./APNsClient";
 import type { APNsPayload, APNsSendResult, ConfigUpdateContent, NotificationRequest } from "./types";
@@ -24,6 +26,7 @@ export interface APNsClientLike {
 }
 
 const LOG_PREFIX = "[APNsService]";
+const TOKENS_FILENAME = "apns-tokens.json";
 
 export class APNsService {
     private static instance: APNsService | null = null;
@@ -38,9 +41,12 @@ export class APNsService {
     /** In-memory token store: pubkey → Set<deviceToken> */
     private tokenStore = new Map<string, Set<string>>();
 
+    private tokensFilePath: string;
     private initialized = false;
 
-    private constructor() {}
+    private constructor() {
+        this.tokensFilePath = path.join(config.getConfigPath("data"), TOKENS_FILENAME);
+    }
 
     static getInstance(): APNsService {
         if (!APNsService.instance) {
@@ -91,6 +97,9 @@ export class APNsService {
             });
             return;
         }
+
+        // Load persisted tokens before subscribing to new events
+        await this.loadTokenStore();
 
         // Create the HTTP/2 client
         const clientConfig: APNsClientConfig = {
@@ -161,7 +170,7 @@ export class APNsService {
 
             if (enable && apn_token) {
                 // Register or refresh token
-                this.addToken(senderPubkey, apn_token);
+                await this.addToken(senderPubkey, apn_token);
                 logger.info(`${LOG_PREFIX} Registered device token`, {
                     sender: senderPubkey.substring(0, 8),
                     tokenPrefix: apn_token.substring(0, 8),
@@ -169,7 +178,7 @@ export class APNsService {
                 });
             } else if (!enable) {
                 // Disable: remove all tokens for this user
-                const removed = this.removeAllTokens(senderPubkey);
+                const removed = await this.removeAllTokens(senderPubkey);
                 logger.info(`${LOG_PREFIX} Disabled notifications for user`, {
                     sender: senderPubkey.substring(0, 8),
                     tokensRemoved: removed,
@@ -239,7 +248,7 @@ export class APNsService {
 
         // Clean up invalid tokens
         for (const token of invalidTokens) {
-            this.removeToken(userPubkey, token);
+            await this.removeToken(userPubkey, token);
         }
     }
 
@@ -262,34 +271,72 @@ export class APNsService {
     // TOKEN STORE MANAGEMENT
     // =====================================================================================
 
-    private addToken(pubkey: string, token: string): void {
+    private async addToken(pubkey: string, token: string): Promise<void> {
         let tokens = this.tokenStore.get(pubkey);
         if (!tokens) {
             tokens = new Set();
             this.tokenStore.set(pubkey, tokens);
         }
         tokens.add(token);
+        await this.persistTokenStore();
     }
 
-    private removeToken(pubkey: string, token: string): void {
+    private async removeToken(pubkey: string, token: string): Promise<void> {
         const tokens = this.tokenStore.get(pubkey);
         if (tokens) {
             tokens.delete(token);
             if (tokens.size === 0) {
                 this.tokenStore.delete(pubkey);
             }
+            await this.persistTokenStore();
         }
     }
 
-    private removeAllTokens(pubkey: string): number {
+    private async removeAllTokens(pubkey: string): Promise<number> {
         const tokens = this.tokenStore.get(pubkey);
         const count = tokens?.size ?? 0;
         this.tokenStore.delete(pubkey);
+        if (count > 0) {
+            await this.persistTokenStore();
+        }
         return count;
     }
 
     private getTokenCount(pubkey: string): number {
         return this.tokenStore.get(pubkey)?.size ?? 0;
+    }
+
+    // =====================================================================================
+    // TOKEN STORE PERSISTENCE
+    // =====================================================================================
+
+    private async loadTokenStore(): Promise<void> {
+        try {
+            const data = await readJsonFile<Record<string, string[]>>(this.tokensFilePath);
+            if (!data) return;
+
+            for (const [pubkey, tokens] of Object.entries(data)) {
+                if (Array.isArray(tokens) && tokens.length > 0) {
+                    this.tokenStore.set(pubkey, new Set(tokens));
+                }
+            }
+
+            logger.info(`${LOG_PREFIX} Loaded token store from disk`, {
+                users: this.tokenStore.size,
+            });
+        } catch (error) {
+            logger.warn(`${LOG_PREFIX} Failed to load token store, starting empty`, {
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    private async persistTokenStore(): Promise<void> {
+        const data: Record<string, string[]> = {};
+        for (const [pubkey, tokens] of this.tokenStore) {
+            data[pubkey] = [...tokens];
+        }
+        await writeJsonFile(this.tokensFilePath, data);
     }
 
     // =====================================================================================
