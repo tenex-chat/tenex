@@ -3,6 +3,7 @@ import { conversationRegistry } from "@/conversations/ConversationRegistry";
 import { formatRelativeTimeShort } from "@/lib/time";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { getPubkeyService } from "@/services/PubkeyService";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 
@@ -201,7 +202,7 @@ export const activeConversationsFragment: PromptFragment<ActiveConversationsArgs
         }
 
         const conversationLines = activeConversations.map((conv, index) => {
-            const title = conv.title || `Conversation ${conv.conversationId.substring(0, 8)}...`;
+            const title = conv.title || `Conversation ${shortenConversationId(conv.conversationId)}...`;
             const duration = formatDuration(conv.startedAt);
             const lastActivity = formatRelativeTimeShort(Math.floor(conv.lastActivityAt / 1000));
 
@@ -218,7 +219,7 @@ export const activeConversationsFragment: PromptFragment<ActiveConversationsArgs
             const summaryLine = conv.summary ? `\n   Summary: ${conv.summary}` : "";
 
             return `${index + 1}. **${title}**
-   - ID: ${conv.conversationId}
+   - ID: ${shortenConversationId(conv.conversationId)}
    - Agent: ${conv.agentName}
    - Status: ${status}
    - Duration: ${duration}
