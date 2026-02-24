@@ -17,6 +17,7 @@ import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
+import { verifyEvent } from "nostr-tools";
 import { z } from "zod";
 
 const NIP46_CONNECT_TIMEOUT_MS = 30_000;
@@ -33,38 +34,60 @@ const nostrPublishAsUserSchema = z.object({
             "This context is shown to the user in the frontend before they approve signing."
         ),
     event: z
-        .union([z.string(), z.record(z.string(), z.unknown())])
+        .union([
+            z.string(),
+            z.object({
+                kind: z.number(),
+                content: z.string(),
+                tags: z.array(z.array(z.string())).optional(),
+            }).passthrough(),
+        ])
         .describe(
             "An unsigned Nostr event as a JSON object or JSON string. " +
-            "Must include 'kind' and 'content'. Tags are optional. " +
+            "Must include 'kind' (number) and 'content' (string). " +
+            "Tags must be an array of string arrays. " +
             "The event will be re-signed by the project owner via NIP-46."
         ),
 });
 
 type NostrPublishAsUserInput = z.infer<typeof nostrPublishAsUserSchema>;
 
+/** Schema for validating a parsed event object */
+const parsedEventSchema = z.object({
+    kind: z.number({ error: "Event must include a numeric 'kind' field" }),
+    content: z.string({ error: "Event must include a string 'content' field" }),
+    tags: z.array(z.array(z.string())).optional(),
+});
+
 /**
  * Parse the event input into a raw event object.
- * Accepts either a JSON string or an object.
+ * Accepts either a JSON string or an already-validated object.
  */
 function parseEventInput(
-    input: string | Record<string, unknown>
+    input: string | { kind: number; content: string; tags?: string[][] }
 ): { kind: number; content: string; tags?: string[][] } {
-    const raw = typeof input === "string" ? JSON.parse(input) : input;
+    let raw: unknown;
 
-    if (typeof raw.kind !== "number") {
-        throw new Error("Event must include a numeric 'kind' field");
+    if (typeof input === "string") {
+        try {
+            raw = JSON.parse(input);
+        } catch (e) {
+            throw new Error(
+                `Invalid JSON in event field: ${e instanceof Error ? e.message : String(e)}`
+            );
+        }
+    } else {
+        // Already validated by Zod schema at the input boundary
+        raw = input;
     }
 
-    if (typeof raw.content !== "string") {
-        throw new Error("Event must include a string 'content' field");
+    const result = parsedEventSchema.safeParse(raw);
+    if (!result.success) {
+        const issues = result.error.issues.map((i) => i.message).join("; ");
+        throw new Error(`Invalid event: ${issues}`);
     }
 
-    return {
-        kind: raw.kind,
-        content: raw.content,
-        tags: Array.isArray(raw.tags) ? raw.tags : undefined,
-    };
+    return result.data;
 }
 
 /**
@@ -127,11 +150,12 @@ async function connectNip46Signer(
  * Execute the nostr_publish_as_user tool.
  *
  * Flow:
- * 1. Parse the provided event
+ * 1. Parse and validate the provided event
  * 2. Add `tenex_explanation` tag (transport for frontend context)
  * 3. Send NIP-46 signing request to the project owner
- * 4. Remove `tenex_explanation` tag before the event is actually signed
- * 5. Publish the signed event to relays
+ * 4. Verify the remote signer stripped the `tenex_explanation` tag before signing
+ * 5. Verify the signature is valid over the clean event
+ * 6. Publish the signed event to relays
  */
 async function executeNostrPublishAsUser(
     input: NostrPublishAsUserInput,
@@ -169,14 +193,14 @@ async function executeNostrPublishAsUser(
     }
 
     // Parse the event input
-    const rawEvent = parseEventInput(eventInput);
+    const parsedEvent = parseEventInput(eventInput);
 
     // Build the NDKEvent
     const ndk = getNDK();
     const ndkEvent = new NDKEvent(ndk);
-    ndkEvent.kind = rawEvent.kind;
-    ndkEvent.content = rawEvent.content;
-    ndkEvent.tags = rawEvent.tags ? [...rawEvent.tags] : [];
+    ndkEvent.kind = parsedEvent.kind;
+    ndkEvent.content = parsedEvent.content;
+    ndkEvent.tags = parsedEvent.tags ? [...parsedEvent.tags] : [];
 
     // Add tenex_explanation tag for frontend context
     ndkEvent.tags.push(["tenex_explanation", explanation]);
@@ -224,10 +248,30 @@ async function executeNostrPublishAsUser(
         clearTimeout(signingTimer);
     }
 
-    // After signing, ensure the tenex_explanation tag is not in the published event.
-    // The TUI/bunker should have already stripped it before signing, but we
-    // defensively remove it here to guarantee it never leaks to relays.
-    ndkEvent.tags = ndkEvent.tags.filter((t) => t[0] !== "tenex_explanation");
+    // After signing, verify the tenex_explanation tag was stripped by the remote
+    // signer BEFORE signing. If the tag is still present, the signature was
+    // computed over tags that include it — removing it now would invalidate
+    // the signature. We must fail rather than publish a broken event.
+    const hasExplanationTag = ndkEvent.tags.some((t) => t[0] === "tenex_explanation");
+
+    if (hasExplanationTag) {
+        try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        throw new Error(
+            "Remote signer did not strip tenex_explanation tag before signing — " +
+            "the event signature covers the explanation tag and removing it would " +
+            "invalidate the signature. The TUI/bunker must strip the tag before signing."
+        );
+    }
+
+    // Verify the signature is valid over the clean (tag-stripped) event
+    const signedRawEvent = ndkEvent.rawEvent();
+    if (!verifyEvent(signedRawEvent)) {
+        try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        throw new Error(
+            "Signature verification failed after NIP-46 signing. " +
+            "The event signature does not match the event content."
+        );
+    }
 
     // Publish the signed event
     try {
