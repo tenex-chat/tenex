@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { formatRelativeTimeShort } from "@/lib/time";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
 
@@ -133,7 +134,7 @@ export const recentConversationsFragment: PromptFragment<RecentConversationsArgs
         }
 
         const conversationLines = recentConversations.map((conv, index) => {
-            const title = conv.title || `Conversation ${conv.id.substring(0, 8)}...`;
+            const title = conv.title || `Conversation ${shortenConversationId(conv.id)}...`;
             const relativeTime = formatRelativeTimeShort(conv.lastActivity);
             // Summary is already sanitized (no newlines), safe to include inline
             const summaryLine = conv.summary ? `\n   Summary: ${conv.summary}` : "";
