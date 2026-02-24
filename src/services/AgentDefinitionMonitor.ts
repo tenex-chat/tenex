@@ -331,10 +331,9 @@ export class AgentDefinitionMonitor {
         this.subscription = this.ndk.subscribe(filter, {
             closeOnEose: false,
             groupable: false,
-        });
-
-        this.subscription.on("event", (event: NDKEvent) => {
-            this.handleIncomingEvent(event);
+            onEvent: (event: NDKEvent) => {
+                this.handleIncomingEvent(event);
+            },
         });
     }
 
