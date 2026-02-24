@@ -2145,4 +2145,139 @@ describe("InterventionService", () => {
             expect(mockDelegationChecker).not.toHaveBeenCalled();
         });
     });
+
+    describe("timer cleanup on project switch", () => {
+        it("should clear timers when switching projects in loadState", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Add a pending intervention which starts a timer
+            service.onAgentCompletion(
+                "conv-1",
+                Date.now() + 60000, // far in the future so timer doesn't fire
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Switch to a different project - timers from project-1 should be cleared
+            await service.setProject("project-2");
+
+            // Pending interventions should be cleared (loaded from project-2's state, which is empty)
+            expect(service.getPendingCount()).toBe(0);
+
+            // Wait beyond what would have been the timeout
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // No intervention should have been published (stale timer was cleared)
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should not fire stale timers from previous project after switch", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 50, // very short timeout
+                },
+            });
+
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Start a timer with short timeout
+            service.onAgentCompletion(
+                "conv-stale",
+                Date.now(),
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Immediately switch projects before timer fires
+            await service.setProject("project-2");
+
+            // Wait for the old timer's timeout to elapse
+            await new Promise(resolve => setTimeout(resolve, 150));
+
+            // The stale timer should have been cancelled, no publish should occur
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should accept new interventions for the new project after switch", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Register a completion in project-1
+            service.onAgentCompletion(
+                "conv-old",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Switch to project-2 (clears old timers and state)
+            await service.setProject("project-2");
+            expect(service.getPendingCount()).toBe(0);
+
+            // Register a new completion in project-2
+            service.onAgentCompletion(
+                "conv-new",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-2"
+            );
+
+            // New project should accept new interventions normally
+            expect(service.getPendingCount()).toBe(1);
+            expect(service.getPending("conv-new")).toBeDefined();
+            expect(service.getPending("conv-new")?.projectId).toBe("project-2");
+        });
+    });
+
+    describe("triggerIntervention project ID guard", () => {
+        it("should discard stale timer firing for wrong project", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 50,
+                },
+            });
+
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Register completion in project-1
+            service.onAgentCompletion(
+                "conv-cross-project",
+                Date.now(),
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            // Verify it was registered
+            expect(service.getPendingCount()).toBe(1);
+
+            // Switch projects - this clears timers and state via loadState()
+            // but the defense-in-depth guard in triggerIntervention should also protect
+            await service.setProject("project-2");
+
+            // Verify state was cleared
+            expect(service.getPendingCount()).toBe(0);
+
+            // No stale notification should fire
+            await new Promise(resolve => setTimeout(resolve, 150));
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+    });
 });
