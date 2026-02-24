@@ -86,6 +86,7 @@ import { createWebSearchTool } from "./implementations/web_search";
 
 // Nostr tools
 import { createNostrFetchTool } from "./implementations/nostr_fetch";
+import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
 // Image generation tools
 import { createGenerateImageTool } from "./implementations/generate_image";
@@ -243,6 +244,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Nostr tools
     nostr_fetch: createNostrFetchTool,
+    nostr_publish_as_user: createNostrPublishAsUserTool,
 
     // Image generation
     generate_image: createGenerateImageTool,

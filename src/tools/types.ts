@@ -65,6 +65,7 @@ export type ToolName =
     | "web_fetch"
     | "web_search"
     | "nostr_fetch"
+    | "nostr_publish_as_user"
     | "change_model"
     | "kill"
     | "generate_image";
