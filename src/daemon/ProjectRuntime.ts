@@ -167,8 +167,8 @@ export class ProjectRuntime {
             this.localReportStore.initialize(this.metadataPath);
             this.context.localReportStore = this.localReportStore;
 
-            // Initialize nudge whitelist subscription (project owner's bookmarked nudges/skills)
-            this.context.initializeNudgeWhitelist();
+            // NOTE: Nudge whitelist is initialized at daemon level (user-scoped, not project-scoped).
+            // See Daemon.ts step 6d.
 
             // Initialize conversation store with project path and agent pubkeys
             const agentPubkeys = Array.from(this.context.agents.values()).map(a => a.pubkey);

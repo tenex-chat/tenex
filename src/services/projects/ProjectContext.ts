@@ -218,8 +218,9 @@ export class ProjectContext {
     public localReportStore?: LocalReportStore;
 
     /**
-     * Nudge whitelist service for this project.
-     * Provides access to whitelisted nudges/skills from trusted pubkeys.
+     * @deprecated Nudge whitelist is now user-scoped, not project-scoped.
+     * Use NudgeSkillWhitelistService.getInstance() directly instead.
+     * Kept temporarily for backward compatibility during transition.
      */
     public nudgeWhitelist: NudgeWhitelistService;
 
@@ -269,29 +270,16 @@ export class ProjectContext {
     }
 
     /**
-     * Initialize the nudge whitelist subscription for this project.
-     * This should be called during project boot with trusted pubkeys.
-     *
-     * By default, whitelists the project owner's pubkey.
-     * Additional trusted pubkeys can be provided for team whitelisting.
-     *
-     * @param additionalPubkeys - Additional pubkeys beyond the project owner to whitelist
+     * @deprecated Nudge whitelist is now initialized at daemon level (user-scoped).
+     * This method is a no-op. See Daemon.ts step 6d.
      */
-    initializeNudgeWhitelist(additionalPubkeys: string[] = []): void {
-        const ownerPubkey = this.project.pubkey;
-        const whitelistPubkeys = [ownerPubkey, ...additionalPubkeys];
-
-        this.nudgeWhitelist.initialize(whitelistPubkeys);
-
-        logger.info("Nudge whitelist initialized for project", {
-            projectId: this.project.id?.substring(0, 12),
-            ownerPubkey: ownerPubkey.substring(0, 8),
-            totalPubkeys: whitelistPubkeys.length,
-        });
+    initializeNudgeWhitelist(_additionalPubkeys: string[] = []): void {
+        logger.debug("initializeNudgeWhitelist is deprecated — nudge whitelist is now initialized at daemon level");
     }
 
     /**
-     * Get available whitelisted nudges for delegation
+     * @deprecated Use NudgeSkillWhitelistService.getInstance().getWhitelistedNudges() directly.
+     * Nudges are user-scoped, not project-scoped.
      */
     getAvailableNudges(): WhitelistItem[] {
         return this.nudgeWhitelist.getWhitelistedNudges();
