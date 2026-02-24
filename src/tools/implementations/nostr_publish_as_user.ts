@@ -260,6 +260,14 @@ async function executeNostrPublishAsUser(
     // 3. Verify the signature matches the clean event
     ndkEvent.tags = ndkEvent.tags.filter((t) => t[0] !== "tenex_explanation");
 
+    // Validate timestamp is in seconds, not milliseconds
+    if (ndkEvent.created_at && ndkEvent.created_at > 1_000_000_000_000) {
+        throw new Error(
+            "Event created_at appears to be in milliseconds instead of seconds. " +
+            "Nostr timestamps must be Unix timestamps in seconds."
+        );
+    }
+
     // Recompute the event ID over the clean tags to match the signed content
     const cleanRawEvent = ndkEvent.rawEvent();
     const cleanId = getEventHash(cleanRawEvent);
@@ -272,6 +280,15 @@ async function executeNostrPublishAsUser(
         throw new Error(
             "Signature verification failed after NIP-46 signing. " +
             "The event signature does not match the clean event content."
+        );
+    }
+
+    // Validate event structure per NDK guardrails
+    if (!ndkEvent.validate()) {
+        try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
+        throw new Error(
+            "NDK validation failed: event structure is invalid. " +
+            "Ensure kind, content, pubkey, created_at, and tags are well-formed."
         );
     }
 
