@@ -1,4 +1,5 @@
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
+import { collectEvents } from "@/nostr/collectEvents";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKFilter } from "@nostr-dev-kit/ndk";
@@ -40,21 +41,18 @@ export class NDKAgentDiscovery {
 
             logger.debug("Discovering NDKAgentDefinition events", { filter });
 
-            // Subscribe and collect events progressively until EOSE
-            const discoveredAgents: NDKAgentDefinition[] = [];
-
-            await new Promise<void>((resolve) => {
-                this.ndk.subscribe(filter, {
-                    closeOnEose: true,
-                    groupable: false,
-                    onEvent: (event) => {
-                        const ndkAgent = NDKAgentDefinition.from(event);
-                        discoveredAgents.push(ndkAgent);
-                    },
-                    onEose: () => resolve(),
-                    onClose: () => resolve(),
-                });
+            const events = await collectEvents(this.ndk, filter, {
+                subOpts: { groupable: false },
             });
+
+            const discoveredAgents: NDKAgentDefinition[] = [];
+            for (const event of events) {
+                try {
+                    discoveredAgents.push(NDKAgentDefinition.from(event));
+                } catch (err) {
+                    logger.warn("Failed to parse NDKAgentDefinition", { eventId: event.id, err });
+                }
+            }
 
             logger.info(`Found ${discoveredAgents.length} NDKAgentDefinition events`);
 

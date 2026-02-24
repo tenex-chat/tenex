@@ -2,6 +2,7 @@ import type { ToolExecutionContext } from "@/tools/types";
 import { ALPHA_BUG_HASHTAG, TENEX_BACKEND_PROJECT_ATAG } from "@/constants";
 import { llmServiceFactory } from "@/llm";
 import { getNDK } from "@/nostr";
+import { collectEvents } from "@/nostr/collectEvents";
 import { config } from "@/services/ConfigService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -122,19 +123,10 @@ async function executeBugList(_context: ToolExecutionContext): Promise<BugListOu
         filter: { "#a": [TENEX_BACKEND_PROJECT_ATAG], "#t": [ALPHA_BUG_HASHTAG] },
     });
 
-    // Collect bug reports via subscription
-    const bugEvents: NDKEvent[] = [];
-    await new Promise<void>((resolve) => {
-        ndk.subscribe({
-            kinds: [1],
-            "#a": [TENEX_BACKEND_PROJECT_ATAG],
-            "#t": [ALPHA_BUG_HASHTAG],
-        }, {
-            closeOnEose: true,
-            onEvent: (event) => bugEvents.push(event),
-            onEose: () => resolve(),
-            onClose: () => resolve(),
-        });
+    const bugEvents = await collectEvents(ndk, {
+        kinds: [1],
+        "#a": [TENEX_BACKEND_PROJECT_ATAG],
+        "#t": [ALPHA_BUG_HASHTAG],
     });
 
     if (bugEvents.length === 0) {
@@ -144,19 +136,10 @@ async function executeBugList(_context: ToolExecutionContext): Promise<BugListOu
     // Process all bugs in parallel for better performance
     const bugs = await Promise.all(
         bugEvents.map(async (bugEvent) => {
-            // Collect replies for this bug via subscription
-            const replies: NDKEvent[] = [];
-            await new Promise<void>((resolve) => {
-                ndk.subscribe({
-                    kinds: [1],
-                    "#e": [bugEvent.id],
-                    "#a": [TENEX_BACKEND_PROJECT_ATAG],
-                }, {
-                    closeOnEose: true,
-                    onEvent: (event) => replies.push(event),
-                    onEose: () => resolve(),
-                    onClose: () => resolve(),
-                });
+            const replies = await collectEvents(ndk, {
+                kinds: [1],
+                "#e": [bugEvent.id],
+                "#a": [TENEX_BACKEND_PROJECT_ATAG],
             });
 
             // Get title from tag or content
