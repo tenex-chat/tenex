@@ -220,7 +220,7 @@ export class ProjectContext {
     /**
      * @deprecated Nudge whitelist is now user-scoped, not project-scoped.
      * Use NudgeSkillWhitelistService.getInstance() directly instead.
-     * Kept temporarily for backward compatibility during transition.
+     * Retained as a backward-compatible shim; callers should migrate to the singleton.
      */
     public nudgeWhitelist: NudgeWhitelistService;
 
@@ -265,7 +265,7 @@ export class ProjectContext {
         this.agentComments = new Map();
         this.reports = new Map();
 
-        // Initialize nudge whitelist service (lazy init on first use)
+        // Reference the daemon-scoped nudge whitelist singleton
         this.nudgeWhitelist = NudgeWhitelistService.getInstance();
     }
 
