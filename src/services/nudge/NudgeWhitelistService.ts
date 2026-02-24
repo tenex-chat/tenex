@@ -305,6 +305,9 @@ export class NudgeSkillWhitelistService {
      * Get all whitelisted nudges
      */
     getWhitelistedNudges(): WhitelistItem[] {
+        if (!this.initialized) {
+            logger.warn("[NudgeSkillWhitelistService] getWhitelistedNudges called before initialize() — returning empty list");
+        }
         return this.cache?.nudges || [];
     }
 
@@ -312,6 +315,9 @@ export class NudgeSkillWhitelistService {
      * Get all whitelisted skills
      */
     getWhitelistedSkills(): WhitelistItem[] {
+        if (!this.initialized) {
+            logger.warn("[NudgeSkillWhitelistService] getWhitelistedSkills called before initialize() — returning empty list");
+        }
         return this.cache?.skills || [];
     }
 
@@ -319,6 +325,9 @@ export class NudgeSkillWhitelistService {
      * Get all whitelisted items (both nudges and skills)
      */
     getAllWhitelistedItems(): WhitelistItem[] {
+        if (!this.initialized) {
+            logger.warn("[NudgeSkillWhitelistService] getAllWhitelistedItems called before initialize() — returning empty list");
+        }
         if (!this.cache) return [];
         return [...this.cache.nudges, ...this.cache.skills];
     }
