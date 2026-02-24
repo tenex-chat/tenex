@@ -40,21 +40,23 @@ export class NDKAgentDiscovery {
 
             logger.debug("Discovering NDKAgentDefinition events", { filter });
 
-            // Fetch events from network
-            const events = await this.ndk.fetchEvents(filter, {
-                closeOnEose: true,
-                groupable: false,
-            });
-
-            logger.info(`Found ${events.size} NDKAgentDefinition events`);
-
-            // Convert to NDKAgentDefinition instances
+            // Subscribe and collect events progressively until EOSE
             const discoveredAgents: NDKAgentDefinition[] = [];
 
-            for (const event of Array.from(events)) {
-                const ndkAgent = NDKAgentDefinition.from(event);
-                discoveredAgents.push(ndkAgent);
-            }
+            await new Promise<void>((resolve) => {
+                this.ndk.subscribe(filter, {
+                    closeOnEose: true,
+                    groupable: false,
+                    onEvent: (event) => {
+                        const ndkAgent = NDKAgentDefinition.from(event);
+                        discoveredAgents.push(ndkAgent);
+                    },
+                    onEose: () => resolve(),
+                    onClose: () => resolve(),
+                });
+            });
+
+            logger.info(`Found ${discoveredAgents.length} NDKAgentDefinition events`);
 
             // Apply local filtering if specified
             let filtered = discoveredAgents;
