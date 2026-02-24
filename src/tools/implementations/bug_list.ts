@@ -122,25 +122,41 @@ async function executeBugList(_context: ToolExecutionContext): Promise<BugListOu
         filter: { "#a": [TENEX_BACKEND_PROJECT_ATAG], "#t": [ALPHA_BUG_HASHTAG] },
     });
 
-    // Fetch all bug reports
-    const bugEvents = await ndk.fetchEvents({
-        kinds: [1],
-        "#a": [TENEX_BACKEND_PROJECT_ATAG],
-        "#t": [ALPHA_BUG_HASHTAG],
+    // Collect bug reports via subscription
+    const bugEvents: NDKEvent[] = [];
+    await new Promise<void>((resolve) => {
+        ndk.subscribe({
+            kinds: [1],
+            "#a": [TENEX_BACKEND_PROJECT_ATAG],
+            "#t": [ALPHA_BUG_HASHTAG],
+        }, {
+            closeOnEose: true,
+            onEvent: (event) => bugEvents.push(event),
+            onEose: () => resolve(),
+            onClose: () => resolve(),
+        });
     });
 
-    if (bugEvents.size === 0) {
+    if (bugEvents.length === 0) {
         return { bugs: [], count: 0 };
     }
 
     // Process all bugs in parallel for better performance
     const bugs = await Promise.all(
-        Array.from(bugEvents).map(async (bugEvent) => {
-            // Fetch replies for this bug
-            const replies = await ndk.fetchEvents({
-                kinds: [1],
-                "#e": [bugEvent.id],
-                "#a": [TENEX_BACKEND_PROJECT_ATAG],
+        bugEvents.map(async (bugEvent) => {
+            // Collect replies for this bug via subscription
+            const replies: NDKEvent[] = [];
+            await new Promise<void>((resolve) => {
+                ndk.subscribe({
+                    kinds: [1],
+                    "#e": [bugEvent.id],
+                    "#a": [TENEX_BACKEND_PROJECT_ATAG],
+                }, {
+                    closeOnEose: true,
+                    onEvent: (event) => replies.push(event),
+                    onEose: () => resolve(),
+                    onClose: () => resolve(),
+                });
             });
 
             // Get title from tag or content
@@ -148,7 +164,7 @@ async function executeBugList(_context: ToolExecutionContext): Promise<BugListOu
                 bugEvent.tagValue("title") || bugEvent.content.substring(0, 50).split("\n")[0] || "Untitled Bug";
 
             // Generate AI summary
-            const { summary, status } = await summarizeBugConversation(bugEvent, Array.from(replies));
+            const { summary, status } = await summarizeBugConversation(bugEvent, replies);
 
             return {
                 id: bugEvent.id,
@@ -156,7 +172,7 @@ async function executeBugList(_context: ToolExecutionContext): Promise<BugListOu
                 summary,
                 status,
                 createdAt: bugEvent.created_at || 0,
-                replyCount: replies.size,
+                replyCount: replies.length,
             };
         })
     );
