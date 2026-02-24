@@ -255,10 +255,12 @@ export function buildDelegationChain(
         });
     }
 
-    // Add the current agent at the end (if not already in chain)
+    // Always add the current agent as the terminal entry.
+    // For self-delegation (A → A), A appears twice: [..., A(delegator), A(current)]
+    // resolveCompletionRecipient picks chain[length-2] which MUST be the delegator.
     // Current agent was delegated TO in currentConversationId (the conversation being created for them)
     // Store FULL conversation ID - truncation happens at display time
-    if (!seenPubkeys.has(currentAgentPubkey) && !chain.some(e => e.pubkey === currentAgentPubkey)) {
+    {
         const currentAgentInfo = resolveDisplayName(currentAgentPubkey);
         chain.push({
             pubkey: currentAgentPubkey,
