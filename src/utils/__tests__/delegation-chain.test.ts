@@ -611,6 +611,55 @@ describe("delegation-chain utilities", () => {
             expect(lines[2]).toBe("    -> [execution-coordinator -> claude-code (you)] [conversation claude-conv-]");
         });
 
+        it("should allow self-delegation: agent appears as both delegator and current agent", () => {
+            // When agent-pubkey-exec delegates to itself, the chain must have exec appearing twice:
+            // once as the delegator and once as the terminal current-agent entry.
+            // This ensures resolveCompletionRecipient picks chain[length-2] = exec (the delegator),
+            // NOT the project owner.
+            const event = {
+                pubkey: "agent-pubkey-exec",
+                tags: [["delegation", "exec-parent-conv-id-1234567890"]],
+            } as unknown as NDKEvent;
+
+            // Mock parent conversation with stored chain ending at exec
+            const mockParentStore = {
+                metadata: {
+                    delegationChain: [
+                        { pubkey: "user-pubkey", displayName: "User", isUser: true },
+                        { pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" },
+                        { pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" },
+                    ],
+                },
+                getAllMessages: () => [{ pubkey: "agent-pubkey-pm" }],
+                getRootEventId: () => undefined,
+            };
+
+            mockConversationStoreGet.mockImplementation((convId: string) => {
+                if (convId === "exec-parent-conv-id-1234567890") return mockParentStore;
+                return undefined;
+            });
+
+            // Self-delegation: currentAgentPubkey === event.pubkey
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-exec", // current agent is exec (same as event.pubkey)
+                "user-pubkey",
+                "self-deleg-conv-id-1234567890"
+            );
+
+            expect(result).toBeDefined();
+            // Chain: User -> pm-wip -> exec(delegator) -> exec(current)
+            // exec MUST appear twice
+            expect(result).toHaveLength(4);
+            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
+            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" });
+            expect(result![3]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "self-deleg-conv-id-1234567890" });
+
+            // Verify resolveCompletionRecipient logic: chain[length-2] should be the delegator (exec)
+            expect(result![result!.length - 2].pubkey).toBe("agent-pubkey-exec");
+        });
+
         it("should use truncated pubkey for unknown agents", () => {
             const event = {
                 pubkey: "unknown123456789abcdef",
