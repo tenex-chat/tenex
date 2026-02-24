@@ -194,12 +194,13 @@ export class OwnerAgentListService {
                 kinds: [NDKKind.ProjectAgentSnapshot as number],
                 authors: this.ownerPubkeys,
             },
-            { closeOnEose: false },
+            {
+                closeOnEose: false,
+                onEvent: (event: NDKEvent) => {
+                    this.handleIncomingEvent(event);
+                },
+            },
         );
-
-        this.subscription.on("event", (event: NDKEvent) => {
-            this.handleIncomingEvent(event);
-        });
 
         logger.debug("[OwnerAgentListService] Started 14199 subscription", {
             ownerCount: this.ownerPubkeys.length,

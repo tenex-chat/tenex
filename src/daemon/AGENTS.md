@@ -76,13 +76,13 @@ import { SubscriptionManager } from "@/daemon/SubscriptionManager";
 
 const manager = new SubscriptionManager(ndkClient);
 
-// Subscribe to conversation events
+// Subscribe to conversation events (NDK v3 callback-in-options pattern)
 const sub = manager.subscribe({
   kinds: [4199],  // Conversation events
   "#p": [agentPubkey]
+}, {
+  onEvent: handleEvent,
 });
-
-sub.on("event", handleEvent);
 ```
 
 ### RuntimeLifecycle

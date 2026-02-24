@@ -121,12 +121,13 @@ export class NudgeSkillWhitelistService {
                 kinds: [NDKKind.NudgeSkillWhitelist],
                 authors,
             },
-            { closeOnEose: false }
+            {
+                closeOnEose: false,
+                onEvent: (event: NDKEvent) => {
+                    this.handleWhitelistEvent(event);
+                },
+            }
         );
-
-        this.subscription.on("event", (event: NDKEvent) => {
-            this.handleWhitelistEvent(event);
-        });
 
         logger.debug("[NudgeSkillWhitelistService] Started subscription", {
             pubkeyCount: authors.length,

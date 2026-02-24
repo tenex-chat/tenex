@@ -170,9 +170,8 @@ export class SubscriptionManager {
         const sub = this.ndk.subscribe([filter], {
             closeOnEose: false,
             groupable: true,
+            onEvent: (event: NDKEvent) => this.handleEvent(event),
         });
-
-        sub.on("event", (event: NDKEvent) => this.handleEvent(event));
 
         this.lessonSubscriptions.set(definitionId, sub);
         logger.debug("Lesson subscription added", {
@@ -262,12 +261,10 @@ export class SubscriptionManager {
         const sub = this.ndk.subscribe(filters, {
             closeOnEose: false,
             groupable: false,
-        });
-
-        sub.on("event", (event: NDKEvent) => this.handleEvent(event));
-
-        sub.on("eose", () => {
-            logger.debug(`Subscription EOSE received [${label}]`);
+            onEvent: (event: NDKEvent) => this.handleEvent(event),
+            onEose: () => {
+                logger.debug(`Subscription EOSE received [${label}]`);
+            },
         });
 
         return sub;
