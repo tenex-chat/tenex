@@ -17,7 +17,7 @@ import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
-import { verifyEvent } from "nostr-tools";
+import { getEventHash, verifyEvent } from "nostr-tools";
 import { z } from "zod";
 
 const NIP46_CONNECT_TIMEOUT_MS = 30_000;
@@ -153,9 +153,10 @@ async function connectNip46Signer(
  * 1. Parse and validate the provided event
  * 2. Add `tenex_explanation` tag (transport for frontend context)
  * 3. Send NIP-46 signing request to the project owner
- * 4. Verify the remote signer stripped the `tenex_explanation` tag before signing
- * 5. Verify the signature is valid over the clean event
- * 6. Publish the signed event to relays
+ * 4. Strip `tenex_explanation` tag locally (remote signer already signed without it)
+ * 5. Recompute event ID over the clean event
+ * 6. Verify the signature is valid over the clean event
+ * 7. Publish the signed event to relays
  */
 async function executeNostrPublishAsUser(
     input: NostrPublishAsUserInput,
@@ -248,28 +249,29 @@ async function executeNostrPublishAsUser(
         clearTimeout(signingTimer);
     }
 
-    // After signing, verify the tenex_explanation tag was stripped by the remote
-    // signer BEFORE signing. If the tag is still present, the signature was
-    // computed over tags that include it — removing it now would invalidate
-    // the signature. We must fail rather than publish a broken event.
-    const hasExplanationTag = ndkEvent.tags.some((t) => t[0] === "tenex_explanation");
+    // NDK's NIP-46 sign() only stores the signature string back on the local
+    // event object. The remote signer (TUI/bunker) strips the tenex_explanation
+    // tag and signs the clean event, but the local ndkEvent.tags still contains
+    // the tag and ndkEvent.id was computed WITH it.
+    //
+    // We must reconcile the local state to match what was actually signed:
+    // 1. Strip the tenex_explanation tag locally
+    // 2. Recompute the event ID over the now-clean event
+    // 3. Verify the signature matches the clean event
+    ndkEvent.tags = ndkEvent.tags.filter((t) => t[0] !== "tenex_explanation");
 
-    if (hasExplanationTag) {
-        try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
-        throw new Error(
-            "Remote signer did not strip tenex_explanation tag before signing — " +
-            "the event signature covers the explanation tag and removing it would " +
-            "invalidate the signature. The TUI/bunker must strip the tag before signing."
-        );
-    }
+    // Recompute the event ID over the clean tags to match the signed content
+    const cleanRawEvent = ndkEvent.rawEvent();
+    const cleanId = getEventHash(cleanRawEvent);
+    ndkEvent.id = cleanId;
+    cleanRawEvent.id = cleanId;
 
-    // Verify the signature is valid over the clean (tag-stripped) event
-    const signedRawEvent = ndkEvent.rawEvent();
-    if (!verifyEvent(signedRawEvent)) {
+    // Verify the signature is valid over the clean event
+    if (!verifyEvent(cleanRawEvent)) {
         try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
         throw new Error(
             "Signature verification failed after NIP-46 signing. " +
-            "The event signature does not match the event content."
+            "The event signature does not match the clean event content."
         );
     }
 
