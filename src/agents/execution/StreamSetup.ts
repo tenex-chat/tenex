@@ -9,7 +9,7 @@
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
+import { NudgeService, NudgeSkillWhitelistService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import { SkillService, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
@@ -281,7 +281,7 @@ export async function setupStreamExecution(
         metaModelSystemPrompt,
         variantSystemPrompt,
         ephemeralMessages,
-        availableNudges: projectContext.getAvailableNudges(),
+        availableNudges: NudgeSkillWhitelistService.getInstance().getWhitelistedNudges(),
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {

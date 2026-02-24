@@ -34,6 +34,7 @@ import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceS
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { InterventionService, type AgentResolutionResult, type ActiveDelegationCheckerFn } from "@/services/intervention";
 import { Nip46SigningService } from "@/services/nip46";
+import { NudgeSkillWhitelistService } from "@/services/nudge";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
@@ -194,6 +195,11 @@ export class Daemon {
                 ? [...this.whitelistedPubkeys]
                 : [backendSigner.pubkey];
             OwnerAgentListService.getInstance().initialize(ownerPubkeys);
+
+            // 6d. Initialize NudgeSkillWhitelistService (global nudge/skill whitelist)
+            // Nudges are user-scoped, not project-scoped — initialize once at daemon level
+            // with the same owner pubkeys used for agent list management.
+            NudgeSkillWhitelistService.getInstance().initialize(ownerPubkeys);
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
