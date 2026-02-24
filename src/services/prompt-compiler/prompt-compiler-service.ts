@@ -243,21 +243,19 @@ export class PromptCompilerService {
         this.subscription = this.ndk.subscribe([filter], {
             closeOnEose: false,
             groupable: true,
-        });
-
-        this.subscription.on("event", (event: NDKEvent) => {
-            this.handleCommentEvent(event);
-        });
-
-        this.subscription.on("eose", () => {
-            logger.debug("PromptCompilerService: EOSE received", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-                commentsCount: this.getTotalCommentsCount(),
-            });
-            this.eoseReceived = true;
-            if (this.eoseResolve) {
-                this.eoseResolve();
-            }
+            onEvent: (event: NDKEvent) => {
+                this.handleCommentEvent(event);
+            },
+            onEose: () => {
+                logger.debug("PromptCompilerService: EOSE received", {
+                    agentPubkey: this.agentPubkey.substring(0, 8),
+                    commentsCount: this.getTotalCommentsCount(),
+                });
+                this.eoseReceived = true;
+                if (this.eoseResolve) {
+                    this.eoseResolve();
+                }
+            },
         });
     }
 

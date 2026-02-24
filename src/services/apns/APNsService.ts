@@ -113,17 +113,18 @@ export class APNsService {
                 kinds: [NDKKind.TenexConfigUpdate as number],
                 "#p": [backendPubkey],
             },
-            { closeOnEose: false }
+            {
+                closeOnEose: false,
+                onEvent: (event: NDKEvent) => {
+                    this.handleConfigUpdateEvent(event).catch((err) => {
+                        logger.error(`${LOG_PREFIX} Error handling config update event`, {
+                            error: err instanceof Error ? err.message : String(err),
+                            eventId: event.id?.substring(0, 8),
+                        });
+                    });
+                },
+            }
         );
-
-        this.subscription.on("event", (event: NDKEvent) => {
-            this.handleConfigUpdateEvent(event).catch((err) => {
-                logger.error(`${LOG_PREFIX} Error handling config update event`, {
-                    error: err instanceof Error ? err.message : String(err),
-                    eventId: event.id?.substring(0, 8),
-                });
-            });
-        });
 
         this.initialized = true;
 
