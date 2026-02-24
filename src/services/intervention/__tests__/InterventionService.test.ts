@@ -111,6 +111,15 @@ const createDefaultProjectAgents = () => new Map([
     ["catchup-project", defaultTestAgents],
 ]);
 
+// Mock PubkeyService - getNameSync calls getProjectContext() which throws in tests
+mock.module("@/services/PubkeyService", () => ({
+    PubkeyService: {
+        getInstance: () => ({
+            getNameSync: (pubkey: string) => pubkey,
+        }),
+    },
+}));
+
 mock.module("@/utils/logger", () => ({
     logger: {
         debug: mock(),
@@ -151,9 +160,15 @@ describe("InterventionService", () => {
         await fs.mkdir(tempDir, { recursive: true });
         mockGetConfigPath.mockReturnValue(tempDir);
 
-        // Reset mocks
+        // Reset mocks - use mockClear for call tracking, then restore default
+        // implementations that may have been overridden by individual tests
+        // (e.g., mockRejectedValue in retry tests persists through mockClear)
         mockGetConfig.mockClear();
         mockPublishReviewRequest.mockClear();
+        mockPublishReviewRequest.mockImplementation(
+            (_target: string, _convId: string, _user: string, _agent: string) =>
+                Promise.resolve("published-event-id")
+        );
         mockPublisherInitialize.mockClear();
         mockIsTrustedSync.mockClear();
 
@@ -2143,6 +2158,150 @@ describe("InterventionService", () => {
 
             // Delegation checker should NOT be called (early return for recent activity)
             expect(mockDelegationChecker).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("timer cleanup on project switch", () => {
+        it("should clear timers when switching projects in loadState", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Add a pending intervention with completedAt = now, so the timer
+            // WOULD fire after 100ms (the configured timeout) if not cleaned up.
+            // This ensures the test is non-vacuous: without cleanup, the timer fires.
+            service.onAgentCompletion(
+                "conv-1",
+                Date.now(),
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Switch to a different project - timers from project-1 should be cleared
+            await service.setProject("project-2");
+
+            // Pending interventions should be cleared (loaded from project-2's state, which is empty)
+            expect(service.getPendingCount()).toBe(0);
+
+            // Wait beyond the timeout (100ms) + buffer — the timer would have fired by now
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            // No intervention should have been published (stale timer was cleared)
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should not fire stale timers from previous project after switch", async () => {
+            mockGetConfig.mockReturnValue({
+                intervention: {
+                    enabled: true,
+                    agent: "test-intervention-agent",
+                    timeout: 50, // very short timeout
+                },
+            });
+
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Start a timer with short timeout
+            service.onAgentCompletion(
+                "conv-stale",
+                Date.now(),
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Immediately switch projects before timer fires
+            await service.setProject("project-2");
+
+            // Wait for the old timer's timeout to elapse
+            await new Promise(resolve => setTimeout(resolve, 150));
+
+            // The stale timer should have been cancelled, no publish should occur
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should accept new interventions for the new project after switch", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Register a completion in project-1
+            service.onAgentCompletion(
+                "conv-old",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-1"
+            );
+
+            expect(service.getPendingCount()).toBe(1);
+
+            // Switch to project-2 (clears old timers and state)
+            await service.setProject("project-2");
+            expect(service.getPendingCount()).toBe(0);
+
+            // Register a new completion in project-2
+            service.onAgentCompletion(
+                "conv-new",
+                Date.now() + 60000,
+                "agent-123",
+                "user-456",
+                "project-2"
+            );
+
+            // New project should accept new interventions normally
+            expect(service.getPendingCount()).toBe(1);
+            expect(service.getPending("conv-new")).toBeDefined();
+            expect(service.getPending("conv-new")?.projectId).toBe("project-2");
+        });
+    });
+
+    describe("triggerIntervention project ID guard", () => {
+        it("should discard stale timer firing for wrong project", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-2");
+
+            // Directly invoke triggerIntervention with a stale PendingIntervention
+            // whose projectId ("project-1") doesn't match currentProjectId ("project-2").
+            // This exercises the defense-in-depth guard without relying on setProject
+            // (which already clears timers and would prevent triggerIntervention from running).
+            const stalePending = {
+                conversationId: "conv-cross-project",
+                completedAt: Date.now(),
+                agentPubkey: "agent-123",
+                userPubkey: "user-456",
+                projectId: "project-1", // mismatches current "project-2"
+            };
+
+            // Call triggerIntervention directly via private method access
+            await (service as any).triggerIntervention(stalePending);
+
+            // The guard should have silently discarded it — no publish call
+            expect(mockPublishReviewRequest).not.toHaveBeenCalled();
+        });
+
+        it("should allow trigger when projectId matches currentProjectId", async () => {
+            const service = await initServiceWithResolver();
+            await service.setProject("project-1");
+
+            // Invoke triggerIntervention with a matching projectId
+            const matchingPending = {
+                conversationId: "conv-matching",
+                completedAt: Date.now() - 10000,
+                agentPubkey: "agent-123",
+                userPubkey: "user-456",
+                projectId: "project-1", // matches currentProjectId
+                retryCount: 0,
+            };
+
+            await (service as any).triggerIntervention(matchingPending);
+
+            // Should proceed to publish (projectId guard passes)
+            expect(mockPublishReviewRequest).toHaveBeenCalledTimes(1);
         });
     });
 });

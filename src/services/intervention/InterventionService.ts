@@ -739,6 +739,18 @@ export class InterventionService {
      * Guarded against concurrent execution for the same conversationId.
      */
     private async triggerIntervention(pending: PendingIntervention): Promise<void> {
+        // Guard against stale timers firing after a project switch.
+        // If the pending intervention belongs to a different project than what's
+        // currently loaded, it's a leftover timer that should be silently discarded.
+        if (pending.projectId !== this.currentProjectId) {
+            logger.debug("InterventionService: stale timer from different project, skipping", {
+                conversationId: pending.conversationId.substring(0, 12),
+                pendingProjectId: pending.projectId.substring(0, 12),
+                currentProjectId: this.currentProjectId?.substring(0, 12) ?? "none",
+            });
+            return;
+        }
+
         // Guard against concurrent triggerIntervention for the same conversation
         if (this.triggeringConversations.has(pending.conversationId)) {
             logger.debug("InterventionService: triggerIntervention already in progress, skipping", {
@@ -985,6 +997,15 @@ export class InterventionService {
      */
     private async loadState(projectId: string): Promise<void> {
         const stateFilePath = this.getStateFilePath(projectId);
+
+        // Cancel all active timers from the previous project before clearing state.
+        // Without this, timers from a previous project continue running and fire
+        // against the new project's data, causing duplicate notifications and
+        // cross-project state corruption.
+        for (const timer of this.timers.values()) {
+            clearTimeout(timer);
+        }
+        this.timers.clear();
 
         // Clear all project-scoped state before loading new project
         // (must happen unconditionally, even if state file doesn't exist)
