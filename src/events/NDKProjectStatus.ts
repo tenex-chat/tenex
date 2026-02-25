@@ -366,9 +366,9 @@ export class NDKProjectStatus extends NDKEvent {
 
     /**
      * Get all scheduled tasks targeting a specific agent
-     * @param agentSlug The agent slug
+     * @param agentIdentifier The agent slug or truncated pubkey prefix
      */
-    getScheduledTasksForAgent(agentSlug: string): Array<{
+    getScheduledTasksForAgent(agentIdentifier: string): Array<{
         id: string;
         title: string;
         schedule: string;
@@ -378,7 +378,7 @@ export class NDKProjectStatus extends NDKEvent {
         lastRun?: number;
     }> {
         return this.scheduledTasks.filter(
-            (task) => task.targetAgent === agentSlug
+            (task) => task.targetAgent === agentIdentifier
         );
     }
 }

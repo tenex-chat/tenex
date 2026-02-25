@@ -494,7 +494,7 @@ export class ProjectStatusService {
             const scheduledTasks: ScheduledTaskInfo[] = [];
 
             for (const task of tasks) {
-                const targetSlug = pubkeyToSlug.get(task.toPubkey) || task.toPubkey.substring(0, 8);
+                const targetAgent = pubkeyToSlug.get(task.toPubkey) || task.toPubkey.substring(0, 8);
                 const lastRunTimestamp = task.lastRun
                     ? Math.floor(new Date(task.lastRun).getTime() / 1000)
                     : undefined;
@@ -503,7 +503,7 @@ export class ProjectStatusService {
                     id: task.id,
                     title: task.title || task.prompt.substring(0, 50),
                     schedule: task.schedule,
-                    targetAgent: targetSlug,
+                    targetAgent,
                     type: task.type || "cron",
                     lastRun: lastRunTimestamp,
                 });
