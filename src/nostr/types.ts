@@ -86,7 +86,8 @@ export interface ScheduledTaskInfo {
     id: string;
     title: string;
     schedule: string; // Cron expression or ISO timestamp
-    targetAgentSlug: string; // Resolved from toPubkey
+    /** Agent slug when resolvable, otherwise a truncated pubkey prefix */
+    targetAgent: string;
     type: "cron" | "oneoff";
     lastRun?: number; // Unix timestamp in seconds
 }

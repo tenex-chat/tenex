@@ -282,25 +282,33 @@ export class NDKProjectStatus extends NDKEvent {
 
     /**
      * Get all scheduled tasks from this status event
-     * Tag format: ["scheduled-task", id, title, schedule, targetAgentSlug, type, lastRunTimestamp]
+     * Tag format: ["scheduled-task", id, title, schedule, targetAgent, type, lastRunTimestamp]
      */
     get scheduledTasks(): Array<{
         id: string;
         title: string;
         schedule: string;
-        targetAgentSlug: string;
+        /** Agent slug when resolvable, otherwise a truncated pubkey prefix */
+        targetAgent: string;
         type: "cron" | "oneoff";
         lastRun?: number;
     }> {
         const taskTags = this.tags.filter((tag) => tag[0] === "scheduled-task" && tag[1]);
-        return taskTags.map((tag) => ({
-            id: tag[1],
-            title: tag[2] || "",
-            schedule: tag[3] || "",
-            targetAgentSlug: tag[4] || "",
-            type: (tag[5] as "cron" | "oneoff") || "cron",
-            lastRun: tag[6] ? Number(tag[6]) : undefined,
-        }));
+        return taskTags.map((tag) => {
+            const rawType = tag[5];
+            const type = rawType === "cron" || rawType === "oneoff" ? rawType : "cron";
+            const parsedLastRun = tag[6] ? Number(tag[6]) : NaN;
+            const lastRun = Number.isFinite(parsedLastRun) ? parsedLastRun : undefined;
+
+            return {
+                id: tag[1],
+                title: tag[2] || "",
+                schedule: tag[3] || "",
+                targetAgent: tag[4] || "",
+                type,
+                lastRun,
+            };
+        });
     }
 
     /**
@@ -308,7 +316,7 @@ export class NDKProjectStatus extends NDKEvent {
      * @param id Task identifier
      * @param title Human-readable task title
      * @param schedule Cron expression or ISO timestamp
-     * @param targetAgentSlug Slug of the target agent
+     * @param targetAgent Agent slug or pubkey-prefix label for the target agent
      * @param type Task type: "cron" or "oneoff"
      * @param lastRun Optional last run Unix timestamp in seconds
      */
@@ -316,7 +324,7 @@ export class NDKProjectStatus extends NDKEvent {
         id: string,
         title: string,
         schedule: string,
-        targetAgentSlug: string,
+        targetAgent: string,
         type: "cron" | "oneoff",
         lastRun?: number
     ): void {
@@ -325,9 +333,9 @@ export class NDKProjectStatus extends NDKEvent {
             id,
             title,
             schedule,
-            targetAgentSlug,
+            targetAgent,
             type,
-            lastRun ? String(lastRun) : "",
+            lastRun !== undefined ? String(lastRun) : "",
         ]);
     }
 
@@ -364,12 +372,13 @@ export class NDKProjectStatus extends NDKEvent {
         id: string;
         title: string;
         schedule: string;
-        targetAgentSlug: string;
+        /** Agent slug when resolvable, otherwise a truncated pubkey prefix */
+        targetAgent: string;
         type: "cron" | "oneoff";
         lastRun?: number;
     }> {
         return this.scheduledTasks.filter(
-            (task) => task.targetAgentSlug === agentSlug
+            (task) => task.targetAgent === agentSlug
         );
     }
 }
