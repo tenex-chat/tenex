@@ -82,12 +82,23 @@ export interface LessonIntent {
     hashtags?: string[];
 }
 
+export interface ScheduledTaskInfo {
+    id: string;
+    title: string;
+    schedule: string; // Cron expression or ISO timestamp
+    /** Agent slug when resolvable, otherwise a truncated pubkey prefix */
+    targetAgent: string;
+    type: "cron" | "oneoff";
+    lastRun?: number; // Unix timestamp in seconds
+}
+
 export interface StatusIntent {
     type: "status";
     agents: Array<{ pubkey: string; slug: string }>;
     models: Array<{ slug: string; agents: string[] }>;
     tools: Array<{ name: string; agents: string[] }>;
     worktrees?: string[]; // Array of branch names, first is default
+    scheduledTasks?: ScheduledTaskInfo[];
 }
 
 export interface ToolUseIntent {
