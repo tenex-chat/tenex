@@ -53,11 +53,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         service: ProjectStatusService,
         intent: StatusIntent
     ): Promise<void> {
-        await (
-            service as unknown as {
-                gatherScheduledTaskInfo(intent: StatusIntent): Promise<void>;
-            }
-        ).gatherScheduledTaskInfo(intent);
+        await service.gatherScheduledTaskInfo(intent);
     }
 
     function createBaseIntent(): StatusIntent {
@@ -132,7 +128,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         expect(task.id).toBe("task-1");
         expect(task.title).toBe("Daily standup");
         expect(task.schedule).toBe("0 9 * * *");
-        expect(task.targetAgentSlug).toBe("architect");
+        expect(task.targetAgent).toBe("architect");
         expect(task.type).toBe("cron");
         expect(task.lastRun).toBe(Math.floor(new Date("2026-02-25T09:00:00.000Z").getTime() / 1000));
     });
@@ -176,7 +172,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         expect(task.id).toBe("task-oneoff-1");
         expect(task.type).toBe("oneoff");
         expect(task.schedule).toBe("2026-03-01T12:00:00.000Z");
-        expect(task.targetAgentSlug).toBe("reporter");
+        expect(task.targetAgent).toBe("reporter");
         expect(task.lastRun).toBeUndefined();
     });
 
@@ -212,7 +208,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
 
         expect(intent.scheduledTasks).toHaveLength(1);
         // Should fall back to first 8 chars of pubkey
-        expect(intent.scheduledTasks![0].targetAgentSlug).toBe("abcdef12");
+        expect(intent.scheduledTasks![0].targetAgent).toBe("abcdef12");
     });
 
     it("should use prompt substring as title when title is missing", async () => {
@@ -339,8 +335,8 @@ describe("ProjectStatusService scheduled task gathering", () => {
         });
 
         expect(intent.scheduledTasks).toHaveLength(3);
-        expect(intent.scheduledTasks![0].targetAgentSlug).toBe("reporter");
-        expect(intent.scheduledTasks![1].targetAgentSlug).toBe("architect");
+        expect(intent.scheduledTasks![0].targetAgent).toBe("reporter");
+        expect(intent.scheduledTasks![1].targetAgent).toBe("architect");
         expect(intent.scheduledTasks![2].type).toBe("oneoff");
     });
 

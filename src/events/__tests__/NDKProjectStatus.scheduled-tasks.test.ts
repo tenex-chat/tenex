@@ -27,7 +27,7 @@ describe("NDKProjectStatus scheduled task getters", () => {
             id: "task-123",
             title: "Daily standup",
             schedule: "0 9 * * *",
-            targetAgentSlug: "architect",
+            targetAgent: "architect",
             type: "cron",
             lastRun: 1740470400,
         });
@@ -71,7 +71,7 @@ describe("NDKProjectStatus scheduled task getters", () => {
         expect(task.id).toBe("task-1");
         expect(task.title).toBe("Daily report");
         expect(task.schedule).toBe("0 8 * * *");
-        expect(task.targetAgentSlug).toBe("reporter");
+        expect(task.targetAgent).toBe("reporter");
         expect(task.type).toBe("cron");
         expect(task.lastRun).toBe(1740470400);
     });
@@ -149,7 +149,7 @@ describe("NDKProjectStatus scheduled task getters", () => {
         expect(tasks[0].id).toBe("task-minimal");
         expect(tasks[0].title).toBe("");
         expect(tasks[0].schedule).toBe("");
-        expect(tasks[0].targetAgentSlug).toBe("");
+        expect(tasks[0].targetAgent).toBe("");
         expect(tasks[0].type).toBe("cron"); // Defaults to cron
         expect(tasks[0].lastRun).toBeUndefined();
     });

@@ -148,7 +148,7 @@ export class ProjectStatusService {
         }
 
         // Add scheduled task tags
-        // Format: ["scheduled-task", id, title, schedule, targetAgentSlug, type, lastRunTimestamp]
+        // Format: ["scheduled-task", id, title, schedule, targetAgent, type, lastRunTimestamp]
         if (intent.scheduledTasks && intent.scheduledTasks.length > 0) {
             for (const task of intent.scheduledTasks) {
                 event.tag([
@@ -156,9 +156,9 @@ export class ProjectStatusService {
                     task.id,
                     task.title,
                     task.schedule,
-                    task.targetAgentSlug,
+                    task.targetAgent,
                     task.type,
-                    task.lastRun ? String(task.lastRun) : "",
+                    task.lastRun !== undefined ? String(task.lastRun) : "",
                 ]);
             }
         }
@@ -463,7 +463,11 @@ export class ProjectStatusService {
         }
     }
 
-    private async gatherScheduledTaskInfo(intent: StatusIntent): Promise<void> {
+    /**
+     * Gather scheduled task information into the status intent.
+     * Exposed for testability — not intended for external use.
+     */
+    async gatherScheduledTaskInfo(intent: StatusIntent): Promise<void> {
         try {
             const projectCtx = this.projectContext;
             const projectTagId = projectCtx.project.tagId();
@@ -499,7 +503,7 @@ export class ProjectStatusService {
                     id: task.id,
                     title: task.title || task.prompt.substring(0, 50),
                     schedule: task.schedule,
-                    targetAgentSlug: targetSlug,
+                    targetAgent: targetSlug,
                     type: task.type || "cron",
                     lastRun: lastRunTimestamp,
                 });
