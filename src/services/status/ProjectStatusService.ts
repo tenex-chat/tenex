@@ -2,13 +2,14 @@
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
 import { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
-import type { StatusIntent } from "@/nostr/types";
+import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { type ProjectContext, projectContextStore } from "@/services/projects";
 import { getAllToolNames } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
+import { SchedulerService } from "@/services/scheduling/SchedulerService";
 import { formatAnyError } from "@/lib/error-formatter";
 import { getDefaultBranchName } from "@/utils/git/initializeGitRepo";
 import { listWorktrees } from "@/utils/git/worktree";
@@ -146,6 +147,22 @@ export class ProjectStatusService {
             }
         }
 
+        // Add scheduled task tags
+        // Format: ["scheduled-task", id, title, schedule, targetAgentSlug, type, lastRunTimestamp]
+        if (intent.scheduledTasks && intent.scheduledTasks.length > 0) {
+            for (const task of intent.scheduledTasks) {
+                event.tag([
+                    "scheduled-task",
+                    task.id,
+                    task.title,
+                    task.schedule,
+                    task.targetAgentSlug,
+                    task.type,
+                    task.lastRun ? String(task.lastRun) : "",
+                ]);
+            }
+        }
+
         return event;
     }
 
@@ -209,8 +226,8 @@ export class ProjectStatusService {
             // Gather worktree info
             await this.gatherWorktreeInfo(intent, projectPath);
 
-            // Gather queue info
-            // Queue functionality removed
+            // Gather scheduled task info
+            await this.gatherScheduledTaskInfo(intent);
 
             // Create and publish the status event directly
             const event = this.createStatusEvent(intent);
@@ -443,6 +460,59 @@ export class ProjectStatusService {
             intent.worktrees = worktreeList;
         } catch (err) {
             logger.warn(`Could not gather worktree information: ${formatAnyError(err)}`);
+        }
+    }
+
+    private async gatherScheduledTaskInfo(intent: StatusIntent): Promise<void> {
+        try {
+            const projectCtx = this.projectContext;
+            const projectTagId = projectCtx.project.tagId();
+
+            if (!projectTagId) {
+                logger.debug("No project tagId available for scheduled task gathering");
+                return;
+            }
+
+            const scheduler = SchedulerService.getInstance();
+            const tasks = await scheduler.getTasks(projectTagId);
+
+            if (tasks.length === 0) {
+                logger.debug("No scheduled tasks for project", { projectTagId });
+                return;
+            }
+
+            // Build a pubkey-to-slug map from agents for resolving toPubkey
+            const pubkeyToSlug = new Map<string, string>();
+            for (const [slug, agent] of projectCtx.agentRegistry.getAllAgentsMap()) {
+                pubkeyToSlug.set(agent.pubkey, slug);
+            }
+
+            const scheduledTasks: ScheduledTaskInfo[] = [];
+
+            for (const task of tasks) {
+                const targetSlug = pubkeyToSlug.get(task.toPubkey) || task.toPubkey.substring(0, 8);
+                const lastRunTimestamp = task.lastRun
+                    ? Math.floor(new Date(task.lastRun).getTime() / 1000)
+                    : undefined;
+
+                scheduledTasks.push({
+                    id: task.id,
+                    title: task.title || task.prompt.substring(0, 50),
+                    schedule: task.schedule,
+                    targetAgentSlug: targetSlug,
+                    type: task.type || "cron",
+                    lastRun: lastRunTimestamp,
+                });
+            }
+
+            intent.scheduledTasks = scheduledTasks;
+
+            logger.debug("Gathered scheduled tasks for status", {
+                total: scheduledTasks.length,
+                projectTagId,
+            });
+        } catch (err) {
+            logger.warn(`Could not gather scheduled task information: ${formatAnyError(err)}`);
         }
     }
 }

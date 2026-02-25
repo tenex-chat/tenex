@@ -275,4 +275,101 @@ export class NDKProjectStatus extends NDKEvent {
     get defaultWorktree(): string | undefined {
         return this.worktrees[0];
     }
+
+    // ========================================================================
+    // Scheduled Tasks
+    // ========================================================================
+
+    /**
+     * Get all scheduled tasks from this status event
+     * Tag format: ["scheduled-task", id, title, schedule, targetAgentSlug, type, lastRunTimestamp]
+     */
+    get scheduledTasks(): Array<{
+        id: string;
+        title: string;
+        schedule: string;
+        targetAgentSlug: string;
+        type: "cron" | "oneoff";
+        lastRun?: number;
+    }> {
+        const taskTags = this.tags.filter((tag) => tag[0] === "scheduled-task" && tag[1]);
+        return taskTags.map((tag) => ({
+            id: tag[1],
+            title: tag[2] || "",
+            schedule: tag[3] || "",
+            targetAgentSlug: tag[4] || "",
+            type: (tag[5] as "cron" | "oneoff") || "cron",
+            lastRun: tag[6] ? Number(tag[6]) : undefined,
+        }));
+    }
+
+    /**
+     * Add a scheduled task to the status
+     * @param id Task identifier
+     * @param title Human-readable task title
+     * @param schedule Cron expression or ISO timestamp
+     * @param targetAgentSlug Slug of the target agent
+     * @param type Task type: "cron" or "oneoff"
+     * @param lastRun Optional last run Unix timestamp in seconds
+     */
+    addScheduledTask(
+        id: string,
+        title: string,
+        schedule: string,
+        targetAgentSlug: string,
+        type: "cron" | "oneoff",
+        lastRun?: number
+    ): void {
+        this.tags.push([
+            "scheduled-task",
+            id,
+            title,
+            schedule,
+            targetAgentSlug,
+            type,
+            lastRun ? String(lastRun) : "",
+        ]);
+    }
+
+    /**
+     * Remove a scheduled task from the status
+     * @param id The task ID to remove
+     */
+    removeScheduledTask(id: string): void {
+        this.tags = this.tags.filter(
+            (tag) => !(tag[0] === "scheduled-task" && tag[1] === id)
+        );
+    }
+
+    /**
+     * Clear all scheduled tasks from the status
+     */
+    clearScheduledTasks(): void {
+        this.tags = this.tags.filter((tag) => tag[0] !== "scheduled-task");
+    }
+
+    /**
+     * Check if a specific scheduled task exists
+     * @param id The task ID
+     */
+    hasScheduledTask(id: string): boolean {
+        return this.tags.some((tag) => tag[0] === "scheduled-task" && tag[1] === id);
+    }
+
+    /**
+     * Get all scheduled tasks targeting a specific agent
+     * @param agentSlug The agent slug
+     */
+    getScheduledTasksForAgent(agentSlug: string): Array<{
+        id: string;
+        title: string;
+        schedule: string;
+        targetAgentSlug: string;
+        type: "cron" | "oneoff";
+        lastRun?: number;
+    }> {
+        return this.scheduledTasks.filter(
+            (task) => task.targetAgentSlug === agentSlug
+        );
+    }
 }
