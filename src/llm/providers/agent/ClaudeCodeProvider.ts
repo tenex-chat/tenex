@@ -209,7 +209,7 @@ export class ClaudeCodeProvider extends AgentProvider {
             },
         };
 
-        // Pass through onStreamStart callback if provided (requires fork of ai-sdk-provider-claude-code)
+        // Pass through onStreamStart callback if provided
         // The callback receives a MessageInjector when the stream starts, allowing mid-execution message injection
         if (context.onStreamStart) {
             settings.onStreamStart = context.onStreamStart;

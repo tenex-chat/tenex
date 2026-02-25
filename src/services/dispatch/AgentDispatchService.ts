@@ -823,7 +823,7 @@ export class AgentDispatchService {
             const isClaudeCodeProvider = llmConfig.provider === PROVIDER_IDS.CLAUDE_CODE;
 
             if (isClaudeCodeProvider) {
-                // Try to use message injection if available (requires fork of ai-sdk-provider-claude-code)
+                // Try to use message injection if available
                 const injector = llmOpsRegistry.getMessageInjector(agent.pubkey, conversationId);
 
                 if (injector) {
