@@ -127,9 +127,9 @@ describe("EventContextService", () => {
             expect(result).toBe(EXEC_COORD_PUBKEY);
         });
 
-        it("should resolve immediate delegator not the origin user", async () => {
-            // This is the critical case: user responds to an ask, but completion
-            // should route to the delegator, not the user
+        it("should resolve immediate delegator when delegator triggers (ask-resume)", async () => {
+            // Ask-resume case: originalTriggeringEventId is restored to the delegator's
+            // message, so triggeringEventPubkey is the delegator, not the origin user
             const conversationId = "conv-ask-response";
             const store = ConversationStore.getOrLoad(conversationId);
             store.addMessage({
@@ -148,10 +148,37 @@ describe("EventContextService", () => {
             });
             await store.save();
 
-            // Should return exec-coord (immediate delegator), not user
-            const result = resolveCompletionRecipient(store);
+            // Triggering event is from exec-coord (delegator) due to originalTriggeringEventId restoration
+            const result = resolveCompletionRecipient(store, EXEC_COORD_PUBKEY);
             expect(result).toBe(EXEC_COORD_PUBKEY);
             expect(result).not.toBe(USER_PUBKEY);
+        });
+
+        it("should return undefined when origin user directly triggers (direct interaction)", async () => {
+            // Direct interaction case: after delegation completes, user messages
+            // agent directly. The origin user IS the triggering event pubkey.
+            // Completion should route back to the user (return undefined).
+            const conversationId = "conv-direct-interaction";
+            const store = ConversationStore.getOrLoad(conversationId);
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Follow-up question",
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+            store.updateMetadata({
+                delegationChain: [
+                    { pubkey: USER_PUBKEY, displayName: "Pablo", isUser: true },
+                    { pubkey: ARCHITECT_PUBKEY, displayName: "architect", isUser: false },
+                    { pubkey: EXEC_COORD_PUBKEY, displayName: "exec-coord", isUser: false },
+                    { pubkey: CLAUDE_CODE_PUBKEY, displayName: "claude-code", isUser: false },
+                ],
+            });
+            await store.save();
+
+            // Origin user directly triggers - should return undefined (route to user)
+            const result = resolveCompletionRecipient(store, USER_PUBKEY);
+            expect(result).toBeUndefined();
         });
     });
 
@@ -178,8 +205,36 @@ describe("EventContextService", () => {
             } as ToolExecutionContext;
         }
 
-        it("should include completionRecipientPubkey when delegation chain exists", async () => {
-            const conversationId = "conv-create-context";
+        it("should return undefined completionRecipientPubkey when origin user directly triggers", async () => {
+            // Direct interaction: user (chain origin) messages agent after delegation completes.
+            // The completion should route back to the user, not the intermediate delegator.
+            const conversationId = "conv-create-context-direct";
+            const store = ConversationStore.getOrLoad(conversationId);
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "Follow-up",
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+            store.updateMetadata({
+                delegationChain: [
+                    { pubkey: USER_PUBKEY, displayName: "Pablo", isUser: true },
+                    { pubkey: EXEC_COORD_PUBKEY, displayName: "exec-coord", isUser: false },
+                    { pubkey: CLAUDE_CODE_PUBKEY, displayName: "claude-code", isUser: false },
+                ],
+            });
+            await store.save();
+
+            const toolContext = createMockToolContext(store, USER_PUBKEY, conversationId);
+            const eventContext = createEventContext(toolContext);
+
+            expect(eventContext.completionRecipientPubkey).toBeUndefined();
+            expect(eventContext.triggeringEvent.pubkey).toBe(USER_PUBKEY);
+        });
+
+        it("should include completionRecipientPubkey when delegator triggers (ask-resume)", async () => {
+            // Ask-resume case: triggeringEvent is from exec-coord (restored via originalTriggeringEventId)
+            const conversationId = "conv-create-context-ask";
             const store = ConversationStore.getOrLoad(conversationId);
             store.addMessage({
                 pubkey: EXEC_COORD_PUBKEY,
@@ -196,11 +251,11 @@ describe("EventContextService", () => {
             });
             await store.save();
 
-            const toolContext = createMockToolContext(store, USER_PUBKEY, conversationId);
+            const toolContext = createMockToolContext(store, EXEC_COORD_PUBKEY, conversationId);
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBe(EXEC_COORD_PUBKEY);
-            expect(eventContext.triggeringEvent.pubkey).toBe(USER_PUBKEY);
+            expect(eventContext.triggeringEvent.pubkey).toBe(EXEC_COORD_PUBKEY);
         });
 
         it("should set completionRecipientPubkey to undefined when no delegation chain", async () => {
