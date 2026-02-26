@@ -1111,6 +1111,7 @@ export class AgentStorage {
      * Get all agents (for debugging/admin purposes)
      */
     async getAllAgents(): Promise<StoredAgent[]> {
+        await ensureDirectory(this.agentsDir);
         const files = await fs.readdir(this.agentsDir);
         const agents: StoredAgent[] = [];
 
