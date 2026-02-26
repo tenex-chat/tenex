@@ -301,23 +301,7 @@ describe("Nudge Tool Permissions", () => {
                 expect(toolNames.length).toBe(2);
             });
 
-            it("should not include alpha tools even if context has alphaMode", () => {
-                const baseTools = ["fs_read"];
-                const nudgePermissions: NudgeToolPermissions = {
-                    onlyTools: ["fs_read"],
-                };
 
-                // Create context with alphaMode enabled
-                const contextWithAlpha = { ...mockContext, alphaMode: true };
-                const tools = getToolsObject(baseTools, contextWithAlpha, nudgePermissions);
-                const toolNames = Object.keys(tools);
-
-                // Should ONLY have fs_read, no alpha tools
-                expect(toolNames).toEqual(["fs_read"]);
-                expect(toolNames).not.toContain("bug_list");
-                expect(toolNames).not.toContain("bug_report_create");
-                expect(toolNames).not.toContain("bug_report_add");
-            });
         });
 
         describe("empty base tools with nudge permissions", () => {

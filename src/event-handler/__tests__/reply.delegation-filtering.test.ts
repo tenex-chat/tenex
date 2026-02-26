@@ -142,7 +142,6 @@ const createExecutionContextMock = async (params: any) => {
         isDelegationCompletion: params.isDelegationCompletion,
         hasPendingDelegations: params.hasPendingDelegations,
         debug: params.debug,
-        alphaMode: false,
         mcpManager: params.mcpManager,
         getConversation: () => undefined,
     };

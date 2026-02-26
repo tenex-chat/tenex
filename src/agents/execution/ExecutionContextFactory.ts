@@ -106,7 +106,6 @@ export async function createExecutionContext(params: {
         isDelegationCompletion: params.isDelegationCompletion,
         hasPendingDelegations: params.hasPendingDelegations,
         debug: params.debug,
-        alphaMode: false,
         mcpManager: params.mcpManager,
         getConversation: () => ConversationStore.get(params.conversationId),
     };

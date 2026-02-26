@@ -81,7 +81,7 @@ describe("relay-configuration fragment", () => {
             expect(relayConfigurationFragment.id).toBe("relay-configuration");
         });
 
-        it("should have priority 4 (after global-system-prompt, before alpha-mode)", () => {
+        it("should have priority 4 (after global-system-prompt, before delegation-chain)", () => {
             expect(relayConfigurationFragment.priority).toBe(4);
         });
     });

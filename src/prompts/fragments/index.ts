@@ -37,7 +37,6 @@ import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring"
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
-import { alphaModeFragment } from "./alpha-mode";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
 
@@ -60,7 +59,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(metaProjectContextFragment);
     fragmentRegistry.register(activeConversationsFragment);
     fragmentRegistry.register(recentConversationsFragment);
-    fragmentRegistry.register(alphaModeFragment);
     fragmentRegistry.register(debugModeFragment);
     fragmentRegistry.register(delegationCompletionFragment);
 

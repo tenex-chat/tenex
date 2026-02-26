@@ -14,7 +14,7 @@ const DEFAULT_RELAY_URL = "wss://tenex.chat";
  */
 export const relayConfigurationFragment: PromptFragment<Record<string, never>> = {
     id: "relay-configuration",
-    priority: 4, // After global-system-prompt (3), before alpha-mode (5)
+    priority: 4, // After global-system-prompt (3), before delegation-chain (5)
     template: () => {
         const relays = getRelayUrls();
         const isDefault = relays.length === 1 && relays[0] === DEFAULT_RELAY_URL;

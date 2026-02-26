@@ -58,9 +58,6 @@ export type ToolName =
     | "mcp_subscribe"
     | "mcp_subscription_stop"
     | "conversation_search"
-    | "bug_list"
-    | "bug_report_create"
-    | "bug_report_add"
     | "todo_write"
     | "web_fetch"
     | "web_search"
@@ -146,7 +143,6 @@ export interface ConversationToolContext extends ToolExecutionContext {
  * Extends ConversationToolContext because normal execution always has a conversation.
  */
 export interface ToolRegistryContext extends ConversationToolContext {
-    alphaMode?: boolean;
     mcpManager?: MCPManager;
 }
 

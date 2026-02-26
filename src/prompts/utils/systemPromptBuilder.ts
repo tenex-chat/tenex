@@ -99,7 +99,6 @@ export interface BuildSystemPromptOptions {
     agentComments?: Map<string, LessonComment[]>;
     isProjectManager?: boolean; // Indicates if this agent is the PM
     projectManagerPubkey?: string; // Pubkey of the project manager
-    alphaMode?: boolean; // True when running in alpha mode
     mcpManager?: MCPManager; // MCP manager for this project
     nudgeContent?: string; // Concatenated content from kind:4201 nudge events (legacy)
     /** Individual nudge data for rendering with titles */
@@ -555,7 +554,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         conversation,
         agentLessons,
         agentComments,
-        alphaMode,
         mcpManager,
         nudgeContent,
         nudges,
@@ -689,9 +687,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
             currentConversationId: conversation.getId(),
         });
     }
-
-    // Add alpha mode warning and bug reporting tools guidance
-    systemPromptBuilder.add("alpha-mode", { enabled: alphaMode ?? false });
 
     // Add nudge content if present (from kind:4201 events referenced by the triggering event)
     // Now supports individual nudge data with tool permissions

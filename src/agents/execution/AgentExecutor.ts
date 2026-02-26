@@ -286,7 +286,6 @@ export class AgentExecutor {
             ralNumber: context.ralNumber,
             conversationStore,
             getConversation: () => conversationStore,
-            alphaMode: context.alphaMode,
             mcpManager: projectContext.mcpManager,
             isDelegationCompletion: context.isDelegationCompletion,
             hasPendingDelegations: context.hasPendingDelegations,

@@ -72,11 +72,6 @@ import { createListScheduledTasksTool } from "./implementations/schedule_tasks_l
 import { createShellTool } from "./implementations/shell";
 import { createUploadBlobTool } from "./implementations/upload_blob";
 
-// Alpha mode bug reporting tools
-import { createBugListTool } from "./implementations/bug_list";
-import { createBugReportAddTool } from "./implementations/bug_report_add";
-import { createBugReportCreateTool } from "./implementations/bug_report_create";
-
 // Todo tools
 import { createTodoWriteTool } from "./implementations/todo";
 
@@ -131,7 +126,6 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     rag_subscription_get: { hasSideEffects: false },
     mcp_resource_read: { hasSideEffects: false },
     // mcp_subscribe and mcp_subscription_stop have side effects (not listed = true by default)
-    bug_list: { hasSideEffects: false },
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
     nostr_fetch: { hasSideEffects: false },
@@ -230,11 +224,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     mcp_subscribe: createMcpSubscribeTool as ToolFactory,
     mcp_subscription_stop: createMcpSubscriptionStopTool,
 
-    // Alpha mode bug reporting tools
-    bug_list: createBugListTool,
-    bug_report_create: createBugReportCreateTool,
-    bug_report_add: createBugReportAddTool,
-
     // Todo tools - require ConversationToolContext (filtered out when no conversation)
     todo_write: createTodoWriteTool as ToolFactory,
 
@@ -307,9 +296,6 @@ export function getAllTools(context: ToolExecutionContext): AISdkTool<unknown, u
 export function getAllToolNames(): ToolName[] {
     return Object.keys(toolFactories) as ToolName[];
 }
-
-/** Alpha mode bug reporting tools - auto-injected when alphaMode is true */
-const ALPHA_TOOLS: ToolName[] = ["bug_list", "bug_report_create", "bug_report_add"];
 
 /** File editing tools - auto-injected when fs_write is available */
 const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
@@ -421,7 +407,7 @@ export function getToolsObject(
     //
     // POLICY:
     // 1. Initial filtering: deny-tool removes tools from base set
-    // 2. Auto-injection: Core tools, alpha tools, etc. are added
+    // 2. Auto-injection: Core tools, etc. are added
     // 3. Final enforcement: deny-tool is re-applied to block any auto-injected tools
     // - This ensures deny-tool CAN block core tools if explicitly denied (e.g., deny-tool: kill)
     // - Provides flexibility: nudges can restrict even critical tools when needed
@@ -480,15 +466,6 @@ export function getToolsObject(
         for (const coreToolName of CORE_AGENT_TOOLS) {
             if (!regularTools.includes(coreToolName)) {
                 regularTools.push(coreToolName);
-            }
-        }
-    }
-
-    // Auto-inject alpha tools when in alpha mode (only for full registry context)
-    if ("alphaMode" in context && context.alphaMode) {
-        for (const alphaToolName of ALPHA_TOOLS) {
-            if (!regularTools.includes(alphaToolName)) {
-                regularTools.push(alphaToolName);
             }
         }
     }
@@ -554,7 +531,7 @@ export function getToolsObject(
     }
 
     // === FINAL DENY-TOOL ENFORCEMENT ===
-    // Apply deny-tool filtering AFTER all auto-injection (core tools, alpha, edit, meta-model)
+    // Apply deny-tool filtering AFTER all auto-injection (core tools, edit, meta-model)
     // This ensures deny-tool can block even core tools if explicitly denied
     if (nudgePermissions?.denyTools && nudgePermissions.denyTools.length > 0) {
         const beforeDenyCount = regularTools.length;

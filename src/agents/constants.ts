@@ -49,10 +49,6 @@ export const AUTO_INJECTED_TOOLS: ToolName[] = ["fs_edit", "fs_glob", "fs_grep"]
  * not configurable per-agent - they're injected based on execution context.
  */
 export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
-    // Alpha mode bug reporting tools (injected when alphaMode is true)
-    "bug_list",
-    "bug_report_create",
-    "bug_report_add",
     // Meta model tool (injected when agent uses a meta model configuration)
     "change_model",
     // Home-scoped filesystem tools (injected when agent lacks fs_* tools)
