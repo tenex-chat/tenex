@@ -6,6 +6,13 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const ragDeleteCollectionSchema = z.object({
+    description: z
+        .string()
+        .trim()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're deleting this collection (5-10 words). Helps provide human-readable context for the operation."
+        ),
     name: z.string().describe("Name of the collection to delete"),
     confirm: z
         .boolean()

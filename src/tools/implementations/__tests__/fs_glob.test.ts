@@ -61,6 +61,7 @@ describe("fs_glob tool", () => {
 
             const result = await globTool.execute({
                 pattern: "*.txt",
+                description: "Test relative path rejection",
                 path: "subdir",
             });
 
@@ -72,6 +73,7 @@ describe("fs_glob tool", () => {
 
             const result = await globTool.execute({
                 pattern: "*.txt",
+                description: "Test absolute path acceptance",
                 path: testDir,
             });
 
@@ -87,6 +89,7 @@ describe("fs_glob tool", () => {
             try {
                 const result = await globTool.execute({
                     pattern: "*.txt",
+                    description: "Test outside directory blocking",
                     path: outsideDir,
                 });
 
@@ -104,6 +107,7 @@ describe("fs_glob tool", () => {
             try {
                 const result = await globTool.execute({
                     pattern: "*.txt",
+                    description: "Test outside directory with flag",
                     path: outsideDir,
                     allowOutsideWorkingDirectory: true,
                 });
@@ -119,6 +123,7 @@ describe("fs_glob tool", () => {
 
             const result = await globTool.execute({
                 pattern: "*.txt",
+                description: "Test inside directory without flag",
                 path: testDir,
             });
 
@@ -133,6 +138,7 @@ describe("fs_glob tool", () => {
             try {
                 const result = await globTool.execute({
                     pattern: "*.txt",
+                    description: "Test similar path blocking",
                     path: similarDir,
                 });
 
@@ -152,6 +158,7 @@ describe("fs_glob tool", () => {
             try {
                 const result = await globTool.execute({
                     pattern: "*.txt",
+                    description: "Test agent home directory access",
                     path: agentHomeDir,
                     // NOTE: No allowOutsideWorkingDirectory flag!
                 });
@@ -175,6 +182,7 @@ describe("fs_glob tool", () => {
             try {
                 const result = await globTool.execute({
                     pattern: "../*",
+                    description: "Test path traversal blocking",
                     path: testDir,
                 });
 
@@ -201,6 +209,7 @@ describe("fs_glob tool", () => {
 
             const result = await globTool.execute({
                 pattern: "*.txt",
+                description: "Find text files",
                 path: testDir,
             });
 
@@ -212,6 +221,7 @@ describe("fs_glob tool", () => {
         it("should return no files message when nothing found", async () => {
             const result = await globTool.execute({
                 pattern: "*.nonexistent",
+                description: "Test no files found",
                 path: testDir,
             });
 
@@ -225,6 +235,7 @@ describe("fs_glob tool", () => {
 
             const result = await globTool.execute({
                 pattern: "**/*.txt",
+                description: "Find nested text files",
                 path: testDir,
             });
 

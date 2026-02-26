@@ -73,7 +73,7 @@ describe("rag_list_collections tool", () => {
 
             const context = createMockContext();
             const tool = createRAGListCollectionsTool(context);
-            const result = parseResult(await tool.execute({}));
+            const result = parseResult(await tool.execute({ description: "List available collections" }));
 
             expect(result).toMatchObject({
                 success: true,
@@ -89,7 +89,7 @@ describe("rag_list_collections tool", () => {
 
             const context = createMockContext();
             const tool = createRAGListCollectionsTool(context);
-            const result = parseResult(await tool.execute({}));
+            const result = parseResult(await tool.execute({ description: "List available collections" }));
 
             expect(result).toMatchObject({
                 success: true,
@@ -108,7 +108,7 @@ describe("rag_list_collections tool", () => {
 
             const context = createMockContext();
             const tool = createRAGListCollectionsTool(context);
-            const result = parseResult(await tool.execute({ include_stats: true }));
+            const result = parseResult(await tool.execute({ description: "List collections with stats", include_stats: true }));
 
             expect(result).toMatchObject({
                 success: true,
@@ -145,7 +145,7 @@ describe("rag_list_collections tool", () => {
 
             const context = createMockContext();
             const tool = createRAGListCollectionsTool(context);
-            const result = parseResult(await tool.execute({ include_stats: true }));
+            const result = parseResult(await tool.execute({ description: "List collections with stats", include_stats: true }));
 
             expect(result).toMatchObject({
                 success: true,

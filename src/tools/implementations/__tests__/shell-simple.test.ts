@@ -23,6 +23,7 @@ describe("shellTool - simple test", () => {
     it("should execute simple command", async () => {
         const result = await shellTool.execute({
             command: "echo test",
+            description: "Run echo test",
             cwd: null,
             timeout: null,
         });
@@ -33,6 +34,7 @@ describe("shellTool - simple test", () => {
     it("should handle command with timeout parameter", async () => {
         const result = await shellTool.execute({
             command: "echo hello",
+            description: "Run echo hello",
             cwd: null,
             timeout: 60,
         });
@@ -42,11 +44,11 @@ describe("shellTool - simple test", () => {
 
     // Table-driven tests for optional parameter combinations
     const optionalParamCases = [
-        { name: "omitting cwd", input: { command: "echo test1" }, expected: "test1" },
-        { name: "omitting timeout", input: { command: "echo test2" }, expected: "test2" },
-        { name: "omitting both cwd and timeout", input: { command: "echo test3" }, expected: "test3" },
-        { name: "explicit null for cwd", input: { command: "echo test4", cwd: null }, expected: "test4" },
-        { name: "explicit null for timeout", input: { command: "echo test5", timeout: null }, expected: "test5" },
+        { name: "omitting cwd", input: { command: "echo test1", description: "Test omitting cwd" }, expected: "test1" },
+        { name: "omitting timeout", input: { command: "echo test2", description: "Test omitting timeout" }, expected: "test2" },
+        { name: "omitting both cwd and timeout", input: { command: "echo test3", description: "Test omitting both" }, expected: "test3" },
+        { name: "explicit null for cwd", input: { command: "echo test4", description: "Test null cwd", cwd: null }, expected: "test4" },
+        { name: "explicit null for timeout", input: { command: "echo test5", description: "Test null timeout", timeout: null }, expected: "test5" },
     ] as const;
 
     for (const { name, input, expected } of optionalParamCases) {
@@ -70,6 +72,7 @@ describe("shellTool - simple test", () => {
         // Background processes should work without cwd or timeout
         const result = await backgroundShellTool.execute({
             command: "echo background-test",
+            description: "Test background execution",
             run_in_background: true,
         });
 
@@ -92,30 +95,30 @@ describe("shellTool - schema validation", () => {
     const schema = shellTool.inputSchema;
 
     describe("optional parameters pass schema validation", () => {
-        it("should validate when only command is provided", () => {
-            const result = schema.safeParse({ command: "echo test" });
+        it("should validate when command and description are provided", () => {
+            const result = schema.safeParse({ command: "echo test", description: "Test command" });
             expect(result.success).toBe(true);
         });
 
         it("should validate when cwd is omitted", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: 5 });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: 5 });
             expect(result.success).toBe(true);
         });
 
         it("should validate when timeout is omitted", () => {
-            const result = schema.safeParse({ command: "echo test", cwd: "/tmp" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", cwd: "/tmp" });
             expect(result.success).toBe(true);
         });
 
-        it("should validate with explicit null values", () => {
-            const result = schema.safeParse({ command: "echo test", cwd: null, timeout: null });
+        it("should validate with explicit null values for optional fields", () => {
+            const result = schema.safeParse({ command: "echo test", description: "Test command", cwd: null, timeout: null });
             expect(result.success).toBe(true);
         });
     });
 
     describe("timeout coercion from numeric strings", () => {
         it("should coerce string '60' to number 60", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "60" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: "60" });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBe(60);
@@ -123,7 +126,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should coerce string '5' to number 5", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "5" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: "5" });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBe(5);
@@ -131,7 +134,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should preserve undefined when timeout is not provided", () => {
-            const result = schema.safeParse({ command: "echo test" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command" });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBeUndefined();
@@ -139,7 +142,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should preserve null when timeout is explicitly null", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: null });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: null });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBeNull();
@@ -147,7 +150,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should preserve actual numbers", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: 30 });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: 30 });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBe(30);
@@ -155,12 +158,12 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should reject invalid non-numeric strings", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "not-a-number" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: "not-a-number" });
             expect(result.success).toBe(false);
         });
 
         it("should treat empty string timeout as undefined (not zero)", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "" });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: "" });
             expect(result.success).toBe(true);
             if (result.success) {
                 // Empty string should become undefined, not 0
@@ -169,7 +172,7 @@ describe("shellTool - schema validation", () => {
         });
 
         it("should treat whitespace-only string timeout as undefined", () => {
-            const result = schema.safeParse({ command: "echo test", timeout: "   " });
+            const result = schema.safeParse({ command: "echo test", description: "Test command", timeout: "   " });
             expect(result.success).toBe(true);
             if (result.success) {
                 expect(result.data.timeout).toBeUndefined();
@@ -177,16 +180,31 @@ describe("shellTool - schema validation", () => {
         });
     });
 
-    describe("required command parameter", () => {
+    describe("required parameters", () => {
         it("should fail validation when command is missing", () => {
-            const result = schema.safeParse({});
+            const result = schema.safeParse({ description: "Test command" });
+            expect(result.success).toBe(false);
+        });
+
+        it("should fail validation when description is missing", () => {
+            const result = schema.safeParse({ command: "echo test" });
+            expect(result.success).toBe(false);
+        });
+
+        it("should fail validation when description is empty", () => {
+            const result = schema.safeParse({ command: "echo test", description: "" });
+            expect(result.success).toBe(false);
+        });
+
+        it("should fail validation when description is whitespace-only", () => {
+            const result = schema.safeParse({ command: "echo test", description: "   " });
             expect(result.success).toBe(false);
         });
 
         it("should allow empty string command (schema validates structure, not semantics)", () => {
             // Empty string is technically valid by schema, but meaningless
             // Semantic validation (rejecting empty commands) would happen at execute time
-            const result = schema.safeParse({ command: "" });
+            const result = schema.safeParse({ command: "", description: "Test command" });
             expect(result.success).toBe(true);
         });
     });
