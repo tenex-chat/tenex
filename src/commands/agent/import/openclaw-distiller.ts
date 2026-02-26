@@ -3,14 +3,6 @@ import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { OpenClawWorkspaceFiles } from "./openclaw-reader";
 
-export interface DistilledAgentIdentity {
-    name: string;
-    description: string;
-    role: string;
-    useCriteria: string;
-    instructions: string;
-}
-
 const DistilledIdentitySchema = z.object({
     name: z.string(),
     description: z.string(),
@@ -18,6 +10,7 @@ const DistilledIdentitySchema = z.object({
     useCriteria: z.string(),
     instructions: z.string(),
 });
+export type DistilledAgentIdentity = z.infer<typeof DistilledIdentitySchema>;
 
 export function parseModelString(tenexModel: string): { provider: string; model: string } {
     const colonIdx = tenexModel.indexOf(":");

@@ -15,6 +15,12 @@ describe("parseModelString", () => {
             model: "gpt-4:turbo",
         });
     });
+
+    it("throws on string with no colon", () => {
+        expect(() => parseModelString("anthropicclaudesonnet")).toThrow(
+            'Invalid model format (expected "provider:model")'
+        );
+    });
 });
 
 describe("buildDistillationPrompt", () => {
