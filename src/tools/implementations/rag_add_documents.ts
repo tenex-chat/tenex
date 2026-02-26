@@ -33,6 +33,7 @@ type ProtocolHandler = (uri: string, context: { workingDirectory: string }) => P
 const ragAddDocumentsSchema = z.object({
     description: z
         .string()
+        .trim()
         .min(1, "Description is required and cannot be empty")
         .describe(
             "REQUIRED: A clear, concise description of why you're adding these documents (5-10 words). Helps provide human-readable context for the operation."

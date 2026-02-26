@@ -196,6 +196,11 @@ describe("shellTool - schema validation", () => {
             expect(result.success).toBe(false);
         });
 
+        it("should fail validation when description is whitespace-only", () => {
+            const result = schema.safeParse({ command: "echo test", description: "   " });
+            expect(result.success).toBe(false);
+        });
+
         it("should allow empty string command (schema validates structure, not semantics)", () => {
             // Empty string is technically valid by schema, but meaningless
             // Semantic validation (rejecting empty commands) would happen at execute time

@@ -120,6 +120,7 @@ const shellSchema = z.object({
     command: z.string().describe("The shell command to execute"),
     description: z
         .string()
+        .trim()
         .min(1, "Description is required and cannot be empty")
         .describe(
             "REQUIRED: A clear, concise description of what this command does (5-10 words). Helps provide human-readable context for the operation."
