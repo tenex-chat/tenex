@@ -643,7 +643,6 @@ export class ConfigurationManager {
             [PROVIDER_IDS.OPENAI]: "gpt-4",
             [PROVIDER_IDS.OLLAMA]: "llama3.1:8b",
             [PROVIDER_IDS.CLAUDE_CODE]: "claude-3-5-sonnet-20241022",
-            [PROVIDER_IDS.GEMINI_CLI]: "gemini-2.0-flash-exp",
             [PROVIDER_IDS.CODEX_APP_SERVER]: "gpt-5.1-codex-max",
         };
         return defaults[provider] || "";

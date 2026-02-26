@@ -70,7 +70,7 @@ export class LLMServiceFactory {
 
         // Also ensure agent providers are initialized (they don't need API keys).
         // Add them with empty configs if not already present.
-        const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER, PROVIDER_IDS.GEMINI_CLI];
+        const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {
                 configs[providerId] = {
@@ -160,7 +160,7 @@ export class LLMServiceFactory {
         // Get capabilities from provider metadata
         const capabilities = provider.metadata.capabilities;
 
-        // For agent providers (claude-code, codex-app-server, gemini-cli), use their provider function
+        // For agent providers (claude-code, codex-app-server), use their provider function
         if (modelResult.bypassRegistry && modelResult.providerFunction) {
             return new LLMService(
                 null,

@@ -3,7 +3,6 @@ import { OpenRouterProvider } from "../standard/OpenRouterProvider";
 import { AnthropicProvider } from "../standard/AnthropicProvider";
 import { OpenAIProvider } from "../standard/OpenAIProvider";
 import { OllamaProvider } from "../standard/OllamaProvider";
-import { GeminiCliProvider } from "../standard/GeminiCliProvider";
 import { ClaudeCodeProvider } from "../agent/ClaudeCodeProvider";
 import { CodexAppServerProvider } from "../agent/CodexAppServerProvider";
 
@@ -33,11 +32,6 @@ describe("Provider Metadata", () => {
             expect(OllamaProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });
 
-        it("GeminiCliProvider has correct static METADATA", () => {
-            expect(GeminiCliProvider.METADATA.id).toBe("gemini-cli");
-            expect(GeminiCliProvider.METADATA.category).toBe("standard");
-            expect(GeminiCliProvider.METADATA.capabilities.requiresApiKey).toBe(false);
-        });
     });
 
     describe("agent providers", () => {
@@ -73,7 +67,6 @@ describe("Provider ID conventions", () => {
             AnthropicProvider.METADATA,
             OpenAIProvider.METADATA,
             OllamaProvider.METADATA,
-            GeminiCliProvider.METADATA,
             ClaudeCodeProvider.METADATA,
         ];
 
@@ -105,7 +98,6 @@ describe("Provider Registration Array", () => {
         expect(ids).toContain("anthropic");
         expect(ids).toContain("openai");
         expect(ids).toContain("ollama");
-        expect(ids).toContain("gemini-cli");
         expect(ids).toContain("claude-code");
         expect(ids).toContain("codex-app-server");
     });

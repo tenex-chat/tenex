@@ -19,11 +19,10 @@ import type {
     ResourceTemplate,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
-import { tool } from "ai";
+import { jsonSchema, tool } from "ai";
 import type { Tool as CoreTool } from "ai";
-import { z } from "zod";
 
-type MCPToolSet = Record<string, CoreTool<unknown, unknown>>;
+type MCPToolSet = Record<string, CoreTool<Record<string, unknown>, string>>;
 
 interface MCPClientEntry {
     client: Client;
@@ -44,22 +43,18 @@ export class MCPManager {
     private resourceNotificationHandlers: Map<string, ResourceNotificationHandler[]> = new Map();
 
     /**
-     * Convert an MCP tool (JSON Schema) to an AI SDK tool (Zod)
-     * Uses Zod's built-in fromJSONSchema converter
+     * Convert an MCP tool (JSON Schema) to an AI SDK tool.
+     * Uses `jsonSchema()` to pass the MCP JSON Schema directly to the AI SDK.
      */
     private convertMCPToolToAISdkTool(
         mcpTool: MCPTool,
         serverName: string,
         toolName: string
-    ): CoreTool<unknown, unknown> {
-        // Convert JSON Schema to Zod schema
-        // The inputSchema from MCP is compatible with JSONSchema type
-        const inputSchema = z.fromJSONSchema(mcpTool.inputSchema as any) as z.ZodTypeAny;
-
-        const result = tool({
+    ): CoreTool<Record<string, unknown>, string> {
+        return tool<Record<string, unknown>, string>({
             description: mcpTool.description || `Tool ${toolName} from ${serverName}`,
-            parameters: inputSchema,
-            execute: async (args: any) => {
+            inputSchema: jsonSchema<Record<string, unknown>>(mcpTool.inputSchema as any),
+            execute: async (args) => {
                 const entry = this.clients.get(serverName);
                 if (!entry) {
                     throw new Error(`MCP server '${serverName}' not found`);
@@ -68,7 +63,7 @@ export class MCPManager {
                 try {
                     const callResult = await entry.client.callTool({
                         name: toolName,
-                        arguments: args as Record<string, unknown>
+                        arguments: args
                     });
 
                     // Extract text content from MCP CallToolResult
@@ -92,8 +87,6 @@ export class MCPManager {
                 }
             }
         });
-
-        return result as CoreTool<unknown, unknown>;
     }
 
     /**

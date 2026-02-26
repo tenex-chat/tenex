@@ -8,4 +8,3 @@ export { OpenRouterProvider } from "./OpenRouterProvider";
 export { AnthropicProvider } from "./AnthropicProvider";
 export { OpenAIProvider } from "./OpenAIProvider";
 export { OllamaProvider } from "./OllamaProvider";
-export { GeminiCliProvider } from "./GeminiCliProvider";

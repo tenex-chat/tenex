@@ -8,7 +8,7 @@
  * ## Architecture
  *
  * - **Standard Providers**: Use AI SDK's provider packages and createProviderRegistry
- *   Examples: OpenRouter, Anthropic, OpenAI, Ollama, Gemini CLI
+ *   Examples: OpenRouter, Anthropic, OpenAI, Ollama
  *
  * - **Agent Providers**: Have built-in tools and session management
  *   Examples: Claude Code, Codex CLI
@@ -44,7 +44,6 @@ export {
     AnthropicProvider,
     OpenAIProvider,
     OllamaProvider,
-    GeminiCliProvider,
 } from "./standard";
 
 // Export agent providers
@@ -56,7 +55,6 @@ import { OpenRouterProvider } from "./standard/OpenRouterProvider";
 import { AnthropicProvider } from "./standard/AnthropicProvider";
 import { OpenAIProvider } from "./standard/OpenAIProvider";
 import { OllamaProvider } from "./standard/OllamaProvider";
-import { GeminiCliProvider } from "./standard/GeminiCliProvider";
 import { ClaudeCodeProvider } from "./agent/ClaudeCodeProvider";
 import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
 import { providerRegistry } from "./registry";
@@ -84,10 +82,6 @@ export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
     {
         Provider: OllamaProvider,
         metadata: OllamaProvider.METADATA,
-    },
-    {
-        Provider: GeminiCliProvider,
-        metadata: GeminiCliProvider.METADATA,
     },
     // Agent providers
     {

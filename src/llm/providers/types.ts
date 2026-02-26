@@ -122,7 +122,7 @@ export interface ProviderRuntimeContext {
 export interface ProviderModelResult {
     /** The language model instance */
     model: LanguageModel;
-    /** Provider function for agent providers (claude-code, codex-app-server, gemini-cli) */
+    /** Provider function for agent providers (claude-code, codex-app-server) */
     providerFunction?: (model: string, options?: unknown) => LanguageModel;
     /** Whether this provider bypasses the standard registry */
     bypassRegistry: boolean;
@@ -136,7 +136,7 @@ export interface ProviderModelResult {
  * Providers implement this interface to be registered in the provider registry.
  * There are two types:
  * - Standard providers: Use AI SDK's createProviderRegistry
- * - Agent providers: Have their own provider functions (claude-code, codex-app-server, gemini-cli)
+ * - Agent providers: Have their own provider functions (claude-code, codex-app-server)
  */
 export interface ILLMProvider {
     /** Provider metadata */

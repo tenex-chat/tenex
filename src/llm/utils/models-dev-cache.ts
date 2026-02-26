@@ -62,7 +62,6 @@ const PROVIDER_MAPPING: Record<string, string | null> = {
     // These providers are not in models.dev (local/custom)
     ollama: null,
     "claude-code": null,
-    "gemini-cli": null,
     "codex-app-server": null,
 };
 

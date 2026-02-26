@@ -320,26 +320,6 @@ describe("LLMService", () => {
             expect(systemMessage.providerOptions).toBeUndefined();
         });
 
-        test("adds cache control for gemini-cli with large system messages", async () => {
-            const service = new LLMService(mockRegistry, "gemini-cli", "gemini-pro", mockCapabilities);
-
-            const largeSystemContent = "x".repeat(5000);
-            const messages: ModelMessage[] = [
-                { role: "system", content: largeSystemContent },
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await service.stream(messages, {});
-
-            const callArgs = mockStreamText.mock.calls[0][0];
-            const systemMessage = callArgs.messages[0];
-
-            expect(systemMessage.providerOptions).toEqual({
-                anthropic: {
-                    cacheControl: { type: "ephemeral" },
-                },
-            });
-        });
     });
 
     describe("generateObject()", () => {

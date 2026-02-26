@@ -7,7 +7,7 @@ import { PROVIDER_IDS } from "./providers/provider-ids";
  */
 export function addCacheControl(messages: ModelMessage[], provider: string): ModelMessage[] {
     // Only add cache control for Anthropic
-    if (provider !== PROVIDER_IDS.ANTHROPIC && provider !== PROVIDER_IDS.GEMINI_CLI) {
+    if (provider !== PROVIDER_IDS.ANTHROPIC) {
         return messages;
     }
 
