@@ -56,15 +56,19 @@ const createMockStore = (overrides: Partial<{
 });
 
 describe("activeConversationsFragment", () => {
-    const now = Date.now();
+    const now = 1700000000000; // Fixed timestamp to prevent drift
     const projectId = "test-project";
 
     let getActiveEntriesForProjectSpy: ReturnType<typeof spyOn>;
     let conversationRegistryGetSpy: ReturnType<typeof spyOn>;
     let getPubkeyServiceSpy: ReturnType<typeof spyOn>;
+    let dateNowSpy: ReturnType<typeof spyOn>;
     let mockPubkeyService: { getNameSync: ReturnType<typeof mock> };
 
     beforeEach(() => {
+        // Freeze Date.now so production code and test timestamps stay in sync
+        dateNowSpy = spyOn(Date, "now").mockReturnValue(now);
+
         // Mock RALRegistry.getActiveEntriesForProject
         getActiveEntriesForProjectSpy = spyOn(
             RALRegistry.getInstance(),
@@ -85,6 +89,7 @@ describe("activeConversationsFragment", () => {
     });
 
     afterEach(() => {
+        dateNowSpy.mockRestore();
         getActiveEntriesForProjectSpy.mockRestore();
         conversationRegistryGetSpy.mockRestore();
         getPubkeyServiceSpy.mockRestore();
@@ -340,6 +345,19 @@ describe("activeConversationsFragment", () => {
             expect(roots.length).toBe(1);
             expect(roots[0].children.length).toBe(2);
         });
+
+        it("should promote self-referential entries to root (cycle guard)", () => {
+            const entries = [
+                { conversationId: "self-ref", agentName: "agent", parentConversationId: "self-ref" },
+                { conversationId: "normal", agentName: "other", parentConversationId: undefined },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(2);
+            const ids = roots.map(r => r.entry.conversationId);
+            expect(ids).toContain("self-ref");
+            expect(ids).toContain("normal");
+        });
     });
 
     describe("sortTree", () => {
@@ -399,6 +417,31 @@ describe("activeConversationsFragment", () => {
             const sorted = sortTree(roots);
             expect(sorted[0].children[0].entry.conversationId).toBe("newer");
             expect(sorted[0].children[1].entry.conversationId).toBe("older");
+        });
+
+        it("should not mutate the original arrays", () => {
+            const childA = { entry: { lastActivityAt: 200, conversationId: "a" } as any, children: [] };
+            const childB = { entry: { lastActivityAt: 400, conversationId: "b" } as any, children: [] };
+            const roots = [
+                {
+                    entry: { lastActivityAt: 300 } as any,
+                    children: [childA, childB],
+                },
+                {
+                    entry: { lastActivityAt: 100 } as any,
+                    children: [],
+                },
+            ];
+
+            // Capture original order
+            const originalRootOrder = roots.map(r => r.entry.lastActivityAt);
+            const originalChildOrder = roots[0].children.map(c => c.entry.conversationId);
+
+            sortTree(roots);
+
+            // Original arrays should be unchanged
+            expect(roots.map(r => r.entry.lastActivityAt)).toEqual(originalRootOrder);
+            expect(roots[0].children.map(c => c.entry.conversationId)).toEqual(originalChildOrder);
         });
     });
 

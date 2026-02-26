@@ -128,6 +128,7 @@ export function extractParentFromDelegationChain(chain?: DelegationChainEntry[])
  * Build a tree structure from a flat list of conversation entries.
  * Children are linked to their parent; if a parent is not in the active set,
  * the child is promoted to a root node.
+ * Guards against cycles (self-referential or transitive) in malformed data.
  */
 export function buildConversationTree(entries: ActiveConversationEntry[]): ConversationTreeNode[] {
     const nodeMap = new Map<string, ConversationTreeNode>();
@@ -138,17 +139,18 @@ export function buildConversationTree(entries: ActiveConversationEntry[]): Conve
         nodeMap.set(entry.conversationId, { entry, children: [] });
     }
 
-    // Link children to parents
+    // Link children to parents (skip self-referential links)
     for (const entry of entries) {
         const node = nodeMap.get(entry.conversationId)!;
-        if (entry.parentConversationId) {
-            const parentNode = nodeMap.get(entry.parentConversationId);
+        const parentId = entry.parentConversationId;
+        if (parentId && parentId !== entry.conversationId) {
+            const parentNode = nodeMap.get(parentId);
             if (parentNode) {
                 parentNode.children.push(node);
                 continue;
             }
         }
-        // No parent or parent not in active set → promote to root
+        // No parent, self-referential, or parent not in active set → promote to root
         roots.push(node);
     }
 
@@ -157,11 +159,15 @@ export function buildConversationTree(entries: ActiveConversationEntry[]): Conve
 
 /**
  * Get the maximum lastActivityAt across an entire subtree (node + all descendants).
+ * Uses a visited set to guard against cycles in malformed data.
  */
-function getSubtreeMaxActivity(node: ConversationTreeNode): number {
+function getSubtreeMaxActivity(node: ConversationTreeNode, visited: Set<string> = new Set()): number {
+    if (visited.has(node.entry.conversationId)) return node.entry.lastActivityAt;
+    visited.add(node.entry.conversationId);
+
     let max = node.entry.lastActivityAt;
     for (const child of node.children) {
-        const childMax = getSubtreeMaxActivity(child);
+        const childMax = getSubtreeMaxActivity(child, visited);
         if (childMax > max) max = childMax;
     }
     return max;
@@ -169,23 +175,19 @@ function getSubtreeMaxActivity(node: ConversationTreeNode): number {
 
 /**
  * Sort tree roots by max subtree activity (most recent first).
- * Also recursively sorts children within each node.
+ * Returns a new array with recursively sorted children (does not mutate the input).
  */
 export function sortTree(roots: ConversationTreeNode[]): ConversationTreeNode[] {
-    // Sort children recursively first
-    for (const root of roots) {
-        sortTreeChildren(root);
-    }
-
-    // Sort roots by max subtree activity
-    return roots.sort((a, b) => getSubtreeMaxActivity(b) - getSubtreeMaxActivity(a));
+    return [...roots]
+        .map(root => sortNodeChildren(root))
+        .sort((a, b) => getSubtreeMaxActivity(b) - getSubtreeMaxActivity(a));
 }
 
-function sortTreeChildren(node: ConversationTreeNode): void {
-    for (const child of node.children) {
-        sortTreeChildren(child);
-    }
-    node.children.sort((a, b) => getSubtreeMaxActivity(b) - getSubtreeMaxActivity(a));
+function sortNodeChildren(node: ConversationTreeNode): ConversationTreeNode {
+    const sortedChildren = [...node.children]
+        .map(child => sortNodeChildren(child))
+        .sort((a, b) => getSubtreeMaxActivity(b) - getSubtreeMaxActivity(a));
+    return { ...node, children: sortedChildren };
 }
 
 /**
@@ -235,9 +237,12 @@ export function renderTree(roots: ConversationTreeNode[]): string[] {
     return lines;
 }
 
-function renderChildren(children: ConversationTreeNode[], indent: string, lines: string[]): void {
+function renderChildren(children: ConversationTreeNode[], indent: string, lines: string[], visited: Set<string> = new Set()): void {
     for (let i = 0; i < children.length; i++) {
         const child = children[i];
+        if (visited.has(child.entry.conversationId)) continue; // cycle guard
+        visited.add(child.entry.conversationId);
+
         const isLast = i === children.length - 1;
         const connector = isLast ? "└─" : "├─";
         const childIndent = isLast ? `${indent}   ` : `${indent}│  `;
@@ -250,7 +255,7 @@ function renderChildren(children: ConversationTreeNode[], indent: string, lines:
         }
 
         // Recursively render grandchildren
-        renderChildren(child.children, childIndent, lines);
+        renderChildren(child.children, childIndent, lines, visited);
     }
 }
 
