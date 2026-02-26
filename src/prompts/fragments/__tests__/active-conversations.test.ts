@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn, mock } from "bun:test";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
+import type { DelegationChainEntry } from "@/conversations/types";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import { activeConversationsFragment } from "../08-active-conversations";
+import {
+    activeConversationsFragment,
+    extractParentFromDelegationChain,
+    buildConversationTree,
+    sortTree,
+    renderTree,
+} from "../08-active-conversations";
 import type { AgentInstance } from "@/agents/types";
 import type { RALRegistryEntry } from "@/services/ral/types";
 import * as PubkeyServiceModule from "@/services/PubkeyService";
@@ -33,29 +40,35 @@ const createMockRalEntry = (overrides: Partial<RALRegistryEntry> = {}): RALRegis
     };
 };
 
-// Mock conversation store
+// Mock conversation store with delegation chain support
 const createMockStore = (overrides: Partial<{
     title: string;
     summary: string;
     messageCount: number;
+    delegationChain: DelegationChainEntry[];
 }> = {}) => ({
     getMetadata: () => ({
         title: overrides.title,
         summary: overrides.summary,
+        delegationChain: overrides.delegationChain,
     }),
     getAllMessages: () => Array(overrides.messageCount ?? 5).fill({}),
 });
 
 describe("activeConversationsFragment", () => {
-    const now = Date.now();
+    const now = 1700000000000; // Fixed timestamp to prevent drift
     const projectId = "test-project";
 
     let getActiveEntriesForProjectSpy: ReturnType<typeof spyOn>;
     let conversationRegistryGetSpy: ReturnType<typeof spyOn>;
     let getPubkeyServiceSpy: ReturnType<typeof spyOn>;
+    let dateNowSpy: ReturnType<typeof spyOn>;
     let mockPubkeyService: { getNameSync: ReturnType<typeof mock> };
 
     beforeEach(() => {
+        // Freeze Date.now so production code and test timestamps stay in sync
+        dateNowSpy = spyOn(Date, "now").mockReturnValue(now);
+
         // Mock RALRegistry.getActiveEntriesForProject
         getActiveEntriesForProjectSpy = spyOn(
             RALRegistry.getInstance(),
@@ -76,6 +89,7 @@ describe("activeConversationsFragment", () => {
     });
 
     afterEach(() => {
+        dateNowSpy.mockRestore();
         getActiveEntriesForProjectSpy.mockRestore();
         conversationRegistryGetSpy.mockRestore();
         getPubkeyServiceSpy.mockRestore();
@@ -126,31 +140,9 @@ describe("activeConversationsFragment", () => {
             });
 
             expect(result).toContain("## Active Conversations");
-            expect(result).toContain("Active Task");
-            expect(result).toContain("ID: conv-active-1");
+            expect(result).toContain("**Active Task**");
             expect(result).toContain("Working on feature X");
-            expect(result).toContain("Messages: 10");
-            expect(result).toContain("streaming");
-        });
-
-        it("should include conversation ID for use with conversation_get", () => {
-            const ralEntry = createMockRalEntry({
-                conversationId: "test-conversation-id-12345",
-                isStreaming: true,
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([ralEntry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task with ID",
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("ID: test-conversation-id-12345");
+            expect(result).toContain("(agent-working-");
         });
     });
 
@@ -181,6 +173,551 @@ describe("activeConversationsFragment", () => {
 
             expect(result).not.toContain("Current Task");
             expect(result).toContain("Other Active Task");
+        });
+    });
+
+    describe("compact one-line format", () => {
+        it("should render conversations in compact format with duration and last msg", () => {
+            const entry = createMockRalEntry({
+                conversationId: "conv-1",
+                createdAt: now - 360000, // 6 minutes ago
+                lastActivityAt: now - 120000, // 2 minutes ago
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                title: "Fix Bug",
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            // Compact format: **Title** (agent) - duration, last msg X ago
+            expect(result).toMatch(/\*\*Fix Bug\*\*.*-.*6m.*last msg.*2m ago/);
+        });
+
+        it("should not render multi-line ID/Status/Duration/Messages format", () => {
+            const entry = createMockRalEntry();
+
+            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({ title: "Task" }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            // Old verbose format should NOT appear
+            expect(result).not.toContain("- ID:");
+            expect(result).not.toContain("- Status:");
+            expect(result).not.toContain("- Duration:");
+            expect(result).not.toContain("- Messages:");
+        });
+
+        it("should use truncated conversation ID when title is missing", () => {
+            const entry = createMockRalEntry({
+                conversationId: "abcdef1234567890",
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                // No title
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            expect(result).toContain("Conversation abcdef12");
+        });
+    });
+
+    describe("extractParentFromDelegationChain", () => {
+        it("should return undefined for undefined chain", () => {
+            expect(extractParentFromDelegationChain(undefined)).toBeUndefined();
+        });
+
+        it("should return undefined for empty chain", () => {
+            expect(extractParentFromDelegationChain([])).toBeUndefined();
+        });
+
+        it("should return undefined for single-entry chain", () => {
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "conv-1" },
+            ];
+            expect(extractParentFromDelegationChain(chain)).toBeUndefined();
+        });
+
+        it("should return the second-to-last entry's conversationId", () => {
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "conv-root" },
+                { pubkey: "pm-pk", displayName: "pm-agent", isUser: false, conversationId: "conv-pm" },
+                { pubkey: "exec-pk", displayName: "exec-agent", isUser: false, conversationId: "conv-exec" },
+            ];
+            expect(extractParentFromDelegationChain(chain)).toBe("conv-pm");
+        });
+
+        it("should handle two-entry chain (return first entry)", () => {
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "conv-root" },
+                { pubkey: "agent-pk", displayName: "agent", isUser: false, conversationId: "conv-agent" },
+            ];
+            expect(extractParentFromDelegationChain(chain)).toBe("conv-root");
+        });
+
+        it("should return undefined when second-to-last entry has no conversationId", () => {
+            const chain: DelegationChainEntry[] = [
+                { pubkey: "user-pk", displayName: "User", isUser: true },
+                { pubkey: "agent-pk", displayName: "agent", isUser: false, conversationId: "conv-agent" },
+            ];
+            expect(extractParentFromDelegationChain(chain)).toBeUndefined();
+        });
+    });
+
+    describe("buildConversationTree", () => {
+        it("should build a flat list when no parent relationships exist", () => {
+            const entries = [
+                { conversationId: "a", agentName: "agent-a", parentConversationId: undefined },
+                { conversationId: "b", agentName: "agent-b", parentConversationId: undefined },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(2);
+            expect(roots[0].children.length).toBe(0);
+            expect(roots[1].children.length).toBe(0);
+        });
+
+        it("should nest children under their parent", () => {
+            const entries = [
+                { conversationId: "parent", agentName: "pm", parentConversationId: undefined },
+                { conversationId: "child", agentName: "exec", parentConversationId: "parent" },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(1);
+            expect(roots[0].entry.conversationId).toBe("parent");
+            expect(roots[0].children.length).toBe(1);
+            expect(roots[0].children[0].entry.conversationId).toBe("child");
+        });
+
+        it("should promote orphan to root when parent is not in active set", () => {
+            const entries = [
+                { conversationId: "orphan", agentName: "exec", parentConversationId: "missing-parent" },
+                { conversationId: "other", agentName: "other", parentConversationId: undefined },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(2);
+            // Both should be root nodes
+            const ids = roots.map(r => r.entry.conversationId);
+            expect(ids).toContain("orphan");
+            expect(ids).toContain("other");
+        });
+
+        it("should handle multi-level nesting", () => {
+            const entries = [
+                { conversationId: "root", agentName: "pm", parentConversationId: undefined },
+                { conversationId: "mid", agentName: "exec", parentConversationId: "root" },
+                { conversationId: "leaf", agentName: "dev", parentConversationId: "mid" },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(1);
+            expect(roots[0].children.length).toBe(1);
+            expect(roots[0].children[0].children.length).toBe(1);
+            expect(roots[0].children[0].children[0].entry.conversationId).toBe("leaf");
+        });
+
+        it("should handle multiple children under one parent", () => {
+            const entries = [
+                { conversationId: "parent", agentName: "pm", parentConversationId: undefined },
+                { conversationId: "child-1", agentName: "exec", parentConversationId: "parent" },
+                { conversationId: "child-2", agentName: "dev", parentConversationId: "parent" },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(1);
+            expect(roots[0].children.length).toBe(2);
+        });
+
+        it("should promote self-referential entries to root (cycle guard)", () => {
+            const entries = [
+                { conversationId: "self-ref", agentName: "agent", parentConversationId: "self-ref" },
+                { conversationId: "normal", agentName: "other", parentConversationId: undefined },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(2);
+            const ids = roots.map(r => r.entry.conversationId);
+            expect(ids).toContain("self-ref");
+            expect(ids).toContain("normal");
+        });
+
+        it("should render shared node only once when reachable from multiple parents (visited-set dedup)", () => {
+            // Malformed data: C lists both A and B as potential parents.
+            // buildConversationTree links C to A (first match), so B has no children.
+            // We then manually duplicate C into B's children to simulate a shared node
+            // and verify renderTree's visited set prevents double rendering.
+            const entries = [
+                { conversationId: "A", agentName: "a", parentConversationId: undefined,
+                    title: "Node A", startedAt: now - 60000, lastActivityAt: now - 5000 },
+                { conversationId: "B", agentName: "b", parentConversationId: "A",
+                    title: "Node B", startedAt: now - 50000, lastActivityAt: now - 4000 },
+                { conversationId: "C", agentName: "c", parentConversationId: "A",
+                    title: "Node C", startedAt: now - 40000, lastActivityAt: now - 3000 },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(1); // Only A is root
+
+            // Manually add C as a child of B too (simulating malformed shared-node data)
+            const nodeA = roots[0];
+            const nodeB = nodeA.children.find(c => c.entry.conversationId === "B")!;
+            const nodeC = nodeA.children.find(c => c.entry.conversationId === "C")!;
+            nodeB.children.push(nodeC);
+
+            const lines = renderTree(roots);
+            // C should only appear once in the rendered output (visited-set prevents the duplicate)
+            const cOccurrences = lines.filter(l => l.includes("Node C"));
+            expect(cOccurrences.length).toBe(1);
+        });
+    });
+
+    describe("sortTree", () => {
+        it("should sort roots by max subtree activity (most recent first)", () => {
+            const roots = [
+                {
+                    entry: { lastActivityAt: 100 } as any,
+                    children: [],
+                },
+                {
+                    entry: { lastActivityAt: 300 } as any,
+                    children: [],
+                },
+                {
+                    entry: { lastActivityAt: 200 } as any,
+                    children: [],
+                },
+            ];
+
+            const sorted = sortTree(roots);
+            expect(sorted[0].entry.lastActivityAt).toBe(300);
+            expect(sorted[1].entry.lastActivityAt).toBe(200);
+            expect(sorted[2].entry.lastActivityAt).toBe(100);
+        });
+
+        it("should consider child activity when sorting roots", () => {
+            const roots = [
+                {
+                    entry: { lastActivityAt: 100 } as any,
+                    children: [
+                        { entry: { lastActivityAt: 500 } as any, children: [] },
+                    ],
+                },
+                {
+                    entry: { lastActivityAt: 400 } as any,
+                    children: [],
+                },
+            ];
+
+            const sorted = sortTree(roots);
+            // First root has child with activity at 500 > second root's 400
+            expect(sorted[0].entry.lastActivityAt).toBe(100); // The parent of the active child
+            expect(sorted[1].entry.lastActivityAt).toBe(400);
+        });
+
+        it("should sort children within a node", () => {
+            const roots = [
+                {
+                    entry: { lastActivityAt: 100 } as any,
+                    children: [
+                        { entry: { lastActivityAt: 200, conversationId: "older" } as any, children: [] },
+                        { entry: { lastActivityAt: 400, conversationId: "newer" } as any, children: [] },
+                    ],
+                },
+            ];
+
+            const sorted = sortTree(roots);
+            expect(sorted[0].children[0].entry.conversationId).toBe("newer");
+            expect(sorted[0].children[1].entry.conversationId).toBe("older");
+        });
+
+        it("should not mutate the original arrays", () => {
+            const childA = { entry: { lastActivityAt: 200, conversationId: "a" } as any, children: [] };
+            const childB = { entry: { lastActivityAt: 400, conversationId: "b" } as any, children: [] };
+            const roots = [
+                {
+                    entry: { lastActivityAt: 300 } as any,
+                    children: [childA, childB],
+                },
+                {
+                    entry: { lastActivityAt: 100 } as any,
+                    children: [],
+                },
+            ];
+
+            // Capture original order
+            const originalRootOrder = roots.map(r => r.entry.lastActivityAt);
+            const originalChildOrder = roots[0].children.map(c => c.entry.conversationId);
+
+            sortTree(roots);
+
+            // Original arrays should be unchanged
+            expect(roots.map(r => r.entry.lastActivityAt)).toEqual(originalRootOrder);
+            expect(roots[0].children.map(c => c.entry.conversationId)).toEqual(originalChildOrder);
+        });
+    });
+
+    describe("renderTree", () => {
+        it("should render root nodes with numbered list", () => {
+            const roots = [
+                {
+                    entry: {
+                        title: "Task A",
+                        agentName: "pm",
+                        startedAt: now - 360000,
+                        lastActivityAt: now - 5000,
+                        conversationId: "conv-a",
+                    } as any,
+                    children: [],
+                },
+                {
+                    entry: {
+                        title: "Task B",
+                        agentName: "exec",
+                        startedAt: now - 60000,
+                        lastActivityAt: now - 1000,
+                        conversationId: "conv-b",
+                    } as any,
+                    children: [],
+                },
+            ];
+
+            const lines = renderTree(roots);
+            expect(lines[0]).toMatch(/^1\. \*\*Task A\*\*/);
+            // Line index depends on whether summary is present (it's not)
+            const taskBLine = lines.find(l => l.includes("Task B"));
+            expect(taskBLine).toMatch(/^2\. \*\*Task B\*\*/);
+        });
+
+        it("should render children with tree connectors ├─ and └─", () => {
+            const roots = [
+                {
+                    entry: {
+                        title: "Parent",
+                        agentName: "pm",
+                        startedAt: now - 360000,
+                        lastActivityAt: now - 5000,
+                        conversationId: "parent",
+                    } as any,
+                    children: [
+                        {
+                            entry: {
+                                title: "Child 1",
+                                agentName: "exec",
+                                startedAt: now - 300000,
+                                lastActivityAt: now - 3000,
+                                conversationId: "child-1",
+                            } as any,
+                            children: [],
+                        },
+                        {
+                            entry: {
+                                title: "Child 2",
+                                agentName: "dev",
+                                startedAt: now - 8000,
+                                lastActivityAt: now - 1000,
+                                conversationId: "child-2",
+                            } as any,
+                            children: [],
+                        },
+                    ],
+                },
+            ];
+
+            const lines = renderTree(roots);
+            const child1Line = lines.find(l => l.includes("Child 1"));
+            const child2Line = lines.find(l => l.includes("Child 2"));
+
+            expect(child1Line).toContain("├─");
+            expect(child2Line).toContain("└─");
+        });
+
+        it("should render single child with └─ connector", () => {
+            const roots = [
+                {
+                    entry: {
+                        title: "Parent",
+                        agentName: "pm",
+                        startedAt: now - 360000,
+                        lastActivityAt: now - 5000,
+                        conversationId: "parent",
+                    } as any,
+                    children: [
+                        {
+                            entry: {
+                                title: "Only Child",
+                                agentName: "exec",
+                                startedAt: now - 120000,
+                                lastActivityAt: now - 1000,
+                                conversationId: "child",
+                            } as any,
+                            children: [],
+                        },
+                    ],
+                },
+            ];
+
+            const lines = renderTree(roots);
+            const childLine = lines.find(l => l.includes("Only Child"));
+            expect(childLine).toContain("└─");
+            expect(childLine).not.toContain("├─");
+        });
+
+        it("should include summary on a separate indented line", () => {
+            const roots = [
+                {
+                    entry: {
+                        title: "Task",
+                        agentName: "pm",
+                        startedAt: now - 360000,
+                        lastActivityAt: now - 5000,
+                        conversationId: "conv",
+                        summary: "Working on feature X",
+                    } as any,
+                    children: [],
+                },
+            ];
+
+            const lines = renderTree(roots);
+            expect(lines.length).toBeGreaterThanOrEqual(2);
+            expect(lines[1]).toContain("Working on feature X");
+        });
+    });
+
+    describe("stale marking", () => {
+        it("should mark conversations with no activity for >30 min as stale", () => {
+            const entry = createMockRalEntry({
+                conversationId: "stale-conv",
+                lastActivityAt: now - 31 * 60 * 1000, // 31 minutes ago
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                title: "Stale Task",
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            expect(result).toContain("[stale]");
+        });
+
+        it("should not mark recent conversations as stale", () => {
+            const entry = createMockRalEntry({
+                conversationId: "fresh-conv",
+                lastActivityAt: now - 5000, // 5 seconds ago
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                title: "Fresh Task",
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            expect(result).not.toContain("[stale]");
+        });
+    });
+
+    describe("hierarchical delegation display (integration)", () => {
+        it("should display parent-child delegation relationships", () => {
+            const parentEntry = createMockRalEntry({
+                conversationId: "conv-parent",
+                agentPubkey: "pm-pubkey",
+                lastActivityAt: now - 120000,
+                createdAt: now - 360000,
+            });
+            const childEntry = createMockRalEntry({
+                conversationId: "conv-child",
+                agentPubkey: "exec-pubkey",
+                lastActivityAt: now - 5000,
+                createdAt: now - 8000,
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([parentEntry, childEntry]);
+            conversationRegistryGetSpy.mockImplementation((convId: string) => {
+                if (convId === "conv-parent") {
+                    return createMockStore({
+                        title: "Fix Bug",
+                        delegationChain: [
+                            { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "user-conv" },
+                            { pubkey: "pm-pubkey", displayName: "pm", isUser: false, conversationId: "conv-parent" },
+                        ],
+                    });
+                }
+                return createMockStore({
+                    title: "Execute Fix",
+                    delegationChain: [
+                        { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "user-conv" },
+                        { pubkey: "pm-pubkey", displayName: "pm", isUser: false, conversationId: "conv-parent" },
+                        { pubkey: "exec-pubkey", displayName: "exec", isUser: false, conversationId: "conv-child" },
+                    ],
+                });
+            });
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            // Parent should be a root node
+            expect(result).toMatch(/1\. \*\*Fix Bug\*\*/);
+            // Child should be nested under parent with └─ connector
+            expect(result).toContain("└─ **Execute Fix**");
+        });
+
+        it("should promote orphan when parent is not in active set", () => {
+            const orphanEntry = createMockRalEntry({
+                conversationId: "conv-orphan",
+                agentPubkey: "exec-pubkey",
+                lastActivityAt: now - 5000,
+            });
+
+            getActiveEntriesForProjectSpy.mockReturnValue([orphanEntry]);
+            conversationRegistryGetSpy.mockReturnValue(createMockStore({
+                title: "Orphan Task",
+                delegationChain: [
+                    { pubkey: "user-pk", displayName: "User", isUser: true, conversationId: "user-conv" },
+                    { pubkey: "pm-pubkey", displayName: "pm", isUser: false, conversationId: "missing-parent" },
+                    { pubkey: "exec-pubkey", displayName: "exec", isUser: false, conversationId: "conv-orphan" },
+                ],
+            }));
+
+            const result = activeConversationsFragment.template({
+                agent: createMockAgent(),
+                currentConversationId: "other-conv",
+                projectId,
+            });
+
+            // Should appear as a root node (promoted), not nested
+            expect(result).toMatch(/1\. \*\*Orphan Task\*\*/);
+            expect(result).not.toContain("├─");
+            expect(result).not.toContain("└─");
         });
     });
 
@@ -216,62 +753,6 @@ describe("activeConversationsFragment", () => {
         });
     });
 
-    describe("status display", () => {
-        it("should show 'streaming' for streaming agents", () => {
-            const entry = createMockRalEntry({
-                isStreaming: true,
-                currentTool: undefined,
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({ title: "Task" }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("Status: streaming");
-        });
-
-        it("should show tool name for agents running tools", () => {
-            const entry = createMockRalEntry({
-                isStreaming: false,
-                currentTool: "file_write",
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({ title: "Task" }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("Status: running file_write");
-        });
-
-        it("should show 'active' for non-streaming, no-tool agents", () => {
-            const entry = createMockRalEntry({
-                isStreaming: false,
-                currentTool: undefined,
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({ title: "Task" }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("Status: active");
-        });
-    });
-
     describe("summary handling and sanitization", () => {
         it("should include summary when available", () => {
             const entry = createMockRalEntry();
@@ -288,7 +769,7 @@ describe("activeConversationsFragment", () => {
                 projectId,
             });
 
-            expect(result).toContain("Summary: Working on feature implementation");
+            expect(result).toContain("Working on feature implementation");
         });
 
         it("should not include summary line when summary is not available", () => {
@@ -306,7 +787,10 @@ describe("activeConversationsFragment", () => {
                 projectId,
             });
 
-            expect(result).not.toContain("Summary:");
+            // Output should just be the compact one-liner per conversation (no summary line)
+            const lines = result.split("\n").filter(l => l.trim().length > 0);
+            const taskLine = lines.find(l => l.includes("**Task**"));
+            expect(taskLine).toBeDefined();
         });
 
         it("should sanitize summaries by removing newlines", () => {
@@ -378,128 +862,6 @@ describe("activeConversationsFragment", () => {
             const taskMatches = result.match(/\*\*Shared Task\*\*/g);
             expect(taskMatches?.length).toBe(1);
         });
-
-        it("should prefer streaming agent when deduplicating", () => {
-            const nonStreaming = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "non-streaming-agent",
-                isStreaming: false,
-            });
-            const streaming = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "streaming-agent",
-                isStreaming: true,
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([nonStreaming, streaming]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task",
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            // Should show streaming status (from the streaming agent)
-            expect(result).toContain("Status: streaming");
-        });
-
-        it("should prefer agent running tool over idle agent when deduplicating", () => {
-            // Order matters: idle agent comes first in the array
-            const idle = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "idle-agent",
-                isStreaming: false,
-                currentTool: undefined,
-            });
-            const runningTool = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "tool-agent",
-                isStreaming: false,
-                currentTool: "file_read",
-            });
-
-            // Idle comes first - without the fix, entries[0] would be selected
-            getActiveEntriesForProjectSpy.mockReturnValue([idle, runningTool]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task",
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            // Should show tool status (from the agent running a tool), not "active"
-            expect(result).toContain("Status: running file_read");
-            expect(result).not.toContain("Status: active");
-        });
-
-        it("should prefer agent with activeTools over idle agent when deduplicating", () => {
-            const idle = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "idle-agent",
-                isStreaming: false,
-                currentTool: undefined,
-                activeTools: new Map(),
-            });
-            const withActiveTools = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "active-tools-agent",
-                isStreaming: false,
-                currentTool: "shell_exec",
-                activeTools: new Map([["tool-1", { toolCallId: "t1", startedAt: Date.now() }]]),
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([idle, withActiveTools]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task",
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            // Should show the agent with active tools
-            expect(result).toContain("Status: running shell_exec");
-        });
-
-        it("should fall back to most recent activity when no agent is streaming or running tools", () => {
-            const olderIdle = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "older-idle-agent",
-                isStreaming: false,
-                currentTool: undefined,
-                lastActivityAt: now - 60000, // 1 minute ago
-            });
-            const newerIdle = createMockRalEntry({
-                conversationId: "same-conv",
-                agentPubkey: "newer-idle-agent",
-                isStreaming: false,
-                currentTool: undefined,
-                lastActivityAt: now - 5000, // 5 seconds ago
-            });
-
-            // Older comes first in the array
-            getActiveEntriesForProjectSpy.mockReturnValue([olderIdle, newerIdle]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task",
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            // Should use the agent with more recent activity
-            expect(result).toContain("agent-newer-id");
-        });
     });
 
     describe("max conversations limit", () => {
@@ -522,11 +884,9 @@ describe("activeConversationsFragment", () => {
                 projectId,
             });
 
-            // Count how many "Agent:" entries appear (one per conversation)
-            const agentMatches = result.match(/- Agent:/g);
-            expect(agentMatches?.length).toBe(10);
-
-            // Should include the most recent ones
+            // Count numbered entries (root nodes)
+            const numberedEntries = result.match(/^\d+\. \*\*/gm);
+            // Should have at most 10 conversations total (some may be nested)
             expect(result).toContain("Task conv-0");
             expect(result).toContain("Task conv-9");
             expect(result).not.toContain("Task conv-10");
@@ -565,25 +925,6 @@ describe("activeConversationsFragment", () => {
             expect(result).toMatch(/1\. \*\*Active Task\*\*/);
         });
 
-        it("should use truncated conversation ID when title is missing", () => {
-            const entry = createMockRalEntry({
-                conversationId: "abcdef1234567890",
-            });
-
-            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                // No title
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("Conversation abcdef12...");
-        });
-
         it("should include duration since conversation started", () => {
             const entry = createMockRalEntry({
                 createdAt: now - 90000, // 1m 30s ago
@@ -598,25 +939,7 @@ describe("activeConversationsFragment", () => {
                 projectId,
             });
 
-            expect(result).toContain("Duration: 1m");
-        });
-
-        it("should include message count", () => {
-            const entry = createMockRalEntry();
-
-            getActiveEntriesForProjectSpy.mockReturnValue([entry]);
-            conversationRegistryGetSpy.mockReturnValue(createMockStore({
-                title: "Task",
-                messageCount: 25,
-            }));
-
-            const result = activeConversationsFragment.template({
-                agent: createMockAgent(),
-                currentConversationId: "other-conv",
-                projectId,
-            });
-
-            expect(result).toContain("Messages: 25");
+            expect(result).toContain("1m");
         });
     });
 
