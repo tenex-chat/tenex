@@ -306,7 +306,11 @@ export class Daemon {
         // Use global daemon directory instead of project-local .tenex
         this.daemonDir = config.getConfigPath("daemon");
 
-        const dirs = [this.daemonDir, path.join(this.daemonDir, "logs")];
+        const dirs = [
+            this.daemonDir,
+            path.join(this.daemonDir, "logs"),
+            config.getConfigPath("agents"),
+        ];
 
         for (const dir of dirs) {
             await fs.mkdir(dir, { recursive: true });
