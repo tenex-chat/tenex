@@ -255,13 +255,44 @@ describe("conversationEventSchema", () => {
 
 ## Event Kinds Reference
 
-| Kind | Name | Description |
-|------|------|-------------|
-| 4199 | CONVERSATION_MESSAGE | Conversation messages |
-| 4200 | DELEGATION | Delegation requests/results |
-| 31990 | AGENT_METADATA | Agent profile (replaceable) |
-| 4129 | AGENT_LESSON | Agent lesson (learned knowledge) |
-| 1111 | COMMENT | NIP-22 comments |
+All TENEX-specific kinds are defined in `../nostr/kinds.ts`. Import from there — never use magic numbers.
+
+### Standard NIP Kinds (used by TENEX)
+
+| Kind | Constant | Description |
+|------|----------|-------------|
+| 1 | `Text` | Regular text note — unified conversation format |
+| 513 | `EventMetadata` | Event metadata (titles, summaries) |
+| 1111 | `Comment` | NIP-22 Comment — used for lesson refinements |
+
+### Agent Kinds (4xxx range)
+
+| Kind | Constant | Description |
+|------|----------|-------------|
+| 4129 | `AgentLesson` | Agent Lesson — learned knowledge |
+| 4199 | `AgentDefinition` | Agent Definition |
+| 4201 | `AgentNudge` | Agent Nudge — system prompt injection |
+| 4202 | `AgentSkill` | Agent Skill — transient capability injection |
+| 4203 | `DelegationMarker` | Delegation Marker — lifecycle tracking |
+
+### Replaceable Agent Kinds (1xxxx range)
+
+| Kind | Constant | Description |
+|------|----------|-------------|
+| 14199 | `ProjectAgentSnapshot` | Owner-agent declaration (replaceable, p-tags agents) |
+| 14202 | `NudgeSkillWhitelist` | Nudge/Skill Whitelist — NIP-51-like list of e-tagged nudges/skills |
+
+### TENEX Custom Kinds (2xxxx range)
+
+| Kind | Constant | Description |
+|------|----------|-------------|
+| 24000 | `TenexBootProject` | Boot project via a-tag |
+| 24010 | `TenexProjectStatus` | Project status |
+| 24020 | `TenexAgentConfigUpdate` | Agent configuration update |
+| 24030 | `TenexAgentDelete` | Agent deletion from projects or globally |
+| 24133 | `TenexOperationsStatus` | Operations status |
+| 24134 | `TenexStopCommand` | Stop command |
+| 25000 | `TenexConfigUpdate` | Encrypted config updates (e.g., APNs device tokens) |
 
 ## Related
 - [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md) - Architecture reference

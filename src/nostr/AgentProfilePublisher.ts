@@ -1,5 +1,4 @@
 import * as crypto from "node:crypto";
-import type { AgentConfig } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
@@ -430,71 +429,6 @@ export class AgentProfilePublisher {
             logger.error("Failed to create agent profile", {
                 error,
                 agentName,
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Publishes an agent request event
-     */
-    static async publishAgentRequest(
-        signer: NDKPrivateKeySigner,
-        agentConfig: Omit<AgentConfig, "nsec">,
-        projectEvent: NDKProject,
-        ndkAgentEventId?: string
-    ): Promise<NDKEvent> {
-        try {
-            const requestEvent = new NDKEvent(getNDK(), {
-                kind: NDKKind.AgentRequest,
-                content: "",
-                tags: [],
-            });
-
-            // Properly tag the project event
-            requestEvent.tag(projectEvent);
-
-            const tags: string[][] = [];
-
-            // Only add e-tag if this agent was created from an NDKAgentDefinition event and is valid
-            if (ndkAgentEventId && ndkAgentEventId.trim() !== "") {
-                // Validate that it's a proper hex event ID (64 characters)
-                const trimmedId = ndkAgentEventId.trim();
-                if (/^[a-f0-9]{64}$/i.test(trimmedId)) {
-                    tags.push(["e", trimmedId, "", "agent-definition"]);
-                } else {
-                    logger.warn(
-                        "Invalid event ID format for agent definition in request, skipping e-tag",
-                        {
-                            eventId: ndkAgentEventId,
-                        }
-                    );
-                }
-            }
-
-            // Add agent metadata tags
-            tags.push(["name", agentConfig.name]);
-
-            // Add the other tags
-            requestEvent.tags.push(...tags);
-
-            await requestEvent.sign(signer, { pTags: false });
-
-            try {
-                await requestEvent.publish();
-            } catch (publishError) {
-                logger.warn("Failed to publish agent request (may already exist)", {
-                    error: publishError,
-                    agentName: agentConfig.name,
-                    pubkey: signer.pubkey.substring(0, 8),
-                });
-            }
-
-            return requestEvent;
-        } catch (error) {
-            logger.error("Failed to create agent request", {
-                error,
-                agentName: agentConfig.name,
             });
             throw error;
         }

@@ -17,7 +17,6 @@ export const NDKKind = {
     EventMetadata: 513 as BaseNDKKind, // Event metadata (titles, summaries)
     Comment: 1111 as BaseNDKKind, // NIP-22 Comment - used for lesson refinements
     AgentLesson: 4129 as BaseNDKKind, // Agent Lesson - learned knowledge
-    AgentRequest: 4133 as BaseNDKKind, // NIP-90 Agent Request
     AgentDefinition: 4199 as BaseNDKKind, // Agent Definition
     AgentNudge: 4201 as BaseNDKKind, // Agent Nudge - system prompt injection
     AgentSkill: 4202 as BaseNDKKind, // Agent Skill - transient capability injection
