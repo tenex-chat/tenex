@@ -358,6 +358,35 @@ describe("activeConversationsFragment", () => {
             expect(ids).toContain("self-ref");
             expect(ids).toContain("normal");
         });
+
+        it("should render shared node only once when reachable from multiple parents (visited-set dedup)", () => {
+            // Malformed data: C lists both A and B as potential parents.
+            // buildConversationTree links C to A (first match), so B has no children.
+            // We then manually duplicate C into B's children to simulate a shared node
+            // and verify renderTree's visited set prevents double rendering.
+            const entries = [
+                { conversationId: "A", agentName: "a", parentConversationId: undefined,
+                    title: "Node A", startedAt: now - 60000, lastActivityAt: now - 5000 },
+                { conversationId: "B", agentName: "b", parentConversationId: "A",
+                    title: "Node B", startedAt: now - 50000, lastActivityAt: now - 4000 },
+                { conversationId: "C", agentName: "c", parentConversationId: "A",
+                    title: "Node C", startedAt: now - 40000, lastActivityAt: now - 3000 },
+            ] as any[];
+
+            const roots = buildConversationTree(entries);
+            expect(roots.length).toBe(1); // Only A is root
+
+            // Manually add C as a child of B too (simulating malformed shared-node data)
+            const nodeA = roots[0];
+            const nodeB = nodeA.children.find(c => c.entry.conversationId === "B")!;
+            const nodeC = nodeA.children.find(c => c.entry.conversationId === "C")!;
+            nodeB.children.push(nodeC);
+
+            const lines = renderTree(roots);
+            // C should only appear once in the rendered output (visited-set prevents the duplicate)
+            const cOccurrences = lines.filter(l => l.includes("Node C"));
+            expect(cOccurrences.length).toBe(1);
+        });
     });
 
     describe("sortTree", () => {

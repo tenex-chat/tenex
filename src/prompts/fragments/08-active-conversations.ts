@@ -128,7 +128,13 @@ export function extractParentFromDelegationChain(chain?: DelegationChainEntry[])
  * Build a tree structure from a flat list of conversation entries.
  * Children are linked to their parent; if a parent is not in the active set,
  * the child is promoted to a root node.
- * Guards against cycles (self-referential or transitive) in malformed data.
+ *
+ * Self-referential cycles (parentConversationId === conversationId) are
+ * prevented by skipping self-referential parent assignments.
+ * Downstream, the visited set in `getSubtreeMaxActivity` and `renderChildren`
+ * prevents duplicate processing of shared nodes (i.e. a node reachable from
+ * multiple parents in malformed data), but does not perform full transitive-
+ * cycle detection.
  */
 export function buildConversationTree(entries: ActiveConversationEntry[]): ConversationTreeNode[] {
     const nodeMap = new Map<string, ConversationTreeNode>();
