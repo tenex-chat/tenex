@@ -34,6 +34,9 @@ export class TrustPubkeyService {
     /** Cached backend pubkey to avoid repeated async calls */
     private cachedBackendPubkey?: Hexpubkey;
 
+    /** Cached whitelist Set for O(1) lookups */
+    private cachedWhitelistSet?: Set<Hexpubkey>;
+
     private constructor() {}
 
     /**
@@ -234,11 +237,22 @@ export class TrustPubkeyService {
     }
 
     /**
-     * Check if pubkey is in the whitelist
+     * Check if pubkey is in the whitelist using cached Set for O(1) lookups.
      */
     private isWhitelisted(pubkey: Hexpubkey): boolean {
-        const whitelisted = this.getWhitelistedPubkeys();
-        return whitelisted.includes(pubkey);
+        return this.getWhitelistSet().has(pubkey);
+    }
+
+    /**
+     * Get the cached whitelist Set, building from config on first access.
+     * The set is cached until clearCache() is called; config changes
+     * are only reflected after an explicit cache clear.
+     */
+    private getWhitelistSet(): Set<Hexpubkey> {
+        if (!this.cachedWhitelistSet) {
+            this.cachedWhitelistSet = new Set(this.getWhitelistedPubkeys());
+        }
+        return this.cachedWhitelistSet;
     }
 
     /**
@@ -295,10 +309,11 @@ export class TrustPubkeyService {
     }
 
     /**
-     * Clear the backend pubkey cache (useful for testing)
+     * Clear all caches (useful for testing and config reloads)
      */
     clearCache(): void {
         this.cachedBackendPubkey = undefined;
+        this.cachedWhitelistSet = undefined;
         logger.debug("[TRUST_PUBKEY] Cache cleared");
     }
 }

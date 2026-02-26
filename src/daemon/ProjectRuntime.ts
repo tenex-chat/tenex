@@ -19,6 +19,7 @@ import { OperationsStatusService } from "@/services/status/OperationsStatusServi
 import { prefixKVStore } from "@/services/storage";
 import { RALRegistry } from "@/services/ral";
 import { getPubkeyService } from "@/services/PubkeyService";
+import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -185,6 +186,12 @@ export class ProjectRuntime {
             await projectContextStore.run(this.context, async () => {
                 await this.warmUserProfileCache();
             });
+
+            // Initialize backend pubkey cache for the pubkey gate.
+            // Must happen before EventHandler is initialized so that
+            // isTrustedEventSync() can recognize backend-signed events
+            // without an async fallback (fail-closed gate).
+            await getTrustPubkeyService().initializeBackendPubkeyCache();
 
             // Initialize event handler
             this.eventHandler = new EventHandler();
