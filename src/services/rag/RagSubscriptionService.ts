@@ -409,14 +409,14 @@ export class RagSubscriptionService {
         if (removeHandler) {
             try {
                 removeHandler();
+                this.handlerRemovers.delete(listenerKey);
             } catch (error) {
-                logger.warn(`Failed to remove handler for subscription '${subscriptionId}': ${error}`);
+                // Keep the map entry on failure so a future retry can re-attempt removal
+                logger.warn(`Failed to remove handler for subscription '${subscriptionId}': ${error instanceof Error ? error.message : error}`);
             }
-            this.handlerRemovers.delete(listenerKey);
         }
 
-        const listener = this.resourceListeners.get(listenerKey);
-        if (listener) {
+        if (this.resourceListeners.has(listenerKey)) {
             try {
                 const projectCtx = getProjectContext();
                 const mcpManager = projectCtx.mcpManager;
