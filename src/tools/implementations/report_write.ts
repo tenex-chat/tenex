@@ -1,6 +1,8 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import { ReportService, getLocalReportStore, InvalidSlugError } from "@/services/reports";
+import { getReportEmbeddingService } from "@/services/reports/ReportEmbeddingService";
+import { getProjectContext } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -155,6 +157,25 @@ async function executeReportWrite(
             nostrId: result.encodedId,
         });
         // Continue - the report is live on Nostr and will be hydrated later
+    }
+
+    // Step 4: Index in RAG for semantic search
+    try {
+        const projectCtx = getProjectContext();
+        const projectTagId = projectCtx.project.tagId();
+        const reportEmbeddingService = getReportEmbeddingService();
+
+        const publishedAt = Math.floor(Date.now() / 1000);
+        await reportEmbeddingService.indexReport(
+            { slug, title, summary, content, hashtags, publishedAt },
+            projectTagId,
+            context.agent.pubkey,
+            context.agent.name
+        );
+    } catch (ragError) {
+        // Don't fail the tool if RAG indexing fails
+        const ragMessage = ragError instanceof Error ? ragError.message : String(ragError);
+        logger.warn("Failed to index report in RAG", { slug, error: ragMessage });
     }
 
     let memorizeMessage = "";
