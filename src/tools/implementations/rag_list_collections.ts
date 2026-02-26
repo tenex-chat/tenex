@@ -10,7 +10,7 @@ const ragListCollectionsSchema = z.object({
         .boolean()
         .nullable()
         .default(false)
-        .describe("Whether to include statistics for each collection (document count, size, etc.)"),
+        .describe("Whether to include statistics for each collection (document count, last updated timestamp)"),
 });
 
 /**
@@ -18,26 +18,42 @@ const ragListCollectionsSchema = z.object({
  */
 async function executeListCollections(
     input: z.infer<typeof ragListCollectionsSchema>,
-    _context: ToolExecutionContext
+    context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { include_stats = false } = input;
 
     const ragService = RAGService.getInstance();
     const collections = await ragService.listCollections();
 
-    // Build response with optional stats note
-    const response: ToolResponse = {
-        success: true,
-        collections_count: collections.length,
-        collections: collections,
-    };
-
-    // If stats requested, add a note that it's not yet implemented
-    if (include_stats && collections.length > 0) {
-        response.note = "Statistics feature is planned for future release";
+    if (!include_stats || collections.length === 0) {
+        return {
+            success: true,
+            collections_count: collections.length,
+            collections: collections,
+        };
     }
 
-    return response;
+    // Fetch stats for all collections with agent attribution
+    const agentPubkey = context.agent.pubkey;
+    const stats = await ragService.getAllCollectionStats(agentPubkey);
+
+    // Build a lookup map for efficient access
+    const statsMap = new Map(stats.map((s) => [s.name, s]));
+
+    const collectionsWithStats = collections.map((name) => {
+        const collectionStats = statsMap.get(name);
+        return {
+            name,
+            total_documents: collectionStats?.totalDocCount ?? 0,
+            agent_documents: collectionStats?.agentDocCount ?? 0,
+        };
+    });
+
+    return {
+        success: true,
+        collections_count: collections.length,
+        collections: collectionsWithStats,
+    };
 }
 
 /**

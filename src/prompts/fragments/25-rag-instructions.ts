@@ -100,11 +100,11 @@ rag_delete_collection({
 \`\`\`
 
 ### 5. rag_list_collections
-List all available collections.
+List all available collections with optional statistics.
 
 \`\`\`typescript
 rag_list_collections({
-  include_stats: false  // Stats feature planned for future
+  include_stats: true  // Include document counts per collection
 })
 \`\`\`
 
