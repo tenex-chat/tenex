@@ -5,7 +5,6 @@ import chalk from "chalk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { config as configService } from "@/services/ConfigService";
-import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { detectOpenClawStateDir, readOpenClawAgents, convertModelFormat } from "./openclaw-reader";
 import { distillAgentIdentity } from "./openclaw-distiller";
 import type { OpenClawAgent } from "./openclaw-reader";
@@ -25,21 +24,13 @@ async function createHomeDir(pubkey: string, workspacePath: string): Promise<str
     // Symlink MEMORY.md (dangling is ok — file may not exist yet)
     const memoryMdTarget = path.join(workspacePath, "MEMORY.md");
     const memoryMdLink = path.join(homeDir, "MEMORY.md");
-    try {
-        await fs.unlink(memoryMdLink);
-    } catch {
-        // doesn't exist yet
-    }
+    await fs.rm(memoryMdLink, { force: true });
     await fs.symlink(memoryMdTarget, memoryMdLink);
 
     // Symlink memory/ directory (dangling is ok)
     const memoryDirTarget = path.join(workspacePath, "memory");
     const memoryDirLink = path.join(homeDir, "memory");
-    try {
-        await fs.unlink(memoryDirLink);
-    } catch {
-        // doesn't exist yet
-    }
+    await fs.rm(memoryDirLink, { force: true });
     await fs.symlink(memoryDirTarget, memoryDirLink);
 
     const indexContent = `# Memory Files
@@ -82,8 +73,8 @@ async function importOneAgent(agent: OpenClawAgent): Promise<void> {
 
     const slug = toSlug(identity.name) || agent.id;
 
-    const existing = await agentStorage.getAgentBySlug(slug);
-    if (existing) {
+    const slugTaken = await agentStorage.slugExists(slug);
+    if (slugTaken) {
         throw new Error(
             `Agent '${slug}' already imported. Delete it first if you want to re-import.`
         );
@@ -93,7 +84,7 @@ async function importOneAgent(agent: OpenClawAgent): Promise<void> {
     const pubkey = signer.pubkey;
 
     const storedAgent = createStoredAgent({
-        nsec: signer.privateKey!,
+        nsec: signer.privateKey,
         slug,
         name: identity.name,
         role: identity.role,
@@ -135,10 +126,6 @@ export const openclawImportCommand = new Command("openclaw")
             console.log(chalk.blue(`Found ${agents.length} agent(s) to import.`));
 
             await configService.loadConfig();
-            const globalPath = configService.getGlobalPath();
-            const providers = await configService.loadTenexProviders(globalPath);
-            await llmServiceFactory.initializeProviders(providers.providers);
-
             await agentStorage.initialize();
 
             let userMdProcessed = false;

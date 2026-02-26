@@ -648,6 +648,15 @@ export class AgentStorage {
     }
 
     /**
+     * Check if any agent (in any project) uses the given slug.
+     * Used for global uniqueness checks (e.g., import commands).
+     */
+    async slugExists(slug: string): Promise<boolean> {
+        if (!this.index) await this.loadIndex();
+        return !!this.index?.bySlug[slug];
+    }
+
+    /**
      * Get agent by slug (uses index for O(1) lookup).
      *
      * **DEPRECATED**: Use getAgentBySlugForProject() instead for project-scoped lookups.
