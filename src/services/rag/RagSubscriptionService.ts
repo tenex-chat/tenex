@@ -401,45 +401,50 @@ export class RagSubscriptionService {
             return false;
         }
 
-        try {
-            // Unsubscribe from MCP resource and remove handler
-            const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
+        // Clean up MCP resources (best-effort — don't block deletion if MCP server lost state)
+        const listenerKey = `${subscription.mcpServerId}:${subscription.resourceUri}`;
 
-            // Remove notification handler from MCPManager dispatcher
-            const removeHandler = this.handlerRemovers.get(listenerKey);
-            if (removeHandler) {
+        // Remove notification handler from MCPManager dispatcher
+        const removeHandler = this.handlerRemovers.get(listenerKey);
+        if (removeHandler) {
+            try {
                 removeHandler();
                 this.handlerRemovers.delete(listenerKey);
+            } catch (error) {
+                // Keep the map entry on failure so a future retry can re-attempt removal
+                logger.warn(`Failed to remove handler for subscription '${subscriptionId}': ${error instanceof Error ? error.message : error}`);
             }
+        }
 
-            const listener = this.resourceListeners.get(listenerKey);
-            if (listener) {
+        if (this.resourceListeners.has(listenerKey)) {
+            try {
                 const projectCtx = getProjectContext();
                 const mcpManager = projectCtx.mcpManager;
 
                 if (mcpManager) {
-                    // Unsubscribe from the resource
+                    // Best-effort: unsubscribe from the MCP resource
                     await mcpManager.unsubscribeFromResource(
                         subscription.mcpServerId,
                         subscription.resourceUri
                     );
                 }
-
-                this.resourceListeners.delete(listenerKey);
+            } catch (error) {
+                // MCP server may have lost subscription state (e.g. after restart).
+                // Log and continue — we still need to remove the local record.
+                logger.warn(
+                    `Best-effort MCP unsubscribe failed for subscription '${subscriptionId}': ${error instanceof Error ? error.message : error}`
+                );
             }
 
-            // Remove subscription
-            this.subscriptions.delete(subscriptionId);
-            await this.saveSubscriptions();
-
-            logger.info(`Deleted subscription '${subscriptionId}'`);
-            return true;
-        } catch (error) {
-            handleError(error, `Failed to delete subscription '${subscriptionId}'`, {
-                logLevel: "error",
-            });
-            throw error;
+            this.resourceListeners.delete(listenerKey);
         }
+
+        // Always remove the subscription from local state and persist
+        this.subscriptions.delete(subscriptionId);
+        await this.saveSubscriptions();
+
+        logger.info(`Deleted subscription '${subscriptionId}'`);
+        return true;
     }
 
     /**
