@@ -94,7 +94,6 @@ export function initializeTelemetry(
     endpoint = DEFAULT_ENDPOINT
 ): void {
     if (!enabled) {
-        console.log("[Telemetry] OpenTelemetry disabled via config");
         return;
     }
 
@@ -111,8 +110,6 @@ export function initializeTelemetry(
 
     sdk = createSDK(serviceName, wrappedExporter);
     sdk.start();
-    console.log(`[Telemetry] OpenTelemetry enabled - service: ${serviceName}`);
-    console.log(`[Telemetry] Exporting to ${exporterUrl}`);
 }
 
 export function shutdownTelemetry(): Promise<void> {
