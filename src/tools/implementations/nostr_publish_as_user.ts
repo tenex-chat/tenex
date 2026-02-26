@@ -6,8 +6,11 @@
  *
  * The agent provides an unsigned event along with a human-readable
  * explanation of WHY the signing is being requested. The explanation
- * is transported as a `tenex_explanation` tag which the frontend
- * displays to the user, then removed before the actual signing occurs.
+ * is transported as a root-level `tenex_explanation` property on the
+ * event object (NOT as a tag). Since NIP-01 event hashing only commits
+ * to [0, pubkey, created_at, kind, tags, content], root-level extras
+ * are never part of the hash or signature, making them safe transport
+ * metadata that the frontend/TUI can read and display to the user.
  */
 
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
@@ -17,7 +20,7 @@ import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
-import { getEventHash, verifyEvent } from "nostr-tools";
+import { verifyEvent } from "nostr-tools";
 import { z } from "zod";
 
 const NIP46_CONNECT_TIMEOUT_MS = 30_000;
@@ -151,12 +154,11 @@ async function connectNip46Signer(
  *
  * Flow:
  * 1. Parse and validate the provided event
- * 2. Add `tenex_explanation` tag (transport for frontend context)
+ * 2. Set `tenex_explanation` as root-level property (transport for frontend context)
  * 3. Send NIP-46 signing request to the project owner
- * 4. Strip `tenex_explanation` tag locally (remote signer already signed without it)
- * 5. Recompute event ID over the clean event
- * 6. Verify the signature is valid over the clean event
- * 7. Publish the signed event to relays
+ * 4. Strip `tenex_explanation` property after signing (harmless — never part of hash)
+ * 5. Verify the signature is valid
+ * 6. Publish the signed event to relays
  */
 async function executeNostrPublishAsUser(
     input: NostrPublishAsUserInput,
@@ -203,8 +205,11 @@ async function executeNostrPublishAsUser(
     ndkEvent.content = parsedEvent.content;
     ndkEvent.tags = parsedEvent.tags ? [...parsedEvent.tags] : [];
 
-    // Add tenex_explanation tag for frontend context
-    ndkEvent.tags.push(["tenex_explanation", explanation]);
+    // Add tenex_explanation as a root-level property for frontend context.
+    // Root-level extras are NOT part of the NIP-01 event hash
+    // ([0, pubkey, created_at, kind, tags, content]), so the signature
+    // is computed over the clean event regardless.
+    (ndkEvent as any).tenex_explanation = explanation;
 
     // Set pubkey to the owner's
     ndkEvent.pubkey = ownerPubkey;
@@ -225,10 +230,10 @@ async function executeNostrPublishAsUser(
 
     // Sign with NIP-46 (the signer sends the event to the user's bunker for approval).
     //
-    // The `tenex_explanation` tag is intentionally left on the event during the
-    // sign() call so it reaches the TUI/bunker as transport context. The
-    // TUI is responsible for displaying the explanation to the user, stripping
-    // the tag, and then producing the signature over the clean event.
+    // The `tenex_explanation` root-level property is present on the event object
+    // during signing so the TUI/bunker can read and display it to the user.
+    // Since it's not in `tags`, it's never part of the event hash — the signature
+    // is always computed over the clean event.
     let signingTimer: ReturnType<typeof setTimeout> | undefined;
     try {
         await Promise.race([
@@ -249,16 +254,10 @@ async function executeNostrPublishAsUser(
         clearTimeout(signingTimer);
     }
 
-    // NDK's NIP-46 sign() only stores the signature string back on the local
-    // event object. The remote signer (TUI/bunker) strips the tenex_explanation
-    // tag and signs the clean event, but the local ndkEvent.tags still contains
-    // the tag and ndkEvent.id was computed WITH it.
-    //
-    // We must reconcile the local state to match what was actually signed:
-    // 1. Strip the tenex_explanation tag locally
-    // 2. Recompute the event ID over the now-clean event
-    // 3. Verify the signature matches the clean event
-    ndkEvent.tags = ndkEvent.tags.filter((t) => t[0] !== "tenex_explanation");
+    // Strip the root-level tenex_explanation property now that signing is done.
+    // This is purely cosmetic cleanup — the property was never part of the
+    // event hash or signature.
+    delete (ndkEvent as any).tenex_explanation;
 
     // Validate timestamp is in seconds, not milliseconds
     if (ndkEvent.created_at && ndkEvent.created_at > 1_000_000_000_000) {
@@ -268,14 +267,9 @@ async function executeNostrPublishAsUser(
         );
     }
 
-    // Recompute the event ID over the clean tags to match the signed content
-    const cleanRawEvent = ndkEvent.rawEvent();
-    const cleanId = getEventHash(cleanRawEvent);
-    ndkEvent.id = cleanId;
-    cleanRawEvent.id = cleanId;
-
-    // Verify the signature is valid over the clean event
-    if (!verifyEvent(cleanRawEvent)) {
+    // Verify the signature is valid
+    const rawEvent = ndkEvent.rawEvent();
+    if (!verifyEvent(rawEvent)) {
         try { nip46Signer.stop(); } catch { /* best-effort cleanup */ }
         throw new Error(
             "Signature verification failed after NIP-46 signing. " +
