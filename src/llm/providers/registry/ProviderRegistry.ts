@@ -106,6 +106,7 @@ export class ProviderRegistry {
         const results: InitializationResult[] = [];
         this.providers.clear();
         this.providerConfigs.clear();
+        this.activeApiKeys.clear();
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {

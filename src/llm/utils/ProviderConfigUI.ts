@@ -38,7 +38,7 @@ export class ProviderConfigUI {
     static async configureProvider(
         provider: string,
         currentProviders?: Record<string, { apiKey: string | string[] }>
-    ): Promise<{ apiKey: string }> {
+    ): Promise<{ apiKey: string | string[] }> {
         if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             // Agent providers don't require an API key
             console.log(
@@ -112,7 +112,7 @@ export class ProviderConfigUI {
                 },
             ]);
             if (keep) {
-                return { apiKey: resolveApiKey(existingKey) || "" };
+                return { apiKey: existingKey };
             }
         }
 
