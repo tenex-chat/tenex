@@ -282,6 +282,7 @@ export async function setupStreamExecution(
         variantSystemPrompt,
         ephemeralMessages,
         availableNudges: NudgeSkillWhitelistService.getInstance().getWhitelistedNudges(),
+        availableSkills: NudgeSkillWhitelistService.getInstance().getWhitelistedSkills(),
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {

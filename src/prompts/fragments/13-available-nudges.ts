@@ -2,14 +2,20 @@ import type { WhitelistItem } from "@/services/nudge";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Fragment for displaying available nudges to agents.
+ * Combined fragment for displaying available nudges AND skills to agents.
  *
- * This shows agents which nudges are available for use in delegations.
- * Nudges can modify tool availability and inject additional context.
+ * Renders under a single "Available Nudges and Skills" heading so agents
+ * recognise this section when asked about either nudges or skills.
+ *
+ * - Shows subsection headers (### Nudges / ### Skills) when BOTH types are present.
+ * - Omits the subsection header when only one type exists.
+ * - Returns empty string when neither nudges nor skills are available.
  */
-interface AvailableNudgesArgs {
+interface AvailableNudgesAndSkillsArgs {
     /** Whitelisted nudges from the NudgeWhitelistService */
-    availableNudges: WhitelistItem[];
+    availableNudges?: WhitelistItem[];
+    /** Whitelisted skills from the NudgeSkillWhitelistService */
+    availableSkills?: WhitelistItem[];
 }
 
 /**
@@ -24,53 +30,93 @@ function escapePromptText(value: string): string {
         .replace(/>/g, "&gt;");
 }
 
-/** Maximum description length for display in available nudges list */
+/** Maximum description length for display in list items */
 const MAX_DESCRIPTION_LENGTH = 150;
 
-export const availableNudgesFragment: PromptFragment<AvailableNudgesArgs> = {
-    id: "available-nudges",
-    priority: 13, // After nudges (11), skills (12), before available-agents (15)
-    template: ({ availableNudges }) => {
-        if (!availableNudges || availableNudges.length === 0) {
+/**
+ * Format a single WhitelistItem into a markdown bullet line.
+ */
+function formatItem(item: WhitelistItem): string {
+    const name = item.name || item.eventId.substring(0, 12);
+    const description = item.description
+        ? item.description.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH)
+        : "No description";
+    return `  - **${escapePromptText(name)}** (${item.eventId.substring(0, 12)}): ${escapePromptText(description)}`;
+}
+
+export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAndSkillsArgs> = {
+    id: "available-nudges-and-skills",
+    priority: 13, // Before available-agents (15)
+    template: ({ availableNudges, availableSkills }) => {
+        const nudges = availableNudges ?? [];
+        const skills = availableSkills ?? [];
+        const hasNudges = nudges.length > 0;
+        const hasSkills = skills.length > 0;
+
+        if (!hasNudges && !hasSkills) {
             return "";
         }
 
-        const nudgeList = availableNudges
-            .map((nudge) => {
-                const name = nudge.name || nudge.eventId.substring(0, 12);
-                // Truncate description here in presentation layer (service keeps full content)
-                const description = nudge.description
-                    ? nudge.description.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH)
-                    : "No description";
-                return `  - **${escapePromptText(name)}** (${nudge.eventId.substring(0, 12)}): ${escapePromptText(description)}`;
-            })
-            .join("\n");
+        const hasBoth = hasNudges && hasSkills;
+        const sections: string[] = [];
 
-        return `## Available Nudges
+        // --- Header ---
+        sections.push("## Available Nudges and Skills");
+        sections.push("");
+        sections.push(
+            "The following nudges and skills are available for use when delegating tasks. Pass their event IDs in the `nudges` parameter of the delegate tool to apply them to delegated agents."
+        );
+        sections.push("");
+        sections.push(
+            "Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context/instructions into the agent's system prompt."
+        );
+        sections.push(
+            "Skills provide transient capabilities and context without modifying tool availability."
+        );
 
-The following nudges are available for use when delegating tasks. Pass nudge event IDs in the \`nudges\` parameter of the delegate tool to apply them to delegated agents.
+        // --- Nudges ---
+        if (hasNudges) {
+            sections.push("");
+            if (hasBoth) {
+                sections.push("### Nudges");
+                sections.push("");
+            }
+            sections.push(nudges.map(formatItem).join("\n"));
+        }
 
-Nudges can modify tool availability (only-tool, allow-tool, deny-tool) and inject additional context/instructions into the agent's system prompt.
+        // --- Skills ---
+        if (hasSkills) {
+            sections.push("");
+            if (hasBoth) {
+                sections.push("### Skills");
+                sections.push("");
+            }
+            sections.push(skills.map(formatItem).join("\n"));
+        }
 
-${nudgeList}
+        // --- Example ---
+        const exampleId =
+            (hasNudges ? nudges[0] : skills[0]).eventId.substring(0, 12);
+        sections.push("");
+        sections.push("Example usage:");
+        sections.push("```");
+        sections.push("delegate({");
+        sections.push("  delegations: [{");
+        sections.push('    recipient: "agent-slug",');
+        sections.push('    prompt: "Your task here",');
+        sections.push(`    nudges: ["${exampleId}..."]`);
+        sections.push("  }]");
+        sections.push("})");
+        sections.push("```");
 
-Example usage:
-\`\`\`
-delegate({
-  delegations: [{
-    recipient: "agent-slug",
-    prompt: "Your task here",
-    nudges: ["${availableNudges[0]?.eventId.substring(0, 12)}..."]
-  }]
-})
-\`\`\``;
+        return sections.join("\n");
     },
-    validateArgs: (args: unknown): args is AvailableNudgesArgs => {
+    validateArgs: (args: unknown): args is AvailableNudgesAndSkillsArgs => {
         if (typeof args !== "object" || args === null) return false;
         const a = args as Record<string, unknown>;
-        if (a.availableNudges === undefined) return true; // Optional
-        if (!Array.isArray(a.availableNudges)) return false;
+        if (a.availableNudges !== undefined && !Array.isArray(a.availableNudges)) return false;
+        if (a.availableSkills !== undefined && !Array.isArray(a.availableSkills)) return false;
         return true;
     },
-    expectedArgs: "{ availableNudges?: WhitelistItem[] }",
+    expectedArgs: "{ availableNudges?: WhitelistItem[], availableSkills?: WhitelistItem[] }",
 };

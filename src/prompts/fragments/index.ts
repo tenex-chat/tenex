@@ -27,7 +27,7 @@ import { todoBeforeDelegationFragment } from "./17-todo-before-delegation";
 import "./20-voice-mode";
 import { nudgesFragment } from "./11-nudges";
 import { skillsFragment } from "./12-skills";
-import { availableNudgesFragment } from "./13-available-nudges";
+import { availableNudgesAndSkillsFragment } from "./13-available-nudges";
 import { scheduledTasksFragment } from "./22-scheduled-tasks";
 import { retrievedLessonsFragment } from "./24-retrieved-lessons";
 import { ragInstructionsFragment } from "./25-rag-instructions";
@@ -73,7 +73,7 @@ export function registerAllFragments(): void {
     // voice-mode and referenced-article are registered via side effects
     fragmentRegistry.register(nudgesFragment);
     fragmentRegistry.register(skillsFragment);
-    fragmentRegistry.register(availableNudgesFragment);
+    fragmentRegistry.register(availableNudgesAndSkillsFragment);
 
     // Scheduled tasks context
     fragmentRegistry.register(scheduledTasksFragment);
