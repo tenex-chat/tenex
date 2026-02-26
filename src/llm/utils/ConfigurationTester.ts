@@ -11,7 +11,7 @@ import { llmServiceFactory } from "../LLMServiceFactory";
  * Extended type for editor use - includes providers
  */
 type TenexLLMsWithProviders = TenexLLMs & {
-    providers: Record<string, { apiKey: string }>;
+    providers: Record<string, { apiKey: string | string[] }>;
 };
 
 /**

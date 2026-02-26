@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { fileExists, readJsonFile, writeJsonFile, ensureDirectory } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
+import { resolveApiKey } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 
 /**
@@ -337,7 +338,7 @@ export class ImageGenerationService {
         try {
             const globalPath = config.getGlobalPath();
             const providersConfig = await config.loadTenexProviders(globalPath);
-            return providersConfig.providers[providerId]?.apiKey;
+            return resolveApiKey(providersConfig.providers[providerId]?.apiKey);
         } catch (error) {
             logger.debug(`Failed to load API key for ${providerId}`, { error });
             return undefined;

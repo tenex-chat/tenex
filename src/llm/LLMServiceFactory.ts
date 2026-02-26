@@ -18,7 +18,7 @@ import { LLMService } from "./service";
 import {
     providerRegistry,
     type MCPConfig,
-    type ProviderInitConfig,
+    type ProviderPoolConfig,
     type ProviderRuntimeContext,
 } from "./providers";
 import { PROVIDER_IDS } from "./providers/provider-ids";
@@ -45,15 +45,20 @@ export class LLMServiceFactory {
      * @param options Additional options for initialization
      */
     async initializeProviders(
-        providerConfigs: Record<string, { apiKey: string }>,
+        providerConfigs: Record<string, { apiKey: string | string[] }>,
         options?: { enableTenexTools?: boolean }
     ): Promise<void> {
         this.enableTenexTools = options?.enableTenexTools !== false;
 
-        // Convert to ProviderInitConfig format
-        const configs: Record<string, ProviderInitConfig> = {};
+        // Convert to ProviderPoolConfig format
+        // apiKey can be a single string or an array — KeyManager handles the rest
+        const configs: Record<string, ProviderPoolConfig> = {};
         for (const [name, config] of Object.entries(providerConfigs)) {
-            if (config?.apiKey) {
+            const hasKey = Array.isArray(config?.apiKey)
+                ? config.apiKey.length > 0
+                : !!config?.apiKey;
+
+            if (hasKey) {
                 configs[name] = {
                     apiKey: config.apiKey,
                     options: {
@@ -63,8 +68,8 @@ export class LLMServiceFactory {
             }
         }
 
-        // Also ensure agent providers are initialized (they don't need API keys)
-        // Add them with empty configs if not already present
+        // Also ensure agent providers are initialized (they don't need API keys).
+        // Add them with empty configs if not already present.
         const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER, PROVIDER_IDS.GEMINI_CLI];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {

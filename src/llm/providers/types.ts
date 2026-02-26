@@ -56,8 +56,21 @@ export interface ProviderMetadata {
  * Configuration for initializing a provider
  */
 export interface ProviderInitConfig {
-    /** API key or authentication token */
+    /** API key or authentication token (always a single resolved key for providers) */
     apiKey?: string;
+    /** Base URL for the API (for self-hosted providers) */
+    baseUrl?: string;
+    /** Additional provider-specific options */
+    options?: Record<string, unknown>;
+}
+
+/**
+ * Configuration accepted by the registry's initialize method.
+ * Supports multiple API keys per provider for rotation/fallback.
+ */
+export interface ProviderPoolConfig {
+    /** API key(s) — single string or array for multi-key rotation */
+    apiKey?: string | string[];
     /** Base URL for the API (for self-hosted providers) */
     baseUrl?: string;
     /** Additional provider-specific options */

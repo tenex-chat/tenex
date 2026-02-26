@@ -1,5 +1,6 @@
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { TenexLLMs } from "@/services/config/types";
+import { resolveApiKey } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
 
@@ -7,7 +8,7 @@ import inquirer from "inquirer";
  * Extended type for editor use - includes providers
  */
 type TenexLLMsWithProviders = TenexLLMs & {
-    providers: Record<string, { apiKey: string }>;
+    providers: Record<string, { apiKey: string | string[] }>;
 };
 
 /**
@@ -36,7 +37,7 @@ export class ProviderConfigUI {
      */
     static async configureProvider(
         provider: string,
-        currentProviders?: Record<string, { apiKey: string }>
+        currentProviders?: Record<string, { apiKey: string | string[] }>
     ): Promise<{ apiKey: string }> {
         if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             // Agent providers don't require an API key
@@ -49,7 +50,7 @@ export class ProviderConfigUI {
         }
         if (provider === PROVIDER_IDS.OLLAMA) {
             // For Ollama, ask for base URL instead of API key
-            const currentUrl = currentProviders?.[provider]?.apiKey || "local";
+            const currentUrl = resolveApiKey(currentProviders?.[provider]?.apiKey) || "local";
             const { ollamaConfig } = await inquirer.prompt([
                 {
                     type: "select",
@@ -88,7 +89,7 @@ export class ProviderConfigUI {
             return { apiKey: baseUrl };
         }
         // For other providers, ask for API key
-        const currentKey = currentProviders?.[provider]?.apiKey;
+        const currentKey = resolveApiKey(currentProviders?.[provider]?.apiKey);
         const { apiKey } = await inquirer.prompt([
             {
                 type: "password",

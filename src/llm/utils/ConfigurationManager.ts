@@ -4,7 +4,7 @@ import type { LLMConfiguration, MetaModelConfiguration, MetaModelVariant, TenexL
  * Extended type for editor use - includes providers
  */
 type TenexLLMsWithProviders = TenexLLMs & {
-    providers: Record<string, { apiKey: string }>;
+    providers: Record<string, { apiKey: string | string[] }>;
 };
 import chalk from "chalk";
 import inquirer from "inquirer";
