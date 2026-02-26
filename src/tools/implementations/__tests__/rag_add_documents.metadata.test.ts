@@ -66,6 +66,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with string metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -96,6 +97,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with numeric metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -126,6 +128,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with boolean metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -156,6 +159,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with null metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -185,6 +189,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with nested metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -216,6 +221,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(createMockContext());
             
             await tool.execute({
+                description: "Add test documents with array metadata",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -248,6 +254,7 @@ describe("rag_add_documents metadata handling", () => {
             const tool = createTool(context);
             
             await tool.execute({
+                description: "Add test documents for agent pubkey injection",
                 collection: "test",
                 documents: [{
                     content: "test content",
@@ -279,6 +286,7 @@ describe("rag_add_documents metadata handling", () => {
             
             // User explicitly provides their own agent_pubkey
             await tool.execute({
+                description: "Add test documents with custom pubkey",
                 collection: "test",
                 documents: [{
                     content: "test content",

@@ -6,6 +6,12 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const ragQuerySchema = z.object({
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're querying this collection (5-10 words). Helps provide human-readable context for the operation."
+        ),
     collection: z.string().describe("Name of the collection to query"),
     query_text: z.string().describe("The text query for semantic search"),
     top_k: z

@@ -6,6 +6,12 @@ import { tool } from "ai";
 import { z } from "zod";
 
 const ragCreateCollectionSchema = z.object({
+    description: z
+        .string()
+        .min(1, "Description is required and cannot be empty")
+        .describe(
+            "REQUIRED: A clear, concise description of why you're creating this collection (5-10 words). Helps provide human-readable context for the operation."
+        ),
     name: z.string().describe("Name of the collection to create (alphanumeric with underscores)"),
     schema: z
         .record(z.string(), z.any())
