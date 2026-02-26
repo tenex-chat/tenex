@@ -108,8 +108,6 @@ export interface ProviderRuntimeContext {
     workingDirectory?: string;
     /** MCP configuration - passed from services layer to avoid layer violations */
     mcpConfig?: MCPConfig;
-    /** Whether TENEX tools should be enabled */
-    enableTenexTools?: boolean;
     /** Reasoning effort level (for codex-app-server) */
     reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
     /** Callback invoked when Claude Code stream starts, providing the message injector */

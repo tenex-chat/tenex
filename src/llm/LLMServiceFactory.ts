@@ -35,7 +35,6 @@ import type { OnStreamStartCallback } from "./types";
  * The actual provider management is delegated to the ProviderRegistry.
  */
 export class LLMServiceFactory {
-    private enableTenexTools = true;
     private initialized = false;
 
     /**
@@ -45,11 +44,8 @@ export class LLMServiceFactory {
      * @param options Additional options for initialization
      */
     async initializeProviders(
-        providerConfigs: Record<string, { apiKey: string | string[] }>,
-        options?: { enableTenexTools?: boolean }
+        providerConfigs: Record<string, { apiKey: string | string[] }>
     ): Promise<void> {
-        this.enableTenexTools = options?.enableTenexTools !== false;
-
         // Convert to ProviderPoolConfig format
         // apiKey can be a single string or an array — KeyManager handles the rest
         const configs: Record<string, ProviderPoolConfig> = {};
@@ -61,9 +57,6 @@ export class LLMServiceFactory {
             if (hasKey) {
                 configs[name] = {
                     apiKey: config.apiKey,
-                    options: {
-                        enableTenexTools: this.enableTenexTools,
-                    },
                 };
             }
         }
@@ -73,16 +66,12 @@ export class LLMServiceFactory {
         const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {
-                configs[providerId] = {
-                    options: {
-                        enableTenexTools: this.enableTenexTools,
-                    },
-                };
+                configs[providerId] = {};
             }
         }
 
         // Initialize through the registry (which has its own tracing span)
-        const results = await providerRegistry.initialize(configs, options);
+        const results = await providerRegistry.initialize(configs);
 
         // Log initialization failures
         const failed = results.filter(r => !r.success);
@@ -138,7 +127,6 @@ export class LLMServiceFactory {
             sessionId: context?.sessionId,
             workingDirectory: context?.workingDirectory,
             mcpConfig: context?.mcpConfig,
-            enableTenexTools: this.enableTenexTools,
             reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" }).reasoningEffort,
             onStreamStart: context?.onStreamStart,
         };

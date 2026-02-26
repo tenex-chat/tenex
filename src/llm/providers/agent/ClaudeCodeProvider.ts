@@ -88,8 +88,6 @@ type ClaudeCodeSettingsWithStreamStart = ClaudeCodeSettings & {
  * Claude Code provider implementation
  */
 export class ClaudeCodeProvider extends AgentProvider {
-    private enableTenexTools = true;
-
     static readonly METADATA: ProviderMetadata = AgentProvider.createMetadata(
         PROVIDER_IDS.CLAUDE_CODE,
         "Claude Code",
@@ -109,14 +107,6 @@ export class ClaudeCodeProvider extends AgentProvider {
 
     get metadata(): ProviderMetadata {
         return ClaudeCodeProvider.METADATA;
-    }
-
-    /**
-     * Initialize with TENEX tools setting
-     */
-    async initialize(config: ProviderInitConfig): Promise<void> {
-        this.enableTenexTools = config.options?.enableTenexTools !== false;
-        await super.initialize(config);
     }
 
     /**
@@ -150,14 +140,14 @@ export class ClaudeCodeProvider extends AgentProvider {
             "session.id": context.sessionId ?? "",
             "tools.count": regularTools.length,
             "mcp_tools.count": mcpTools.length,
-            "tenex_tools.enabled": this.enableTenexTools,
+            "tenex_tools.enabled": true,
             "cwd.from_context": context.workingDirectory ?? "(undefined)",
             "disallowed_builtins": disallowedTools.join(", "),
         });
 
-        // Create SDK MCP server for local TENEX tools if enabled
+        // Create SDK MCP server for local TENEX tools
         const tenexSdkServer =
-            this.enableTenexTools && regularTools.length > 0 && context.tools
+            regularTools.length > 0 && context.tools
                 ? ClaudeCodeToolsAdapter.createSdkMcpServer(context.tools)
                 : undefined;
 

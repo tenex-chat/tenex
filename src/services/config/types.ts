@@ -18,11 +18,6 @@ export interface TenexConfig {
     relays?: string[]; // Nostr relay URLs
     blossomServerUrl?: string; // Blossom server URL for blob uploads (default: https://blossom.primal.net)
 
-    // Claude Code specific configuration
-    claudeCode?: {
-        enableTenexTools?: boolean; // Feature flag: provide TENEX tools to claude-code agents (default: true)
-    };
-
     // Logging configuration
     logging?: {
         logFile?: string; // Path to log file (default: ~/.tenex/daemon.log)
@@ -105,11 +100,6 @@ export const TenexConfigSchema = z.object({
     projectsBase: z.string().optional(),
     relays: z.array(z.string()).optional(),
     blossomServerUrl: z.string().optional(),
-    claudeCode: z
-        .object({
-            enableTenexTools: z.boolean().optional(),
-        })
-        .optional(),
     logging: z
         .object({
             logFile: z.string().optional(),

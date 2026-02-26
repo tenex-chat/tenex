@@ -156,9 +156,7 @@ export class ConfigService {
         this.loadedConfig = loadedConfig;
 
         // Initialize the LLM factory with provider configs and global settings
-        await llmServiceFactory.initializeProviders(providers.providers, {
-            enableTenexTools: config.claudeCode?.enableTenexTools,
-        });
+        await llmServiceFactory.initializeProviders(providers.providers);
 
         // Load models.dev cache for model metadata (context windows, output limits)
         await ensureModelsDevCacheLoaded();

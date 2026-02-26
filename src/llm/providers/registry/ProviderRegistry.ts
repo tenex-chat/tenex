@@ -100,8 +100,7 @@ export class ProviderRegistry {
      * and a single key is selected for each provider's initial setup.
      */
     async initialize(
-        configs: Record<string, ProviderPoolConfig>,
-        _options?: { enableTenexTools?: boolean }
+        configs: Record<string, ProviderPoolConfig>
     ): Promise<InitializationResult[]> {
         const results: InitializationResult[] = [];
         this.providers.clear();
