@@ -19,6 +19,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // Conversation tools for project introspection
     "conversation_get", // All agents should access conversation details
     "conversation_list", // All agents should list conversations
+    // Unified search across all project knowledge
+    "search", // All agents should be able to search across reports, conversations, and lessons
     // Process control
     "kill", // All agents should be able to terminate processes
     // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)

@@ -83,6 +83,9 @@ import { createWebSearchTool } from "./implementations/web_search";
 import { createNostrFetchTool } from "./implementations/nostr_fetch";
 import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
+// Unified search tool
+import { createSearchTool } from "./implementations/search";
+
 // Image generation tools
 import { createGenerateImageTool } from "./implementations/generate_image";
 
@@ -129,6 +132,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
     nostr_fetch: { hasSideEffects: false },
+    search: { hasSideEffects: false },
 };
 
 /**
@@ -199,6 +203,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Conversation search
     conversation_search: createConversationSearchTool,
+
+    // Unified search across all project knowledge
+    search: createSearchTool,
 
     shell: createShellTool,
     kill: createKillTool,

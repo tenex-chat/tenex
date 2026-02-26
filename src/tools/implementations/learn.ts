@@ -1,5 +1,6 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import type { EventContext, LessonIntent } from "@/nostr/types";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -84,6 +85,17 @@ async function executeLessonLearn(
 
         // Add the lesson to the RAG collection
         const lessonContent = detailed || lesson;
+
+        // Get projectId for project-scoped search isolation
+        let projectId: string | undefined;
+        if (isProjectContextInitialized()) {
+            try {
+                projectId = getProjectContext().project.tagId();
+            } catch {
+                // Project context not available - lesson will lack project scoping
+            }
+        }
+
         await ragService.addDocuments("lessons", [
             {
                 id: lessonEvent.encode(),
@@ -97,6 +109,7 @@ async function executeLessonLearn(
                     timestamp: Date.now(),
                     hasDetailed: !!detailed,
                     type: "lesson",
+                    ...(projectId && { projectId }),
                 },
             },
         ]);
