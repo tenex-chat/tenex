@@ -18,6 +18,7 @@ import { prefixKVStore } from "@/services/storage";
 import { logger } from "../utils/logger";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
+import { getPubkeyGateService } from "@/services/pubkey-gate";
 import { handleAgentDeletion } from "./agentDeletion";
 import { handleProjectEvent } from "./project";
 import { handleChatMessage } from "./reply";
@@ -69,6 +70,13 @@ export class EventHandler {
     async handleEvent(event: NDKEvent): Promise<void> {
         // Ignore ephemeral status and typing indicator events
         if (IGNORED_EVENT_KINDS.includes(event.kind)) return;
+
+        // PUBKEY GATE: Only allow events from trusted pubkeys (whitelisted, backend, or known agents)
+        // This is the front-door gate — all events must pass through before any routing occurs.
+        // Fail-closed: if the check errors, the event is denied.
+        if (!getPubkeyGateService().shouldAllowEvent(event)) {
+            return;
+        }
 
         // Index event ID and pubkey for prefix lookups
         await indexEventForPrefixLookup(event);
