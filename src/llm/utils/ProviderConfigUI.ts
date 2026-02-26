@@ -1,6 +1,6 @@
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
+import { resolveApiKey, hasApiKey } from "@/llm/providers/key-manager";
 import type { TenexLLMs } from "@/services/config/types";
-import { resolveApiKey } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
 
@@ -89,7 +89,34 @@ export class ProviderConfigUI {
             return { apiKey: baseUrl };
         }
         // For other providers, ask for API key
-        const currentKey = resolveApiKey(currentProviders?.[provider]?.apiKey);
+        const existingKey = currentProviders?.[provider]?.apiKey;
+
+        // If the provider already has a multi-key array, preserve it
+        if (Array.isArray(existingKey) && existingKey.length > 1) {
+            console.log(
+                chalk.cyan(
+                    `  ℹ  ${ProviderConfigUI.getProviderDisplayName(provider)} has ${existingKey.length} API keys configured (multi-key rotation).`
+                )
+            );
+            console.log(
+                chalk.gray(
+                    "     To edit multi-key configs, modify providers.json directly."
+                )
+            );
+            const { keep } = await inquirer.prompt([
+                {
+                    type: "confirm",
+                    name: "keep",
+                    message: "Keep existing multi-key configuration?",
+                    default: true,
+                },
+            ]);
+            if (keep) {
+                return { apiKey: resolveApiKey(existingKey) || "" };
+            }
+        }
+
+        const currentKey = resolveApiKey(existingKey);
         const { apiKey } = await inquirer.prompt([
             {
                 type: "password",
@@ -114,7 +141,7 @@ export class ProviderConfigUI {
     static displayCurrentConfig(llmsConfig: TenexLLMsWithProviders): void {
         console.log(chalk.bold("Configured Providers:"));
         const providers = Object.keys(llmsConfig.providers).filter(
-            (p) => llmsConfig.providers[p]?.apiKey
+            (p) => hasApiKey(llmsConfig.providers[p]?.apiKey)
         );
         if (providers.length === 0) {
             console.log(chalk.gray("  None configured"));

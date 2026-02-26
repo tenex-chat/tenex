@@ -393,16 +393,8 @@ export interface LoadedConfig {
 // HELPER TYPES
 // =====================================================================================
 
-/**
- * Resolve an API key that may be a single string or an array.
- * For services that only need a single key (embeddings, image gen),
- * this returns the first key from an array or the string itself.
- */
-export function resolveApiKey(apiKey: string | string[] | undefined): string | undefined {
-    if (!apiKey) return undefined;
-    if (Array.isArray(apiKey)) return apiKey[0];
-    return apiKey;
-}
+// resolveApiKey has moved to @/llm/providers/key-manager — re-export for backwards compatibility
+export { resolveApiKey } from "@/llm/providers/key-manager";
 
 export type ConfigFile = "config.json" | "llms.json" | "mcp.json" | "providers.json";
 

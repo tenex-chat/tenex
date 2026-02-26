@@ -45,6 +45,7 @@ export class ProviderRegistry {
     private providers: Map<string, ILLMProvider> = new Map();
     private registrations: Map<string, ProviderRegistration> = new Map();
     private providerConfigs: Map<string, ProviderPoolConfig> = new Map();
+    private activeApiKeys: Map<string, string> = new Map();
     private aiSdkRegistry: ProviderRegistryProvider | null = null;
     private initialized = false;
 
@@ -114,7 +115,12 @@ export class ProviderRegistry {
         // Register all key pools with KeyManager and initialize providers
         for (const [providerId, registration] of this.registrations) {
             const config = configs[providerId];
-            const apiKey = config?.apiKey;
+            const rawKey = config?.apiKey;
+
+            // Normalize: treat empty arrays and arrays of only empty strings as "no key"
+            const apiKey = Array.isArray(rawKey)
+                ? (rawKey.filter(k => k.length > 0).length > 0 ? rawKey : undefined)
+                : (rawKey || undefined);
 
             // Register keys with KeyManager (handles string | string[])
             if (apiKey) {
@@ -143,6 +149,9 @@ export class ProviderRegistry {
                 };
                 await provider.initialize(initConfig);
                 this.providers.set(providerId, provider);
+                if (selectedKey) {
+                    this.activeApiKeys.set(providerId, selectedKey);
+                }
 
                 results.push({ providerId, success: true });
 
@@ -197,21 +206,23 @@ export class ProviderRegistry {
         }
 
         try {
-            // Reset the old provider
-            const oldProvider = this.providers.get(providerId);
-            if (oldProvider) {
-                oldProvider.reset();
-            }
-
-            // Create and initialize a new provider instance with the new key
-            const provider = new registration.Provider();
+            // Build the new provider FIRST — never tear down before we have a replacement
+            const newProvider = new registration.Provider();
             const initConfig: ProviderInitConfig = {
                 apiKey: newKey,
                 baseUrl: originalConfig.baseUrl,
                 options: originalConfig.options,
             };
-            await provider.initialize(initConfig);
-            this.providers.set(providerId, provider);
+            await newProvider.initialize(initConfig);
+
+            // New provider is ready — now swap it in and clean up the old one
+            const oldProvider = this.providers.get(providerId);
+            this.providers.set(providerId, newProvider);
+            this.activeApiKeys.set(providerId, newKey);
+
+            if (oldProvider) {
+                oldProvider.reset();
+            }
 
             // Rebuild the AI SDK registry to reflect the new provider instance
             this.buildAiSdkRegistry();
@@ -224,6 +235,7 @@ export class ProviderRegistry {
             logger.error(`[ProviderRegistry] Failed to re-initialize "${providerId}"`, {
                 error: errorMessage,
             });
+            // Old provider remains intact — no downtime
             return false;
         }
     }
@@ -233,15 +245,7 @@ export class ProviderRegistry {
      * Used by callers that need to report which key failed.
      */
     getActiveApiKey(providerId: string): string | undefined {
-        const provider = this.providers.get(providerId);
-        if (!provider) return undefined;
-
-        // Access the stored config on the base provider
-        const config = (provider as unknown as { config?: ProviderInitConfig }).config;
-        if (!config?.apiKey) return undefined;
-
-        // At this point, the provider was initialized with a single key
-        return typeof config.apiKey === "string" ? config.apiKey : undefined;
+        return this.activeApiKeys.get(providerId);
     }
 
     /**
@@ -397,6 +401,7 @@ export class ProviderRegistry {
         }
         this.providers.clear();
         this.providerConfigs.clear();
+        this.activeApiKeys.clear();
         this.aiSdkRegistry = null;
         this.initialized = false;
         keyManager.reset();

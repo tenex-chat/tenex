@@ -122,12 +122,15 @@ describe("KeyManager", () => {
     });
 
     describe("key re-enabling", () => {
-        it("re-enables key after disable duration", async () => {
-            // Use very short durations for testing
+        it("re-enables key after disable duration", () => {
+            let now = 1000;
+            const clock = { now: () => now };
+
             km = new KeyManager({
                 failureWindowMs: 500,
                 failureThreshold: 2,
                 disableDurationMs: 100,
+                clock,
             });
 
             km.registerKeys("openai", ["sk-a", "sk-b"]);
@@ -141,8 +144,8 @@ describe("KeyManager", () => {
                 expect(km.selectKey("openai")).toBe("sk-b");
             }
 
-            // Wait for the disable duration to pass
-            await new Promise(resolve => setTimeout(resolve, 150));
+            // Advance clock past the disable duration
+            now += 150;
 
             // sk-a should be re-enabled now
             const selected = new Set<string>();
@@ -155,11 +158,15 @@ describe("KeyManager", () => {
     });
 
     describe("failure window expiry", () => {
-        it("prunes old failures outside the window", async () => {
+        it("prunes old failures outside the window", () => {
+            let now = 1000;
+            const clock = { now: () => now };
+
             km = new KeyManager({
                 failureWindowMs: 100,
                 failureThreshold: 3,
                 disableDurationMs: 2000,
+                clock,
             });
 
             km.registerKeys("openai", ["sk-a", "sk-b"]);
@@ -168,8 +175,8 @@ describe("KeyManager", () => {
             km.reportFailure("openai", "sk-a");
             km.reportFailure("openai", "sk-a");
 
-            // Wait for the window to expire
-            await new Promise(resolve => setTimeout(resolve, 150));
+            // Advance clock past the failure window
+            now += 150;
 
             // Third failure should NOT trigger disable (old failures pruned)
             km.reportFailure("openai", "sk-a");

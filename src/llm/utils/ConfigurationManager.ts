@@ -1,4 +1,5 @@
 import type { LLMConfiguration, MetaModelConfiguration, MetaModelVariant, TenexLLMs } from "@/services/config/types";
+import { hasApiKey } from "@/llm/providers/key-manager";
 
 /**
  * Extended type for editor use - includes providers
@@ -20,7 +21,7 @@ import { listCodexModels, formatCodexModel } from "./codex-models";
 export class ConfigurationManager {
     static async add(llmsConfig: TenexLLMsWithProviders, isFirstConfig = false): Promise<void> {
         const configuredProviders = Object.keys(llmsConfig.providers).filter(
-            (p) => llmsConfig.providers[p]?.apiKey
+            (p) => hasApiKey(llmsConfig.providers[p]?.apiKey)
         );
 
         if (configuredProviders.length === 0) {

@@ -14,6 +14,15 @@
 import { logger } from "@/utils/logger";
 
 /**
+ * Clock interface for injectable time source (enables deterministic testing)
+ */
+export interface Clock {
+    now(): number;
+}
+
+const systemClock: Clock = { now: () => Date.now() };
+
+/**
  * Configuration for key health tracking
  */
 export interface KeyManagerConfig {
@@ -23,6 +32,8 @@ export interface KeyManagerConfig {
     failureThreshold: number;
     /** How long (ms) a key stays disabled after hitting the threshold. Default: 300000 (5 min) */
     disableDurationMs: number;
+    /** Injectable clock for testing. Defaults to system clock. */
+    clock?: Clock;
 }
 
 const DEFAULT_CONFIG: KeyManagerConfig = {
@@ -52,9 +63,11 @@ export class KeyManager {
     private keys: Map<string, string[]> = new Map();
     private health: Map<string, KeyHealth> = new Map();
     private config: KeyManagerConfig;
+    private clock: Clock;
 
     constructor(config?: Partial<KeyManagerConfig>) {
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.clock = config?.clock ?? systemClock;
     }
 
     /**
@@ -113,7 +126,7 @@ export class KeyManager {
             return;
         }
 
-        const now = Date.now();
+        const now = this.clock.now();
         health.failures.push(now);
 
         // Prune old failures outside the window
@@ -170,7 +183,7 @@ export class KeyManager {
         const health = this.health.get(hKey);
         if (!health) return true;
 
-        const now = Date.now();
+        const now = this.clock.now();
 
         // Re-enable if disable period has passed
         if (health.disabledUntil > 0 && now >= health.disabledUntil) {
@@ -202,3 +215,24 @@ export class KeyManager {
  * Singleton instance shared across the application
  */
 export const keyManager = new KeyManager();
+
+/**
+ * Resolve an API key that may be a single string or an array.
+ * For services that only need a single key (embeddings, image gen),
+ * this returns the first key from an array or the string itself.
+ */
+export function resolveApiKey(apiKey: string | string[] | undefined): string | undefined {
+    if (!apiKey) return undefined;
+    if (Array.isArray(apiKey)) return apiKey[0];
+    return apiKey;
+}
+
+/**
+ * Check whether an API key value represents a configured, usable key.
+ * Handles string, string[], undefined, and empty values.
+ */
+export function hasApiKey(apiKey: string | string[] | undefined): boolean {
+    if (!apiKey) return false;
+    if (Array.isArray(apiKey)) return apiKey.some(k => k.length > 0);
+    return apiKey.length > 0 && apiKey !== "none";
+}
