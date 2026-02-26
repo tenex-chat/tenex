@@ -2,7 +2,21 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { findOpenClawStateDir, readOpenClawAgents } from "../openclaw-reader";
+import { convertModelFormat, findOpenClawStateDir, readOpenClawAgents } from "../openclaw-reader";
+
+describe("convertModelFormat", () => {
+    it("converts provider/model to provider:model", () => {
+        expect(convertModelFormat("anthropic/claude-sonnet-4-6")).toBe("anthropic:claude-sonnet-4-6");
+    });
+
+    it("only replaces the first slash, preserving slashes in model name", () => {
+        expect(convertModelFormat("openrouter/anthropic/claude-3-5-sonnet")).toBe("openrouter:anthropic/claude-3-5-sonnet");
+    });
+
+    it("returns unchanged string if no slash", () => {
+        expect(convertModelFormat("anthropic:claude-sonnet-4-6")).toBe("anthropic:claude-sonnet-4-6");
+    });
+});
 
 describe("findOpenClawStateDir", () => {
     let tempDir: string;

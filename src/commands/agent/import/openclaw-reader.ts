@@ -24,8 +24,10 @@ async function readFileOrNull(filePath: string): Promise<string | null> {
     }
 }
 
+const CONFIG_FILE_NAMES = ["openclaw.json", "clawdbot.json", "moldbot.json", "moltbot.json"] as const;
+
 async function configExists(dir: string): Promise<boolean> {
-    for (const name of ["openclaw.json", "clawdbot.json", "moldbot.json", "moltbot.json"]) {
+    for (const name of CONFIG_FILE_NAMES) {
         try {
             await fs.access(path.join(dir, name));
             return true;
@@ -64,7 +66,7 @@ export async function detectOpenClawStateDir(): Promise<string | null> {
 }
 
 async function readConfigJson(stateDir: string): Promise<Record<string, unknown>> {
-    for (const name of ["openclaw.json", "clawdbot.json", "moldbot.json", "moltbot.json"]) {
+    for (const name of CONFIG_FILE_NAMES) {
         try {
             const content = await fs.readFile(path.join(stateDir, name), "utf-8");
             return JSON.parse(content);
@@ -133,5 +135,7 @@ export async function readOpenClawAgents(stateDir: string): Promise<OpenClawAgen
  * OpenClaw uses "provider/model", TENEX uses "provider:model".
  */
 export function convertModelFormat(openClawModel: string): string {
-    return openClawModel.replace("/", ":");
+    const firstSlash = openClawModel.indexOf("/");
+    if (firstSlash === -1) return openClawModel;
+    return openClawModel.slice(0, firstSlash) + ":" + openClawModel.slice(firstSlash + 1);
 }
