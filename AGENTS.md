@@ -140,6 +140,9 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { NDKEvent } from "@nostr-dev-kit/ndk";  // Only for types
 ```
 
+### Event Kinds
+All Nostr event kinds used by TENEX are defined in `src/nostr/kinds.ts`. This is the single source of truth — never hardcode kind numbers elsewhere. The `src/events/AGENTS.md` and `src/nostr/AGENTS.md` files contain detailed reference tables.
+
 ### Tools Pattern
 Tools delegate to services, never hold state:
 ```typescript
