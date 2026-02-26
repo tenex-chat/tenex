@@ -112,6 +112,8 @@ export interface BuildSystemPromptOptions {
     skills?: SkillData[];
     /** Available whitelisted nudges for delegation */
     availableNudges?: WhitelistItem[];
+    /** Available whitelisted skills */
+    availableSkills?: WhitelistItem[];
 }
 
 
@@ -357,12 +359,14 @@ function addAgentFragments(
     agent: AgentInstance,
     availableAgents: AgentInstance[],
     projectManagerPubkey?: string,
-    availableNudges?: WhitelistItem[]
+    availableNudges?: WhitelistItem[],
+    availableSkills?: WhitelistItem[]
 ): void {
-    // Add available nudges for delegation (priority 13, before available-agents)
-    if (availableNudges && availableNudges.length > 0) {
-        builder.add("available-nudges", {
+    // Add available nudges and skills for delegation (priority 13, before available-agents)
+    if ((availableNudges && availableNudges.length > 0) || (availableSkills && availableSkills.length > 0)) {
+        builder.add("available-nudges-and-skills", {
             availableNudges,
+            availableSkills,
         });
     }
 
@@ -768,7 +772,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         agentForFragments,
         availableAgents,
         options.projectManagerPubkey,
-        options.availableNudges
+        options.availableNudges,
+        options.availableSkills
     );
 
     // Build and return the complete prompt with all fragments

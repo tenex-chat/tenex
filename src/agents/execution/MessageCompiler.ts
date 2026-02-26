@@ -77,6 +77,8 @@ export interface MessageCompilerContext {
     ephemeralMessages?: EphemeralMessage[];
     /** Available whitelisted nudges for delegation */
     availableNudges?: WhitelistItem[];
+    /** Available whitelisted skills */
+    availableSkills?: WhitelistItem[];
 }
 
 export interface CompiledMessages {
