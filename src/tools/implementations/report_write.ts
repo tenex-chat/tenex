@@ -165,8 +165,9 @@ async function executeReportWrite(
         const projectTagId = projectCtx.project.tagId();
         const reportEmbeddingService = getReportEmbeddingService();
 
+        const publishedAt = Math.floor(Date.now() / 1000);
         await reportEmbeddingService.indexReport(
-            { slug, title, summary, content, hashtags },
+            { slug, title, summary, content, hashtags, publishedAt },
             projectTagId,
             context.agent.pubkey,
             context.agent.name

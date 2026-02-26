@@ -179,6 +179,7 @@ export class ReportEmbeddingService {
             summary?: string;
             content: string;
             hashtags?: string[];
+            publishedAt?: number;
         },
         projectId: string,
         agentPubkey: string,
@@ -214,9 +215,9 @@ export class ReportEmbeddingService {
                     agentPubkey,
                     agentName: agentName || "",
                     type: "report",
-                    publishedAt: Date.now(),
+                    publishedAt: report.publishedAt ?? Math.floor(Date.now() / 1000),
                 },
-                timestamp: Date.now(),
+                timestamp: Math.floor(Date.now() / 1000),
                 source: "report",
             };
 
@@ -246,9 +247,18 @@ export class ReportEmbeddingService {
      * Called when a report is deleted.
      */
     public async removeReport(slug: string, projectId: string): Promise<void> {
-        await this.ensureInitialized();
-
         try {
+            // Check if the collection exists before attempting deletion.
+            // Avoids ensureInitialized() which would create the collection as a side-effect.
+            const collections = await this.ragService.listCollections();
+            if (!collections.includes(REPORT_COLLECTION)) {
+                logger.debug("Report collection does not exist, nothing to remove", {
+                    slug,
+                    projectId,
+                });
+                return;
+            }
+
             const documentId = this.buildDocumentId(projectId, slug);
             await this.ragService.deleteDocumentById(REPORT_COLLECTION, documentId);
             logger.info("🗑️ Report removed from RAG", { slug, projectId, documentId });
@@ -371,6 +381,7 @@ export class ReportEmbeddingService {
                     summary: report.summary,
                     content: report.content,
                     hashtags: report.hashtags,
+                    publishedAt: report.publishedAt,
                 },
                 projectId,
                 report.author
