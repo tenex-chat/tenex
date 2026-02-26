@@ -12,17 +12,6 @@ const DistilledIdentitySchema = z.object({
 });
 export type DistilledAgentIdentity = z.infer<typeof DistilledIdentitySchema>;
 
-export function parseModelString(tenexModel: string): { provider: string; model: string } {
-    const colonIdx = tenexModel.indexOf(":");
-    if (colonIdx === -1) {
-        throw new Error(`Invalid model format (expected "provider:model"): ${tenexModel}`);
-    }
-    return {
-        provider: tenexModel.slice(0, colonIdx),
-        model: tenexModel.slice(colonIdx + 1),
-    };
-}
-
 export function buildDistillationPrompt(files: OpenClawWorkspaceFiles): string {
     const sections: string[] = [];
 
@@ -54,11 +43,8 @@ ${sections.join("\n\n")}`;
 
 export async function distillAgentIdentity(
     files: OpenClawWorkspaceFiles,
-    tenexModelString: string
+    llmConfig: LLMConfiguration
 ): Promise<DistilledAgentIdentity> {
-    const { provider, model } = parseModelString(tenexModelString);
-    const llmConfig: LLMConfiguration = { provider, model };
-
     const service = llmServiceFactory.createService(llmConfig);
     const prompt = buildDistillationPrompt(files);
 

@@ -5,6 +5,7 @@ import chalk from "chalk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { config as configService } from "@/services/ConfigService";
+import type { LLMConfiguration } from "@/services/config/types";
 import { detectOpenClawStateDir, readOpenClawAgents, convertModelFormat } from "./openclaw-reader";
 import { distillAgentIdentity } from "./openclaw-distiller";
 import type { OpenClawAgent } from "./openclaw-reader";
@@ -65,11 +66,11 @@ async function appendUserMdToGlobalPrompt(userMdContent: string): Promise<void> 
     await configService.saveGlobalConfig(newConfig);
 }
 
-async function importOneAgent(agent: OpenClawAgent): Promise<void> {
+async function importOneAgent(agent: OpenClawAgent, llmConfig: LLMConfiguration): Promise<void> {
     const tenexModel = convertModelFormat(agent.modelPrimary);
 
     console.log(chalk.blue(`\nDistilling identity for agent '${agent.id}'...`));
-    const identity = await distillAgentIdentity(agent.workspaceFiles, tenexModel);
+    const identity = await distillAgentIdentity(agent.workspaceFiles, llmConfig);
 
     const slug = toSlug(identity.name) || agent.id;
 
@@ -128,10 +129,11 @@ export const openclawImportCommand = new Command("openclaw")
             await configService.loadConfig();
             await agentStorage.initialize();
 
+            const llmConfig = configService.getLLMConfig();
             let userMdProcessed = false;
 
             for (const agent of agents) {
-                await importOneAgent(agent);
+                await importOneAgent(agent, llmConfig);
 
                 if (!userMdProcessed && agent.workspaceFiles.user) {
                     await appendUserMdToGlobalPrompt(agent.workspaceFiles.user);

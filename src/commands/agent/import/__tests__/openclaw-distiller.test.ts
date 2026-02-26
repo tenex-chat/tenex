@@ -1,27 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildDistillationPrompt, parseModelString } from "../openclaw-distiller";
-
-describe("parseModelString", () => {
-    it("parses provider:model format", () => {
-        expect(parseModelString("anthropic:claude-sonnet-4-6")).toEqual({
-            provider: "anthropic",
-            model: "claude-sonnet-4-6",
-        });
-    });
-
-    it("handles model with colons in name", () => {
-        expect(parseModelString("openai:gpt-4:turbo")).toEqual({
-            provider: "openai",
-            model: "gpt-4:turbo",
-        });
-    });
-
-    it("throws on string with no colon", () => {
-        expect(() => parseModelString("anthropicclaudesonnet")).toThrow(
-            'Invalid model format (expected "provider:model")'
-        );
-    });
-});
+import { buildDistillationPrompt } from "../openclaw-distiller";
 
 describe("buildDistillationPrompt", () => {
     it("includes all provided files in prompt", () => {
