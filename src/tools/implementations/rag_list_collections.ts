@@ -10,7 +10,7 @@ const ragListCollectionsSchema = z.object({
         .boolean()
         .nullable()
         .default(false)
-        .describe("Whether to include statistics for each collection (document count, last updated timestamp)"),
+        .describe("Whether to include per-collection statistics (total document count, your document count)"),
 });
 
 /**
@@ -23,9 +23,9 @@ async function executeListCollections(
     const { include_stats = false } = input;
 
     const ragService = RAGService.getInstance();
-    const collections = await ragService.listCollections();
 
-    if (!include_stats || collections.length === 0) {
+    if (!include_stats) {
+        const collections = await ragService.listCollections();
         return {
             success: true,
             collections_count: collections.length,
@@ -34,24 +34,19 @@ async function executeListCollections(
     }
 
     // Fetch stats for all collections with agent attribution
+    // getAllCollectionStats already calls listCollections internally
     const agentPubkey = context.agent.pubkey;
     const stats = await ragService.getAllCollectionStats(agentPubkey);
 
-    // Build a lookup map for efficient access
-    const statsMap = new Map(stats.map((s) => [s.name, s]));
-
-    const collectionsWithStats = collections.map((name) => {
-        const collectionStats = statsMap.get(name);
-        return {
-            name,
-            total_documents: collectionStats?.totalDocCount ?? 0,
-            agent_documents: collectionStats?.agentDocCount ?? 0,
-        };
-    });
+    const collectionsWithStats = stats.map((s) => ({
+        name: s.name,
+        total_documents: s.totalDocCount,
+        agent_documents: s.agentDocCount,
+    }));
 
     return {
         success: true,
-        collections_count: collections.length,
+        collections_count: stats.length,
         collections: collectionsWithStats,
     };
 }
