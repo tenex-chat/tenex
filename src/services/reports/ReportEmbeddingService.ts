@@ -217,7 +217,7 @@ export class ReportEmbeddingService {
                     type: "report",
                     publishedAt: report.publishedAt ?? Math.floor(Date.now() / 1000),
                 },
-                timestamp: Math.floor(Date.now() / 1000),
+                timestamp: Date.now(),
                 source: "report",
             };
 

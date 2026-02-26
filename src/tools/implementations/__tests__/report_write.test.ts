@@ -117,7 +117,9 @@ describe("report_write tool", () => {
         expect(reportArg.hashtags).toEqual(["test"]);
         // publishedAt should be present and in seconds (not milliseconds)
         expect(reportArg.publishedAt).toBeDefined();
-        expect(reportArg.publishedAt).toBeLessThan(Date.now()); // seconds < milliseconds
+        const nowInSeconds = Math.floor(Date.now() / 1000);
+        expect(reportArg.publishedAt).toBeGreaterThan(nowInSeconds - 5);
+        expect(reportArg.publishedAt).toBeLessThanOrEqual(nowInSeconds);
         expect(projectIdArg).toBe("31933:owner:test-project");
         expect(pubkeyArg).toBe("pubkey123");
         expect(nameArg).toBe("TestAgent");
