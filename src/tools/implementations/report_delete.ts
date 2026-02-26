@@ -1,5 +1,7 @@
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { ReportService } from "@/services/reports";
+import { getReportEmbeddingService } from "@/services/reports/ReportEmbeddingService";
+import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -34,6 +36,18 @@ async function executeReportDelete(
     const reportService = new ReportService();
 
     const articleId = await reportService.deleteReport(slug, context.agent);
+
+    // Remove from RAG index
+    try {
+        const projectCtx = getProjectContext();
+        const projectTagId = projectCtx.project.tagId();
+        const reportEmbeddingService = getReportEmbeddingService();
+        await reportEmbeddingService.removeReport(slug, projectTagId);
+    } catch (ragError) {
+        // Don't fail deletion if RAG cleanup fails
+        const ragMessage = ragError instanceof Error ? ragError.message : String(ragError);
+        logger.warn("Failed to remove report from RAG", { slug, error: ragMessage });
+    }
 
     logger.info("✅ Report deleted successfully", {
         slug,
