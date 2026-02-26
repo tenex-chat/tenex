@@ -10,7 +10,7 @@ const ragListCollectionsSchema = z.object({
         .boolean()
         .nullable()
         .default(false)
-        .describe("Whether to include statistics for each collection (document count, size, etc.)"),
+        .describe("Whether to include per-collection statistics (total document count, your document count)"),
 });
 
 /**
@@ -18,26 +18,37 @@ const ragListCollectionsSchema = z.object({
  */
 async function executeListCollections(
     input: z.infer<typeof ragListCollectionsSchema>,
-    _context: ToolExecutionContext
+    context: ToolExecutionContext
 ): Promise<ToolResponse> {
     const { include_stats = false } = input;
 
     const ragService = RAGService.getInstance();
-    const collections = await ragService.listCollections();
 
-    // Build response with optional stats note
-    const response: ToolResponse = {
-        success: true,
-        collections_count: collections.length,
-        collections: collections,
-    };
-
-    // If stats requested, add a note that it's not yet implemented
-    if (include_stats && collections.length > 0) {
-        response.note = "Statistics feature is planned for future release";
+    if (!include_stats) {
+        const collections = await ragService.listCollections();
+        return {
+            success: true,
+            collections_count: collections.length,
+            collections: collections,
+        };
     }
 
-    return response;
+    // Fetch stats for all collections with agent attribution
+    // getAllCollectionStats already calls listCollections internally
+    const agentPubkey = context.agent.pubkey;
+    const stats = await ragService.getAllCollectionStats(agentPubkey);
+
+    const collectionsWithStats = stats.map((s) => ({
+        name: s.name,
+        total_documents: s.totalDocCount,
+        agent_documents: s.agentDocCount,
+    }));
+
+    return {
+        success: true,
+        collections_count: stats.length,
+        collections: collectionsWithStats,
+    };
 }
 
 /**
