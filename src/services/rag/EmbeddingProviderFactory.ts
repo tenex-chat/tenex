@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { fileExists, readJsonFile } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
+import { resolveApiKey } from "@/services/config/types";
 import { logger } from "@/utils/logger";
 import {
     type EmbeddingProvider,
@@ -166,7 +167,7 @@ export class EmbeddingProviderFactory {
             const providersConfig = await config.loadTenexProviders(globalPath);
             const providerCreds = providersConfig.providers[providerId];
             return {
-                apiKey: providerCreds?.apiKey,
+                apiKey: resolveApiKey(providerCreds?.apiKey),
                 baseUrl: providerCreds?.baseUrl,
             };
         } catch (error) {

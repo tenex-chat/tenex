@@ -322,7 +322,7 @@ export const TenexLLMsSchema = z.object({
  * Contains API keys and connection details for external providers
  */
 export interface ProviderCredentials {
-    apiKey: string;
+    apiKey: string | string[];
     baseUrl?: string;
     timeout?: number;
     options?: Record<string, unknown>;
@@ -336,7 +336,7 @@ export interface TenexProviders {
 }
 
 export const ProviderCredentialsSchema = z.object({
-    apiKey: z.string(),
+    apiKey: z.union([z.string(), z.array(z.string())]),
     baseUrl: z.string().optional(),
     timeout: z.number().optional(),
     options: z.record(z.string(), z.unknown()).optional(),
@@ -392,6 +392,9 @@ export interface LoadedConfig {
 // =====================================================================================
 // HELPER TYPES
 // =====================================================================================
+
+// resolveApiKey has moved to @/llm/providers/key-manager — re-export for backwards compatibility
+export { resolveApiKey } from "@/llm/providers/key-manager";
 
 export type ConfigFile = "config.json" | "llms.json" | "mcp.json" | "providers.json";
 

@@ -1,4 +1,5 @@
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
+import { resolveApiKey, hasApiKey } from "@/llm/providers/key-manager";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -7,7 +8,7 @@ import inquirer from "inquirer";
  * Extended type for editor use - includes providers
  */
 type TenexLLMsWithProviders = TenexLLMs & {
-    providers: Record<string, { apiKey: string }>;
+    providers: Record<string, { apiKey: string | string[] }>;
 };
 
 /**
@@ -36,8 +37,8 @@ export class ProviderConfigUI {
      */
     static async configureProvider(
         provider: string,
-        currentProviders?: Record<string, { apiKey: string }>
-    ): Promise<{ apiKey: string }> {
+        currentProviders?: Record<string, { apiKey: string | string[] }>
+    ): Promise<{ apiKey: string | string[] }> {
         if (provider === PROVIDER_IDS.CLAUDE_CODE || provider === PROVIDER_IDS.GEMINI_CLI || provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             // Agent providers don't require an API key
             console.log(
@@ -49,7 +50,7 @@ export class ProviderConfigUI {
         }
         if (provider === PROVIDER_IDS.OLLAMA) {
             // For Ollama, ask for base URL instead of API key
-            const currentUrl = currentProviders?.[provider]?.apiKey || "local";
+            const currentUrl = resolveApiKey(currentProviders?.[provider]?.apiKey) || "local";
             const { ollamaConfig } = await inquirer.prompt([
                 {
                     type: "select",
@@ -88,7 +89,34 @@ export class ProviderConfigUI {
             return { apiKey: baseUrl };
         }
         // For other providers, ask for API key
-        const currentKey = currentProviders?.[provider]?.apiKey;
+        const existingKey = currentProviders?.[provider]?.apiKey;
+
+        // If the provider already has a multi-key array, preserve it
+        if (Array.isArray(existingKey) && existingKey.length > 1) {
+            console.log(
+                chalk.cyan(
+                    `  ℹ  ${ProviderConfigUI.getProviderDisplayName(provider)} has ${existingKey.length} API keys configured (multi-key rotation).`
+                )
+            );
+            console.log(
+                chalk.gray(
+                    "     To edit multi-key configs, modify providers.json directly."
+                )
+            );
+            const { keep } = await inquirer.prompt([
+                {
+                    type: "confirm",
+                    name: "keep",
+                    message: "Keep existing multi-key configuration?",
+                    default: true,
+                },
+            ]);
+            if (keep) {
+                return { apiKey: existingKey };
+            }
+        }
+
+        const currentKey = resolveApiKey(existingKey);
         const { apiKey } = await inquirer.prompt([
             {
                 type: "password",
@@ -113,7 +141,7 @@ export class ProviderConfigUI {
     static displayCurrentConfig(llmsConfig: TenexLLMsWithProviders): void {
         console.log(chalk.bold("Configured Providers:"));
         const providers = Object.keys(llmsConfig.providers).filter(
-            (p) => llmsConfig.providers[p]?.apiKey
+            (p) => hasApiKey(llmsConfig.providers[p]?.apiKey)
         );
         if (providers.length === 0) {
             console.log(chalk.gray("  None configured"));

@@ -13,7 +13,7 @@ import { runProviderSetup } from "./utils/provider-setup";
  * Merges providers with llms for internal convenience
  */
 type LLMConfigWithProviders = TenexLLMs & {
-    providers: Record<string, { apiKey: string }>;
+    providers: Record<string, { apiKey: string | string[] }>;
 };
 
 /**

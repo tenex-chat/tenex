@@ -35,6 +35,9 @@ export * from "./base";
 // Export registry
 export { ProviderRegistry, providerRegistry } from "./registry";
 
+// Export key manager
+export { KeyManager, keyManager, type KeyManagerConfig, resolveApiKey, hasApiKey } from "./key-manager";
+
 // Export standard providers
 export {
     OpenRouterProvider,

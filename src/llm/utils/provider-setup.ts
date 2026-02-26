@@ -2,6 +2,7 @@ import inquirer from "inquirer";
 
 import { AI_SDK_PROVIDERS } from "@/llm/types";
 import type { ProviderCredentials, TenexProviders } from "@/services/config/types";
+import { hasApiKey } from "@/llm/providers/key-manager";
 import { ProviderConfigUI } from "@/llm/utils/ProviderConfigUI";
 
 /**
@@ -16,8 +17,7 @@ export async function runProviderSetup(
     };
 
     const choices = AI_SDK_PROVIDERS.map((provider) => {
-        const isConfigured =
-            providers[provider]?.apiKey && providers[provider]?.apiKey !== "none";
+        const isConfigured = hasApiKey(providers[provider]?.apiKey);
         const name = ProviderConfigUI.getProviderDisplayName(provider);
         return {
             name: isConfigured ? `${name} (configured)` : name,

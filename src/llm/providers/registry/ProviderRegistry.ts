@@ -3,15 +3,18 @@
  *
  * This module provides a unified registry for managing LLM providers,
  * supporting both standard AI SDK providers and custom agent providers.
+ * Integrates with KeyManager for multi-key rotation and fallback.
  */
 
 import { createProviderRegistry } from "ai";
 import type { ProviderRegistryProvider } from "ai";
 import type { ProviderV3 } from "@ai-sdk/provider";
 import { logger } from "@/utils/logger";
+import { keyManager } from "../key-manager";
 import type {
     ILLMProvider,
     ProviderInitConfig,
+    ProviderPoolConfig,
     ProviderMetadata,
     ProviderRegistration,
     ProviderRuntimeContext,
@@ -34,12 +37,15 @@ interface InitializationResult {
  * 1. Registration - Providers register themselves
  * 2. Initialization - Providers are initialized with API keys
  * 3. Model Creation - Providers create language models on demand
+ * 4. Key Rotation - Providers can be re-initialized with a different key on failure
  */
 export class ProviderRegistry {
     private static instance: ProviderRegistry | null = null;
 
     private providers: Map<string, ILLMProvider> = new Map();
     private registrations: Map<string, ProviderRegistration> = new Map();
+    private providerConfigs: Map<string, ProviderPoolConfig> = new Map();
+    private activeApiKeys: Map<string, string> = new Map();
     private aiSdkRegistry: ProviderRegistryProvider | null = null;
     private initialized = false;
 
@@ -89,33 +95,64 @@ export class ProviderRegistry {
     }
 
     /**
-     * Initialize all registered providers with their configurations
+     * Initialize all registered providers with their configurations.
+     * Supports multi-key configs — keys are registered with KeyManager
+     * and a single key is selected for each provider's initial setup.
      */
     async initialize(
-        configs: Record<string, ProviderInitConfig>,
+        configs: Record<string, ProviderPoolConfig>,
         _options?: { enableTenexTools?: boolean }
     ): Promise<InitializationResult[]> {
         const results: InitializationResult[] = [];
         this.providers.clear();
+        this.providerConfigs.clear();
+        this.activeApiKeys.clear();
 
         // Check if mock mode is enabled
         if (process.env.USE_MOCK_LLM === "true") {
             await this.initializeMockProvider();
         }
 
-        // Initialize each registered provider that has a config
+        // Register all key pools with KeyManager and initialize providers
         for (const [providerId, registration] of this.registrations) {
             const config = configs[providerId];
+            const rawKey = config?.apiKey;
+
+            // Normalize: treat empty arrays and arrays of only empty strings as "no key"
+            const apiKey = Array.isArray(rawKey)
+                ? (rawKey.filter(k => k.length > 0).length > 0 ? rawKey : undefined)
+                : (rawKey || undefined);
+
+            // Register keys with KeyManager (handles string | string[])
+            if (apiKey) {
+                keyManager.registerKeys(providerId, apiKey);
+            }
 
             // Skip providers without config (unless they don't require API key)
-            if (!config?.apiKey && registration.metadata.capabilities.requiresApiKey) {
+            if (!apiKey && registration.metadata.capabilities.requiresApiKey) {
                 continue;
             }
 
+            // Store the full config for potential re-initialization
+            if (config) {
+                this.providerConfigs.set(providerId, config);
+            }
+
+            // Select a single key for this initialization
+            const selectedKey = apiKey ? keyManager.selectKey(providerId) : undefined;
+
             try {
                 const provider = new registration.Provider();
-                await provider.initialize(config || {});
+                const initConfig: ProviderInitConfig = {
+                    apiKey: selectedKey,
+                    baseUrl: config?.baseUrl,
+                    options: config?.options,
+                };
+                await provider.initialize(initConfig);
                 this.providers.set(providerId, provider);
+                if (selectedKey) {
+                    this.activeApiKeys.set(providerId, selectedKey);
+                }
 
                 results.push({ providerId, success: true });
 
@@ -138,6 +175,78 @@ export class ProviderRegistry {
         logger.debug(`[ProviderRegistry] Initialized ${this.providers.size} providers: ${Array.from(this.providers.keys()).join(", ")}`);
 
         return results;
+    }
+
+    /**
+     * Re-initialize a provider with a different API key.
+     * Called when a key fails at runtime to attempt fallback.
+     *
+     * @param providerId The provider to re-initialize
+     * @param failedKey The key that failed (will be reported to KeyManager)
+     * @returns true if re-initialization succeeded with a new key
+     */
+    async reinitializeProvider(providerId: string, failedKey: string): Promise<boolean> {
+        if (!keyManager.hasMultipleKeys(providerId)) {
+            return false;
+        }
+
+        // Report the failure to track key health
+        keyManager.reportFailure(providerId, failedKey);
+
+        // Select a new key (KeyManager will avoid disabled keys)
+        const newKey = keyManager.selectKey(providerId);
+        if (!newKey || newKey === failedKey) {
+            logger.warn(`[ProviderRegistry] No alternative key available for "${providerId}"`);
+            return false;
+        }
+
+        const registration = this.registrations.get(providerId);
+        const originalConfig = this.providerConfigs.get(providerId);
+        if (!registration || !originalConfig) {
+            return false;
+        }
+
+        try {
+            // Build the new provider FIRST — never tear down before we have a replacement
+            const newProvider = new registration.Provider();
+            const initConfig: ProviderInitConfig = {
+                apiKey: newKey,
+                baseUrl: originalConfig.baseUrl,
+                options: originalConfig.options,
+            };
+            await newProvider.initialize(initConfig);
+
+            // New provider is ready — now swap it in and clean up the old one
+            const oldProvider = this.providers.get(providerId);
+            this.providers.set(providerId, newProvider);
+            this.activeApiKeys.set(providerId, newKey);
+
+            if (oldProvider) {
+                oldProvider.reset();
+            }
+
+            // Rebuild the AI SDK registry to reflect the new provider instance
+            this.buildAiSdkRegistry();
+
+            const keyPreview = newKey.slice(0, 8) + "...";
+            logger.info(`[ProviderRegistry] Re-initialized "${providerId}" with key ${keyPreview}`);
+            return true;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.error(`[ProviderRegistry] Failed to re-initialize "${providerId}"`, {
+                error: errorMessage,
+            });
+            // Old provider remains intact — no downtime
+            return false;
+        }
+    }
+
+    /**
+     * Get the currently active API key for a provider.
+     * Used by callers that need to report which key failed.
+     */
+    getActiveApiKey(providerId: string): string | undefined {
+        return this.activeApiKeys.get(providerId);
     }
 
     /**
@@ -292,8 +401,11 @@ export class ProviderRegistry {
             provider.reset();
         }
         this.providers.clear();
+        this.providerConfigs.clear();
+        this.activeApiKeys.clear();
         this.aiSdkRegistry = null;
         this.initialized = false;
+        keyManager.reset();
     }
 }
 
