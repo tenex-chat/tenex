@@ -131,92 +131,43 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
 }
 
 /**
- * Fetch an agent definition event from Nostr and save it to storage.
+ * Install an agent from an already-fetched NDKEvent.
  *
- * Pure orchestration: fetch → validate → parse → generate keys → install scripts → save → return
+ * Core installation logic: validate → parse → generate keys → install scripts → save → return
  *
- * ## Flow
- * 1. Fetch agent definition event from Nostr relays (by eventId)
- * 2. Validate event structure (has title, content, etc.)
- * 3. Parse event tags (tools, etc.)
- * 4. Check if agent already exists (by eventId) to preserve user config
- * 5. Generate new private key for this agent instance (if new)
- * 6. Install bundled files from kind 1063 events (all e-tags referencing 1063 events)
- * 7. Save to AgentStorage
- * 8. Return StoredAgent
- *
- * ## Configuration Preservation
- * If an agent with the same eventId already exists, this function preserves:
- * - default.model: User's custom LLM model assignment
- * - pmOverrides: Project-scoped PM override settings
- * - nsec: The agent's private key (identity)
- *
- * This prevents re-adding an agent to a new project from resetting its
- * configuration across all projects that share the same agent definition.
- *
- * ## File Installation
- * Agent definitions can reference kind 1063 (NIP-94 file metadata) events via e-tags.
- * These files are downloaded from Blossom servers and installed to the agent's home
- * directory at the path specified in the name tag. All e-tags are processed, not just
- * those with the "script" marker.
- *
- * ## Note
- * This does NOT add the agent to any registry or project. That happens
- * later in agent-loader.ts. This function is ONLY about Nostr → storage.
- *
- * @param eventId - The Nostr event ID of the agent definition (with or without "nostr:" prefix)
+ * @param event - The NDKEvent containing the agent definition
  * @param customSlug - Optional custom slug (defaults to kebab-case of agent name)
- * @param ndk - Optional NDK instance (uses default if not provided)
+ * @param ndk - Optional NDK instance (uses default if not provided, needed for script downloads)
  * @returns The saved StoredAgent (with generated private key)
- * @throws AgentNotFoundError if event not found on relays
  * @throws AgentValidationError if event structure is invalid
- *
- * @example
- * // Install agent with default slug
- * const agent = await installAgentFromNostr('event123');
- *
- * @example
- * // Install with custom slug
- * const agent = await installAgentFromNostr('event123', 'my-custom-slug');
  */
-export async function installAgentFromNostr(
-    eventId: string,
+export async function installAgentFromNostrEvent(
+    event: NDKEvent,
     customSlug?: string,
     ndk?: NDK
 ): Promise<StoredAgent> {
-    // Use provided NDK or get default
     const ndkInstance = ndk || getNDK();
-
-    // Clean the event ID (remove nostr: prefix if present)
-    const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
 
     // Check if an agent with this eventId already exists
     // This preserves user configuration (llmConfig, pmOverrides, etc.)
-    const existingAgent = await agentStorage.getAgentByEventId(cleanEventId);
-    if (existingAgent) {
-        logger.debug(
-            `Agent with eventId ${cleanEventId} already exists as "${existingAgent.slug}", ` +
-            `preserving existing configuration`
-        );
-        return existingAgent;
+    if (event.id) {
+        const existingAgent = await agentStorage.getAgentByEventId(event.id);
+        if (existingAgent) {
+            logger.debug(
+                `Agent with eventId ${event.id} already exists as "${existingAgent.slug}", ` +
+                `preserving existing configuration`
+            );
+            return existingAgent;
+        }
     }
 
-    // Fetch the event from Nostr
-    logger.debug(`Fetching agent event ${cleanEventId} from Nostr relays`);
-    const agentEvent = await ndkInstance.fetchEvent(cleanEventId, { groupable: false });
-
-    if (!agentEvent) {
-        throw new AgentNotFoundError(cleanEventId);
-    }
-
-    // Wrap in NDKAgentDefinition for proper accessors
-    const agentDef = NDKAgentDefinition.from(agentEvent);
+    const agentDef = NDKAgentDefinition.from(event);
 
     // Generate slug: prefer customSlug > event's d-tag > derived from title
     const slug = customSlug || agentDef.slug || toKebabCase(agentDef.title || "unnamed-agent");
 
-    // Parse the event into agent data
-    const agentData = parseAgentEvent(agentEvent, slug);
+    // Parse and validate the event into agent data
+    const agentData = parseAgentEvent(event, slug);
 
     // Generate a new private key for this agent
     const signer = NDKPrivateKeySigner.generate();
@@ -227,7 +178,6 @@ export async function installAgentFromNostr(
         logger.info(`Agent "${agentData.name}" has ${fileETags.length} bundled file(s)`);
         const fileResults = await installAgentScripts(fileETags, signer.pubkey, ndkInstance);
 
-        // Log any file installation failures (but don't fail the agent installation)
         const failures = fileResults.filter((r) => !r.success);
         if (failures.length > 0) {
             logger.warn(`${failures.length} file(s) failed to install for agent "${agentData.name}"`, {
@@ -236,7 +186,6 @@ export async function installAgentFromNostr(
         }
     }
 
-    // Create StoredAgent using factory
     const storedAgent = createStoredAgent({
         nsec: signer.nsec,
         slug: agentData.slug,
@@ -252,9 +201,36 @@ export async function installAgentFromNostr(
         definitionCreatedAt: agentData.definitionCreatedAt,
     });
 
-    // Save to storage
     await agentStorage.saveAgent(storedAgent);
-    logger.info(`Installed agent "${agentData.name}" (${slug}) from Nostr event ${cleanEventId}`);
+    logger.info(`Installed agent "${agentData.name}" (${slug}) from Nostr event ${event.id}`);
 
     return storedAgent;
+}
+
+/**
+ * Fetch an agent definition event from Nostr by ID and install it.
+ *
+ * @param eventId - The Nostr event ID (with or without "nostr:" prefix)
+ * @param customSlug - Optional custom slug (defaults to kebab-case of agent name)
+ * @param ndk - Optional NDK instance (uses default if not provided)
+ * @returns The saved StoredAgent (with generated private key)
+ * @throws AgentNotFoundError if event not found on relays
+ * @throws AgentValidationError if event structure is invalid
+ */
+export async function installAgentFromNostr(
+    eventId: string,
+    customSlug?: string,
+    ndk?: NDK
+): Promise<StoredAgent> {
+    const ndkInstance = ndk || getNDK();
+    const cleanEventId = eventId.startsWith("nostr:") ? eventId.substring(6) : eventId;
+
+    logger.debug(`Fetching agent event ${cleanEventId} from Nostr relays`);
+    const agentEvent = await ndkInstance.fetchEvent(cleanEventId, { groupable: false });
+
+    if (!agentEvent) {
+        throw new AgentNotFoundError(cleanEventId);
+    }
+
+    return installAgentFromNostrEvent(agentEvent, customSlug, ndkInstance);
 }
