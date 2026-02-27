@@ -534,22 +534,12 @@ export class RAGOperations {
 
         const stats = await Promise.all(
             collections.map(async (name) => {
-                try {
-                    const { totalCount, agentCount } = await this.getCollectionStats(name, agentPubkey);
-                    return {
-                        name,
-                        agentDocCount: agentCount ?? 0,
-                        totalDocCount: totalCount,
-                    };
-                } catch (error) {
-                    // Log but don't fail - return zero counts for problematic collections
-                    logger.warn(`Failed to get stats for collection '${name}':`, error);
-                    return {
-                        name,
-                        agentDocCount: 0,
-                        totalDocCount: 0,
-                    };
-                }
+                const { totalCount, agentCount } = await this.getCollectionStats(name, agentPubkey);
+                return {
+                    name,
+                    agentDocCount: agentCount ?? 0,
+                    totalDocCount: totalCount,
+                };
             })
         );
 

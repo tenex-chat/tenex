@@ -13,13 +13,20 @@ mock.module("@/utils/logger", () => ({
 
 // Use object to hold mock functions so we can swap them
 const ragMocks = {
+    listCollections: mock().mockResolvedValue([]),
     createCollection: mock().mockResolvedValue(undefined),
     addDocuments: mock().mockResolvedValue(undefined),
 };
 
+mock.module("@/services/projects", () => ({
+    isProjectContextInitialized: () => false,
+    getProjectContext: () => { throw new Error("Not initialized"); },
+}));
+
 mock.module("@/services/rag/RAGService", () => ({
     RAGService: {
         getInstance: () => ({
+            listCollections: (...args: any[]) => ragMocks.listCollections(...args),
             createCollection: (...args: any[]) => ragMocks.createCollection(...args),
             addDocuments: (...args: any[]) => ragMocks.addDocuments(...args),
         }),
@@ -69,6 +76,7 @@ describe("Learn Tool", () => {
     };
 
     beforeEach(() => {
+        ragMocks.listCollections.mockReset().mockResolvedValue([]);
         ragMocks.createCollection.mockReset().mockResolvedValue(undefined);
         ragMocks.addDocuments.mockReset().mockResolvedValue(undefined);
     });
@@ -81,6 +89,7 @@ describe("Learn Tool", () => {
             const result = await tool.execute({
                 title: "Performance Optimization",
                 lesson: "Use React.memo for expensive component renders",
+                hashtags: [],
             });
 
             expect(result.message).toContain("Lesson recorded");
@@ -97,6 +106,7 @@ describe("Learn Tool", () => {
                 title: "Error Handling",
                 lesson: "Always handle async errors",
                 detailed: "When working with async/await, always wrap in try-catch blocks to handle potential errors gracefully.",
+                hashtags: [],
             });
 
             expect(result.message).toContain("with detailed version");
@@ -121,6 +131,9 @@ describe("Learn Tool", () => {
         // NOTE: Tests for missing agentPublisher/ralNumber removed - now enforced by ToolExecutionContext type
 
         it("should add lesson to RAG collection", async () => {
+            // Collection doesn't exist yet
+            ragMocks.listCollections.mockReset().mockResolvedValue([]);
+
             const context = createMockContext();
             const tool = createLessonLearnTool(context);
 
@@ -131,6 +144,8 @@ describe("Learn Tool", () => {
                 hashtags: ["rag", "test"],
             });
 
+            // Should check existence and create collection
+            expect(ragMocks.listCollections).toHaveBeenCalled();
             expect(ragMocks.createCollection).toHaveBeenCalledWith("lessons");
             expect(ragMocks.addDocuments).toHaveBeenCalledWith(
                 "lessons",
@@ -149,19 +164,31 @@ describe("Learn Tool", () => {
             );
         });
 
-        it("should continue even if RAG integration fails", async () => {
+        it("should skip collection creation when lessons collection already exists", async () => {
+            ragMocks.listCollections.mockReset().mockResolvedValue(["lessons"]);
+
+            const context = createMockContext();
+            const tool = createLessonLearnTool(context);
+
+            await tool.execute({
+                title: "RAG Test",
+                lesson: "Test lesson for RAG",
+                hashtags: [],
+            });
+
+            expect(ragMocks.createCollection).not.toHaveBeenCalled();
+            expect(ragMocks.addDocuments).toHaveBeenCalled();
+        });
+
+        it("should propagate RAG errors", async () => {
             ragMocks.addDocuments.mockReset().mockRejectedValue(new Error("RAG error"));
 
             const context = createMockContext();
             const tool = createLessonLearnTool(context);
 
-            // Should not throw, just warn
-            const result = await tool.execute({
-                title: "Test",
-                lesson: "Test lesson",
-            });
-
-            expect(result.message).toContain("Lesson recorded");
+            await expect(
+                tool.execute({ title: "Test", lesson: "Test lesson", hashtags: [] })
+            ).rejects.toThrow("RAG error");
         });
     });
 
@@ -173,6 +200,7 @@ describe("Learn Tool", () => {
             await tool.execute({
                 title: "Context Test",
                 lesson: "Testing event context",
+                hashtags: [],
             });
 
             expect(mockAgentPublisher.lesson).toHaveBeenCalledWith(

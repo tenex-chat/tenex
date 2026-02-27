@@ -50,12 +50,15 @@ describe("LessonSearchProvider", () => {
         expect(provider.description).toBeTruthy();
     });
 
-    it("returns empty results when lessons collection does not exist", async () => {
+    it("queries RAG directly without checking collection existence", async () => {
+        // No collection guard — errors propagate to UnifiedSearchService
         mockCollections = [];
 
         const results = await provider.search("test query", "project-123", 10, 0.3);
+
+        // queryWithFilter is called regardless of collection existence
+        expect(queryWithFilterCalls).toHaveLength(1);
         expect(results).toHaveLength(0);
-        expect(queryWithFilterCalls).toHaveLength(0);
     });
 
     it("queries with project filter and transforms results", async () => {

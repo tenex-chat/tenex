@@ -7,13 +7,13 @@
  * Key features:
  * - Project-scoped: reports are tagged with projectId for isolation
  * - Index on write: called from report_write tool after successful publish
- * - Upsert semantics: re-indexing updates existing documents (by slug + projectId)
- * - Graceful degradation: RAG failures don't break report writes
+ * - Upsert semantics: re-indexing updates existing documents via bulkUpsert
  * - Nostr remains authoritative source; RAG is just a search layer
  */
 
 import { logger } from "@/utils/logger";
 import { RAGService, type RAGDocument, type RAGQueryResult } from "@/services/rag/RAGService";
+import { buildProjectFilter } from "@/services/search/projectFilter";
 import type { ReportInfo } from "./ReportService";
 
 /** Collection name for report embeddings */
@@ -187,59 +187,43 @@ export class ReportEmbeddingService {
     ): Promise<boolean> {
         await this.ensureInitialized();
 
-        try {
-            const documentId = this.buildDocumentId(projectId, report.slug);
-            const embeddingContent = this.buildEmbeddingContent(report);
+        const documentId = this.buildDocumentId(projectId, report.slug);
+        const embeddingContent = this.buildEmbeddingContent(report);
 
-            if (!embeddingContent.trim()) {
-                logger.debug("No content to embed for report", { slug: report.slug });
-                return false;
-            }
-
-            // Delete existing document before inserting (upsert semantics)
-            try {
-                await this.ragService.deleteDocumentById(REPORT_COLLECTION, documentId);
-            } catch {
-                // Document might not exist - that's fine
-            }
-
-            const document: RAGDocument = {
-                id: documentId,
-                content: embeddingContent,
-                metadata: {
-                    slug: report.slug,
-                    projectId,
-                    title: report.title || "",
-                    summary: report.summary || "",
-                    hashtags: report.hashtags,
-                    agentPubkey,
-                    agentName: agentName || "",
-                    type: "report",
-                    publishedAt: report.publishedAt ?? Math.floor(Date.now() / 1000),
-                },
-                timestamp: Date.now(),
-                source: "report",
-            };
-
-            await this.ragService.addDocuments(REPORT_COLLECTION, [document]);
-
-            logger.info("📝 Report indexed in RAG", {
-                slug: report.slug,
-                projectId,
-                documentId,
-                agentName,
-            });
-
-            return true;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.warn("Failed to index report in RAG", {
-                slug: report.slug,
-                projectId,
-                error: message,
-            });
+        if (!embeddingContent.trim()) {
+            logger.debug("No content to embed for report", { slug: report.slug });
             return false;
         }
+
+        const document: RAGDocument = {
+            id: documentId,
+            content: embeddingContent,
+            metadata: {
+                slug: report.slug,
+                projectId,
+                title: report.title || "",
+                summary: report.summary || "",
+                hashtags: report.hashtags,
+                agentPubkey,
+                agentName: agentName || "",
+                type: "report",
+                publishedAt: report.publishedAt ?? Math.floor(Date.now() / 1000),
+            },
+            timestamp: Date.now(),
+            source: "report",
+        };
+
+        // Atomic upsert via mergeInsert — one LanceDB version per chunk
+        await this.ragService.bulkUpsert(REPORT_COLLECTION, [document]);
+
+        logger.info("📝 Report indexed in RAG", {
+            slug: report.slug,
+            projectId,
+            documentId,
+            agentName,
+        });
+
+        return true;
     }
 
     /**
@@ -247,40 +231,16 @@ export class ReportEmbeddingService {
      * Called when a report is deleted.
      */
     public async removeReport(slug: string, projectId: string): Promise<void> {
-        try {
-            // Check if the collection exists before attempting deletion.
-            // Avoids ensureInitialized() which would create the collection as a side-effect.
-            const collections = await this.ragService.listCollections();
-            if (!collections.includes(REPORT_COLLECTION)) {
-                logger.debug("Report collection does not exist, nothing to remove", {
-                    slug,
-                    projectId,
-                });
-                return;
-            }
-
-            const documentId = this.buildDocumentId(projectId, slug);
-            await this.ragService.deleteDocumentById(REPORT_COLLECTION, documentId);
-            logger.info("🗑️ Report removed from RAG", { slug, projectId, documentId });
-        } catch (error) {
-            logger.debug("Could not remove report from RAG (may not exist)", {
-                slug,
-                projectId,
-                error,
-            });
+        // Check if the collection exists before attempting deletion.
+        // Avoids ensureInitialized() which would create the collection as a side-effect.
+        const collections = await this.ragService.listCollections();
+        if (!collections.includes(REPORT_COLLECTION)) {
+            return;
         }
-    }
 
-    /**
-     * Build SQL prefilter for project isolation.
-     * Applied DURING vector search, not after, to ensure proper project boundaries.
-     */
-    private buildProjectFilter(projectId?: string): string | undefined {
-        if (!projectId || projectId.toLowerCase() === "all") {
-            return undefined;
-        }
-        const escapedProjectId = projectId.replace(/'/g, "''");
-        return `metadata LIKE '%"projectId":"${escapedProjectId}"%'`;
+        const documentId = this.buildDocumentId(projectId, slug);
+        await this.ragService.deleteDocumentById(REPORT_COLLECTION, documentId);
+        logger.info("🗑️ Report removed from RAG", { slug, projectId, documentId });
     }
 
     /**
@@ -298,36 +258,30 @@ export class ReportEmbeddingService {
 
         const { limit = 10, minScore = 0.3, projectId } = options;
 
-        try {
-            logger.info("🔍 Report semantic search", { query, limit, minScore, projectId });
+        logger.info("🔍 Report semantic search", { query, limit, minScore, projectId });
 
-            const filter = this.buildProjectFilter(projectId);
+        const filter = buildProjectFilter(projectId);
 
-            const results = await this.ragService.queryWithFilter(
-                REPORT_COLLECTION,
-                query,
-                limit * 2, // Request more to account for minScore filtering
-                filter
-            );
+        const results = await this.ragService.queryWithFilter(
+            REPORT_COLLECTION,
+            query,
+            limit * 2,
+            filter
+        );
 
-            const searchResults: ReportSearchResult[] = results
-                .filter((result: RAGQueryResult) => result.score >= minScore)
-                .slice(0, limit)
-                .map((result: RAGQueryResult) => this.transformResult(result));
+        const searchResults: ReportSearchResult[] = results
+            .filter((result: RAGQueryResult) => result.score >= minScore)
+            .slice(0, limit)
+            .map((result: RAGQueryResult) => this.transformResult(result));
 
-            logger.info("✅ Report semantic search complete", {
-                query,
-                found: searchResults.length,
-                limit,
-                projectFilter: filter || "none",
-            });
+        logger.info("✅ Report semantic search complete", {
+            query,
+            found: searchResults.length,
+            limit,
+            projectFilter: filter || "none",
+        });
 
-            return searchResults;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error("Report semantic search failed", { query, error: message });
-            return [];
-        }
+        return searchResults;
     }
 
     /**
@@ -403,12 +357,8 @@ export class ReportEmbeddingService {
      * Clear all report embeddings
      */
     public async clearIndex(): Promise<void> {
-        try {
-            await this.ragService.deleteCollection(REPORT_COLLECTION);
-            logger.info("Cleared report embeddings index");
-        } catch (error) {
-            logger.debug("No report index to clear or error clearing", { error });
-        }
+        await this.ragService.deleteCollection(REPORT_COLLECTION);
+        logger.info("Cleared report embeddings index");
 
         this.initialized = false;
         this.initializationPromise = null;

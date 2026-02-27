@@ -11,7 +11,7 @@
  * - Indexes conversations across all projects
  * - Tracks indexing state durably to avoid redundant work
  * - Re-indexes when conversation metadata changes
- * - Graceful error handling - failures don't break the service
+ * - Errors propagate to scheduleNextBatch which catches and reschedules
  * - Prevents overlapping batches
  * - Decoupled from ConversationRegistry for multi-project support
  */
@@ -160,58 +160,50 @@ export class ConversationIndexingJob {
             const projectIds = listProjectIdsFromDisk(this.projectsBasePath);
 
             for (const projectId of projectIds) {
-                try {
-                    const conversationIds = listConversationIdsFromDiskForProject(
+                const conversationIds = listConversationIdsFromDiskForProject(
+                    this.projectsBasePath,
+                    projectId
+                );
+
+                for (const conversationId of conversationIds) {
+                    totalChecked++;
+
+                    // Check if conversation needs indexing using durable state
+                    const needsIndexing = this.stateManager.needsIndexing(
                         this.projectsBasePath,
+                        projectId,
+                        conversationId
+                    );
+
+                    if (!needsIndexing) {
+                        totalSkipped++;
+                        continue;
+                    }
+
+                    // Build document without writing
+                    const result: BuildDocumentResult = conversationEmbeddingService.buildDocument(
+                        conversationId,
                         projectId
                     );
 
-                    for (const conversationId of conversationIds) {
-                        totalChecked++;
-
-                        // Check if conversation needs indexing using durable state
-                        const needsIndexing = this.stateManager.needsIndexing(
-                            this.projectsBasePath,
-                            projectId,
-                            conversationId
-                        );
-
-                        if (!needsIndexing) {
-                            totalSkipped++;
-                            continue;
-                        }
-
-                        // Build document without writing
-                        const result: BuildDocumentResult = conversationEmbeddingService.buildDocument(
-                            conversationId,
-                            projectId
-                        );
-
-                        switch (result.kind) {
-                            case "ok":
-                                pendingDocuments.push(result.document);
-                                pendingMarkIndexed.push({ projectId, conversationId });
-                                break;
-                            case "noContent":
-                                pendingMarkNoContent.push({ projectId, conversationId });
-                                break;
-                            case "error":
-                                // Transient error — leave unmarked so it retries next cycle
-                                totalFailed++;
-                                logger.warn("Transient error building document, will retry", {
-                                    conversationId: conversationId.substring(0, 8),
-                                    projectId,
-                                    reason: result.reason,
-                                });
-                                break;
-                        }
+                    switch (result.kind) {
+                        case "ok":
+                            pendingDocuments.push(result.document);
+                            pendingMarkIndexed.push({ projectId, conversationId });
+                            break;
+                        case "noContent":
+                            pendingMarkNoContent.push({ projectId, conversationId });
+                            break;
+                        case "error":
+                            // Transient error — leave unmarked so it retries next cycle
+                            totalFailed++;
+                            logger.warn("Transient error building document, will retry", {
+                                conversationId: conversationId.substring(0, 8),
+                                projectId,
+                                reason: result.reason,
+                            });
+                            break;
                     }
-                } catch (error) {
-                    const message = error instanceof Error ? error.message : String(error);
-                    logger.error("Failed to process project conversations", {
-                        projectId,
-                        error: message,
-                    });
                 }
             }
 
@@ -267,10 +259,6 @@ export class ConversationIndexingJob {
             } else {
                 logger.debug("No conversations to index in this batch");
             }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error("Conversation indexing batch failed", { error: message });
-            // Don't throw - we want the job to keep running even if one batch fails
         } finally {
             this.isBatchRunning = false;
         }

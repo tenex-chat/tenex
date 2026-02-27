@@ -8,13 +8,13 @@
  * - Embeds conversation summaries (not individual messages - too expensive)
  * - Uses existing RAG infrastructure (LanceDB, embedding providers)
  * - Supports hybrid search (semantic + keyword fallback)
- * - Graceful degradation when embeddings unavailable
  * - Project isolation: filters are applied DURING vector search (prefilter)
- * - Upsert semantics: re-indexing updates existing documents
+ * - Upsert semantics: re-indexing updates existing documents via bulkUpsert
  */
 
 import { logger } from "@/utils/logger";
 import { RAGService, type RAGDocument, type RAGQueryResult } from "@/services/rag/RAGService";
+import { buildProjectFilter } from "@/services/search/projectFilter";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
 
@@ -261,40 +261,17 @@ export class ConversationEmbeddingService {
     ): Promise<boolean> {
         await this.ensureInitialized();
 
-        try {
-            const result = this.buildDocument(conversationId, projectId, store);
+        const result = this.buildDocument(conversationId, projectId, store);
 
-            if (result.kind !== "ok") {
-                return false;
-            }
-
-            const document = result.document;
-            // buildDocument always sets document.id — use it as the single source of truth
-            const documentId = document.id ?? `conv_${projectId}_${conversationId}`;
-
-            // Delete existing document before inserting (upsert semantics)
-            // This prevents duplicate entries when re-indexing
-            try {
-                await this.ragService.deleteDocumentById(CONVERSATION_COLLECTION, documentId);
-                logger.debug(`Deleted existing embedding for ${conversationId.substring(0, 8)}`);
-            } catch {
-                // Document might not exist - that's fine
-            }
-
-            // Add to collection
-            await this.ragService.addDocuments(CONVERSATION_COLLECTION, [document]);
-
-            logger.debug(`Indexed conversation ${conversationId.substring(0, 8)} for project ${projectId}`);
-            return true;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error("Failed to index conversation", {
-                conversationId: conversationId.substring(0, 8),
-                error: message,
-            });
-            // Don't throw - indexing failures shouldn't break the application
+        if (result.kind !== "ok") {
             return false;
         }
+
+        // Atomic upsert via mergeInsert — one LanceDB version per chunk
+        await this.ragService.bulkUpsert(CONVERSATION_COLLECTION, [result.document]);
+
+        logger.debug(`Indexed conversation ${conversationId.substring(0, 8)} for project ${projectId}`);
+        return true;
     }
 
     /**
@@ -349,23 +326,9 @@ export class ConversationEmbeddingService {
     }
 
     /**
-     * Build SQL filter for project isolation
-     * FIX #1: This filter is applied DURING vector search (prefilter), not after
-     */
-    private buildProjectFilter(projectId?: string): string | undefined {
-        if (!projectId || projectId.toLowerCase() === "all") {
-            return undefined;
-        }
-        // Filter on the metadata JSON string - LanceDB stores metadata as JSON string
-        // We need to match the projectId within the serialized JSON
-        const escapedProjectId = projectId.replace(/'/g, "''");
-        return `metadata LIKE '%"projectId":"${escapedProjectId}"%'`;
-    }
-
-    /**
-     * Perform semantic search on conversations
-     * FIX #1: Project filter is now applied DURING vector search (prefilter),
-     * ensuring proper project isolation without leakage from other projects
+     * Perform semantic search on conversations.
+     * Project filter is applied DURING vector search (prefilter),
+     * ensuring proper project isolation without leakage from other projects.
      */
     public async semanticSearch(
         query: string,
@@ -375,42 +338,30 @@ export class ConversationEmbeddingService {
 
         const { limit = 20, minScore = 0.3, projectId } = options;
 
-        try {
-            logger.info("🔍 Semantic search", { query, limit, minScore, projectId });
+        logger.info("🔍 Semantic search", { query, limit, minScore, projectId });
 
-            // FIX #1: Build SQL filter for project isolation - applied DURING vector search
-            const filter = this.buildProjectFilter(projectId);
+        const filter = buildProjectFilter(projectId);
 
-            // Perform RAG query with prefilter for project isolation
-            // Request more results to account for minScore filtering
-            const results = await this.ragService.queryWithFilter(
-                CONVERSATION_COLLECTION,
-                query,
-                limit * 2, // Request more to filter by minScore
-                filter
-            );
+        const results = await this.ragService.queryWithFilter(
+            CONVERSATION_COLLECTION,
+            query,
+            limit * 2,
+            filter
+        );
 
-            // Transform and filter by minScore only (project filtering already done)
-            const searchResults: SemanticSearchResult[] = results
-                .filter((result: RAGQueryResult) => result.score >= minScore)
-                .slice(0, limit)
-                .map((result: RAGQueryResult) => this.transformResult(result));
+        const searchResults: SemanticSearchResult[] = results
+            .filter((result: RAGQueryResult) => result.score >= minScore)
+            .slice(0, limit)
+            .map((result: RAGQueryResult) => this.transformResult(result));
 
-            logger.info("✅ Semantic search complete", {
-                query,
-                found: searchResults.length,
-                limit,
-                projectFilter: filter || "none",
-            });
+        logger.info("✅ Semantic search complete", {
+            query,
+            found: searchResults.length,
+            limit,
+            projectFilter: filter || "none",
+        });
 
-            return searchResults;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error("Semantic search failed", { query, error: message });
-
-            // Return empty results on error - let caller fall back to keyword search
-            return [];
-        }
+        return searchResults;
     }
 
     /**
@@ -435,13 +386,9 @@ export class ConversationEmbeddingService {
      * Check if the service has any indexed conversations
      */
     public async hasIndexedConversations(): Promise<boolean> {
-        try {
-            await this.ensureInitialized();
-            const collections = await this.ragService.listCollections();
-            return collections.includes(CONVERSATION_COLLECTION);
-        } catch {
-            return false;
-        }
+        await this.ensureInitialized();
+        const collections = await this.ragService.listCollections();
+        return collections.includes(CONVERSATION_COLLECTION);
     }
 
     /**
@@ -456,14 +403,9 @@ export class ConversationEmbeddingService {
      * Clear all conversation embeddings
      */
     public async clearIndex(): Promise<void> {
-        try {
-            await this.ragService.deleteCollection(CONVERSATION_COLLECTION);
-            logger.info("Cleared conversation embeddings index");
-        } catch (error) {
-            logger.debug("No index to clear or error clearing", { error });
-        }
+        await this.ragService.deleteCollection(CONVERSATION_COLLECTION);
+        logger.info("Cleared conversation embeddings index");
 
-        // Reset initialization state
         this.initialized = false;
         this.initializationPromise = null;
     }

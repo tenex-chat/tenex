@@ -72,57 +72,45 @@ async function executeLessonLearn(
     const lessonEvent = await context.agentPublisher.lesson(intent, eventContext);
 
     // Add lesson to RAG collection for semantic search
-    try {
-        const ragService = RAGService.getInstance();
+    const ragService = RAGService.getInstance();
 
-        // Ensure the lessons collection exists
-        try {
-            await ragService.createCollection("lessons");
-        } catch (error) {
-            // Collection might already exist, which is fine
-            logger.debug("Lessons collection might already exist", { error });
-        }
-
-        // Add the lesson to the RAG collection
-        const lessonContent = detailed || lesson;
-
-        // Get projectId for project-scoped search isolation
-        let projectId: string | undefined;
-        if (isProjectContextInitialized()) {
-            try {
-                projectId = getProjectContext().project.tagId();
-            } catch {
-                // Project context not available - lesson will lack project scoping
-            }
-        }
-
-        await ragService.addDocuments("lessons", [
-            {
-                id: lessonEvent.encode(),
-                content: lessonContent,
-                metadata: {
-                    title,
-                    category,
-                    hashtags: hashtags.length > 0 ? hashtags : undefined,
-                    agentPubkey: context.agent.pubkey,
-                    agentName: context.agent.name,
-                    timestamp: Date.now(),
-                    hasDetailed: !!detailed,
-                    type: "lesson",
-                    ...(projectId && { projectId }),
-                },
-            },
-        ]);
-
-        logger.info("Lesson added to RAG collection", {
-            title,
-            eventId: lessonEvent.encode(),
-            agentName: context.agent.name,
-        });
-    } catch (error) {
-        // Don't fail the tool if RAG integration fails
-        logger.warn("Failed to add lesson to RAG collection", { error, title });
+    // Ensure the lessons collection exists
+    const collections = await ragService.listCollections();
+    if (!collections.includes("lessons")) {
+        await ragService.createCollection("lessons");
     }
+
+    const lessonContent = detailed || lesson;
+
+    // Get projectId for project-scoped search isolation
+    let projectId: string | undefined;
+    if (isProjectContextInitialized()) {
+        projectId = getProjectContext().project.tagId();
+    }
+
+    await ragService.addDocuments("lessons", [
+        {
+            id: lessonEvent.encode(),
+            content: lessonContent,
+            metadata: {
+                title,
+                category,
+                hashtags: hashtags.length > 0 ? hashtags : undefined,
+                agentPubkey: context.agent.pubkey,
+                agentName: context.agent.name,
+                timestamp: Date.now(),
+                hasDetailed: !!detailed,
+                type: "lesson",
+                ...(projectId && { projectId }),
+            },
+        },
+    ]);
+
+    logger.info("Lesson added to RAG collection", {
+        title,
+        eventId: lessonEvent.encode(),
+        agentName: context.agent.name,
+    });
 
     const message = `Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
 

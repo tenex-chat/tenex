@@ -197,72 +197,42 @@ export class RagSubscriptionService {
             });
         };
 
+        // Validate that resourceUri is a proper URI format
         try {
-            // Validate that resourceUri is a proper URI format
-            try {
-                new URL(subscription.resourceUri);
-            } catch {
-                throw new Error(
-                    `Invalid resourceUri: "${subscription.resourceUri}". Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). This appears to be a tool name or invalid format. If you're using a resource template, you must first expand it with parameters to get the actual URI.`
-                );
-            }
-
-            // Get mcpManager from project context
-            const projectCtx = getProjectContext();
-            const mcpManager = projectCtx.mcpManager;
-            if (!mcpManager) {
-                throw new Error("MCPManager not available in project context");
-            }
-
-            // Try to subscribe to resource updates
-            let subscriptionSupported = true;
-            try {
-                // CRITICAL: Register handler FIRST, then subscribe
-                const removeHandler = mcpManager.addResourceNotificationHandler(subscription.mcpServerId, listener);
-
-                // Subscribe to resource updates
-                await mcpManager.subscribeToResource(
-                    subscription.mcpServerId,
-                    subscription.resourceUri
-                );
-
-                // Store listener reference and removal function for cleanup
-                this.resourceListeners.set(
-                    listenerKey,
-                    listener as unknown as (notification: Notification) => void
-                );
-                this.handlerRemovers.set(listenerKey, removeHandler);
-
-                logger.info(
-                    `RAG subscription '${subscription.subscriptionId}' active with push notifications. ` +
-                        `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
-                );
-            } catch (error) {
-                if (
-                    error instanceof Error &&
-                    error.message.includes("does not support resource subscriptions")
-                ) {
-                    // Server doesn't support subscriptions, gracefully degrade to polling
-                    subscriptionSupported = false;
-                    logger.warn(
-                        `Server '${subscription.mcpServerId}' does not support resource subscriptions. ` +
-                        `Subscription '${subscription.subscriptionId}' will use polling mode. ` +
-                        `Call pollResource() manually or set up a polling interval.`
-                    );
-                    // Don't exit - gracefully degrade to polling mode
-                } else {
-                    throw error;
-                }
-            }
-
-            if (!subscriptionSupported) {
-                subscription.lastError = "Server does not support subscriptions - use polling mode";
-            }
-        } catch (error) {
-            subscription.status = SubscriptionStatus.ERROR;
-            subscription.lastError = error instanceof Error ? error.message : "Unknown error";
-            throw error;
+            new URL(subscription.resourceUri);
+        } catch {
+            throw new Error(
+                `Invalid resourceUri: "${subscription.resourceUri}". Resource URI must be a valid URI format (e.g., "nostr://feed/pubkey/kinds", "file:///path/to/file"). This appears to be a tool name or invalid format. If you're using a resource template, you must first expand it with parameters to get the actual URI.`
+            );
         }
+
+        // Get mcpManager from project context
+        const projectCtx = getProjectContext();
+        const mcpManager = projectCtx.mcpManager;
+        if (!mcpManager) {
+            throw new Error("MCPManager not available in project context");
+        }
+
+        // CRITICAL: Register handler FIRST, then subscribe
+        const removeHandler = mcpManager.addResourceNotificationHandler(subscription.mcpServerId, listener);
+
+        // Subscribe to resource updates — if server doesn't support subscriptions, let it throw
+        await mcpManager.subscribeToResource(
+            subscription.mcpServerId,
+            subscription.resourceUri
+        );
+
+        // Store listener reference and removal function for cleanup
+        this.resourceListeners.set(
+            listenerKey,
+            listener as unknown as (notification: Notification) => void
+        );
+        this.handlerRemovers.set(listenerKey, removeHandler);
+
+        logger.info(
+            `RAG subscription '${subscription.subscriptionId}' active with push notifications. ` +
+                `Listening for updates from ${subscription.mcpServerId}:${subscription.resourceUri}`
+        );
     }
 
     /**
@@ -272,75 +242,54 @@ export class RagSubscriptionService {
         subscription: RagSubscription,
         notification: Notification
     ): Promise<void> {
-        try {
-            // Extract content from notification
-            const content = this.extractContentFromNotification(notification);
+        const content = this.extractContentFromNotification(notification);
 
-            if (!content) {
-                logger.warn(
-                    `Received empty update for subscription '${subscription.subscriptionId}'`
-                );
-                return;
-            }
-
-            // Build metadata with provenance fields for filtering at query time
-            const metadata: DocumentMetadata = {
-                // Auto-inject provenance for filtering at query time
-                agent_pubkey: subscription.agentPubkey,
-                // Subscription-specific metadata
-                subscriptionId: subscription.subscriptionId,
-                mcpServerId: subscription.mcpServerId,
-                resourceUri: subscription.resourceUri,
-                timestamp: Date.now(),
-            };
-
-            // Add project_id if available from project context (uses NIP-33 address format)
-            if (isProjectContextInitialized()) {
-                try {
-                    const projectCtx = getProjectContext();
-                    const projectId = projectCtx.project.tagId();
-                    if (projectId) {
-                        metadata.project_id = projectId;
-                    }
-                } catch (error) {
-                    logger.debug("Project context error during RAG subscription update", { error });
-                }
-            }
-
-            // Add document to RAG collection
-            await this.ragService.addDocuments(subscription.ragCollection, [
-                {
-                    content,
-                    metadata,
-                    source: `${subscription.mcpServerId}:${subscription.resourceUri}`,
-                    timestamp: Date.now(),
-                },
-            ]);
-
-            // Update subscription metrics
-            subscription.documentsProcessed++;
-            subscription.lastDocumentIngested = content.substring(0, 200); // Store snippet
-            subscription.updatedAt = Date.now();
-            subscription.status = SubscriptionStatus.RUNNING;
-            subscription.lastError = undefined;
-
-            await this.saveSubscriptions();
-
-            logger.debug(
-                `Processed update for subscription '${subscription.subscriptionId}', total documents: ${subscription.documentsProcessed}`
-            );
-        } catch (error) {
-            subscription.status = SubscriptionStatus.ERROR;
-            subscription.lastError = error instanceof Error ? error.message : "Unknown error";
-            subscription.updatedAt = Date.now();
-            await this.saveSubscriptions();
-
-            handleError(
-                error,
-                `Failed to process update for subscription '${subscription.subscriptionId}'`,
-                { logLevel: "error" }
+        if (!content) {
+            throw new Error(
+                `Received empty update for subscription '${subscription.subscriptionId}'`
             );
         }
+
+        // Build metadata with provenance fields for filtering at query time
+        const metadata: DocumentMetadata = {
+            agent_pubkey: subscription.agentPubkey,
+            subscriptionId: subscription.subscriptionId,
+            mcpServerId: subscription.mcpServerId,
+            resourceUri: subscription.resourceUri,
+            timestamp: Date.now(),
+        };
+
+        // Add project_id if available from project context (uses NIP-33 address format)
+        if (isProjectContextInitialized()) {
+            const projectCtx = getProjectContext();
+            const projectId = projectCtx.project.tagId();
+            if (projectId) {
+                metadata.project_id = projectId;
+            }
+        }
+
+        // Add document to RAG collection
+        await this.ragService.addDocuments(subscription.ragCollection, [
+            {
+                content,
+                metadata,
+                source: `${subscription.mcpServerId}:${subscription.resourceUri}`,
+                timestamp: Date.now(),
+            },
+        ]);
+
+        // Update subscription metrics
+        subscription.documentsProcessed++;
+        subscription.lastDocumentIngested = content.substring(0, 200);
+        subscription.updatedAt = Date.now();
+        subscription.status = SubscriptionStatus.RUNNING;
+        subscription.lastError = undefined;
+
+        await this.saveSubscriptions();
+
+        logger.debug(
+            `Processed update for subscription '${subscription.subscriptionId}', total documents: ${subscription.documentsProcessed}`
+        );
     }
 
     /**

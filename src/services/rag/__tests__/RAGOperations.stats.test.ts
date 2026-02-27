@@ -190,7 +190,7 @@ describe("RAGOperations", () => {
             expect(stats).toHaveLength(0);
         });
 
-        it("should handle errors gracefully for individual collections", async () => {
+        it("should propagate errors from individual collections", async () => {
             const mockTable1 = createMockTable({ totalRows: 100, filteredRows: 25 });
             // Table2 throws an error
             const mockTable2 = {
@@ -203,18 +203,8 @@ describe("RAGOperations", () => {
             const mockProvider = createMockEmbeddingProvider();
             const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
 
-            const stats = await ops.getAllCollectionStats("agent123");
-
-            // Should still have collection1 stats, collection2 should have 0s
-            expect(stats).toHaveLength(2);
-            const collection1Stats = stats.find(s => s.name === "collection1");
-            const collection2Stats = stats.find(s => s.name === "collection2");
-            
-            expect(collection1Stats?.agentDocCount).toBe(25);
-            expect(collection1Stats?.totalDocCount).toBe(100);
-            // Collection2 should have 0s due to error handling
-            expect(collection2Stats?.agentDocCount).toBe(0);
-            expect(collection2Stats?.totalDocCount).toBe(0);
+            // Errors from individual collections now propagate through Promise.all
+            await expect(ops.getAllCollectionStats("agent123")).rejects.toThrow();
         });
     });
 });

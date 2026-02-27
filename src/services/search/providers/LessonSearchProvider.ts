@@ -26,14 +26,6 @@ export class LessonSearchProvider implements SearchProvider {
         minScore: number
     ): Promise<SearchResult[]> {
         const ragService = RAGService.getInstance();
-
-        // Check if the lessons collection exists
-        const collections = await ragService.listCollections();
-        if (!collections.includes(LESSONS_COLLECTION)) {
-            logger.debug("[LessonSearchProvider] Lessons collection does not exist");
-            return [];
-        }
-
         const filter = buildProjectFilter(projectId);
 
         const results = await ragService.queryWithFilter(

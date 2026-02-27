@@ -12,12 +12,12 @@ mock.module("@/utils/logger", () => ({
 
 // Track RAG service calls
 let mockCollections: string[] = [];
-let addDocumentsCalls: Array<{ collection: string; docs: any[] }> = [];
+let bulkUpsertCalls: Array<{ collection: string; docs: any[] }> = [];
 let deleteDocumentCalls: Array<{ collection: string; id: string }> = [];
 let queryWithFilterCalls: Array<{ collection: string; query: string; topK: number; filter?: string }> = [];
 let queryWithFilterResults: any[] = [];
 let createCollectionCalled = false;
-let addDocumentsShouldThrow = false;
+let bulkUpsertShouldThrow = false;
 let queryWithFilterShouldThrow = false;
 
 // Mock RAGService - single mock that uses flags for behavior variation
@@ -30,11 +30,12 @@ mock.module("@/services/rag/RAGService", () => ({
                 mockCollections.push(name);
                 return { name, created_at: Date.now(), updated_at: Date.now() };
             },
-            addDocuments: async (collection: string, docs: any[]) => {
-                if (addDocumentsShouldThrow) {
+            bulkUpsert: async (collection: string, docs: any[]) => {
+                if (bulkUpsertShouldThrow) {
                     throw new Error("RAG write failed");
                 }
-                addDocumentsCalls.push({ collection, docs });
+                bulkUpsertCalls.push({ collection, docs });
+                return { upsertedCount: docs.length, failedIndices: [] };
             },
             deleteDocumentById: async (collection: string, id: string) => {
                 deleteDocumentCalls.push({ collection, id });
@@ -54,6 +55,7 @@ mock.module("@/services/rag/RAGService", () => ({
 }));
 
 import { ReportEmbeddingService } from "../ReportEmbeddingService";
+import { buildProjectFilter } from "@/services/search/projectFilter";
 
 describe("ReportEmbeddingService", () => {
     let service: ReportEmbeddingService;
@@ -61,12 +63,12 @@ describe("ReportEmbeddingService", () => {
     beforeEach(() => {
         // Reset all tracking state
         mockCollections = [];
-        addDocumentsCalls = [];
+        bulkUpsertCalls = [];
         deleteDocumentCalls = [];
         queryWithFilterCalls = [];
         queryWithFilterResults = [];
         createCollectionCalled = false;
-        addDocumentsShouldThrow = false;
+        bulkUpsertShouldThrow = false;
         queryWithFilterShouldThrow = false;
 
         // Reset singleton
@@ -109,9 +111,9 @@ describe("ReportEmbeddingService", () => {
             );
 
             expect(result).toBe(true);
-            expect(addDocumentsCalls.length).toBe(1);
+            expect(bulkUpsertCalls.length).toBe(1);
 
-            const call = addDocumentsCalls[0];
+            const call = bulkUpsertCalls[0];
             expect(call.collection).toBe("project_reports");
             expect(call.docs.length).toBe(1);
 
@@ -129,7 +131,7 @@ describe("ReportEmbeddingService", () => {
             expect(doc.source).toBe("report");
         });
 
-        it("should upsert: delete existing before inserting", async () => {
+        it("should use bulkUpsert for atomic mergeInsert", async () => {
             const report = {
                 slug: "test-report",
                 title: "Test Report",
@@ -138,13 +140,12 @@ describe("ReportEmbeddingService", () => {
 
             await service.indexReport(report, "project-id", "agent-pubkey");
 
-            // Should have called delete first (upsert semantics)
-            expect(deleteDocumentCalls.length).toBe(1);
-            expect(deleteDocumentCalls[0].id).toBe("report_project-id_test-report");
-            expect(deleteDocumentCalls[0].collection).toBe("project_reports");
-
-            // Then add
-            expect(addDocumentsCalls.length).toBe(1);
+            // Should use bulkUpsert (mergeInsert) instead of delete+add
+            expect(bulkUpsertCalls.length).toBe(1);
+            expect(bulkUpsertCalls[0].collection).toBe("project_reports");
+            expect(bulkUpsertCalls[0].docs[0].id).toBe("report_project-id_test-report");
+            // No delete calls — bulkUpsert handles it atomically
+            expect(deleteDocumentCalls.length).toBe(0);
         });
 
         it("should return false for empty content", async () => {
@@ -157,7 +158,7 @@ describe("ReportEmbeddingService", () => {
             const result = await service.indexReport(report, "project-id", "agent-pubkey");
 
             expect(result).toBe(false);
-            expect(addDocumentsCalls.length).toBe(0);
+            expect(bulkUpsertCalls.length).toBe(0);
         });
 
         it("should truncate very long content", async () => {
@@ -170,32 +171,43 @@ describe("ReportEmbeddingService", () => {
 
             await service.indexReport(report, "project-id", "agent-pubkey");
 
-            const doc = addDocumentsCalls[0].docs[0];
+            const doc = bulkUpsertCalls[0].docs[0];
             // Content should be truncated to 2000 chars + "..."
             expect(doc.content).toContain("...");
             expect(doc.content.length).toBeLessThan(longContent.length + 200);
         });
 
-        it("should not throw on RAG failure and return false", async () => {
-            addDocumentsShouldThrow = true;
+        it("should propagate RAG errors", async () => {
+            bulkUpsertShouldThrow = true;
 
-            const result = await service.indexReport(
-                { slug: "test", title: "Test", content: "content" },
-                "project-id",
-                "agent-pubkey"
-            );
-
-            expect(result).toBe(false);
+            await expect(
+                service.indexReport(
+                    { slug: "test", title: "Test", content: "content" },
+                    "project-id",
+                    "agent-pubkey"
+                )
+            ).rejects.toThrow("RAG write failed");
         });
     });
 
     describe("removeReport", () => {
         it("should delete a report document by project-scoped ID", async () => {
+            // Collection must exist for removeReport to proceed
+            mockCollections = ["project_reports"];
+
             await service.removeReport("test-slug", "project-id");
 
             expect(deleteDocumentCalls.length).toBe(1);
             expect(deleteDocumentCalls[0].collection).toBe("project_reports");
             expect(deleteDocumentCalls[0].id).toBe("report_project-id_test-slug");
+        });
+
+        it("should skip deletion when collection does not exist", async () => {
+            mockCollections = [];
+
+            await service.removeReport("test-slug", "project-id");
+
+            expect(deleteDocumentCalls.length).toBe(0);
         });
     });
 
@@ -336,14 +348,12 @@ describe("ReportEmbeddingService", () => {
             });
         });
 
-        it("should return empty array on search error", async () => {
+        it("should propagate search errors", async () => {
             queryWithFilterShouldThrow = true;
 
-            const results = await service.semanticSearch("test", {
-                projectId: "proj",
-            });
-
-            expect(results).toEqual([]);
+            await expect(
+                service.semanticSearch("test", { projectId: "proj" })
+            ).rejects.toThrow("Search failed");
         });
     });
 
@@ -365,17 +375,17 @@ describe("ReportEmbeddingService", () => {
             );
 
             // Both should be indexed with different document IDs
-            expect(addDocumentsCalls.length).toBe(2);
-            expect(addDocumentsCalls[0].docs[0].id).toBe(
+            expect(bulkUpsertCalls.length).toBe(2);
+            expect(bulkUpsertCalls[0].docs[0].id).toBe(
                 `report_${projectA}_shared-slug`
             );
-            expect(addDocumentsCalls[1].docs[0].id).toBe(
+            expect(bulkUpsertCalls[1].docs[0].id).toBe(
                 `report_${projectB}_shared-slug`
             );
 
             // Metadata should have different projectIds
-            expect(addDocumentsCalls[0].docs[0].metadata.projectId).toBe(projectA);
-            expect(addDocumentsCalls[1].docs[0].metadata.projectId).toBe(projectB);
+            expect(bulkUpsertCalls[0].docs[0].metadata.projectId).toBe(projectA);
+            expect(bulkUpsertCalls[1].docs[0].metadata.projectId).toBe(projectB);
         });
 
         it("should generate different document IDs for same slug in different projects", () => {
@@ -390,24 +400,21 @@ describe("ReportEmbeddingService", () => {
         });
 
         it("should build correct project filter for SQL prefilter", () => {
-            const svc = service as any;
-
             // Normal projectId
-            const filter = svc.buildProjectFilter("31933:pubkey:my-project");
+            const filter = buildProjectFilter("31933:pubkey:my-project");
             expect(filter).toBe('metadata LIKE \'%"projectId":"31933:pubkey:my-project"%\'');
 
             // ALL = no filter
-            expect(svc.buildProjectFilter("ALL")).toBeUndefined();
-            expect(svc.buildProjectFilter("all")).toBeUndefined();
+            expect(buildProjectFilter("ALL")).toBeUndefined();
+            expect(buildProjectFilter("all")).toBeUndefined();
 
             // Empty = no filter
-            expect(svc.buildProjectFilter("")).toBeUndefined();
-            expect(svc.buildProjectFilter(undefined)).toBeUndefined();
+            expect(buildProjectFilter("")).toBeUndefined();
+            expect(buildProjectFilter(undefined)).toBeUndefined();
         });
 
         it("should escape single quotes in projectId for SQL safety", () => {
-            const svc = service as any;
-            const filter = svc.buildProjectFilter("project's-id");
+            const filter = buildProjectFilter("project's-id");
             expect(filter).toBe('metadata LIKE \'%"projectId":"project\'\'s-id"%\'');
         });
     });
@@ -436,8 +443,8 @@ describe("ReportEmbeddingService", () => {
             const count = await service.indexExistingReports(reports as any, "project-id");
 
             expect(count).toBe(1);
-            expect(addDocumentsCalls.length).toBe(1);
-            expect(addDocumentsCalls[0].docs[0].metadata.slug).toBe("active");
+            expect(bulkUpsertCalls.length).toBe(1);
+            expect(bulkUpsertCalls[0].docs[0].metadata.slug).toBe("active");
         });
 
         it("should skip reports without content", async () => {
