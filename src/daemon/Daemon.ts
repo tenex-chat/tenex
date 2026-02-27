@@ -914,6 +914,9 @@ export class Daemon {
             projectSet.add(projectId);
         }
 
+        // Persist in stored set so trust survives if this project later stops
+        this.storedAgentPubkeys.add(agent.pubkey);
+
         // Update subscriptions
         if (this.subscriptionManager) {
             const allPubkeys = Array.from(this.agentPubkeyToProjects.keys());
