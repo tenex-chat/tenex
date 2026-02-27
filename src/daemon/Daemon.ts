@@ -40,6 +40,7 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { APNsService } from "@/services/apns";
+import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 const lessonTracer = trace.getTracer("tenex.lessons");
 
 /**
@@ -213,6 +214,17 @@ export class Daemon {
                 this.whitelistedPubkeys,
                 this.routingLogger
             );
+
+            // 8b. Seed trust service with all known agent pubkeys from storage
+            // This covers agents from not-yet-running projects for cross-project trust
+            await agentStorage.initialize();
+            const storedAgentPubkeys = await agentStorage.getAllKnownPubkeys();
+            if (storedAgentPubkeys.size > 0) {
+                getTrustPubkeyService().setGlobalAgentPubkeys(storedAgentPubkeys);
+                logger.info("Seeded trust service with stored agent pubkeys", {
+                    count: storedAgentPubkeys.size,
+                });
+            }
 
             // 9. Start subscription immediately
             // Projects will be discovered naturally as events arrive
@@ -822,6 +834,9 @@ export class Daemon {
             // Sync per-agent lesson subscriptions: add new, remove stale
             this.syncLessonSubscriptions(allAgentDefinitionIds);
 
+            // Sync trust service with all known agent pubkeys (cross-project trust)
+            this.syncTrustServiceAgentPubkeys();
+
             // Set up callback for dynamic agent additions (e.g., via agents_write tool)
             // This ensures new agents are immediately routable without requiring a restart
             const context = runtime.getContext();
@@ -866,6 +881,16 @@ export class Daemon {
     }
 
     /**
+     * Push current agent pubkeys to TrustPubkeyService for cross-project trust.
+     * Uses the daemon-level agentPubkeyToProjects map which tracks all agents
+     * across all running projects.
+     */
+    private syncTrustServiceAgentPubkeys(): void {
+        const allPubkeys = new Set(this.agentPubkeyToProjects.keys());
+        getTrustPubkeyService().setGlobalAgentPubkeys(allPubkeys);
+    }
+
+    /**
      * Handle a dynamically added agent (e.g., created via agents_write tool).
      * Updates the routing map and subscription to make the agent immediately routable.
      */
@@ -894,6 +919,9 @@ export class Daemon {
         // Register with global 14199 service
         const dTag = projectId.split(":").slice(2).join(":");
         OwnerAgentListService.getInstance().registerAgents(dTag, [agent.pubkey]);
+
+        // Sync trust service with updated agent pubkeys (cross-project trust)
+        this.syncTrustServiceAgentPubkeys();
 
         logger.info("Dynamic agent added to routing", {
             projectId,
@@ -1799,6 +1827,9 @@ export class Daemon {
 
             this.subscriptionManager.updateAgentMentions(Array.from(allAgentPubkeys));
             this.syncLessonSubscriptions(allAgentDefinitionIds);
+
+            // Sync trust service with remaining agent pubkeys (cross-project trust)
+            this.syncTrustServiceAgentPubkeys();
         } catch (error) {
             logger.error("Failed to update subscription after runtime removed", {
                 projectId,

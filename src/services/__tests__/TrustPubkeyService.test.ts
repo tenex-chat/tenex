@@ -4,7 +4,6 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Variables to control mock behavior
 let mockProjectContext: any = null;
-let mockProjectContextInitialized = true;
 let mockWhitelistedPubkeys: string[] = [];
 let mockBackendPubkey: string | null = "backend-pubkey-hex";
 let mockBackendSignerError = false;
@@ -39,8 +38,9 @@ mock.module("@/services/ConfigService", () => ({
 }));
 
 mock.module("@/services/projects", () => ({
-    getProjectContext: () => mockProjectContext,
-    isProjectContextInitialized: () => mockProjectContextInitialized,
+    projectContextStore: {
+        getContext: () => mockProjectContext,
+    },
 }));
 
 mock.module("@/utils/logger", () => ({
@@ -67,7 +67,6 @@ describe("TrustPubkeyService", () => {
         // Reset mock values
         mockWhitelistedPubkeys = [];
         mockBackendPubkey = "backend-pubkey-hex";
-        mockProjectContextInitialized = true;
         mockBackendSignerError = false;
         mockConfigError = false;
 
@@ -206,6 +205,99 @@ describe("TrustPubkeyService", () => {
         });
     });
 
+    describe("cross-project agent trust via globalAgentPubkeys", () => {
+        it("should trust pubkeys from global agent set when no project context", async () => {
+            // No project context (simulates cross-project scenario)
+            mockProjectContext = null;
+
+            // Set global agent pubkeys (as Daemon would)
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
+
+            const result = await service.isTrusted("cross-project-agent-pubkey");
+
+            expect(result.trusted).toBe(true);
+            expect(result.reason).toBe("agent");
+        });
+
+        it("should trust pubkeys from global agent set in sync path", () => {
+            mockProjectContext = null;
+
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
+
+            const result = service.isTrustedSync("cross-project-agent-pubkey");
+
+            expect(result.trusted).toBe(true);
+            expect(result.reason).toBe("agent");
+        });
+
+        it("should trust pubkey from different project even with project context active", () => {
+            // Current project has agent1 and agent2, but NOT cross-project-agent
+            const result1 = service.isTrustedSync("cross-project-agent-pubkey");
+            expect(result1.trusted).toBe(false);
+
+            // Daemon pushes global set including cross-project agent
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey", "agent1-pubkey"]));
+
+            const result2 = service.isTrustedSync("cross-project-agent-pubkey");
+            expect(result2.trusted).toBe(true);
+            expect(result2.reason).toBe("agent");
+        });
+
+        it("should still reject unknown pubkeys with global set populated", () => {
+            service.setGlobalAgentPubkeys(new Set(["known-agent-pubkey"]));
+
+            const result = service.isTrustedSync("unknown-pubkey");
+
+            expect(result.trusted).toBe(false);
+        });
+
+        it("should clear global agent pubkeys on cache clear", () => {
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
+
+            // Verify it's trusted
+            expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(true);
+
+            // Clear cache
+            service.clearCache();
+
+            // Should no longer be trusted
+            expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(false);
+        });
+
+        it("should include global agent pubkeys in getAllTrustedPubkeys", async () => {
+            mockProjectContext = null;
+            service.setGlobalAgentPubkeys(new Set(["global-agent-1", "global-agent-2"]));
+
+            const trusted = await service.getAllTrustedPubkeys();
+
+            const agentEntries = trusted.filter((t) => t.reason === "agent");
+            expect(agentEntries.length).toBe(2);
+            expect(agentEntries.map((e) => e.pubkey).sort()).toEqual(["global-agent-1", "global-agent-2"]);
+        });
+
+        it("should de-duplicate between project context and global set", async () => {
+            // agent1-pubkey is in both project context and global set
+            service.setGlobalAgentPubkeys(new Set(["agent1-pubkey", "cross-project-agent"]));
+
+            const trusted = await service.getAllTrustedPubkeys();
+
+            const agentEntries = trusted.filter((t) => t.reason === "agent");
+            // Should be 3: agent1-pubkey, agent2-pubkey (from context), cross-project-agent (from global)
+            expect(agentEntries.length).toBe(3);
+        });
+
+        it("should trust event from cross-project agent via isTrustedEventSync", () => {
+            mockProjectContext = null;
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
+
+            const event = { pubkey: "cross-project-agent-pubkey", id: "event-id" } as NDKEvent;
+            const result = service.isTrustedEventSync(event);
+
+            expect(result.trusted).toBe(true);
+            expect(result.reason).toBe("agent");
+        });
+    });
+
     describe("getAllTrustedPubkeys", () => {
         it("should return all trusted pubkeys with reasons", async () => {
             mockWhitelistedPubkeys = ["whitelisted-1", "whitelisted-2"];
@@ -266,12 +358,12 @@ describe("TrustPubkeyService", () => {
         });
     });
 
-    describe("when project context is not initialized", () => {
+    describe("when project context is not available", () => {
         beforeEach(() => {
-            mockProjectContextInitialized = false;
+            mockProjectContext = null;
         });
 
-        it("should not trust agent pubkeys", async () => {
+        it("should not trust agent pubkeys without global set", async () => {
             const result = await service.isTrusted("agent1-pubkey");
 
             expect(result.trusted).toBe(false);
@@ -293,7 +385,7 @@ describe("TrustPubkeyService", () => {
             expect(result.reason).toBe("backend");
         });
 
-        it("getAllTrustedPubkeys should exclude agent pubkeys", async () => {
+        it("getAllTrustedPubkeys should exclude agent pubkeys without global set", async () => {
             const trusted = await service.getAllTrustedPubkeys();
 
             expect(trusted.filter((t) => t.reason === "agent").length).toBe(0);

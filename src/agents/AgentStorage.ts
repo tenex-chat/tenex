@@ -1111,6 +1111,26 @@ export class AgentStorage {
     }
 
     /**
+     * Get all known agent pubkeys across all projects from the index.
+     * Returns pubkeys from the byProject index (source of truth for project associations).
+     *
+     * Used by the Daemon to seed the TrustPubkeyService global agent pubkeys set
+     * at startup, covering agents from not-yet-running projects.
+     */
+    async getAllKnownPubkeys(): Promise<Set<string>> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return new Set();
+
+        const pubkeys = new Set<string>();
+        for (const projectPubkeys of Object.values(this.index.byProject)) {
+            for (const pubkey of projectPubkeys) {
+                pubkeys.add(pubkey);
+            }
+        }
+        return pubkeys;
+    }
+
+    /**
      * Get all agents (for debugging/admin purposes)
      */
     async getAllAgents(): Promise<StoredAgent[]> {

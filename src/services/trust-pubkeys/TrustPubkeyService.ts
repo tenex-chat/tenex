@@ -24,9 +24,14 @@ export interface TrustResult {
  * A pubkey is trusted if it is:
  * - In the whitelisted pubkeys from config
  * - The backend's own pubkey
- * - An agent in the system (registered in ProjectContext)
+ * - An agent in the system (registered in ProjectContext or globally across all projects)
  *
  * Trust precedence (highest to lowest): whitelisted > backend > agent
+ *
+ * ## Agent Trust: Three-Tier Lookup
+ * 1. **Project context** (sync): Check the current project's agent registry (fast, scoped)
+ * 2. **Global agent set** (sync): Check daemon-level set of all agent pubkeys across all projects
+ * 3. **AgentStorage fallback** (async only): Check persistent storage for not-yet-running projects
  */
 export class TrustPubkeyService {
     private static instance: TrustPubkeyService;
@@ -36,6 +41,13 @@ export class TrustPubkeyService {
 
     /** Cached whitelist Set for O(1) lookups */
     private cachedWhitelistSet?: Set<Hexpubkey>;
+
+    /**
+     * Global set of agent pubkeys across ALL projects (running and discovered).
+     * Pushed by the Daemon whenever projects start/stop or agents are added.
+     * Frozen for safe concurrent reads.
+     */
+    private globalAgentPubkeys: ReadonlySet<Hexpubkey> = Object.freeze(new Set<Hexpubkey>());
 
     private constructor() {}
 
@@ -166,6 +178,20 @@ export class TrustPubkeyService {
     }
 
     /**
+     * Set the global agent pubkeys set (daemon-level, cross-project).
+     * Called by the Daemon when projects start/stop or agents are dynamically added.
+     * The set is frozen for safe concurrent reads.
+     *
+     * @param pubkeys Set of all known agent pubkeys across all projects
+     */
+    setGlobalAgentPubkeys(pubkeys: Set<Hexpubkey>): void {
+        this.globalAgentPubkeys = Object.freeze(new Set(pubkeys));
+        logger.debug("[TRUST_PUBKEY] Global agent pubkeys updated", {
+            count: pubkeys.size,
+        });
+    }
+
+    /**
      * Get all currently trusted pubkeys.
      * Useful for debugging or displaying trust status.
      *
@@ -196,12 +222,20 @@ export class TrustPubkeyService {
         }
 
         // 3. Add agent pubkeys (lowest priority)
+        // 3a. Current project context agents
         const projectCtx = projectContextStore.getContext();
         if (projectCtx) {
             for (const [_slug, agent] of projectCtx.agents) {
                 if (agent.pubkey && !trustedMap.has(agent.pubkey)) {
                     trustedMap.set(agent.pubkey, "agent");
                 }
+            }
+        }
+
+        // 3b. Global agent pubkeys (cross-project)
+        for (const pubkey of this.globalAgentPubkeys) {
+            if (!trustedMap.has(pubkey)) {
+                trustedMap.set(pubkey, "agent");
             }
         }
 
@@ -296,16 +330,27 @@ export class TrustPubkeyService {
     }
 
     /**
-     * Check if pubkey belongs to an agent in the system.
-     * Returns false if no project context is available (e.g., during daemon startup
-     * or when called outside of projectContextStore.run()).
+     * Check if pubkey belongs to an agent in the system (synchronous, two-tier).
+     *
+     * Tier 1: Current project context (fast, scoped to the active project)
+     * Tier 2: Global agent pubkeys set (daemon-level, covers all running projects)
+     *
+     * Returns false if neither tier matches. For the async fallback (AgentStorage),
+     * see isAgentPubkeyAsync().
      */
     private isAgentPubkey(pubkey: Hexpubkey): boolean {
+        // Tier 1: Current project context (existing fast path)
         const projectCtx = projectContextStore.getContext();
-        if (!projectCtx) {
-            return false;
+        if (projectCtx?.getAgentByPubkey(pubkey) !== undefined) {
+            return true;
         }
-        return projectCtx.getAgentByPubkey(pubkey) !== undefined;
+
+        // Tier 2: Global agent pubkeys (daemon-level, cross-project)
+        if (this.globalAgentPubkeys.has(pubkey)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -314,6 +359,7 @@ export class TrustPubkeyService {
     clearCache(): void {
         this.cachedBackendPubkey = undefined;
         this.cachedWhitelistSet = undefined;
+        this.globalAgentPubkeys = Object.freeze(new Set<Hexpubkey>());
         logger.debug("[TRUST_PUBKEY] Cache cleared");
     }
 }
