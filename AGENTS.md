@@ -78,7 +78,7 @@ Use `MODULE_INVENTORY.md` as the canonical map of components. Consult it before 
 | Directories | kebab-case | `event-handler/` |
 | Services/Classes | PascalCase | `ConfigService.ts` |
 | Utilities | kebab-case | `error-formatter.ts` |
-| Tools | `<domain>_<action>` | `rag_query.ts` |
+| Tools | `<domain>_<action>` | `rag_search.ts` |
 | Tests | `*.test.ts` in `__tests__/` | `AgentExecutor.test.ts` |
 
 ### Import Patterns

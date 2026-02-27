@@ -19,6 +19,7 @@ export type {
 export { ReportSearchProvider } from "./providers/ReportSearchProvider";
 export { ConversationSearchProvider } from "./providers/ConversationSearchProvider";
 export { LessonSearchProvider } from "./providers/LessonSearchProvider";
+export { GenericCollectionSearchProvider } from "./providers/GenericCollectionSearchProvider";
 
 import { SearchProviderRegistry } from "./SearchProviderRegistry";
 import { ReportSearchProvider } from "./providers/ReportSearchProvider";

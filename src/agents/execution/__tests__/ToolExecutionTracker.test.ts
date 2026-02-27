@@ -68,7 +68,7 @@ describe("ToolExecutionTracker", () => {
 
         // Create mock tools object
         mockToolsObject = {
-            search: {
+            rag_search: {
                 getHumanReadableContent: mock(() => 'Searching for "test query"'),
             } as any,
             calculator: {} as any, // Tool without getHumanReadableContent
@@ -78,8 +78,8 @@ describe("ToolExecutionTracker", () => {
         // Clear all mocks
         mockStore.mockClear();
         mockAgentPublisher.toolUse.mockClear();
-        if (mockToolsObject.search?.getHumanReadableContent) {
-            mockToolsObject.search.getHumanReadableContent.mockClear();
+        if (mockToolsObject.rag_search?.getHumanReadableContent) {
+            mockToolsObject.rag_search.getHumanReadableContent.mockClear();
         }
     });
 
@@ -92,7 +92,7 @@ describe("ToolExecutionTracker", () => {
         it("should track a new tool execution successfully", async () => {
             await tracker.trackExecution({
                 toolCallId: "call-123",
-                toolName: "search",
+                toolName: "rag_search",
                 args: { query: "test query" },
                 toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
@@ -101,7 +101,7 @@ describe("ToolExecutionTracker", () => {
 
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 {
-                    toolName: "search",
+                    toolName: "rag_search",
                     content: 'Searching for "test query"',
                     args: { query: "test query" },
                 },
@@ -113,7 +113,7 @@ describe("ToolExecutionTracker", () => {
             const execution = tracker.getExecution("call-123");
             expect(execution).toEqual({
                 toolCallId: "call-123",
-                toolName: "search",
+                toolName: "rag_search",
                 toolEventId: "mock-event-id-123",
                 input: { query: "test query" },
                 completed: false,
@@ -159,7 +159,7 @@ describe("ToolExecutionTracker", () => {
         it("should return the published NDKEvent", async () => {
             const returnedEvent = await tracker.trackExecution({
                 toolCallId: "call-return-event",
-                toolName: "search",
+                toolName: "rag_search",
                 args: { query: "test" },
                 toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
@@ -205,7 +205,7 @@ describe("ToolExecutionTracker", () => {
             // Setup: Track an execution first
             await tracker.trackExecution({
                 toolCallId: "call-123",
-                toolName: "search",
+                toolName: "rag_search",
                 args: { query: "test" },
                 toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
@@ -226,7 +226,7 @@ describe("ToolExecutionTracker", () => {
             const execution = tracker.getExecution("call-123");
             expect(execution).toEqual({
                 toolCallId: "call-123",
-                toolName: "search",
+                toolName: "rag_search",
                 toolEventId: "mock-event-id-123",
                 input: { query: "test" },
                 output: result,
@@ -239,12 +239,12 @@ describe("ToolExecutionTracker", () => {
                 "mock-event-id-123",
                 {
                     toolCallId: "call-123",
-                    toolName: "search",
+                    toolName: "rag_search",
                     input: { query: "test" },
                 },
                 {
                     toolCallId: "call-123",
-                    toolName: "search",
+                    toolName: "rag_search",
                     output: result,
                     error: false,
                 },
@@ -635,7 +635,7 @@ describe("ToolExecutionTracker", () => {
         it("should not affect non-delegation tools", async () => {
             const result = await tracker.trackExecution({
                 toolCallId: "normal-tool",
-                toolName: "search",
+                toolName: "rag_search",
                 args: { query: "test" },
                 toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,

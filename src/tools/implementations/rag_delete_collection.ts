@@ -1,5 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
+import { RAGCollectionRegistry } from "@/services/rag/RAGCollectionRegistry";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
@@ -40,6 +41,14 @@ async function executeDeleteCollection(
 
     const ragService = RAGService.getInstance();
     await ragService.deleteCollection(name);
+
+    // Clean up registry entry
+    try {
+        const registry = RAGCollectionRegistry.getInstance();
+        registry.unregister(name);
+    } catch {
+        // Registry not available — non-critical, skip
+    }
 
     return {
         success: true,

@@ -21,11 +21,48 @@ mock.module("@/services/ConfigService", () => ({
     },
 }));
 
+// Mock RAGService for dynamic collection discovery
+let mockListCollections: () => Promise<string[]> = async () => [];
+let mockQueryWithFilter: (name: string, query: string, topK: number, filter?: string) => Promise<any[]> =
+    async () => [];
+
+mock.module("@/services/rag/RAGService", () => ({
+    RAGService: {
+        getInstance: () => ({
+            listCollections: () => mockListCollections(),
+            queryWithFilter: (name: string, query: string, topK: number, filter?: string) =>
+                mockQueryWithFilter(name, query, topK, filter),
+        }),
+    },
+}));
+
+// Mock RAGCollectionRegistry for scope-aware tests
+let mockGetMatchingCollections: ((allCollections: string[], projectId: string, agentPubkey?: string) => string[]) | null = null;
+
+mock.module("@/services/rag/RAGCollectionRegistry", () => ({
+    RAGCollectionRegistry: {
+        getInstance: () => ({
+            getMatchingCollections: (allCollections: string[], projectId: string, agentPubkey?: string) => {
+                if (mockGetMatchingCollections) {
+                    return mockGetMatchingCollections(allCollections, projectId, agentPubkey);
+                }
+                // Default: return all (no scope filtering)
+                return allCollections;
+            },
+        }),
+    },
+}));
+
 import { SearchProviderRegistry } from "../SearchProviderRegistry";
 import { UnifiedSearchService } from "../UnifiedSearchService";
 import type { SearchProvider, SearchResult } from "../types";
 
 function createMockResult(source: string, id: string, score: number): SearchResult {
+    const toolMap: Record<string, SearchResult["retrievalTool"]> = {
+        reports: "report_read",
+        conversations: "conversation_get",
+        lessons: "lesson_get",
+    };
     return {
         source,
         id,
@@ -33,14 +70,15 @@ function createMockResult(source: string, id: string, score: number): SearchResu
         relevanceScore: score,
         title: `${source} result ${id}`,
         summary: `Summary for ${id}`,
-        retrievalTool: source === "reports" ? "report_read" : source === "conversations" ? "conversation_get" : "lesson_get",
+        retrievalTool: toolMap[source] ?? "rag_search",
         retrievalArg: id,
     };
 }
 
-function createMockProvider(name: string, results: SearchResult[]): SearchProvider {
+function createMockProvider(name: string, results: SearchResult[], collectionName?: string): SearchProvider {
     return {
         name,
+        collectionName,
         description: `Mock provider: ${name}`,
         search: async () => results,
     };
@@ -62,6 +100,9 @@ describe("UnifiedSearchService", () => {
         UnifiedSearchService.resetInstance();
         mockSearchModelName = undefined;
         mockCreateLLMServiceResult = undefined;
+        mockListCollections = async () => [];
+        mockQueryWithFilter = async () => [];
+        mockGetMatchingCollections = null;
     });
 
     afterEach(() => {
@@ -272,5 +313,287 @@ describe("UnifiedSearchService", () => {
         expect(result.totalResults).toBe(0);
         expect(result.collectionsErrored).toHaveLength(2);
         expect(result.warnings).toHaveLength(2);
+    });
+
+    describe("dynamic collection discovery", () => {
+        it("discovers and queries generic RAG collections alongside specialized providers", async () => {
+            // Register a specialized provider (with collectionName mapping to its RAG collection)
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAG returns specialized + extra collections
+            mockListCollections = async () => [
+                "project_reports",          // covered by specialized "reports" provider
+                "conversation_embeddings",  // covered by specialized "conversations" provider
+                "lessons",                  // covered by specialized "lessons" provider
+                "custom_knowledge",         // NOT covered — should get a generic provider
+            ];
+
+            mockQueryWithFilter = async (name: string) => {
+                if (name === "custom_knowledge") {
+                    return [
+                        {
+                            document: {
+                                id: "doc-1",
+                                content: "Custom knowledge content here",
+                                metadata: { projectId: "test-project", title: "Custom Doc" },
+                            },
+                            score: 0.75,
+                        },
+                    ];
+                }
+                return [];
+            };
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+            });
+
+            expect(result.success).toBe(true);
+            // Should include both specialized (reports) and generic (custom_knowledge)
+            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("custom_knowledge");
+            expect(result.totalResults).toBe(2);
+
+            // Verify generic result is included and properly formatted
+            const customResult = result.results.find((r) => r.source === "custom_knowledge");
+            expect(customResult).toBeDefined();
+            expect(customResult!.id).toBe("doc-1");
+            expect(customResult!.retrievalTool).toBe("rag_search");
+        });
+
+        it("does not create generic providers for specialized collection names", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+            registry.register(
+                createMockProvider("conversations", [], "conversation_embeddings")
+            );
+            registry.register(
+                createMockProvider("lessons", [], "lessons")
+            );
+
+            // Only return collections covered by specialized providers
+            mockListCollections = async () => [
+                "project_reports",
+                "conversation_embeddings",
+                "lessons",
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+            });
+
+            // Only the registered specialized providers should be queried — no generic duplicates
+            expect(result.collectionsSearched).toEqual(["reports", "conversations", "lessons"]);
+            expect(result.totalResults).toBe(1);
+        });
+
+        it("filters dynamic collections via the collections parameter", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            mockListCollections = async () => ["project_reports", "custom_a", "custom_b"];
+
+            mockQueryWithFilter = async (name: string) => [
+                {
+                    document: {
+                        id: `${name}-doc`,
+                        content: `Content from ${name}`,
+                        metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                    },
+                    score: 0.8,
+                },
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+                collections: ["custom_a"],
+            });
+
+            // Should only search custom_a, not reports or custom_b
+            expect(result.collectionsSearched).toEqual(["custom_a"]);
+            expect(result.totalResults).toBe(1);
+            expect(result.results[0].source).toBe("custom_a");
+        });
+
+        it("degrades gracefully when RAG collection discovery fails", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAGService.listCollections() throws
+            mockListCollections = async () => {
+                throw new Error("RAG unavailable");
+            };
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+            });
+
+            // Should still work with just the specialized providers
+            expect(result.success).toBe(true);
+            expect(result.collectionsSearched).toEqual(["reports"]);
+            expect(result.totalResults).toBe(1);
+        });
+
+        it("gracefully handles a failing generic provider among healthy ones", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            mockListCollections = async () => ["project_reports", "good_collection", "bad_collection"];
+
+            mockQueryWithFilter = async (name: string) => {
+                if (name === "bad_collection") {
+                    throw new Error("Collection corrupted");
+                }
+                return [
+                    {
+                        document: {
+                            id: `${name}-doc`,
+                            content: `Content from ${name}`,
+                            metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                        },
+                        score: 0.7,
+                    },
+                ];
+            };
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("good_collection");
+            expect(result.collectionsErrored).toContain("bad_collection");
+            // reports (1) + good_collection (1) = 2
+            expect(result.totalResults).toBe(2);
+        });
+    });
+
+    describe("scope-aware collection filtering", () => {
+        it("uses RAGCollectionRegistry to filter collections by scope", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAG lists all collections
+            mockListCollections = async () => [
+                "project_reports",
+                "project_coll",     // matches scope
+                "other_project",    // excluded by scope
+            ];
+
+            // Scope filter: only include project_reports and project_coll
+            mockGetMatchingCollections = (allCollections, _projectId, _agentPubkey) => {
+                return allCollections.filter((c) => c !== "other_project");
+            };
+
+            mockQueryWithFilter = async (name: string) => [
+                {
+                    document: {
+                        id: `${name}-doc`,
+                        content: `Content from ${name}`,
+                        metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                    },
+                    score: 0.7,
+                },
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should include reports (specialized) and project_coll (scope-matched generic)
+            // Should NOT include other_project (excluded by scope)
+            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("project_coll");
+            expect(result.collectionsSearched).not.toContain("other_project");
+        });
+
+        it("bypasses scope filtering when collections parameter is explicit", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAG lists all collections
+            mockListCollections = async () => [
+                "project_reports",
+                "scoped_out_coll",  // Would be excluded by scope
+            ];
+
+            // Scope filter excludes scoped_out_coll
+            mockGetMatchingCollections = (allCollections) => {
+                return allCollections.filter((c) => c !== "scoped_out_coll");
+            };
+
+            mockQueryWithFilter = async (name: string) => [
+                {
+                    document: {
+                        id: `${name}-doc`,
+                        content: `Content from ${name}`,
+                        metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                    },
+                    score: 0.8,
+                },
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+                // Explicit collections — bypasses scope
+                collections: ["scoped_out_coll"],
+            });
+
+            // Even though scope would exclude it, explicit collections bypass scoping
+            expect(result.collectionsSearched).toEqual(["scoped_out_coll"]);
+            expect(result.totalResults).toBe(1);
+        });
+
+        it("passes agentPubkey through to scope filtering", async () => {
+            let receivedAgentPubkey: string | undefined;
+
+            mockGetMatchingCollections = (_allCollections, _projectId, agentPubkey) => {
+                receivedAgentPubkey = agentPubkey;
+                return _allCollections;
+            };
+
+            mockListCollections = async () => ["some_collection"];
+            mockQueryWithFilter = async () => [];
+
+            const service = UnifiedSearchService.getInstance();
+            await service.search({
+                query: "test",
+                projectId: "test-project",
+                agentPubkey: "my-agent-pubkey-123",
+            });
+
+            expect(receivedAgentPubkey).toBe("my-agent-pubkey-123");
+        });
     });
 });

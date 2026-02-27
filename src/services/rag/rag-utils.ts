@@ -1,4 +1,17 @@
+import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import * as path from "node:path";
+
+/**
+ * Resolve the LanceDB data directory path.
+ * Centralizes env/config fallback logic used by multiple RAG services.
+ */
+export function getLanceDBDataDir(): string {
+    return (
+        process.env.LANCEDB_DATA_DIR ||
+        path.join(config.getConfigPath("data"), "lancedb")
+    );
+}
 
 /**
  * JSON-serializable primitive value.

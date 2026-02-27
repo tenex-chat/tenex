@@ -41,21 +41,21 @@ bun run validate:events
 ### Anatomy of a Tool
 
 ```typescript
-// src/tools/implementations/rag_query.ts
+// src/tools/implementations/rag_search.ts
 import { tool } from "ai";
 import { z } from "zod";
-import { RAGService } from "@/services/rag";
+import { UnifiedSearchService } from "@/services/search";
 
-export const rag_query = tool({
-  description: "Query the RAG knowledge base",
+export const rag_search = tool({
+  description: "Search across all RAG collections",
   parameters: z.object({
     query: z.string().describe("The search query"),
     limit: z.number().optional().default(10)
   }),
   execute: async ({ query, limit }) => {
     // CORRECT: Delegate to service
-    const ragService = new RAGService();
-    return await ragService.query(query, limit);
+    const searchService = UnifiedSearchService.getInstance();
+    return await searchService.search({ query, limit });
   }
 });
 ```
@@ -66,7 +66,7 @@ Files follow `<domain>_<action>.ts` pattern:
 | Domain | Examples |
 |--------|----------|
 | `agents_` | `agents_list.ts`, `agents_remove.ts` |
-| `rag_` | `rag_query.ts`, `rag_ingest.ts` |
+| `rag_` | `rag_search.ts`, `rag_create_collection.ts` |
 | `delegation_` | `delegation_create.ts`, `delegation_complete.ts` |
 | `schedule_` | `schedule_create.ts`, `schedule_list.ts` |
 | `file_` | `file_read.ts`, `file_write.ts` |
@@ -79,9 +79,9 @@ One file = one tool. If a tool does multiple things, split it:
 
 ```typescript
 // CORRECT: Separate tools
-// rag_query.ts - Query the knowledge base
-// rag_ingest.ts - Ingest documents
-// rag_list.ts - List collections
+// rag_search.ts - Search across all RAG collections
+// rag_create_collection.ts - Create a collection
+// rag_add_documents.ts - Ingest documents
 
 // WRONG: God tool
 // rag.ts - Query, ingest, list, delete, everything...
@@ -157,9 +157,10 @@ parameters: z.object({
 - `agents_configure` - Configure agent settings
 
 ### RAG Operations (`rag_*`)
-- `rag_query` - Query knowledge base
-- `rag_ingest` - Ingest documents
-- `rag_list` - List collections
+- `rag_search` - Search across all RAG collections
+- `rag_create_collection` - Create a collection
+- `rag_add_documents` - Ingest documents
+- `rag_delete_collection` - Delete a collection
 
 ### Delegation (`delegation_*`)
 - `delegation_create` - Create new delegation
@@ -219,7 +220,7 @@ export const rag_tool = tool({
 });
 
 // REJECT: Wrong naming
-export const query_rag = tool();  // Should be rag_query
+export const query_rag = tool();  // Should be rag_search
 ```
 
 ## Testing
@@ -227,15 +228,15 @@ export const query_rag = tool();  // Should be rag_query
 Test tools by mocking their service dependencies:
 
 ```typescript
-import { rag_query } from "@/tools/implementations/rag_query";
+import { createRAGSearchTool } from "@/tools/implementations/rag_search";
 
-describe("rag_query", () => {
-  it("should query RAG service", async () => {
+describe("rag_search", () => {
+  it("should search across all RAG collections", async () => {
     const mockService = createMockRAGService({
       queryResult: [{ content: "result" }]
     });
 
-    const result = await rag_query.execute({
+    const result = await ragSearchTool.execute({
       query: "test",
       limit: 5
     });

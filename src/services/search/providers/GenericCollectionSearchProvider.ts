@@ -1,9 +1,9 @@
 /**
- * LessonSearchProvider - Search provider for lessons.
+ * GenericCollectionSearchProvider - Search provider for any RAG collection.
  *
- * Queries the `lessons` RAG collection directly via RAGService
- * since lessons don't have a dedicated embedding service like
- * reports and conversations do.
+ * Created dynamically for RAG collections that don't have a dedicated
+ * specialized provider. Queries via RAGService with basic project-scoped
+ * filtering.
  */
 
 import { logger } from "@/utils/logger";
@@ -11,13 +11,18 @@ import { RAGService, type RAGQueryResult } from "@/services/rag/RAGService";
 import { buildProjectFilter } from "../projectFilter";
 import type { SearchProvider, SearchResult } from "../types";
 
-/** Collection name for lessons (matches what learn.ts uses) */
-const LESSONS_COLLECTION = "lessons";
+export class GenericCollectionSearchProvider implements SearchProvider {
+    readonly name: string;
+    readonly description: string;
 
-export class LessonSearchProvider implements SearchProvider {
-    readonly name = "lessons";
-    readonly collectionName = "lessons";
-    readonly description = "Agent lessons and insights";
+    /** The actual RAG collection name to query */
+    readonly collectionName: string;
+
+    constructor(collectionName: string) {
+        this.collectionName = collectionName;
+        this.name = collectionName;
+        this.description = `RAG collection: ${collectionName}`;
+    }
 
     async search(
         query: string,
@@ -27,49 +32,49 @@ export class LessonSearchProvider implements SearchProvider {
     ): Promise<SearchResult[]> {
         const ragService = RAGService.getInstance();
 
-        // Check if the lessons collection exists
-        const collections = await ragService.listCollections();
-        if (!collections.includes(LESSONS_COLLECTION)) {
-            logger.debug("[LessonSearchProvider] Lessons collection does not exist");
-            return [];
-        }
-
         const filter = buildProjectFilter(projectId);
 
         const results = await ragService.queryWithFilter(
-            LESSONS_COLLECTION,
+            this.collectionName,
             query,
             limit * 2, // Request more to account for minScore filtering
             filter
         );
 
-        logger.debug("[LessonSearchProvider] Search complete", {
+        logger.debug(`[GenericSearchProvider:${this.collectionName}] Search complete`, {
             query,
             projectId,
             rawResults: results.length,
         });
 
-        return results
-            .filter((result: RAGQueryResult) => result.score >= minScore)
+        const filtered = results
+            .filter((result: RAGQueryResult) => result.score >= minScore && !!result.document.id)
             .slice(0, limit)
             .map((result: RAGQueryResult) => this.transformResult(result, projectId));
+
+        if (filtered.length < results.length) {
+            const dropped = results.length - filtered.length;
+            logger.debug(`[GenericSearchProvider:${this.collectionName}] Dropped ${dropped} result(s) (low score or missing ID)`);
+        }
+
+        return filtered;
     }
 
     private transformResult(result: RAGQueryResult, fallbackProjectId: string): SearchResult {
         const metadata = result.document.metadata || {};
 
         return {
-            source: this.name,
+            source: this.collectionName,
             id: result.document.id || "",
             projectId: String(metadata.projectId || fallbackProjectId),
             relevanceScore: result.score,
-            title: String(metadata.title || ""),
+            title: String(metadata.title || result.document.id || ""),
             summary: result.document.content?.substring(0, 200) || "",
             createdAt: metadata.timestamp ? Number(metadata.timestamp) : undefined,
-            author: String(metadata.agentPubkey || ""),
-            authorName: String(metadata.agentName || ""),
+            author: metadata.agentPubkey ? String(metadata.agentPubkey) : undefined,
+            authorName: metadata.agentName ? String(metadata.agentName) : undefined,
             tags: Array.isArray(metadata.hashtags) ? (metadata.hashtags as string[]) : undefined,
-            retrievalTool: "lesson_get" as const,
+            retrievalTool: "rag_search" as const,
             retrievalArg: result.document.id || "",
         };
     }
