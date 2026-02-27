@@ -38,9 +38,9 @@ export const DEFAULT_CATEGORY: AgentCategory = "principal";
 export const CATEGORY_DENIED_TOOLS: Record<AgentCategory, readonly string[]> = {
     principal: [],
     orchestrator: ["fs_write", "fs_edit", "home_fs_write", "shell"],
-    worker: ["delegate", "delegate_crossproject", "delegate_followup"],
-    advisor: ["fs_write", "fs_edit", "home_fs_write", "shell", "delegate", "delegate_crossproject"],
-    auditor: ["fs_write", "fs_edit", "home_fs_write", "delegate", "delegate_crossproject"],
+    worker: [],
+    advisor: ["fs_write", "fs_edit", "home_fs_write", "shell"],
+    auditor: ["fs_write", "fs_edit", "home_fs_write"],
 } as const;
 
 /**
