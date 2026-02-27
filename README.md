@@ -78,7 +78,11 @@ From the repo, run:
 bun run start -- setup
 ```
 
-If you install the CLI binary, the equivalent command is `tenex setup`.
+If you install the daemon launcher from npm, run:
+
+```bash
+npx @tenex-chat/daemon
+```
 
 ### Quick Start
 

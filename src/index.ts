@@ -8,6 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { initializeTelemetry } from "@/telemetry/setup";
 
 /**
@@ -23,6 +24,24 @@ interface TelemetryConfig {
     enabled: boolean;
     serviceName: string;
     endpoint: string;
+}
+
+function getCliVersion(): string {
+    if (process.env.npm_package_version) {
+        return process.env.npm_package_version;
+    }
+
+    try {
+        const packageJsonPath = fileURLToPath(new URL("../package.json", import.meta.url));
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+        if (typeof packageJson.version === "string" && packageJson.version.length > 0) {
+            return packageJson.version;
+        }
+    } catch {
+        // Fall through to default when package metadata is unavailable.
+    }
+
+    return "0.0.0";
 }
 
 function getTelemetryConfig(): TelemetryConfig {
@@ -89,7 +108,7 @@ async function main(): Promise<void> {
     program
         .name("tenex")
         .description("TENEX Command Line Interface")
-        .version(process.env.npm_package_version || "0.8.0");
+        .version(getCliVersion());
 
     // Register subcommands
     program.addCommand(daemonCommand);

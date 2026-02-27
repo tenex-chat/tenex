@@ -193,13 +193,17 @@ class DaemonWrapper {
      */
     private spawnDaemon(args: string[]): Promise<number> {
         return new Promise((resolve) => {
-            // Build command: bun <entry-point> daemon --supervised [args]
             const indexPath = resolveEntryPoint();
             const daemonArgs = [indexPath, "daemon", "--supervised", ...args];
 
-            console.log(`[Wrapper] Spawning: bun ${daemonArgs.join(" ")}`);
+            // Use Bun when running TypeScript sources; otherwise run compiled JS via Node.
+            const runtimeBinary = indexPath.endsWith(".ts")
+                ? (process.env.TENEX_BUN_BIN || "bun")
+                : process.execPath;
 
-            this.child = spawn("bun", daemonArgs, {
+            console.log(`[Wrapper] Spawning: ${runtimeBinary} ${daemonArgs.join(" ")}`);
+
+            this.child = spawn(runtimeBinary, daemonArgs, {
                 stdio: "inherit",
                 env: process.env,
             });
