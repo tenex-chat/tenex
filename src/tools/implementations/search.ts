@@ -40,9 +40,10 @@ const searchSchema = z.object({
         .array(z.string())
         .optional()
         .describe(
-            "Which collections to search. Defaults to all available collections. " +
-            "Well-known: 'reports', 'conversations', 'lessons'. " +
-            "Additional RAG collections are discovered dynamically. " +
+            "Filter by provider name. Defaults to all available collections. " +
+            "Well-known provider names: 'reports', 'conversations', 'lessons'. " +
+            "Dynamically discovered RAG collections use their collection name as the " +
+            "provider name (e.g., 'custom_knowledge'). " +
             "Use to narrow search scope when you know where the information lives."
         ),
 });

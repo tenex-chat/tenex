@@ -41,6 +41,11 @@ import { UnifiedSearchService } from "../UnifiedSearchService";
 import type { SearchProvider, SearchResult } from "../types";
 
 function createMockResult(source: string, id: string, score: number): SearchResult {
+    const toolMap: Record<string, SearchResult["retrievalTool"]> = {
+        reports: "report_read",
+        conversations: "conversation_get",
+        lessons: "lesson_get",
+    };
     return {
         source,
         id,
@@ -48,14 +53,15 @@ function createMockResult(source: string, id: string, score: number): SearchResu
         relevanceScore: score,
         title: `${source} result ${id}`,
         summary: `Summary for ${id}`,
-        retrievalTool: source === "reports" ? "report_read" : source === "conversations" ? "conversation_get" : "lesson_get",
+        retrievalTool: toolMap[source] ?? "search",
         retrievalArg: id,
     };
 }
 
-function createMockProvider(name: string, results: SearchResult[]): SearchProvider {
+function createMockProvider(name: string, results: SearchResult[], collectionName?: string): SearchProvider {
     return {
         name,
+        collectionName,
         description: `Mock provider: ${name}`,
         search: async () => results,
     };
@@ -293,10 +299,10 @@ describe("UnifiedSearchService", () => {
 
     describe("dynamic collection discovery", () => {
         it("discovers and queries generic RAG collections alongside specialized providers", async () => {
-            // Register a specialized provider
+            // Register a specialized provider (with collectionName mapping to its RAG collection)
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
             );
 
             // RAG returns specialized + extra collections
@@ -345,7 +351,13 @@ describe("UnifiedSearchService", () => {
         it("does not create generic providers for specialized collection names", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+            registry.register(
+                createMockProvider("conversations", [], "conversation_embeddings")
+            );
+            registry.register(
+                createMockProvider("lessons", [], "lessons")
             );
 
             // Only return collections covered by specialized providers
@@ -361,15 +373,15 @@ describe("UnifiedSearchService", () => {
                 projectId: "test-project",
             });
 
-            // Only the registered specialized provider should be queried
-            expect(result.collectionsSearched).toEqual(["reports"]);
+            // Only the registered specialized providers should be queried — no generic duplicates
+            expect(result.collectionsSearched).toEqual(["reports", "conversations", "lessons"]);
             expect(result.totalResults).toBe(1);
         });
 
         it("filters dynamic collections via the collections parameter", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
             );
 
             mockListCollections = async () => ["project_reports", "custom_a", "custom_b"];
@@ -401,7 +413,7 @@ describe("UnifiedSearchService", () => {
         it("degrades gracefully when RAG collection discovery fails", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
             );
 
             // RAGService.listCollections() throws
@@ -424,7 +436,7 @@ describe("UnifiedSearchService", () => {
         it("gracefully handles a failing generic provider among healthy ones", async () => {
             const registry = SearchProviderRegistry.getInstance();
             registry.register(
-                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)])
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
             );
 
             mockListCollections = async () => ["project_reports", "good_collection", "bad_collection"];

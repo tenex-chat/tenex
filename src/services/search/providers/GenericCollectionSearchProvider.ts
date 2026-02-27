@@ -16,7 +16,7 @@ export class GenericCollectionSearchProvider implements SearchProvider {
     readonly description: string;
 
     /** The actual RAG collection name to query */
-    private readonly collectionName: string;
+    readonly collectionName: string;
 
     constructor(collectionName: string) {
         this.collectionName = collectionName;
@@ -47,10 +47,17 @@ export class GenericCollectionSearchProvider implements SearchProvider {
             rawResults: results.length,
         });
 
-        return results
-            .filter((result: RAGQueryResult) => result.score >= minScore)
+        const filtered = results
+            .filter((result: RAGQueryResult) => result.score >= minScore && !!result.document.id)
             .slice(0, limit)
             .map((result: RAGQueryResult) => this.transformResult(result, projectId));
+
+        if (filtered.length < results.length) {
+            const dropped = results.length - filtered.length;
+            logger.debug(`[GenericSearchProvider:${this.collectionName}] Dropped ${dropped} result(s) (low score or missing ID)`);
+        }
+
+        return filtered;
     }
 
     private transformResult(result: RAGQueryResult, fallbackProjectId: string): SearchResult {
@@ -67,7 +74,7 @@ export class GenericCollectionSearchProvider implements SearchProvider {
             author: metadata.agentPubkey ? String(metadata.agentPubkey) : undefined,
             authorName: metadata.agentName ? String(metadata.agentName) : undefined,
             tags: Array.isArray(metadata.hashtags) ? (metadata.hashtags as string[]) : undefined,
-            retrievalTool: "search",
+            retrievalTool: "search" as const,
             retrievalArg: result.document.id || "",
         };
     }

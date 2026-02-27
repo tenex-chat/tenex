@@ -16,6 +16,7 @@ const LESSONS_COLLECTION = "lessons";
 
 export class LessonSearchProvider implements SearchProvider {
     readonly name = "lessons";
+    readonly collectionName = "lessons";
     readonly description = "Agent lessons and insights";
 
     async search(

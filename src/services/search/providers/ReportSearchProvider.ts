@@ -10,6 +10,7 @@ import type { SearchProvider, SearchResult } from "../types";
 
 export class ReportSearchProvider implements SearchProvider {
     readonly name = "reports";
+    readonly collectionName = "project_reports";
     readonly description = "Project reports and documentation";
 
     async search(

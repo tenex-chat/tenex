@@ -139,28 +139,27 @@ export class UnifiedSearchService {
     }
 
     /**
-     * Map of specialized provider names to the RAG collection names they cover.
-     * These collections are handled by dedicated providers with smart filtering
-     * logic and should NOT get a generic provider.
-     */
-    private static readonly SPECIALIZED_COLLECTION_MAP: Record<string, string> = {
-        reports: "project_reports",
-        conversations: "conversation_embeddings",
-        lessons: "lessons",
-    };
-
-    /**
      * Resolve all providers to query: specialized (from registry) + generic
      * (dynamically created for any RAG collections not covered by a specialized provider).
      *
-     * @param requestedCollections - Optional filter. When provided, only return
-     *   providers whose name matches one of these collection names.
+     * @param requestedCollections - Optional filter by **provider name**. When provided,
+     *   only providers whose `name` matches are returned. For specialized providers, the
+     *   name is a friendly label (e.g., "reports"); for dynamic/generic providers, the
+     *   name equals the RAG collection name (e.g., "custom_knowledge").
      */
     private async resolveProviders(requestedCollections?: string[]): Promise<SearchProvider[]> {
         const specializedProviders = this.registry.getAll();
-        const coveredCollections = new Set(
-            Object.values(UnifiedSearchService.SPECIALIZED_COLLECTION_MAP)
-        );
+
+        // Derive covered RAG collections from the providers themselves.
+        // A collection is "covered" if a specialized provider declares it via
+        // `collectionName` or if its `name` matches a RAG collection name.
+        const coveredCollections = new Set<string>();
+        for (const provider of specializedProviders) {
+            if (provider.collectionName) {
+                coveredCollections.add(provider.collectionName);
+            }
+            coveredCollections.add(provider.name);
+        }
 
         // Discover all RAG collections
         let allCollections: string[];
@@ -187,7 +186,7 @@ export class UnifiedSearchService {
             });
         }
 
-        // Apply collection filter if requested
+        // Apply collection filter by provider name
         if (requestedCollections && requestedCollections.length > 0) {
             const requestedSet = new Set(requestedCollections);
             return allProviders.filter((p) => requestedSet.has(p.name));

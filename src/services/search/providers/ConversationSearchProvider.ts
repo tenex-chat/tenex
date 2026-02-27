@@ -10,6 +10,7 @@ import type { SearchProvider, SearchResult } from "../types";
 
 export class ConversationSearchProvider implements SearchProvider {
     readonly name = "conversations";
+    readonly collectionName = "conversation_embeddings";
     readonly description = "Past conversation threads and discussions";
 
     async search(

@@ -50,11 +50,8 @@ export interface SearchResult {
     /** Hashtags/categories for additional context */
     tags?: string[];
 
-    /** Which tool to use to retrieve full content.
-     * Well-known values: "report_read", "lesson_get", "conversation_get".
-     * Generic collections use "search" (re-query with narrower scope).
-     */
-    retrievalTool: string;
+    /** Which tool to use to retrieve full content */
+    retrievalTool: "report_read" | "lesson_get" | "conversation_get" | "search";
 
     /** The argument to pass to the retrieval tool */
     retrievalArg: string;
@@ -82,7 +79,12 @@ export interface SearchOptions {
      */
     prompt?: string;
 
-    /** Which collections to search (defaults to all) */
+    /**
+     * Filter by **provider name** (defaults to all).
+     * Well-known provider names: "reports", "conversations", "lessons".
+     * Dynamically discovered RAG collections use their collection name as provider name
+     * (e.g., "custom_knowledge").
+     */
     collections?: string[];
 }
 
@@ -91,11 +93,19 @@ export interface SearchOptions {
  * Each provider wraps a specific RAG collection.
  */
 export interface SearchProvider {
-    /** Unique name for this provider (matches collection concept) */
+    /** Unique name for this provider (used for filtering via `collections` parameter) */
     readonly name: string;
 
     /** Human-readable description */
     readonly description: string;
+
+    /**
+     * The underlying RAG collection name this provider covers.
+     * Used to prevent duplicate generic providers for collections that already
+     * have a specialized provider. When undefined, the provider is not
+     * associated with a specific RAG collection (or uses its `name` directly).
+     */
+    readonly collectionName?: string;
 
     /**
      * Perform semantic search within this provider's collection.
