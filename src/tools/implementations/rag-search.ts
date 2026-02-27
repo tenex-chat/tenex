@@ -1,5 +1,5 @@
 /**
- * Unified Search Tool
+ * RAG Search Tool
  *
  * Single search tool that queries across ALL accessible RAG collections.
  * Specialized providers handle well-known collections (reports, conversations,
@@ -16,7 +16,7 @@ import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
 
-const searchSchema = z.object({
+const ragSearchSchema = z.object({
     query: z.string().describe(
         "Natural language search query. Searches across all project knowledge " +
         "including reports, conversations, lessons, and any additional RAG collections. " +
@@ -40,18 +40,19 @@ const searchSchema = z.object({
         .array(z.string())
         .optional()
         .describe(
-            "Filter by provider name. Defaults to all available collections. " +
+            "Filter by provider name. When omitted, searches all collections matching the " +
+            "agent's scope (global + project + personal). When provided, searches exactly " +
+            "those collections (no scope filtering — the agent explicitly chose them). " +
             "Well-known provider names: 'reports', 'conversations', 'lessons'. " +
             "Dynamically discovered RAG collections use their collection name as the " +
-            "provider name (e.g., 'custom_knowledge'). " +
-            "Use to narrow search scope when you know where the information lives."
+            "provider name (e.g., 'custom_knowledge')."
         ),
 });
 
-type SearchInput = z.infer<typeof searchSchema>;
+type RAGSearchInput = z.infer<typeof ragSearchSchema>;
 
-async function executeSearch(
-    input: SearchInput,
+async function executeRAGSearch(
+    input: RAGSearchInput,
     context: ToolExecutionContext
 ): Promise<Record<string, unknown>> {
     const { query, prompt, limit = 10, collections } = input;
@@ -74,7 +75,7 @@ async function executeSearch(
         };
     }
 
-    logger.info("🔍 [SearchTool] Executing unified search", {
+    logger.info("🔍 [RAGSearch] Executing unified search", {
         query,
         prompt: prompt ? `${prompt.substring(0, 50)}...` : undefined,
         limit,
@@ -94,6 +95,7 @@ async function executeSearch(
         limit,
         prompt,
         collections,
+        agentPubkey: context.agent.pubkey,
     });
 
     // Format results for agent consumption
@@ -122,7 +124,7 @@ async function executeSearch(
     };
 }
 
-export function createSearchTool(context: ToolExecutionContext): AISdkTool {
+export function createRAGSearchTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
             "Search across ALL project knowledge — reports, conversations, lessons, and any " +
@@ -135,15 +137,15 @@ export function createSearchTool(context: ToolExecutionContext): AISdkTool {
             "This is the primary discovery tool for finding information across the project. Use " +
             "conversation_search for deep exploration of specific conversation content.",
 
-        inputSchema: searchSchema,
+        inputSchema: ragSearchSchema,
 
-        execute: async (input: SearchInput) => {
-            return await executeSearch(input, context);
+        execute: async (input: RAGSearchInput) => {
+            return await executeRAGSearch(input, context);
         },
     });
 
     Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ query, prompt, limit, collections }: SearchInput) => {
+        value: ({ query, prompt, limit, collections }: RAGSearchInput) => {
             const parts = [`Searching project knowledge for "${query}"`];
             if (prompt) parts.push(`prompt: "${prompt.substring(0, 40)}..."`);
             if (collections?.length) parts.push(`in: ${collections.join(", ")}`);

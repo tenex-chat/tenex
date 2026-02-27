@@ -36,6 +36,23 @@ mock.module("@/services/rag/RAGService", () => ({
     },
 }));
 
+// Mock RAGCollectionRegistry for scope-aware tests
+let mockGetMatchingCollections: ((allCollections: string[], projectId: string, agentPubkey?: string) => string[]) | null = null;
+
+mock.module("@/services/rag/RAGCollectionRegistry", () => ({
+    RAGCollectionRegistry: {
+        getInstance: () => ({
+            getMatchingCollections: (allCollections: string[], projectId: string, agentPubkey?: string) => {
+                if (mockGetMatchingCollections) {
+                    return mockGetMatchingCollections(allCollections, projectId, agentPubkey);
+                }
+                // Default: return all (no scope filtering)
+                return allCollections;
+            },
+        }),
+    },
+}));
+
 import { SearchProviderRegistry } from "../SearchProviderRegistry";
 import { UnifiedSearchService } from "../UnifiedSearchService";
 import type { SearchProvider, SearchResult } from "../types";
@@ -53,7 +70,7 @@ function createMockResult(source: string, id: string, score: number): SearchResu
         relevanceScore: score,
         title: `${source} result ${id}`,
         summary: `Summary for ${id}`,
-        retrievalTool: toolMap[source] ?? "search",
+        retrievalTool: toolMap[source] ?? "rag_search",
         retrievalArg: id,
     };
 }
@@ -85,6 +102,7 @@ describe("UnifiedSearchService", () => {
         mockCreateLLMServiceResult = undefined;
         mockListCollections = async () => [];
         mockQueryWithFilter = async () => [];
+        mockGetMatchingCollections = null;
     });
 
     afterEach(() => {
@@ -345,7 +363,7 @@ describe("UnifiedSearchService", () => {
             const customResult = result.results.find((r) => r.source === "custom_knowledge");
             expect(customResult).toBeDefined();
             expect(customResult!.id).toBe("doc-1");
-            expect(customResult!.retrievalTool).toBe("search");
+            expect(customResult!.retrievalTool).toBe("rag_search");
         });
 
         it("does not create generic providers for specialized collection names", async () => {
@@ -469,6 +487,113 @@ describe("UnifiedSearchService", () => {
             expect(result.collectionsErrored).toContain("bad_collection");
             // reports (1) + good_collection (1) = 2
             expect(result.totalResults).toBe(2);
+        });
+    });
+
+    describe("scope-aware collection filtering", () => {
+        it("uses RAGCollectionRegistry to filter collections by scope", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAG lists all collections
+            mockListCollections = async () => [
+                "project_reports",
+                "project_coll",     // matches scope
+                "other_project",    // excluded by scope
+            ];
+
+            // Scope filter: only include project_reports and project_coll
+            mockGetMatchingCollections = (allCollections, _projectId, _agentPubkey) => {
+                return allCollections.filter((c) => c !== "other_project");
+            };
+
+            mockQueryWithFilter = async (name: string) => [
+                {
+                    document: {
+                        id: `${name}-doc`,
+                        content: `Content from ${name}`,
+                        metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                    },
+                    score: 0.7,
+                },
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+                agentPubkey: "agent-pubkey",
+            });
+
+            // Should include reports (specialized) and project_coll (scope-matched generic)
+            // Should NOT include other_project (excluded by scope)
+            expect(result.collectionsSearched).toContain("reports");
+            expect(result.collectionsSearched).toContain("project_coll");
+            expect(result.collectionsSearched).not.toContain("other_project");
+        });
+
+        it("bypasses scope filtering when collections parameter is explicit", async () => {
+            const registry = SearchProviderRegistry.getInstance();
+            registry.register(
+                createMockProvider("reports", [createMockResult("reports", "r1", 0.9)], "project_reports")
+            );
+
+            // RAG lists all collections
+            mockListCollections = async () => [
+                "project_reports",
+                "scoped_out_coll",  // Would be excluded by scope
+            ];
+
+            // Scope filter excludes scoped_out_coll
+            mockGetMatchingCollections = (allCollections) => {
+                return allCollections.filter((c) => c !== "scoped_out_coll");
+            };
+
+            mockQueryWithFilter = async (name: string) => [
+                {
+                    document: {
+                        id: `${name}-doc`,
+                        content: `Content from ${name}`,
+                        metadata: { projectId: "test-project", title: `Doc from ${name}` },
+                    },
+                    score: 0.8,
+                },
+            ];
+
+            const service = UnifiedSearchService.getInstance();
+            const result = await service.search({
+                query: "test",
+                projectId: "test-project",
+                // Explicit collections — bypasses scope
+                collections: ["scoped_out_coll"],
+            });
+
+            // Even though scope would exclude it, explicit collections bypass scoping
+            expect(result.collectionsSearched).toEqual(["scoped_out_coll"]);
+            expect(result.totalResults).toBe(1);
+        });
+
+        it("passes agentPubkey through to scope filtering", async () => {
+            let receivedAgentPubkey: string | undefined;
+
+            mockGetMatchingCollections = (_allCollections, _projectId, agentPubkey) => {
+                receivedAgentPubkey = agentPubkey;
+                return _allCollections;
+            };
+
+            mockListCollections = async () => ["some_collection"];
+            mockQueryWithFilter = async () => [];
+
+            const service = UnifiedSearchService.getInstance();
+            await service.search({
+                query: "test",
+                projectId: "test-project",
+                agentPubkey: "my-agent-pubkey-123",
+            });
+
+            expect(receivedAgentPubkey).toBe("my-agent-pubkey-123");
         });
     });
 });

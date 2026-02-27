@@ -47,7 +47,7 @@ export type ToolName =
     | "upload_blob"
     | "rag_create_collection"
     | "rag_add_documents"
-    | "rag_query"
+    | "rag_search"
     | "rag_delete_collection"
     | "rag_list_collections"
     | "rag_subscription_create"
@@ -63,7 +63,6 @@ export type ToolName =
     | "web_search"
     | "nostr_fetch"
     | "nostr_publish_as_user"
-    | "search"
     | "change_model"
     | "kill"
     | "generate_image";

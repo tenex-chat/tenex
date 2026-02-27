@@ -74,7 +74,7 @@ export class GenericCollectionSearchProvider implements SearchProvider {
             author: metadata.agentPubkey ? String(metadata.agentPubkey) : undefined,
             authorName: metadata.agentName ? String(metadata.agentName) : undefined,
             tags: Array.isArray(metadata.hashtags) ? (metadata.hashtags as string[]) : undefined,
-            retrievalTool: "search" as const,
+            retrievalTool: "rag_search" as const,
             retrievalArg: result.document.id || "",
         };
     }

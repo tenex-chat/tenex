@@ -134,7 +134,7 @@ Tool calls and results are always paired:
   role: "assistant",
   toolCalls: [{
     id: "call_123",
-    name: "rag_query",
+    name: "rag_search",
     arguments: { query: "test" }
   }]
 }

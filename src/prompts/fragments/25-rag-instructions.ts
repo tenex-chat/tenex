@@ -77,15 +77,16 @@ rag_add_documents({
 })
 \`\`\`
 
-### 3. rag_query
-Perform semantic search on a collection.
+### 3. rag_search
+Search across ALL project knowledge — reports, conversations, lessons, and any
+additional RAG collections — using natural language semantic search.
 
 \`\`\`typescript
-rag_query({
-  collection: "project_knowledge",
-  query_text: "How does authentication work?",
-  top_k: 5,  // Number of results (1-100)
-  include_metadata: true  // Include document metadata
+rag_search({
+  query: "How does authentication work?",
+  limit: 10,  // Maximum results (default: 10)
+  collections: ["reports", "lessons"],  // Optional: filter to specific collections
+  prompt: "Summarize the auth approach"  // Optional: LLM extraction
 })
 \`\`\`
 
@@ -143,7 +144,7 @@ All tools use standardized error responses:
 {
   "success": false,
   "error": "Descriptive error message",
-  "toolName": "rag_query"
+  "toolName": "rag_search"
 }
 \`\`\`
 
@@ -169,9 +170,9 @@ rag_add_documents({
 })
 
 // Later, retrieve relevant context
-rag_query({
-  collection: "agent_insights",
-  query_text: "What are the user's programming language preferences?"
+rag_search({
+  query: "What are the user's programming language preferences?",
+  collections: ["agent_insights"]
 })
 \`\`\`
 
@@ -192,9 +193,9 @@ rag_add_documents({
 })
 
 // Query for specific information
-rag_query({
-  collection: "project_docs",
-  query_text: "API authentication methods"
+rag_search({
+  query: "API authentication methods",
+  collections: ["project_docs"]
 })
 \`\`\`
 
@@ -222,9 +223,9 @@ rag_add_documents({
 })
 
 // Find related lessons semantically
-rag_query({
-  collection: "lessons",
-  query_text: "How to handle promise rejections"
+rag_search({
+  query: "How to handle promise rejections",
+  collections: ["lessons"]
 })
 \`\`\`
 
@@ -247,9 +248,9 @@ rag_add_documents({
   }]
 })
 
-rag_query({
-  collection: "code_patterns",
-  query_text: "authentication hook implementation"
+rag_search({
+  query: "authentication hook implementation",
+  collections: ["code_patterns"]
 })
 \`\`\`
 
@@ -273,7 +274,7 @@ Share collections between agents:
 \`\`\`typescript
 delegate({
   task: "Analyze the project documentation",
-  tools: ["rag_query"],
+  tools: ["rag_search"],
   context: "Use collection 'project_docs' for analysis"
 })
 \`\`\`

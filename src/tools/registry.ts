@@ -52,7 +52,7 @@ import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
 import { createRAGDeleteCollectionTool } from "./implementations/rag_delete_collection";
 import { createRAGListCollectionsTool } from "./implementations/rag_list_collections";
-import { createRAGQueryTool } from "./implementations/rag_query";
+
 import { createRAGSubscriptionCreateTool } from "./implementations/rag_subscription_create";
 import { createRAGSubscriptionDeleteTool } from "./implementations/rag_subscription_delete";
 import { createRAGSubscriptionGetTool } from "./implementations/rag_subscription_get";
@@ -83,8 +83,8 @@ import { createWebSearchTool } from "./implementations/web_search";
 import { createNostrFetchTool } from "./implementations/nostr_fetch";
 import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
-// Unified search tool
-import { createSearchTool } from "./implementations/search";
+// Unified RAG search tool
+import { createRAGSearchTool } from "./implementations/rag-search";
 
 // Image generation tools
 import { createGenerateImageTool } from "./implementations/generate_image";
@@ -124,7 +124,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     report_read: { hasSideEffects: false },
     schedule_tasks_list: { hasSideEffects: false },
     rag_list_collections: { hasSideEffects: false },
-    rag_query: { hasSideEffects: false },
+
     rag_subscription_list: { hasSideEffects: false },
     rag_subscription_get: { hasSideEffects: false },
     mcp_resource_read: { hasSideEffects: false },
@@ -132,7 +132,7 @@ const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
     web_fetch: { hasSideEffects: false },
     web_search: { hasSideEffects: false },
     nostr_fetch: { hasSideEffects: false },
-    search: { hasSideEffects: false },
+    rag_search: { hasSideEffects: false },
 };
 
 /**
@@ -204,8 +204,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // Conversation search
     conversation_search: createConversationSearchTool,
 
-    // Unified search across all project knowledge
-    search: createSearchTool,
+    // Unified RAG search across all project knowledge
+    rag_search: createRAGSearchTool,
 
     shell: createShellTool,
     kill: createKillTool,
@@ -216,7 +216,6 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     // RAG tools
     rag_create_collection: createRAGCreateCollectionTool,
     rag_add_documents: createRAGAddDocumentsTool,
-    rag_query: createRAGQueryTool,
     rag_delete_collection: createRAGDeleteCollectionTool,
     rag_list_collections: createRAGListCollectionsTool,
 

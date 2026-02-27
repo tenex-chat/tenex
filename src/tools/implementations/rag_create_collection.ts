@@ -1,5 +1,7 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
+import { RAGCollectionRegistry, type CollectionScope } from "@/services/rag/RAGCollectionRegistry";
+import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
 import { tool } from "ai";
@@ -20,6 +22,17 @@ const ragCreateCollectionSchema = z.object({
         .describe(
             "Optional custom schema for the collection (default includes id, content, vector, metadata, timestamp, source)"
         ),
+    scope: z
+        .enum(["global", "project", "personal"])
+        .optional()
+        .default("project")
+        .describe(
+            "Visibility scope for rag_search() auto-discovery. " +
+            "'global' = visible to all agents in all projects. " +
+            "'project' = visible to agents in this project (default). " +
+            "'personal' = primarily relevant to the creating agent. " +
+            "Note: This is NOT access control — agents can always query any collection explicitly."
+        ),
 });
 
 /**
@@ -27,12 +40,29 @@ const ragCreateCollectionSchema = z.object({
  */
 async function executeCreateCollection(
     input: z.infer<typeof ragCreateCollectionSchema>,
-    _context: ToolExecutionContext
+    context: ToolExecutionContext
 ): Promise<ToolResponse> {
-    const { name, schema } = input;
+    const { name, schema, scope } = input;
 
     const ragService = RAGService.getInstance();
     const collection = await ragService.createCollection(name, schema ?? undefined);
+
+    // Register in the collection registry with scope metadata
+    const registry = RAGCollectionRegistry.getInstance();
+    let projectId: string | undefined;
+    if (isProjectContextInitialized()) {
+        try {
+            projectId = getProjectContext().project.tagId();
+        } catch {
+            // Project context not available — no projectId
+        }
+    }
+
+    registry.register(name, {
+        scope: scope as CollectionScope,
+        projectId,
+        agentPubkey: context.agent.pubkey,
+    });
 
     return {
         success: true,
@@ -41,6 +71,7 @@ async function executeCreateCollection(
             name: collection.name,
             created_at: new Date(collection.created_at).toISOString(),
             schema: collection.schema,
+            scope,
         },
     };
 }
@@ -51,7 +82,9 @@ async function executeCreateCollection(
 export function createRAGCreateCollectionTool(context: ToolExecutionContext): AISdkTool {
     return tool({
         description:
-            "Create a new RAG collection (vector database) for storing documents with semantic search capabilities",
+            "Create a new RAG collection (vector database) for storing documents with semantic search capabilities. " +
+            "Set scope to control default visibility in rag_search(): 'global' (all projects), " +
+            "'project' (current project, default), or 'personal' (creating agent only).",
         inputSchema: ragCreateCollectionSchema,
         execute: async (input: unknown) => {
             return executeToolWithErrorHandling(
@@ -62,4 +95,4 @@ export function createRAGCreateCollectionTool(context: ToolExecutionContext): AI
             );
         },
     }) as AISdkTool;
-} 
+}

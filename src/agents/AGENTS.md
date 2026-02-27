@@ -108,8 +108,8 @@ const context = buildAgentContext({
 ```typescript
 import { parseToolName, categorizeToolCall } from "@/agents/tool-names";
 
-const { domain, action } = parseToolName("rag_query");
-// domain: "rag", action: "query"
+const { domain, action } = parseToolName("rag_search");
+// domain: "rag", action: "search"
 ```
 
 ## Agent Identity Preservation Policy

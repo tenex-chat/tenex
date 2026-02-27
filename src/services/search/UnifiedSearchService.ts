@@ -9,12 +9,14 @@
  * - Parallel queries across all providers
  * - Graceful degradation: one collection failure doesn't block others
  * - Project-scoped isolation via projectId
+ * - Scope-aware collection filtering (global/project/personal)
  * - Optional LLM extraction with configurable prompt
  */
 
 import { logger } from "@/utils/logger";
 import { config as configService } from "@/services/ConfigService";
 import { RAGService } from "@/services/rag/RAGService";
+import { RAGCollectionRegistry } from "@/services/rag/RAGCollectionRegistry";
 import { SearchProviderRegistry } from "./SearchProviderRegistry";
 import { GenericCollectionSearchProvider } from "./providers/GenericCollectionSearchProvider";
 import type { SearchOptions, SearchProvider, SearchResult, UnifiedSearchOutput } from "./types";
@@ -49,6 +51,7 @@ export class UnifiedSearchService {
             minScore = DEFAULT_MIN_SCORE,
             prompt,
             collections,
+            agentPubkey,
         } = options;
 
         logger.info("🔍 [UnifiedSearch] Starting search", {
@@ -57,11 +60,12 @@ export class UnifiedSearchService {
             limit,
             minScore,
             prompt: prompt ? `${prompt.substring(0, 50)}...` : undefined,
-            collections: collections || "all",
+            collections: collections || "all (scope-aware)",
+            agentPubkey: agentPubkey ? `${agentPubkey.substring(0, 12)}...` : undefined,
         });
 
         // Resolve providers: static (specialized) + dynamic (generic for discovered RAG collections)
-        const providers = await this.resolveProviders(collections);
+        const providers = await this.resolveProviders(collections, projectId, agentPubkey);
         if (providers.length === 0) {
             logger.warn("[UnifiedSearch] No search providers available");
             return {
@@ -142,12 +146,18 @@ export class UnifiedSearchService {
      * Resolve all providers to query: specialized (from registry) + generic
      * (dynamically created for any RAG collections not covered by a specialized provider).
      *
-     * @param requestedCollections - Optional filter by **provider name**. When provided,
-     *   only providers whose `name` matches are returned. For specialized providers, the
-     *   name is a friendly label (e.g., "reports"); for dynamic/generic providers, the
-     *   name equals the RAG collection name (e.g., "custom_knowledge").
+     * When `requestedCollections` is provided, only those are returned (explicit choice,
+     * no scope filtering). When absent, scope-aware filtering is applied.
+     *
+     * @param requestedCollections - Optional explicit collection filter (bypasses scoping)
+     * @param projectId - Current project ID for scope filtering
+     * @param agentPubkey - Current agent pubkey for personal scope filtering
      */
-    private async resolveProviders(requestedCollections?: string[]): Promise<SearchProvider[]> {
+    private async resolveProviders(
+        requestedCollections?: string[],
+        projectId?: string,
+        agentPubkey?: string
+    ): Promise<SearchProvider[]> {
         const specializedProviders = this.registry.getAll();
 
         // Derive covered RAG collections from the providers themselves.
@@ -172,8 +182,35 @@ export class UnifiedSearchService {
             allCollections = [];
         }
 
+        // Apply scope filtering to discovered collections (only when no explicit filter)
+        let scopedCollections = allCollections;
+        if (!requestedCollections && projectId) {
+            try {
+                const collectionRegistry = RAGCollectionRegistry.getInstance();
+                scopedCollections = collectionRegistry.getMatchingCollections(
+                    allCollections,
+                    projectId,
+                    agentPubkey
+                );
+
+                if (scopedCollections.length < allCollections.length) {
+                    logger.debug("[UnifiedSearch] Scope filtering applied", {
+                        total: allCollections.length,
+                        matched: scopedCollections.length,
+                        excluded: allCollections.length - scopedCollections.length,
+                    });
+                }
+            } catch (error) {
+                // Registry not available — fall through with all collections
+                const message = error instanceof Error ? error.message : String(error);
+                logger.debug("[UnifiedSearch] Collection registry unavailable, using all collections", {
+                    error: message,
+                });
+            }
+        }
+
         // Create generic providers for collections not covered by specialized providers
-        const genericProviders = allCollections
+        const genericProviders = scopedCollections
             .filter((name) => !coveredCollections.has(name))
             .map((name) => new GenericCollectionSearchProvider(name));
 
@@ -186,10 +223,25 @@ export class UnifiedSearchService {
             });
         }
 
-        // Apply collection filter by provider name
+        // Apply explicit collection filter by provider name
         if (requestedCollections && requestedCollections.length > 0) {
             const requestedSet = new Set(requestedCollections);
-            return allProviders.filter((p) => requestedSet.has(p.name));
+
+            // For explicitly requested collections that aren't in scopedCollections
+            // (because scope would have excluded them), add generic providers anyway.
+            // The agent explicitly asked — no scope filtering.
+            const missingGenericNames = requestedCollections.filter(
+                (name) =>
+                    !specializedProviders.some((p) => p.name === name) &&
+                    !genericProviders.some((p) => p.name === name) &&
+                    allCollections.includes(name)
+            );
+            const extraProviders = missingGenericNames.map(
+                (name) => new GenericCollectionSearchProvider(name)
+            );
+
+            const expandedProviders = [...allProviders, ...extraProviders];
+            return expandedProviders.filter((p) => requestedSet.has(p.name));
         }
 
         return allProviders;

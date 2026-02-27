@@ -51,7 +51,7 @@ export interface SearchResult {
     tags?: string[];
 
     /** Which tool to use to retrieve full content */
-    retrievalTool: "report_read" | "lesson_get" | "conversation_get" | "search";
+    retrievalTool: "report_read" | "lesson_get" | "conversation_get" | "rag_search";
 
     /** The argument to pass to the retrieval tool */
     retrievalArg: string;
@@ -84,8 +84,16 @@ export interface SearchOptions {
      * Well-known provider names: "reports", "conversations", "lessons".
      * Dynamically discovered RAG collections use their collection name as provider name
      * (e.g., "custom_knowledge").
+     *
+     * When provided, searches exactly those collections (no scope filtering).
      */
     collections?: string[];
+
+    /**
+     * Agent pubkey for scope-aware collection filtering.
+     * Used to include `personal` collections belonging to this agent.
+     */
+    agentPubkey?: string;
 }
 
 /**
