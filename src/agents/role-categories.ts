@@ -22,9 +22,11 @@ export type AgentCategory = "principal" | "orchestrator" | "worker" | "advisor" 
 
 /**
  * The default category applied when an agent has no recognized category.
- * Fail-closed: defaults to the most restrictive general category.
+ * Defaults to "principal" (unrestricted) for backwards compatibility with agents
+ * created before the category field existed. Existing agents should have their
+ * category explicitly set based on their operational role.
  */
-export const DEFAULT_CATEGORY: AgentCategory = "advisor";
+export const DEFAULT_CATEGORY: AgentCategory = "principal";
 
 /**
  * Map of category → tool names that should be DENIED.
