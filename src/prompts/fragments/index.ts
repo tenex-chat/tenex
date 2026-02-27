@@ -37,6 +37,7 @@ import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring"
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
+import { processMetricsFragment } from "./32-process-metrics";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
 
@@ -85,6 +86,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(worktreeContextFragment);
     fragmentRegistry.register(agentsMdGuidanceFragment);
+    fragmentRegistry.register(processMetricsFragment);
 }
 
 // Auto-register all fragments on import
