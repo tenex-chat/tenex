@@ -2,6 +2,7 @@ import type { AgentMetadataStore } from "@/services/agents";
 import type { LLMService } from "@/llm/service";
 import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
 import type { OnStreamStartCallback } from "@/llm/types";
+import type { AgentCategory } from "@/agents/role-categories";
 import type { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 import type { AgentProjectConfig } from "./storage";
@@ -23,6 +24,12 @@ export interface AgentInstance {
     pubkey: string;
     signer: NDKPrivateKeySigner;
     role: string;
+    /**
+     * Agent category for role-based tool restrictions (TIP-01).
+     * Resolved from the agent definition's category tag.
+     * When missing or unrecognized, defaults to "advisor" (most restrictive).
+     */
+    category?: AgentCategory;
     description?: string;
     instructions?: string;
     customInstructions?: string; // Custom system prompt instructions

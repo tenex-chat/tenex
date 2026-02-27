@@ -1,4 +1,5 @@
 import type { MCPServerConfig } from "@/llm/providers/types";
+import type { AgentCategory } from "@/agents/role-categories";
 
 /**
  * Default agent configuration block.
@@ -61,6 +62,12 @@ export interface ProjectScopedConfig {
 export interface StoredAgentData {
     name: string;
     role: string;
+    /**
+     * Agent category for role-based tool restrictions (TIP-01).
+     * Valid values: "principal", "orchestrator", "worker", "advisor", "auditor".
+     * When missing or unrecognized, defaults to "advisor" (most restrictive).
+     */
+    category?: AgentCategory;
     description?: string;
     instructions?: string;
     useCriteria?: string;

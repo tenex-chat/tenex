@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { StoredAgentData, ProjectScopedConfig, AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type { AgentCategory } from "@/agents/role-categories";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import {
     resolveEffectiveConfig,
@@ -100,6 +101,7 @@ export function createStoredAgent(config: {
     slug: string;
     name: string;
     role: string;
+    category?: AgentCategory;
     description?: string | null;
     instructions?: string | null;
     useCriteria?: string | null;
@@ -118,6 +120,7 @@ export function createStoredAgent(config: {
         slug: config.slug,
         name: config.name,
         role: config.role,
+        category: config.category,
         description: config.description ?? undefined,
         instructions: config.instructions ?? undefined,
         useCriteria: config.useCriteria ?? undefined,
