@@ -154,8 +154,8 @@ export class UnifiedSearchService {
      * @param agentPubkey - Current agent pubkey for personal scope filtering
      */
     private async resolveProviders(
-        requestedCollections?: string[],
-        projectId?: string,
+        requestedCollections: string[] | undefined,
+        projectId: string,
         agentPubkey?: string
     ): Promise<SearchProvider[]> {
         const specializedProviders = this.registry.getAll();
@@ -184,7 +184,7 @@ export class UnifiedSearchService {
 
         // Apply scope filtering to discovered collections (only when no explicit filter)
         let scopedCollections = allCollections;
-        if (!requestedCollections && projectId) {
+        if (!requestedCollections) {
             try {
                 const collectionRegistry = RAGCollectionRegistry.getInstance();
                 scopedCollections = collectionRegistry.getMatchingCollections(

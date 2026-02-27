@@ -1,6 +1,6 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { RAGService } from "@/services/rag/RAGService";
-import { RAGCollectionRegistry, type CollectionScope } from "@/services/rag/RAGCollectionRegistry";
+import { RAGCollectionRegistry } from "@/services/rag/RAGCollectionRegistry";
 import { getProjectContext, isProjectContextInitialized } from "@/services/projects";
 import type { AISdkTool } from "@/tools/types";
 import { type ToolResponse, executeToolWithErrorHandling } from "@/tools/utils";
@@ -59,7 +59,7 @@ async function executeCreateCollection(
     }
 
     registry.register(name, {
-        scope: scope as CollectionScope,
+        scope,
         projectId,
         agentPubkey: context.agent.pubkey,
     });

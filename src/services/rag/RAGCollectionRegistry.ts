@@ -11,8 +11,8 @@
  * without an explicit `collections` parameter.
  */
 
-import { config as configService } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
+import { getLanceDBDataDir } from "./rag-utils";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -51,9 +51,7 @@ export class RAGCollectionRegistry {
     private readonly filePath: string;
 
     private constructor() {
-        const dataDir = process.env.LANCEDB_DATA_DIR ||
-            path.join(configService.getConfigPath("data"), "lancedb");
-        this.filePath = path.join(dataDir, REGISTRY_FILENAME);
+        this.filePath = path.join(getLanceDBDataDir(), REGISTRY_FILENAME);
         this.data = this.load();
     }
 
@@ -144,9 +142,10 @@ export class RAGCollectionRegistry {
 
     /**
      * Get all registered collection metadata.
+     * Returns a deep copy to prevent callers from mutating internal state.
      */
     public getAll(): Record<string, CollectionMetadata> {
-        return { ...this.data.collections };
+        return JSON.parse(JSON.stringify(this.data.collections));
     }
 
     /**

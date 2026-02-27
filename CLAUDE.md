@@ -173,7 +173,7 @@ Tools in `src/tools/implementations/` should:
 // CORRECT: Tool delegates to service
 import { RAGService } from "@/services/rag";
 
-export const rag_query = tool({
+export const rag_search = tool({
   execute: async ({ query }) => {
     const ragService = new RAGService();
     return await ragService.query(query);
@@ -181,7 +181,7 @@ export const rag_query = tool({
 });
 
 // WRONG: Tool implements business logic directly
-export const rag_query = tool({
+export const rag_search = tool({
   execute: async ({ query }) => {
     const db = await lancedb.connect();
     // ... 100 lines of implementation

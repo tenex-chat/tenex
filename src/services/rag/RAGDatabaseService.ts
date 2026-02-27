@@ -1,7 +1,6 @@
-import { config } from "@/services/ConfigService";
-import * as path from "node:path";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
+import { getLanceDBDataDir } from "./rag-utils";
 import { type Connection, type Table, connect } from "@lancedb/lancedb";
 
 /**
@@ -27,11 +26,7 @@ export class RAGDatabaseService {
     private tableCache: Map<string, Table> = new Map();
 
     constructor(dataDir?: string) {
-        // Use provided directory or environment variable, fallback to global location
-        this.dataDir =
-            dataDir ||
-            process.env.LANCEDB_DATA_DIR ||
-            path.join(config.getConfigPath("data"), "lancedb");
+        this.dataDir = dataDir || getLanceDBDataDir();
 
         logger.debug(`RAGDatabaseService initialized with data directory: ${this.dataDir}`);
     }

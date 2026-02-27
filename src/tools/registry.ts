@@ -84,7 +84,7 @@ import { createNostrFetchTool } from "./implementations/nostr_fetch";
 import { createNostrPublishAsUserTool } from "./implementations/nostr_publish_as_user";
 
 // Unified RAG search tool
-import { createRAGSearchTool } from "./implementations/rag-search";
+import { createRAGSearchTool } from "./implementations/rag_search";
 
 // Image generation tools
 import { createGenerateImageTool } from "./implementations/generate_image";

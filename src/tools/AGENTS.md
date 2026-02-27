@@ -41,7 +41,7 @@ bun run validate:events
 ### Anatomy of a Tool
 
 ```typescript
-// src/tools/implementations/rag-search.ts
+// src/tools/implementations/rag_search.ts
 import { tool } from "ai";
 import { z } from "zod";
 import { UnifiedSearchService } from "@/services/search";
@@ -66,7 +66,7 @@ Files follow `<domain>_<action>.ts` pattern:
 | Domain | Examples |
 |--------|----------|
 | `agents_` | `agents_list.ts`, `agents_remove.ts` |
-| `rag_` / `rag-` | `rag-search.ts`, `rag_create_collection.ts` |
+| `rag_` | `rag_search.ts`, `rag_create_collection.ts` |
 | `delegation_` | `delegation_create.ts`, `delegation_complete.ts` |
 | `schedule_` | `schedule_create.ts`, `schedule_list.ts` |
 | `file_` | `file_read.ts`, `file_write.ts` |
@@ -79,7 +79,7 @@ One file = one tool. If a tool does multiple things, split it:
 
 ```typescript
 // CORRECT: Separate tools
-// rag-search.ts - Search across all RAG collections
+// rag_search.ts - Search across all RAG collections
 // rag_create_collection.ts - Create a collection
 // rag_add_documents.ts - Ingest documents
 
@@ -228,7 +228,7 @@ export const query_rag = tool();  // Should be rag_search
 Test tools by mocking their service dependencies:
 
 ```typescript
-import { createRAGSearchTool } from "@/tools/implementations/rag-search";
+import { createRAGSearchTool } from "@/tools/implementations/rag_search";
 
 describe("rag_search", () => {
   it("should search across all RAG collections", async () => {
