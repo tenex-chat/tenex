@@ -25,9 +25,9 @@ export interface AgentInstance {
     signer: NDKPrivateKeySigner;
     role: string;
     /**
-     * Agent category for role-based tool restrictions (TIP-01).
+     * Agent category for semantic classification and organizational purposes.
      * Resolved from the agent definition's category tag.
-     * When missing or unrecognized, defaults to "advisor" (most restrictive).
+     * No restrictions are applied based on category — all agents have access to all tools.
      */
     category?: AgentCategory;
     description?: string;

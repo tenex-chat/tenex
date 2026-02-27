@@ -11,7 +11,7 @@
  * - `advisor`      — Experts, reviewers
  * - `auditor`      — Testers, code reviewers
  *
- * Unknown/missing category defaults to `principal` (unrestricted).
+ * Unknown/missing category remains undefined. Only set a category when explicitly known.
  */
 
 /**
@@ -19,11 +19,6 @@
  */
 export type AgentCategory = "principal" | "orchestrator" | "worker" | "advisor" | "auditor";
 
-/**
- * The default category applied when an agent has no recognized category.
- * Defaults to "principal" (unrestricted).
- */
-export const DEFAULT_CATEGORY: AgentCategory = "principal";
 
 /**
  * All recognized category values for validation.
@@ -45,14 +40,14 @@ export function isValidCategory(value: string): value is AgentCategory {
 
 /**
  * Resolve an agent's effective category.
- * Returns the category if valid, otherwise the default (principal).
+ * Returns the category if valid and provided, otherwise undefined.
  *
  * Categories are for semantic classification and organizational purposes only.
  * They do not restrict tool access — all agents have access to all tools.
  */
-export function resolveCategory(category: string | undefined): AgentCategory {
+export function resolveCategory(category: string | undefined): AgentCategory | undefined {
     if (category && isValidCategory(category)) {
         return category;
     }
-    return DEFAULT_CATEGORY;
+    return undefined;
 }
