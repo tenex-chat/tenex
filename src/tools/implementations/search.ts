@@ -1,9 +1,10 @@
 /**
  * Unified Search Tool
  *
- * Single search tool that queries across ALL project-scoped RAG collections
- * (conversations, reports, lessons) and returns unified results with metadata
- * that allows agents to dig deeper using other tools.
+ * Single search tool that queries across ALL accessible RAG collections.
+ * Specialized providers handle well-known collections (reports, conversations,
+ * lessons) with smart filtering, while dynamically discovered collections are
+ * queried via generic providers with basic project-scoped filtering.
  *
  * Supports optional prompt-based LLM extraction for focused information retrieval.
  */
@@ -17,9 +18,9 @@ import { z } from "zod";
 
 const searchSchema = z.object({
     query: z.string().describe(
-        "Natural language search query. Searches across all project knowledge: " +
-        "reports (documentation, architecture), conversations (past discussions), " +
-        "and lessons (agent insights). Use descriptive natural language for best results."
+        "Natural language search query. Searches across all project knowledge " +
+        "including reports, conversations, lessons, and any additional RAG collections. " +
+        "Use descriptive natural language for best results."
     ),
     prompt: z
         .string()
@@ -36,10 +37,12 @@ const searchSchema = z.object({
         .default(10)
         .describe("Maximum number of results to return across all collections. Defaults to 10."),
     collections: z
-        .array(z.enum(["reports", "conversations", "lessons"]))
+        .array(z.string())
         .optional()
         .describe(
-            "Which collections to search. Defaults to all. " +
+            "Which collections to search. Defaults to all available collections. " +
+            "Well-known: 'reports', 'conversations', 'lessons'. " +
+            "Additional RAG collections are discovered dynamically. " +
             "Use to narrow search scope when you know where the information lives."
         ),
 });
@@ -121,11 +124,11 @@ async function executeSearch(
 export function createSearchTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Search across ALL project knowledge — reports, conversations, and lessons — using " +
-            "natural language semantic search. Returns ranked results with metadata and retrieval " +
-            "instructions. Each result includes a `retrievalTool` and `retrievalArg` that you can " +
-            "use to fetch the full document (e.g., call report_read with the slug, lesson_get with " +
-            "the event ID, or conversation_get with the conversation ID).\n\n" +
+            "Search across ALL project knowledge — reports, conversations, lessons, and any " +
+            "additional RAG collections — using natural language semantic search. Returns ranked " +
+            "results with metadata and retrieval instructions. Each result includes a `retrievalTool` " +
+            "and `retrievalArg` that you can use to fetch the full document (e.g., call report_read " +
+            "with the slug, lesson_get with the event ID, or conversation_get with the conversation ID).\n\n" +
             "Optionally provide a `prompt` parameter to have an LLM extract focused information " +
             "from the search results, rather than reviewing them manually.\n\n" +
             "This is the primary discovery tool for finding information across the project. Use " +

@@ -50,8 +50,11 @@ export interface SearchResult {
     /** Hashtags/categories for additional context */
     tags?: string[];
 
-    /** Which tool to use to retrieve full content */
-    retrievalTool: "report_read" | "lesson_get" | "conversation_get";
+    /** Which tool to use to retrieve full content.
+     * Well-known values: "report_read", "lesson_get", "conversation_get".
+     * Generic collections use "search" (re-query with narrower scope).
+     */
+    retrievalTool: string;
 
     /** The argument to pass to the retrieval tool */
     retrievalArg: string;

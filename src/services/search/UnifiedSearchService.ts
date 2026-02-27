@@ -14,8 +14,10 @@
 
 import { logger } from "@/utils/logger";
 import { config as configService } from "@/services/ConfigService";
+import { RAGService } from "@/services/rag/RAGService";
 import { SearchProviderRegistry } from "./SearchProviderRegistry";
-import type { SearchOptions, SearchResult, UnifiedSearchOutput } from "./types";
+import { GenericCollectionSearchProvider } from "./providers/GenericCollectionSearchProvider";
+import type { SearchOptions, SearchProvider, SearchResult, UnifiedSearchOutput } from "./types";
 
 /** Default search parameters */
 const DEFAULT_LIMIT = 10;
@@ -58,8 +60,8 @@ export class UnifiedSearchService {
             collections: collections || "all",
         });
 
-        // Get providers to search
-        const providers = this.registry.getByNames(collections);
+        // Resolve providers: static (specialized) + dynamic (generic for discovered RAG collections)
+        const providers = await this.resolveProviders(collections);
         if (providers.length === 0) {
             logger.warn("[UnifiedSearch] No search providers available");
             return {
@@ -134,6 +136,64 @@ export class UnifiedSearchService {
             ...(warnings.length > 0 && { warnings }),
             ...(extraction && { extraction }),
         };
+    }
+
+    /**
+     * Map of specialized provider names to the RAG collection names they cover.
+     * These collections are handled by dedicated providers with smart filtering
+     * logic and should NOT get a generic provider.
+     */
+    private static readonly SPECIALIZED_COLLECTION_MAP: Record<string, string> = {
+        reports: "project_reports",
+        conversations: "conversation_embeddings",
+        lessons: "lessons",
+    };
+
+    /**
+     * Resolve all providers to query: specialized (from registry) + generic
+     * (dynamically created for any RAG collections not covered by a specialized provider).
+     *
+     * @param requestedCollections - Optional filter. When provided, only return
+     *   providers whose name matches one of these collection names.
+     */
+    private async resolveProviders(requestedCollections?: string[]): Promise<SearchProvider[]> {
+        const specializedProviders = this.registry.getAll();
+        const coveredCollections = new Set(
+            Object.values(UnifiedSearchService.SPECIALIZED_COLLECTION_MAP)
+        );
+
+        // Discover all RAG collections
+        let allCollections: string[];
+        try {
+            const ragService = RAGService.getInstance();
+            allCollections = await ragService.listCollections();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn("[UnifiedSearch] Failed to discover RAG collections", { error: message });
+            allCollections = [];
+        }
+
+        // Create generic providers for collections not covered by specialized providers
+        const genericProviders = allCollections
+            .filter((name) => !coveredCollections.has(name))
+            .map((name) => new GenericCollectionSearchProvider(name));
+
+        const allProviders = [...specializedProviders, ...genericProviders];
+
+        if (genericProviders.length > 0) {
+            logger.debug("[UnifiedSearch] Dynamic collections discovered", {
+                specialized: specializedProviders.map((p) => p.name),
+                generic: genericProviders.map((p) => p.name),
+            });
+        }
+
+        // Apply collection filter if requested
+        if (requestedCollections && requestedCollections.length > 0) {
+            const requestedSet = new Set(requestedCollections);
+            return allProviders.filter((p) => requestedSet.has(p.name));
+        }
+
+        return allProviders;
     }
 
     /**
