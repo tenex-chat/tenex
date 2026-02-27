@@ -62,7 +62,7 @@ describe("TrustPubkeyService", () => {
         // Reset singleton
         (TrustPubkeyService as any).instance = undefined;
         service = TrustPubkeyService.getInstance();
-        service.clearCache();
+        service.resetAll();
 
         // Reset mock values
         mockWhitelistedPubkeys = [];
@@ -251,14 +251,27 @@ describe("TrustPubkeyService", () => {
             expect(result.trusted).toBe(false);
         });
 
-        it("should clear global agent pubkeys on cache clear", () => {
+        it("should preserve global agent pubkeys on clearCache (config-only clear)", () => {
             service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
 
             // Verify it's trusted
             expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(true);
 
-            // Clear cache
+            // Clear config cache only
             service.clearCache();
+
+            // Global agent pubkeys should still be trusted (not config-derived)
+            expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(true);
+        });
+
+        it("should clear global agent pubkeys on resetAll", () => {
+            service.setGlobalAgentPubkeys(new Set(["cross-project-agent-pubkey"]));
+
+            // Verify it's trusted
+            expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(true);
+
+            // Full state reset
+            service.resetAll();
 
             // Should no longer be trusted
             expect(service.isTrustedSync("cross-project-agent-pubkey").trusted).toBe(false);
@@ -295,6 +308,70 @@ describe("TrustPubkeyService", () => {
 
             expect(result.trusted).toBe(true);
             expect(result.reason).toBe("agent");
+        });
+    });
+
+    describe("seed + sync interaction (daemon behavior simulation)", () => {
+        /**
+         * These tests simulate the Daemon's behavior:
+         * 1. At startup, seed with all known pubkeys from AgentStorage
+         * 2. As projects start/stop, sync with union of active + stored pubkeys
+         *
+         * The key invariant: stored pubkeys from non-running projects must never
+         * be dropped after a sync call.
+         */
+
+        it("should retain seeded pubkeys after a sync with different active pubkeys", () => {
+            // Step 1: Daemon seeds from AgentStorage at startup (3 agents across all projects)
+            const storedPubkeys = new Set(["agent-proj-a", "agent-proj-b", "agent-proj-c"]);
+            service.setGlobalAgentPubkeys(storedPubkeys);
+
+            // Verify all seeded pubkeys are trusted
+            expect(service.isTrustedSync("agent-proj-a").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-proj-b").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-proj-c").trusted).toBe(true);
+
+            // Step 2: Daemon sync after project A starts (only proj-a agents are active)
+            // The Daemon's syncTrustServiceAgentPubkeys should union stored + active
+            // Simulating what the fixed Daemon does: union of active runtime + stored
+            const activePubkeys = new Set(["agent-proj-a"]);
+            const unioned = new Set([...activePubkeys, ...storedPubkeys]);
+            service.setGlobalAgentPubkeys(unioned);
+
+            // All original stored pubkeys must still be trusted
+            expect(service.isTrustedSync("agent-proj-a").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-proj-b").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-proj-c").trusted).toBe(true);
+        });
+
+        it("should handle sync after project removal retaining stored pubkeys", () => {
+            // Seed from storage
+            const storedPubkeys = new Set(["agent-1", "agent-2", "agent-3"]);
+            service.setGlobalAgentPubkeys(storedPubkeys);
+
+            // Project with agent-2 stops, runtime only has agent-1 and agent-3
+            // Fixed Daemon unions: runtime {agent-1, agent-3} ∪ stored {agent-1, agent-2, agent-3}
+            const afterRemoval = new Set(["agent-1", "agent-3", ...storedPubkeys]);
+            service.setGlobalAgentPubkeys(afterRemoval);
+
+            // agent-2 should still be trusted (came from storage seed)
+            expect(service.isTrustedSync("agent-2").trusted).toBe(true);
+        });
+
+        it("should include newly discovered agents not in storage seed", () => {
+            // Seed from storage (old set)
+            const storedPubkeys = new Set(["agent-old-1", "agent-old-2"]);
+            service.setGlobalAgentPubkeys(storedPubkeys);
+
+            // A new project starts with a new agent not yet in storage
+            // Fixed Daemon unions: runtime {agent-old-1, agent-new-1} ∪ stored {agent-old-1, agent-old-2}
+            const afterNewProject = new Set(["agent-old-1", "agent-new-1", ...storedPubkeys]);
+            service.setGlobalAgentPubkeys(afterNewProject);
+
+            // All should be trusted
+            expect(service.isTrustedSync("agent-old-1").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-old-2").trusted).toBe(true);
+            expect(service.isTrustedSync("agent-new-1").trusted).toBe(true);
         });
     });
 

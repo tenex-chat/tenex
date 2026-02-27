@@ -28,10 +28,13 @@ export interface TrustResult {
  *
  * Trust precedence (highest to lowest): whitelisted > backend > agent
  *
- * ## Agent Trust: Three-Tier Lookup
+ * ## Agent Trust: Two-Tier Lookup + Daemon Seeding
  * 1. **Project context** (sync): Check the current project's agent registry (fast, scoped)
  * 2. **Global agent set** (sync): Check daemon-level set of all agent pubkeys across all projects
- * 3. **AgentStorage fallback** (async only): Check persistent storage for not-yet-running projects
+ *
+ * The global agent set is seeded by the Daemon at startup from AgentStorage (covering
+ * not-yet-running projects) and kept in sync as projects start/stop. Each sync unions
+ * the active runtime pubkeys with the stored seed, so trust is never dropped.
  */
 export class TrustPubkeyService {
     private static instance: TrustPubkeyService;
@@ -333,10 +336,10 @@ export class TrustPubkeyService {
      * Check if pubkey belongs to an agent in the system (synchronous, two-tier).
      *
      * Tier 1: Current project context (fast, scoped to the active project)
-     * Tier 2: Global agent pubkeys set (daemon-level, covers all running projects)
+     * Tier 2: Global agent pubkeys set (daemon-level, covers all projects including non-running)
      *
-     * Returns false if neither tier matches. For the async fallback (AgentStorage),
-     * see isAgentPubkeyAsync().
+     * The global set is maintained by the Daemon via setGlobalAgentPubkeys(),
+     * which unions active runtime pubkeys with the AgentStorage seed.
      */
     private isAgentPubkey(pubkey: Hexpubkey): boolean {
         // Tier 1: Current project context (existing fast path)
@@ -354,13 +357,25 @@ export class TrustPubkeyService {
     }
 
     /**
-     * Clear all caches (useful for testing and config reloads)
+     * Clear config-derived caches (useful for testing and config reloads).
+     * Does NOT clear globalAgentPubkeys — that state is managed by the Daemon
+     * via setGlobalAgentPubkeys() and is not derived from config.
      */
     clearCache(): void {
         this.cachedBackendPubkey = undefined;
         this.cachedWhitelistSet = undefined;
+        logger.debug("[TRUST_PUBKEY] Config cache cleared");
+    }
+
+    /**
+     * Reset all state including daemon-managed global agent pubkeys.
+     * Use only in tests to fully reset the service.
+     */
+    resetAll(): void {
+        this.cachedBackendPubkey = undefined;
+        this.cachedWhitelistSet = undefined;
         this.globalAgentPubkeys = Object.freeze(new Set<Hexpubkey>());
-        logger.debug("[TRUST_PUBKEY] Cache cleared");
+        logger.debug("[TRUST_PUBKEY] Full state reset");
     }
 }
 

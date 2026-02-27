@@ -74,6 +74,9 @@ export class Daemon {
     // Agent pubkey mapping for routing (pubkey -> project IDs)
     private agentPubkeyToProjects = new Map<Hexpubkey, Set<string>>();
 
+    // Agent pubkeys seeded from AgentStorage at startup (covers not-yet-running projects)
+    private storedAgentPubkeys = new Set<Hexpubkey>();
+
     // Tracked agent definition IDs for lesson subscription sync
     private trackedLessonDefinitionIds = new Set<string>();
 
@@ -218,11 +221,11 @@ export class Daemon {
             // 8b. Seed trust service with all known agent pubkeys from storage
             // This covers agents from not-yet-running projects for cross-project trust
             await agentStorage.initialize();
-            const storedAgentPubkeys = await agentStorage.getAllKnownPubkeys();
-            if (storedAgentPubkeys.size > 0) {
-                getTrustPubkeyService().setGlobalAgentPubkeys(storedAgentPubkeys);
+            this.storedAgentPubkeys = await agentStorage.getAllKnownPubkeys();
+            if (this.storedAgentPubkeys.size > 0) {
+                getTrustPubkeyService().setGlobalAgentPubkeys(this.storedAgentPubkeys);
                 logger.info("Seeded trust service with stored agent pubkeys", {
-                    count: storedAgentPubkeys.size,
+                    count: this.storedAgentPubkeys.size,
                 });
             }
 
@@ -882,11 +885,18 @@ export class Daemon {
 
     /**
      * Push current agent pubkeys to TrustPubkeyService for cross-project trust.
-     * Uses the daemon-level agentPubkeyToProjects map which tracks all agents
-     * across all running projects.
+     * Unions the daemon-level runtime pubkeys (from currently running projects)
+     * with the stored pubkeys seeded from AgentStorage at startup (covers
+     * not-yet-running projects), so trust is never dropped for known agents.
      */
     private syncTrustServiceAgentPubkeys(): void {
-        const allPubkeys = new Set(this.agentPubkeyToProjects.keys());
+        const allPubkeys = new Set<Hexpubkey>(this.agentPubkeyToProjects.keys());
+
+        // Union with stored pubkeys so non-running projects retain trust
+        for (const pubkey of this.storedAgentPubkeys) {
+            allPubkeys.add(pubkey);
+        }
+
         getTrustPubkeyService().setGlobalAgentPubkeys(allPubkeys);
     }
 
