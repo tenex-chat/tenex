@@ -2,7 +2,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
 import { installAgentFromNostr } from "@/agents/agent-installer";
 import { AgentSlugConflictError } from "@/agents/errors";
-import { resolveCategory, filterDeniedTools } from "@/agents/role-categories";
+import { resolveCategory } from "@/agents/role-categories";
 import { processAgentTools } from "@/agents/tool-normalization";
 import type { AgentInstance } from "@/agents/types";
 import { AgentMetadataStore } from "@/services/agents";
@@ -45,9 +45,8 @@ export function createAgentInstance(
     // Process tools using pure functions
     const normalizedTools = processAgentTools(effectiveTools || [], storedAgent.slug);
 
-    // Apply category-based tool restrictions (TIP-01)
+    // Resolve category for organizational purposes (no tool restrictions)
     const resolvedCategory = resolveCategory(storedAgent.category);
-    const validToolNames = filterDeniedTools(normalizedTools, resolvedCategory);
 
     // Build agent-specific MCP config from stored mcpServers
     const agentMcpConfig: MCPConfig | undefined = storedAgent.mcpServers
@@ -67,7 +66,7 @@ export function createAgentInstance(
         instructions: storedAgent.instructions,
         useCriteria: storedAgent.useCriteria,
         llmConfig: effectiveLLMConfig || DEFAULT_AGENT_LLM_CONFIG,
-        tools: validToolNames,
+        tools: normalizedTools,
         eventId: storedAgent.eventId,
         slug: storedAgent.slug,
         mcpServers: storedAgent.mcpServers,

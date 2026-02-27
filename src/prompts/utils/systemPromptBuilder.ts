@@ -637,6 +637,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add relay configuration context
     systemPromptBuilder.add("relay-configuration", {});
 
+    // Add process metrics (PID, uptime, CPU/memory usage)
+    systemPromptBuilder.add("process-metrics", {});
+
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them
     systemPromptBuilder.add("meta-project-context", {
