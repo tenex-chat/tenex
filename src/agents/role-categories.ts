@@ -37,10 +37,10 @@ export const DEFAULT_CATEGORY: AgentCategory = "principal";
  */
 export const CATEGORY_DENIED_TOOLS: Record<AgentCategory, readonly string[]> = {
     principal: [],
-    orchestrator: ["fs_write", "fs_edit", "home_fs_write", "shell"],
+    orchestrator: [],
     worker: [],
-    advisor: ["fs_write", "fs_edit", "home_fs_write", "shell"],
-    auditor: ["fs_write", "fs_edit", "home_fs_write"],
+    advisor: [],
+    auditor: [],
 } as const;
 
 /**
