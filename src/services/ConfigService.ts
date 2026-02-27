@@ -368,6 +368,40 @@ export class ConfigService {
     }
 
     /**
+     * Get all resolved LLM configurations, skipping meta models.
+     * Returns the default config first, followed by the rest in declaration order.
+     */
+    getAllLLMConfigs(): LLMConfiguration[] {
+        if (!this.loadedConfig) {
+            throw new Error("Config not loaded. Call loadConfig() first.");
+        }
+
+        const llms = this.loadedConfig.llms;
+        const configs: LLMConfiguration[] = [];
+        const seen = new Set<string>();
+
+        // Default first
+        if (llms.default && llms.configurations[llms.default]) {
+            const config = llms.configurations[llms.default];
+            if (!isMetaModelConfiguration(config)) {
+                configs.push(config);
+                seen.add(`${config.provider}:${config.model}`);
+            }
+        }
+
+        // Then the rest, deduplicating by provider:model
+        for (const config of Object.values(llms.configurations)) {
+            if (isMetaModelConfiguration(config)) continue;
+            const key = `${config.provider}:${config.model}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            configs.push(config);
+        }
+
+        return configs;
+    }
+
+    /**
      * Check if a configuration name refers to a meta model.
      */
     isMetaModelConfig(configName?: string): boolean {

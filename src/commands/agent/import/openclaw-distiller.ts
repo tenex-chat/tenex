@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
+import { logger } from "@/utils/logger";
 import type { LLMConfiguration } from "@/services/config/types";
 import type { OpenClawWorkspaceFiles } from "./openclaw-reader";
 
@@ -43,15 +44,30 @@ ${sections.join("\n\n")}`;
 
 export async function distillAgentIdentity(
     files: OpenClawWorkspaceFiles,
-    llmConfig: LLMConfiguration
+    llmConfigs: LLMConfiguration[]
 ): Promise<DistilledAgentIdentity> {
-    const service = llmServiceFactory.createService(llmConfig);
+    if (llmConfigs.length === 0) {
+        throw new Error("No LLM configurations available for distillation");
+    }
+
     const prompt = buildDistillationPrompt(files);
+    const messages = [{ role: "user" as const, content: prompt }];
 
-    const { object } = await service.generateObject(
-        [{ role: "user", content: prompt }],
-        DistilledIdentitySchema
-    );
+    let lastError: unknown;
+    for (const config of llmConfigs) {
+        try {
+            const service = llmServiceFactory.createService(config);
+            const { object } = await service.generateObject(messages, DistilledIdentitySchema);
+            return object;
+        } catch (error) {
+            lastError = error;
+            if (llmConfigs.length > 1) {
+                logger.warn(
+                    `[distiller] generateObject failed with ${config.provider}:${config.model}, trying next model...`
+                );
+            }
+        }
+    }
 
-    return object;
+    throw lastError;
 }

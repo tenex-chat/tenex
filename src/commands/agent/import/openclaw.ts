@@ -66,11 +66,11 @@ async function appendUserMdToGlobalPrompt(userMdContent: string): Promise<void> 
     await configService.saveGlobalConfig(newConfig);
 }
 
-async function importOneAgent(agent: OpenClawAgent, llmConfig: LLMConfiguration): Promise<void> {
+async function importOneAgent(agent: OpenClawAgent, llmConfigs: LLMConfiguration[]): Promise<void> {
     const tenexModel = convertModelFormat(agent.modelPrimary);
 
     console.log(chalk.blue(`\nDistilling identity for agent '${agent.id}'...`));
-    const identity = await distillAgentIdentity(agent.workspaceFiles, llmConfig);
+    const identity = await distillAgentIdentity(agent.workspaceFiles, llmConfigs);
 
     const slug = toSlug(identity.name) || agent.id;
 
@@ -105,12 +105,25 @@ async function importOneAgent(agent: OpenClawAgent, llmConfig: LLMConfiguration)
     console.log(chalk.gray(`    Symlinks:  MEMORY.md, memory/`));
 }
 
+function filterAgents(agents: OpenClawAgent[], slugs?: string): OpenClawAgent[] {
+    if (!slugs) return agents;
+    const allowed = slugs.split(",").map((s) => s.trim());
+    return agents.filter((a) => allowed.includes(a.id));
+}
+
 export const openclawImportCommand = new Command("openclaw")
     .description("Import agents from a local OpenClaw installation")
-    .action(async () => {
+    .option("--dry-run", "Preview what would be imported without making changes")
+    .option("--json", "Output as JSON array (implies --dry-run)")
+    .option("--slugs <slugs>", "Comma-separated list of agent IDs to import (default: all)")
+    .action(async (options: { dryRun?: boolean; json?: boolean; slugs?: string }) => {
         try {
             const stateDir = await detectOpenClawStateDir();
             if (!stateDir) {
+                if (options.json) {
+                    console.log("[]");
+                    return;
+                }
                 console.error(chalk.red("No OpenClaw installation detected."));
                 console.error(
                     chalk.gray(
@@ -121,19 +134,60 @@ export const openclawImportCommand = new Command("openclaw")
                 return;
             }
 
-            console.log(chalk.blue(`Found OpenClaw installation at: ${stateDir}`));
+            const allAgents = await readOpenClawAgents(stateDir);
+            const agents = filterAgents(allAgents, options.slugs);
 
-            const agents = await readOpenClawAgents(stateDir);
-            console.log(chalk.blue(`Found ${agents.length} agent(s) to import.`));
+            if (agents.length === 0) {
+                if (options.json) {
+                    console.log("[]");
+                } else {
+                    console.log(chalk.yellow("No matching OpenClaw agents found."));
+                }
+                return;
+            }
 
             await configService.loadConfig();
+            const llmConfigs = configService.getAllLLMConfigs();
+
+            if (options.dryRun || options.json) {
+                const previews = [];
+                for (const agent of agents) {
+                    const identity = await distillAgentIdentity(agent.workspaceFiles, llmConfigs);
+                    const slug = toSlug(identity.name) || agent.id;
+                    previews.push({
+                        id: agent.id,
+                        slug,
+                        model: convertModelFormat(agent.modelPrimary),
+                        ...identity,
+                    });
+                }
+
+                if (options.json) {
+                    console.log(JSON.stringify(previews, null, 2));
+                } else {
+                    console.log(chalk.blue(`Would import ${previews.length} agent(s):\n`));
+                    for (const p of previews) {
+                        console.log(chalk.green(`  ${p.slug}`) + chalk.gray(` (${p.name})`));
+                        console.log(chalk.gray(`    Role:         ${p.role}`));
+                        console.log(chalk.gray(`    Model:        ${p.model}`));
+                        console.log(chalk.gray(`    Description:  ${p.description}`));
+                        console.log(chalk.gray(`    Instructions: ${p.instructions.slice(0, 120)}...`));
+                    }
+                }
+                return;
+            }
+
+            if (!options.json) {
+                console.log(chalk.blue(`Found OpenClaw installation at: ${stateDir}`));
+                console.log(chalk.blue(`Found ${agents.length} agent(s) to import.`));
+            }
+
             await agentStorage.initialize();
 
-            const llmConfig = configService.getLLMConfig();
             let userMdProcessed = false;
 
             for (const agent of agents) {
-                await importOneAgent(agent, llmConfig);
+                await importOneAgent(agent, llmConfigs);
 
                 if (!userMdProcessed && agent.workspaceFiles.user) {
                     await appendUserMdToGlobalPrompt(agent.workspaceFiles.user);
