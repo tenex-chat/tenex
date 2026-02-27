@@ -182,9 +182,10 @@ export class Daemon {
             await initNDK();
             this.ndk = getNDK();
 
-            // 6. Publish backend profile (kind:0)
+            // 6. Set backend signer on NDK for NIP-42 relay auth + publish profile
             logger.debug("Publishing backend profile");
             const backendSigner = await config.getBackendSigner();
+            this.ndk.signer = backendSigner;
             const backendName = loadedConfig.backendName || "tenex backend";
             await AgentProfilePublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
 
