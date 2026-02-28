@@ -224,7 +224,7 @@ describe("ReportEmbeddingService", () => {
             expect(call.collection).toBe("project_reports");
             expect(call.query).toBe("architecture");
             expect(call.filter).toBe(
-                'metadata LIKE \'%"projectId":"31933:pubkey:my-project"%\''
+                `(metadata LIKE '%"projectId":"31933:pubkey:my-project"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"31933:pubkey:my-project"%' ESCAPE '\\\\')`
             );
         });
 
@@ -400,9 +400,11 @@ describe("ReportEmbeddingService", () => {
         });
 
         it("should build correct project filter for SQL prefilter", () => {
-            // Normal projectId
+            // Normal projectId — matches both camelCase and snake_case with ESCAPE clause
             const filter = buildProjectFilter("31933:pubkey:my-project");
-            expect(filter).toBe('metadata LIKE \'%"projectId":"31933:pubkey:my-project"%\'');
+            expect(filter).toBe(
+                `(metadata LIKE '%"projectId":"31933:pubkey:my-project"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"31933:pubkey:my-project"%' ESCAPE '\\\\')`
+            );
 
             // ALL = no filter
             expect(buildProjectFilter("ALL")).toBeUndefined();
@@ -415,7 +417,9 @@ describe("ReportEmbeddingService", () => {
 
         it("should escape single quotes in projectId for SQL safety", () => {
             const filter = buildProjectFilter("project's-id");
-            expect(filter).toBe('metadata LIKE \'%"projectId":"project\'\'s-id"%\'');
+            expect(filter).toBe(
+                `(metadata LIKE '%"projectId":"project''s-id"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"project''s-id"%' ESCAPE '\\\\')`
+            );
         });
     });
 

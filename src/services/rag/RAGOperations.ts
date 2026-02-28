@@ -1,5 +1,7 @@
 import type { DocumentMetadata, LanceDBResult, LanceDBStoredDocument } from "@/services/rag/rag-utils";
 import { calculateRelevanceScore, mapLanceResultToDocument } from "@/services/rag/rag-utils";
+import { AGENT_PUBKEY_KEYS } from "@/utils/metadataKeys";
+import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "@/utils/sqlEscaping";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import type { Table, VectorQuery } from "@lancedb/lancedb";
@@ -469,26 +471,6 @@ export class RAGOperations {
      * @param agentPubkey Optional agent pubkey to count their contributions
      * @returns Object with total count and optional agent-specific count
      */
-    /**
-     * Escape a string for use in SQL LIKE pattern.
-     * Escapes: single quotes ('), double quotes ("), backslashes (\), and LIKE wildcards (%, _).
-     *
-     * IMPORTANT: DataFusion (used by LanceDB) has NO default escape character.
-     * The backslash escapes here only work when paired with ESCAPE '\\' clause.
-     * See: https://github.com/apache/datafusion/issues/13291
-     *
-     * Note: Agent pubkeys are hex strings (0-9, a-f) so most escaping isn't strictly needed,
-     * but we escape properly for defense-in-depth and to handle any future metadata fields.
-     */
-    private escapeSqlLikeValue(value: string): string {
-        return value
-            .replace(/\\/g, "\\\\")  // Escape backslashes first
-            .replace(/'/g, "''")      // SQL standard: escape single quote by doubling
-            .replace(/"/g, '\\"')     // Escape double quotes
-            .replace(/%/g, "\\%")     // Escape LIKE wildcard %
-            .replace(/_/g, "\\_");    // Escape LIKE wildcard _
-    }
-
     async getCollectionStats(
         collectionName: string,
         agentPubkey?: string
@@ -503,11 +485,11 @@ export class RAGOperations {
             // The metadata field is stored as JSON string, so we use LIKE for matching
             let agentCount: number | undefined;
             if (agentPubkey) {
-                // SQL filter for JSON string field containing agent_pubkey
-                // Format: metadata LIKE '%"agent_pubkey":"<pubkey>"%' ESCAPE '\\'
-                // ESCAPE clause is required because DataFusion has no default escape character
-                const escapedPubkey = this.escapeSqlLikeValue(agentPubkey);
-                const filter = `metadata LIKE '%"agent_pubkey":"${escapedPubkey}"%' ESCAPE '\\\\'`;
+                const escaped = escapeSqlLikeValue(agentPubkey);
+                const clauses = AGENT_PUBKEY_KEYS
+                    .map((key) => `metadata LIKE '%"${key}":"${escaped}"%' ${SQL_LIKE_ESCAPE_CLAUSE}`)
+                    .join(" OR ");
+                const filter = `(${clauses})`;
                 agentCount = await table.countRows(filter);
             }
 
