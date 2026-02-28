@@ -141,18 +141,20 @@ export class AgentRegistry {
             }
         }
 
-        // Check if critical agents failed
+        // Log failed agents but don't block project boot
         if (failedAgents.length > 0) {
-            // PM is the first agent in tags
             const pmEventId = agentEventIds[0];
             if (failedAgents.includes(pmEventId)) {
-                throw new Error(
-                    `Critical agent failed to load. Agent event ID ${pmEventId} could not be fetched. This might be due to network issues or the event not being available on the configured relays.`
+                logger.error(
+                    `PM agent (first in tags) failed to load — project will boot without a PM. Agent event ID ${pmEventId} could not be fetched. This might be due to network issues or the event not being available on the configured relays.`,
+                    { pmEventId, failedAgents }
+                );
+            } else {
+                logger.warn(
+                    `${failedAgents.length} agent(s) could not be installed but continuing with available agents`,
+                    { failedAgents }
                 );
             }
-            logger.warn(
-                `${failedAgents.length} agent(s) could not be installed but continuing with available agents`
-            );
         }
 
         // Load locally-associated agents from storage

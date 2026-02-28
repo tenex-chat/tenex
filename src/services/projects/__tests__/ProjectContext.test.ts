@@ -531,6 +531,60 @@ describe("ProjectContext", () => {
             expect(pm).toBe(agent1);
         });
 
+        it("should fall through gracefully when PM agent from tags is not in registry", () => {
+            // First agent in project tags has eventId "missing-event-id" which is NOT in the registry
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                eventId: "loaded-event-id",
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+            ]);
+
+            const project = {
+                tags: [["agent", "missing-event-id"]], // Not in registry
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            // Should NOT throw — should fall through to registry fallback
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Falls through to step 6: first agent in registry
+            expect(pm).toBe(agent1);
+
+            // Should have logged a warning
+            const warning = loggerWarnings.find(
+                (w) => w.message.includes("not loaded in registry yet")
+            );
+            expect(warning).toBeDefined();
+        });
+
+        it("should fall through gracefully when explicit PM tag agent is not in registry", () => {
+            const agent1 = createMockAgent({
+                slug: "agent-1",
+                eventId: "loaded-event-id",
+            });
+
+            const agents = new Map<string, AgentInstance>([
+                ["agent-1", agent1],
+            ]);
+
+            // Explicit PM designation for a missing agent
+            const project = {
+                tags: [["agent", "missing-pm-event-id", "pm"]],
+                dTag: "test-project",
+                tagValue: () => "test-project",
+            } as unknown as NDKProject;
+
+            // Should NOT throw — should fall through
+            const pm = resolveProjectManager(project, agents, "test-project");
+
+            // Falls through to step 6: first agent in registry
+            expect(pm).toBe(agent1);
+        });
+
         it("should only apply project-scoped PM to matching project", () => {
             // Agent has project-scoped PM for a DIFFERENT project
             const agent1: AgentInstance = {

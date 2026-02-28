@@ -101,9 +101,10 @@ export function resolveProjectManager(
             }
         }
 
-        throw new Error(
-            `Project Manager agent not found. PM agent (eventId: ${pmEventId}) not loaded in registry.`
-        );
+        logger.warn("PM agent designated in project tags not loaded in registry yet, falling through", {
+            pmEventId,
+            loadedEventIds: Array.from(agents.values()).map(a => a.eventId),
+        });
     }
 
     // Step 5: Fallback to first agent from project tags
@@ -121,9 +122,10 @@ export function resolveProjectManager(
             }
         }
 
-        throw new Error(
-            `Project Manager agent not found. First agent (eventId: ${pmEventId}) not loaded in registry.`
-        );
+        logger.warn("First agent from project tags not loaded in registry yet, falling through", {
+            pmEventId,
+            loadedEventIds: Array.from(agents.values()).map(a => a.eventId),
+        });
     }
 
     // Step 6: No agent tags in project, use first from registry if any exist
