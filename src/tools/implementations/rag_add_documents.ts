@@ -388,16 +388,18 @@ function computeBaseProvenance(context: ToolExecutionContext): DocumentMetadata 
         provenance.agent_pubkey = context.agent.pubkey;
     }
 
-    // Auto-inject project_id if available (uses NIP-33 address format)
+    // Auto-inject projectId if available (uses NIP-33 address format)
+    // NOTE: Must use camelCase "projectId" to match buildProjectFilter() and
+    // all specialized services (ReportEmbeddingService, ConversationEmbeddingService, learn.ts)
     if (isProjectContextInitialized()) {
         try {
             const projectCtx = getProjectContext();
             const projectId = projectCtx.project.tagId();
             if (projectId) {
-                provenance.project_id = projectId;
+                provenance.projectId = projectId;
             }
         } catch {
-            // Project context not available - skip project_id injection
+            // Project context not available - skip projectId injection
         }
     }
 
@@ -455,7 +457,7 @@ function mergeWithProvenance(
     // Coerce user-provided metadata to ensure JSON-serializable values
     const coercedMetadata = documentMetadata ? coerceToDocumentMetadata(documentMetadata) : {};
 
-    // Base provenance (agent_pubkey, project_id) comes first, user metadata can override
+    // Base provenance (agent_pubkey, projectId) comes first, user metadata can override
     return {
         ...baseProvenance,
         ...coercedMetadata,

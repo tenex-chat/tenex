@@ -149,8 +149,11 @@ describe("RAGOperations", () => {
             const calls = mockTable.countRows.mock.calls;
             const filter = calls[1][0];
             
-            // Check the filter format - ESCAPE clause required for DataFusion (no default escape char)
-            expect(filter).toBe('metadata LIKE \'%"agent_pubkey":"testpubkey123"%\' ESCAPE \'\\\\\'');
+            // Must match both "agent_pubkey" (from rag_add_documents) and "agentPubkey" (from specialized services)
+            // ESCAPE clause required for DataFusion (no default escape char)
+            expect(filter).toBe(
+                `(metadata LIKE '%"agent_pubkey":"testpubkey123"%' ESCAPE '\\\\' OR metadata LIKE '%"agentPubkey":"testpubkey123"%' ESCAPE '\\\\')`
+            );
         });
     });
 

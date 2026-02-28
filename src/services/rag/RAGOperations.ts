@@ -503,11 +503,11 @@ export class RAGOperations {
             // The metadata field is stored as JSON string, so we use LIKE for matching
             let agentCount: number | undefined;
             if (agentPubkey) {
-                // SQL filter for JSON string field containing agent_pubkey
-                // Format: metadata LIKE '%"agent_pubkey":"<pubkey>"%' ESCAPE '\\'
+                // SQL filter for JSON string field containing agent pubkey
+                // Match both "agent_pubkey" (from rag_add_documents) and "agentPubkey" (from specialized services)
                 // ESCAPE clause is required because DataFusion has no default escape character
                 const escapedPubkey = this.escapeSqlLikeValue(agentPubkey);
-                const filter = `metadata LIKE '%"agent_pubkey":"${escapedPubkey}"%' ESCAPE '\\\\'`;
+                const filter = `(metadata LIKE '%"agent_pubkey":"${escapedPubkey}"%' ESCAPE '\\\\' OR metadata LIKE '%"agentPubkey":"${escapedPubkey}"%' ESCAPE '\\\\')`;
                 agentCount = await table.countRows(filter);
             }
 

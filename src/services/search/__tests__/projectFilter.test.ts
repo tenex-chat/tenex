@@ -13,19 +13,26 @@ describe("buildProjectFilter", () => {
         expect(buildProjectFilter("All")).toBeUndefined();
     });
 
-    it("returns SQL LIKE filter for valid projectId", () => {
+    it("returns SQL LIKE filter matching both projectId and project_id", () => {
         const filter = buildProjectFilter("project-123");
-        expect(filter).toBe(`metadata LIKE '%"projectId":"project-123"%'`);
+        // Must match both camelCase (canonical) and snake_case (legacy) metadata keys
+        expect(filter).toBe(
+            `(metadata LIKE '%"projectId":"project-123"%' OR metadata LIKE '%"project_id":"project-123"%')`
+        );
     });
 
     it("escapes single quotes in projectId", () => {
         const filter = buildProjectFilter("project's-id");
-        expect(filter).toBe(`metadata LIKE '%"projectId":"project''s-id"%'`);
+        expect(filter).toBe(
+            `(metadata LIKE '%"projectId":"project''s-id"%' OR metadata LIKE '%"project_id":"project''s-id"%')`
+        );
     });
 
     it("handles complex projectId formats (NIP-33 address)", () => {
         const tagId = "31933:abc123:my-project";
         const filter = buildProjectFilter(tagId);
-        expect(filter).toBe(`metadata LIKE '%"projectId":"31933:abc123:my-project"%'`);
+        expect(filter).toBe(
+            `(metadata LIKE '%"projectId":"31933:abc123:my-project"%' OR metadata LIKE '%"project_id":"31933:abc123:my-project"%')`
+        );
     });
 });
