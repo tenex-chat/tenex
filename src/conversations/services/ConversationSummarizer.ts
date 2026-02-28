@@ -75,7 +75,7 @@ export class ConversationSummarizer {
                 }
 
                 // Get existing categories for consistency
-                const existingCategories = await this.categoryManager.getCategories();
+                const existingCategories = (await this.categoryManager.getCategories()).slice(0, 10);
                 const categoryListText = existingCategories.length > 0
                     ? `Existing categories (prefer these for consistency): ${existingCategories.join(", ")}`
                     : "No existing categories yet. Create new ones as needed.";
@@ -165,7 +165,6 @@ export class ConversationSummarizer {
                             ),
                         categories: z
                             .array(z.string())
-                            .max(3)
                             .describe(
                                 "0-3 category tags. Lowercase singular nouns. Prefer canonical list; create new only if necessary; may be empty []."
                             ),
