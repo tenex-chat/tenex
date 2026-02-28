@@ -46,6 +46,23 @@ async function addAgent(eventId: string | undefined): Promise<void> {
     console.log(chalk.gray(`  pubkey: ${pubkey}`));
 }
 
+// ─── tenex agent assign ─────────────────────────────────────────────────────
+
+async function assignAgent(slug: string, projectDTag: string): Promise<void> {
+    await agentStorage.initialize();
+
+    const agent = await agentStorage.getAgentBySlug(slug);
+    if (!agent) {
+        console.error(chalk.red(`Error: no agent found with slug "${slug}"`));
+        process.exit(1);
+    }
+
+    const pubkey = new NDKPrivateKeySigner(agent.nsec).pubkey;
+    await agentStorage.addAgentToProject(pubkey, projectDTag);
+
+    console.log(chalk.green(`✓ Assigned agent "${slug}" to project "${projectDTag}"`));
+}
+
 // ─── Command registration ────────────────────────────────────────────────────
 
 const addCommand = new Command("add")
@@ -55,7 +72,16 @@ const addCommand = new Command("add")
         await addAgent(eventId);
     });
 
+const assignCommand = new Command("assign")
+    .description("Assign an existing agent to a project")
+    .argument("<slug>", "Agent slug")
+    .argument("<project-dtag>", "Project d-tag to assign the agent to")
+    .action(async (slug: string, projectDTag: string) => {
+        await assignAgent(slug, projectDTag);
+    });
+
 export const agentCommand = new Command("agent")
     .description("Manage TENEX agents")
     .addCommand(importCommand)
-    .addCommand(addCommand);
+    .addCommand(addCommand)
+    .addCommand(assignCommand);

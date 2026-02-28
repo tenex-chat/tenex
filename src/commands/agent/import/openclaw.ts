@@ -4,6 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
+import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { config as configService } from "@/services/ConfigService";
 import type { LLMConfiguration } from "@/services/config/types";
 import { detectOpenClawStateDir, readOpenClawAgents, convertModelFormat } from "./openclaw-reader";
@@ -18,23 +19,46 @@ function toSlug(name: string): string {
         .replace(/^-+|-+$/g, "");
 }
 
-async function createHomeDir(pubkey: string, workspacePath: string): Promise<string> {
-    const homeDir = configService.getConfigPath(`agents/${pubkey}`);
+interface CreateHomeDirOptions {
+    noSync?: boolean;
+}
+
+export async function createHomeDir(
+    pubkey: string,
+    workspacePath: string,
+    options: CreateHomeDirOptions = {},
+): Promise<string> {
+    const homeDir = getAgentHomeDirectory(pubkey);
     await fs.mkdir(homeDir, { recursive: true });
 
-    // Symlink MEMORY.md (dangling is ok — file may not exist yet)
-    const memoryMdTarget = path.join(workspacePath, "MEMORY.md");
-    const memoryMdLink = path.join(homeDir, "MEMORY.md");
-    await fs.rm(memoryMdLink, { force: true });
-    await fs.symlink(memoryMdTarget, memoryMdLink);
+    if (options.noSync) {
+        // Copy all workspace files into the home directory
+        await fs.cp(workspacePath, homeDir, { recursive: true });
 
-    // Symlink memory/ directory (dangling is ok)
-    const memoryDirTarget = path.join(workspacePath, "memory");
-    const memoryDirLink = path.join(homeDir, "memory");
-    await fs.rm(memoryDirLink, { force: true });
-    await fs.symlink(memoryDirTarget, memoryDirLink);
+        const indexContent = `# Memory Files
 
-    const indexContent = `# Memory Files
+This agent's memory was copied from an OpenClaw installation.
+
+- \`MEMORY.md\` — long-term curated memory (copied from OpenClaw)
+- \`memory/YYYY-MM-DD.md\` — daily session logs (copied from OpenClaw)
+
+Source: ${workspacePath}
+`;
+        await fs.writeFile(path.join(homeDir, "+INDEX.md"), indexContent, "utf-8");
+    } else {
+        // Symlink MEMORY.md (dangling is ok — file may not exist yet)
+        const memoryMdTarget = path.join(workspacePath, "MEMORY.md");
+        const memoryMdLink = path.join(homeDir, "MEMORY.md");
+        await fs.rm(memoryMdLink, { force: true });
+        await fs.symlink(memoryMdTarget, memoryMdLink);
+
+        // Symlink memory/ directory (dangling is ok)
+        const memoryDirTarget = path.join(workspacePath, "memory");
+        const memoryDirLink = path.join(homeDir, "memory");
+        await fs.rm(memoryDirLink, { force: true });
+        await fs.symlink(memoryDirTarget, memoryDirLink);
+
+        const indexContent = `# Memory Files
 
 This agent's memory is synced live from an OpenClaw installation.
 
@@ -43,7 +67,8 @@ This agent's memory is synced live from an OpenClaw installation.
 
 Source: ${workspacePath}
 `;
-    await fs.writeFile(path.join(homeDir, "+INDEX.md"), indexContent, "utf-8");
+        await fs.writeFile(path.join(homeDir, "+INDEX.md"), indexContent, "utf-8");
+    }
 
     return homeDir;
 }
@@ -66,7 +91,11 @@ async function appendUserMdToGlobalPrompt(userMdContent: string): Promise<void> 
     await configService.saveGlobalConfig(newConfig);
 }
 
-async function importOneAgent(agent: OpenClawAgent, llmConfigs: LLMConfiguration[]): Promise<void> {
+async function importOneAgent(
+    agent: OpenClawAgent,
+    llmConfigs: LLMConfiguration[],
+    options: { noSync?: boolean } = {},
+): Promise<void> {
     const tenexModel = convertModelFormat(agent.modelPrimary);
 
     console.log(chalk.blue(`\nDistilling identity for agent '${agent.id}'...`));
@@ -96,13 +125,13 @@ async function importOneAgent(agent: OpenClawAgent, llmConfigs: LLMConfiguration
     });
 
     await agentStorage.saveAgent(storedAgent);
-    const homeDir = await createHomeDir(pubkey, agent.workspacePath);
+    const homeDir = await createHomeDir(pubkey, agent.workspacePath, { noSync: options.noSync });
 
     console.log(chalk.green(`  ✓ Imported: ${identity.name} (${slug})`));
     console.log(chalk.gray(`    Keypair:   ${pubkey}`));
     console.log(chalk.gray(`    Model:     ${tenexModel}`));
     console.log(chalk.gray(`    Home dir:  ${homeDir}`));
-    console.log(chalk.gray(`    Symlinks:  MEMORY.md, memory/`));
+    console.log(chalk.gray(`    Files:     ${options.noSync ? "copied" : "symlinked"} from ${agent.workspacePath}`));
 }
 
 function filterAgents(agents: OpenClawAgent[], slugs?: string): OpenClawAgent[] {
@@ -115,8 +144,9 @@ export const openclawImportCommand = new Command("openclaw")
     .description("Import agents from a local OpenClaw installation")
     .option("--dry-run", "Preview what would be imported without making changes")
     .option("--json", "Output as JSON array (implies --dry-run)")
+    .option("--no-sync", "Copy workspace files instead of symlinking them")
     .option("--slugs <slugs>", "Comma-separated list of agent IDs to import (default: all)")
-    .action(async (options: { dryRun?: boolean; json?: boolean; slugs?: string }) => {
+    .action(async (options: { dryRun?: boolean; json?: boolean; noSync?: boolean; slugs?: string }) => {
         try {
             const stateDir = await detectOpenClawStateDir();
             if (!stateDir) {
@@ -187,7 +217,7 @@ export const openclawImportCommand = new Command("openclaw")
             let userMdProcessed = false;
 
             for (const agent of agents) {
-                await importOneAgent(agent, llmConfigs);
+                await importOneAgent(agent, llmConfigs, { noSync: options.noSync });
 
                 if (!userMdProcessed && agent.workspaceFiles.user) {
                     await appendUserMdToGlobalPrompt(agent.workspaceFiles.user);
