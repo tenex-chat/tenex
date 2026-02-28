@@ -48,63 +48,9 @@ const createMockEmbeddingProvider = () => ({
 
 // Import after mocks
 import { RAGOperations } from "../RAGOperations";
+import { escapeSqlLikeValue } from "@/services/search/sqlEscaping";
 
 describe("RAGOperations", () => {
-    describe("escapeSqlLikeValue", () => {
-        it("should escape double quotes", () => {
-            const mockDbManager = createMockDbManager({});
-            const mockProvider = createMockEmbeddingProvider();
-            const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
-
-            // Access private method via prototype
-            const escapeFn = (ops as any).escapeSqlLikeValue.bind(ops);
-            
-            expect(escapeFn('test"value')).toBe('test\\"value');
-        });
-
-        it("should escape single quotes by doubling", () => {
-            const mockDbManager = createMockDbManager({});
-            const mockProvider = createMockEmbeddingProvider();
-            const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
-
-            const escapeFn = (ops as any).escapeSqlLikeValue.bind(ops);
-            
-            expect(escapeFn("test'value")).toBe("test''value");
-        });
-
-        it("should escape backslashes", () => {
-            const mockDbManager = createMockDbManager({});
-            const mockProvider = createMockEmbeddingProvider();
-            const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
-
-            const escapeFn = (ops as any).escapeSqlLikeValue.bind(ops);
-            
-            expect(escapeFn("test\\value")).toBe("test\\\\value");
-        });
-
-        it("should escape LIKE wildcards", () => {
-            const mockDbManager = createMockDbManager({});
-            const mockProvider = createMockEmbeddingProvider();
-            const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
-
-            const escapeFn = (ops as any).escapeSqlLikeValue.bind(ops);
-            
-            expect(escapeFn("test%value")).toBe("test\\%value");
-            expect(escapeFn("test_value")).toBe("test\\_value");
-        });
-
-        it("should handle hex pubkeys (no escaping needed)", () => {
-            const mockDbManager = createMockDbManager({});
-            const mockProvider = createMockEmbeddingProvider();
-            const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
-
-            const escapeFn = (ops as any).escapeSqlLikeValue.bind(ops);
-            
-            const hexPubkey = "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd";
-            expect(escapeFn(hexPubkey)).toBe(hexPubkey);
-        });
-    });
-
     describe("getCollectionStats", () => {
         it("should return total count when no agentPubkey provided", async () => {
             const mockTable = createMockTable({ totalRows: 100 });
@@ -149,10 +95,10 @@ describe("RAGOperations", () => {
             const calls = mockTable.countRows.mock.calls;
             const filter = calls[1][0];
             
-            // Must match both "agent_pubkey" (from rag_add_documents) and "agentPubkey" (from specialized services)
+            // Must match both "agentPubkey" (from specialized services) and "agent_pubkey" (from rag_add_documents)
             // ESCAPE clause required for DataFusion (no default escape char)
             expect(filter).toBe(
-                `(metadata LIKE '%"agent_pubkey":"testpubkey123"%' ESCAPE '\\\\' OR metadata LIKE '%"agentPubkey":"testpubkey123"%' ESCAPE '\\\\')`
+                `(metadata LIKE '%"agentPubkey":"testpubkey123"%' ESCAPE '\\\\' OR metadata LIKE '%"agent_pubkey":"testpubkey123"%' ESCAPE '\\\\')`
             );
         });
     });
@@ -209,5 +155,29 @@ describe("RAGOperations", () => {
             // Errors from individual collections now propagate through Promise.all
             await expect(ops.getAllCollectionStats("agent123")).rejects.toThrow();
         });
+    });
+});
+
+describe("escapeSqlLikeValue (shared utility)", () => {
+    it("should escape double quotes", () => {
+        expect(escapeSqlLikeValue('test"value')).toBe('test\\"value');
+    });
+
+    it("should escape single quotes by doubling", () => {
+        expect(escapeSqlLikeValue("test'value")).toBe("test''value");
+    });
+
+    it("should escape backslashes", () => {
+        expect(escapeSqlLikeValue("test\\value")).toBe("test\\\\value");
+    });
+
+    it("should escape LIKE wildcards", () => {
+        expect(escapeSqlLikeValue("test%value")).toBe("test\\%value");
+        expect(escapeSqlLikeValue("test_value")).toBe("test\\_value");
+    });
+
+    it("should handle hex pubkeys (no escaping needed)", () => {
+        const hexPubkey = "a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd";
+        expect(escapeSqlLikeValue(hexPubkey)).toBe(hexPubkey);
     });
 });

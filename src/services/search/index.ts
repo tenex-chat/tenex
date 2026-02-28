@@ -6,6 +6,8 @@
  */
 
 export { buildProjectFilter } from "./projectFilter";
+export { AGENT_PUBKEY_KEYS, PROJECT_ID_KEYS } from "./metadataKeys";
+export { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "./sqlEscaping";
 export { SearchProviderRegistry } from "./SearchProviderRegistry";
 export { UnifiedSearchService } from "./UnifiedSearchService";
 export type {

@@ -13,18 +13,26 @@ describe("buildProjectFilter", () => {
         expect(buildProjectFilter("All")).toBeUndefined();
     });
 
-    it("returns SQL LIKE filter matching both projectId and project_id", () => {
+    it("returns SQL LIKE filter matching both projectId and project_id with ESCAPE clause", () => {
         const filter = buildProjectFilter("project-123");
         // Must match both camelCase (canonical) and snake_case (legacy) metadata keys
+        // ESCAPE clause is required for DataFusion (no default escape char)
         expect(filter).toBe(
-            `(metadata LIKE '%"projectId":"project-123"%' OR metadata LIKE '%"project_id":"project-123"%')`
+            `(metadata LIKE '%"projectId":"project-123"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"project-123"%' ESCAPE '\\\\')`
         );
     });
 
     it("escapes single quotes in projectId", () => {
         const filter = buildProjectFilter("project's-id");
         expect(filter).toBe(
-            `(metadata LIKE '%"projectId":"project''s-id"%' OR metadata LIKE '%"project_id":"project''s-id"%')`
+            `(metadata LIKE '%"projectId":"project''s-id"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"project''s-id"%' ESCAPE '\\\\')`
+        );
+    });
+
+    it("escapes SQL LIKE wildcards in projectId", () => {
+        const filter = buildProjectFilter("project%100_test");
+        expect(filter).toBe(
+            `(metadata LIKE '%"projectId":"project\\%100\\_test"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"project\\%100\\_test"%' ESCAPE '\\\\')`
         );
     });
 
@@ -32,7 +40,7 @@ describe("buildProjectFilter", () => {
         const tagId = "31933:abc123:my-project";
         const filter = buildProjectFilter(tagId);
         expect(filter).toBe(
-            `(metadata LIKE '%"projectId":"31933:abc123:my-project"%' OR metadata LIKE '%"project_id":"31933:abc123:my-project"%')`
+            `(metadata LIKE '%"projectId":"31933:abc123:my-project"%' ESCAPE '\\\\' OR metadata LIKE '%"project_id":"31933:abc123:my-project"%' ESCAPE '\\\\')`
         );
     });
 });
