@@ -192,8 +192,6 @@ export interface MetaModelVariant {
     description?: string;
     /** Optional additional system prompt to inject when this variant is active */
     systemPrompt?: string;
-    /** Priority tier for conflict resolution (higher number = higher priority) */
-    tier?: number;
 }
 
 /**
@@ -207,8 +205,6 @@ export interface MetaModelConfiguration {
     variants: Record<string, MetaModelVariant>;
     /** Default variant to use when no keyword matches */
     default: string;
-    /** Optional description shown in system prompt preamble */
-    description?: string;
 }
 
 /**
@@ -258,7 +254,6 @@ export const MetaModelVariantSchema = z.object({
     keywords: z.array(z.string()).optional(),
     description: z.string().optional(),
     systemPrompt: z.string().optional(),
-    tier: z.number().optional(),
 });
 
 /**
@@ -268,7 +263,6 @@ export const MetaModelConfigurationSchema = z.object({
     provider: z.literal("meta"),
     variants: z.record(z.string(), MetaModelVariantSchema),
     default: z.string(),
-    description: z.string().optional(),
 });
 
 /**

@@ -3,7 +3,7 @@
   "version": "0.9.0",
   "description": "TENEX Command Line Interface",
   "bin": {
-    "daemon": "./dist/daemon-wrapper.cjs"
+    "tenex-backend": "./dist/daemon-wrapper.cjs"
   },
   "files": [
     "dist/**/*.js",

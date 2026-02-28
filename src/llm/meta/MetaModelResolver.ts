@@ -134,8 +134,8 @@ export class MetaModelResolver {
     }
 
     /**
-     * Select the winning variant from a set of matches using tier-based resolution.
-     * Highest tier wins. If tiers are equal, first match wins.
+     * Select the winning variant from a set of matches using position-based resolution.
+     * First keyword match wins (earliest position in message).
      */
     private static selectWinningVariant(
         matches: Array<{ keyword: string; variantName: string; variant: MetaModelVariant; position: number }>
@@ -144,16 +144,7 @@ export class MetaModelResolver {
             return null;
         }
 
-        // Sort by tier (descending), then by position (ascending for first match)
-        const sorted = [...matches].sort((a, b) => {
-            const tierA = a.variant.tier ?? 0;
-            const tierB = b.variant.tier ?? 0;
-            if (tierB !== tierA) {
-                return tierB - tierA; // Higher tier wins
-            }
-            return a.position - b.position; // Earlier position wins if tiers equal
-        });
-
+        const sorted = [...matches].sort((a, b) => a.position - b.position);
         return sorted[0];
     }
 
@@ -256,7 +247,6 @@ export class MetaModelResolver {
         logger.debug("[MetaModelResolver] Resolved variant", {
             variantName: winner.variantName,
             matchedKeywords,
-            tier: winner.variant.tier ?? 0,
             configName: winner.variant.model,
         });
 
@@ -313,11 +303,6 @@ export class MetaModelResolver {
      */
     static generateSystemPromptFragment(config: MetaModelConfiguration): string {
         const lines: string[] = [];
-
-        if (config.description) {
-            lines.push(config.description);
-            lines.push("");
-        }
 
         lines.push("You have access to the following models via change_model() tool:");
 

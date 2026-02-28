@@ -7,7 +7,8 @@ import {
     type ImageConfig,
 } from "@/services/image/ImageGenerationService";
 import { config as configService } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
+import { amber, inquirerTheme } from "@/utils/cli-theme";
+import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 
@@ -31,9 +32,7 @@ export const imageCommand = new Command("image")
             if (scope === "project") {
                 // Check if we're in a TENEX project
                 if (!(await fileSystem.directoryExists(baseDir))) {
-                    logger.error(
-                        "No .tenex directory found. Make sure you're in a TENEX project directory."
-                    );
+                    console.log(chalk.red("❌ No .tenex directory found. Make sure you're in a TENEX project directory."));
                     process.exitCode = 1;
                     return;
                 }
@@ -51,17 +50,13 @@ export const imageCommand = new Command("image")
             // Check if OpenRouter is configured
             const providersConfig = await configService.loadTenexProviders(configService.getGlobalPath());
             if (!providersConfig.providers.openrouter?.apiKey) {
-                logger.error(
-                    "OpenRouter is not configured. Run `tenex setup providers` and add your OpenRouter API key first."
-                );
-                logger.info(
-                    "\nImage generation requires OpenRouter. Get an API key at: https://openrouter.ai/keys"
-                );
+                console.log(chalk.red("❌ OpenRouter is not configured. Run `tenex setup providers` and add your OpenRouter API key first."));
+                console.log(amber("→") + chalk.bold(" Image generation requires OpenRouter. Get an API key at: https://openrouter.ai/keys"));
                 process.exitCode = 1;
                 return;
             }
 
-            logger.info("✓ OpenRouter API key found\n");
+            console.log(chalk.green("✓") + chalk.bold(" OpenRouter API key found") + "\n");
 
             // Build model choices
             const modelChoices = OPENROUTER_IMAGE_MODELS.map((m) => ({
@@ -83,6 +78,7 @@ export const imageCommand = new Command("image")
                     message: "Select default image generation model:",
                     choices: modelChoices,
                     default: existing?.model || OPENROUTER_IMAGE_MODELS[0]?.value,
+                    theme: inquirerTheme,
                 },
             ]);
 
@@ -93,6 +89,7 @@ export const imageCommand = new Command("image")
                         type: "input",
                         name: "customModel",
                         message: "Enter OpenRouter model ID (e.g., black-forest-labs/flux.2-pro):",
+                        theme: inquirerTheme,
                         validate: (input: string) =>
                             input.trim().length > 0 || "Model ID cannot be empty",
                     },
@@ -120,6 +117,7 @@ export const imageCommand = new Command("image")
                     message: "Select default aspect ratio:",
                     choices: aspectRatioChoices,
                     default: existing?.defaultAspectRatio || "1:1",
+                    theme: inquirerTheme,
                 },
             ]);
 
@@ -139,6 +137,7 @@ export const imageCommand = new Command("image")
                     message: "Select default image size:",
                     choices: imageSizeChoices,
                     default: existing?.defaultImageSize || "2K",
+                    theme: inquirerTheme,
                 },
             ]);
 
@@ -158,14 +157,12 @@ export const imageCommand = new Command("image")
             const modelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === model);
             const modelDisplayName = modelInfo ? modelInfo.name : model;
 
-            logger.info(
-                `\n✅ Image generation configured for ${scope}\n` +
-                    `   Provider: OpenRouter\n` +
-                    `   Model: ${modelDisplayName} (${model})\n` +
-                    `   Default aspect ratio: ${aspectRatio}\n` +
-                    `   Default image size: ${imageSize}\n` +
-                    "\nAgents can now use the generate_image tool to create images."
-            );
+            console.log("\n" + chalk.green("✓") + chalk.bold(` Image generation configured for ${scope}`));
+            console.log(chalk.gray(`   Provider: OpenRouter`));
+            console.log(chalk.gray(`   Model: ${modelDisplayName} (${model})`));
+            console.log(chalk.gray(`   Default aspect ratio: ${aspectRatio}`));
+            console.log(chalk.gray(`   Default image size: ${imageSize}`));
+            console.log(chalk.gray("\nAgents can now use the generate_image tool to create images."));
         } catch (error: unknown) {
             // Handle SIGINT (Ctrl+C) gracefully
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -173,7 +170,7 @@ export const imageCommand = new Command("image")
                 return;
             }
 
-            logger.error(`Failed to configure image generation: ${error}`);
+            console.log(chalk.red(`❌ Failed to configure image generation: ${error}`));
             process.exitCode = 1;
         }
     });

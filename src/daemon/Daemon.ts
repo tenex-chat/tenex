@@ -1378,6 +1378,17 @@ export class Daemon {
      * Setup graceful shutdown handlers
      */
     private setupShutdownHandlers(): void {
+        // Prevent EPIPE from crashing the daemon when stdout/stderr pipe breaks
+        // (e.g. when the TUI exits). The daemon logs to ~/.tenex/daemon/daemon.log
+        // so silently dropping broken-pipe writes is correct behavior.
+        process.stdout.on('error', (err) => {
+            if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+            throw err;
+        });
+        process.stderr.on('error', (err) => {
+            if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+            throw err;
+        });
         /**
          * Perform graceful shutdown of the daemon.
          * @param exitCode - Exit code to use (default: 0)
@@ -1405,87 +1416,77 @@ export class Daemon {
                 }
 
                 if (this.streamTransport) {
-                    process.stdout.write("Stopping stream transport...");
+                    logger.info("Stopping stream transport...");
                     await this.streamTransport.stop();
                     streamPublisher.setTransport(null);
                     this.streamTransport = null;
-                    console.log(" done");
+                    logger.info("Stream transport stopped");
                 }
 
                 // Stop conversation indexing job
-                process.stdout.write("Stopping conversation indexing job...");
+                logger.info("Stopping conversation indexing job...");
                 getConversationIndexingJob().stop();
-                console.log(" done");
 
                 // Stop LanceDB maintenance service
-                process.stdout.write("Stopping LanceDB maintenance service...");
+                logger.info("Stopping LanceDB maintenance service...");
                 getLanceDBMaintenanceService().stop();
-                console.log(" done");
 
                 // Stop agent definition monitor
                 if (this.agentDefinitionMonitor) {
-                    process.stdout.write("Stopping agent definition monitor...");
+                    logger.info("Stopping agent definition monitor...");
                     this.agentDefinitionMonitor.stop();
                     this.agentDefinitionMonitor = null;
-                    console.log(" done");
                 }
 
                 // Stop intervention service
-                process.stdout.write("Stopping intervention service...");
+                logger.info("Stopping intervention service...");
                 InterventionService.getInstance().shutdown();
-                console.log(" done");
 
                 // Stop owner agent list service
-                process.stdout.write("Stopping owner agent list service...");
+                logger.info("Stopping owner agent list service...");
                 OwnerAgentListService.getInstance().shutdown();
-                console.log(" done");
 
                 // Stop NIP-46 signing service
-                process.stdout.write("Stopping NIP-46 signing service...");
+                logger.info("Stopping NIP-46 signing service...");
                 await Nip46SigningService.getInstance().shutdown();
-                console.log(" done");
 
                 if (this.subscriptionManager) {
-                    process.stdout.write("Stopping subscriptions...");
+                    logger.info("Stopping subscriptions...");
                     this.subscriptionManager.stop();
-                    console.log(" done");
                 }
 
                 if (this.runtimeLifecycle) {
                     const stats = this.runtimeLifecycle.getStats();
                     if (stats.activeCount > 0) {
-                        console.log(`Stopping ${stats.activeCount} project runtime(s)...`);
+                        logger.info(`Stopping ${stats.activeCount} project runtime(s)...`);
                     }
                     await this.runtimeLifecycle.stopAllRuntimes();
                 }
 
                 // Close the global prefix KV store (after all runtimes are stopped)
-                process.stdout.write("Closing storage...");
+                logger.info("Closing storage...");
                 await prefixKVStore.forceClose();
-                console.log(" done");
 
                 if (this.shutdownHandlers.length > 0) {
-                    process.stdout.write("Running shutdown handlers...");
+                    logger.info("Running shutdown handlers...");
                     for (const handler of this.shutdownHandlers) {
                         await handler();
                     }
-                    console.log(" done");
                 }
 
                 if (this.lockfile) {
                     await this.lockfile.release();
                 }
 
-                process.stdout.write("Flushing telemetry...");
+                logger.info("Flushing telemetry...");
                 const conversationSpanManager = getConversationSpanManager();
                 conversationSpanManager.shutdown();
                 await shutdownTelemetry();
-                console.log(" done");
 
                 if (isGracefulRestart) {
-                    console.log("[Daemon] Graceful restart complete - exiting with code 0");
+                    logger.info("[Daemon] Graceful restart complete - exiting with code 0");
                 } else {
-                    console.log("Shutdown complete.");
+                    logger.info("Shutdown complete.");
                 }
                 process.exit(exitCode);
             } catch (error) {

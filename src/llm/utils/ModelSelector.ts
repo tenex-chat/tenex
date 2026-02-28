@@ -1,7 +1,9 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
+import { amber, inquirerTheme } from "@/utils/cli-theme";
 import { fetchOllamaModels, getPopularOllamaModels } from "../providers/ollama-models";
 import { fetchOpenRouterModels, getPopularModels } from "../providers/openrouter-models";
+import { ensureCacheLoaded, getProviderModels } from "./models-dev-cache";
 
 /**
  * Utility class for interactive model selection
@@ -9,7 +11,7 @@ import { fetchOpenRouterModels, getPopularModels } from "../providers/openrouter
  */
 export class ModelSelector {
     /**
-     * Select an Ollama model interactively
+     * Select an Ollama model interactively with fuzzy search
      */
     static async selectOllamaModel(currentModel?: string): Promise<string> {
         console.log(chalk.gray("Fetching available Ollama models..."));
@@ -19,23 +21,38 @@ export class ModelSelector {
         if (ollamaModels.length > 0) {
             console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
 
-            const choices = [
+            const allChoices = [
                 ...ollamaModels.map((m) => ({
                     name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
                     value: m.name,
+                    short: m.name,
                 })),
-                new inquirer.Separator(),
-                { name: chalk.cyan("→ Type model name manually"), value: "__manual__" },
+                { name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" },
             ];
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "select",
+                    type: "search",
                     name: "selectedModel",
                     message: "Select model:",
-                    choices,
+                    source: (term: string | undefined) => {
+                        if (!term) return allChoices;
+                        const lower = term.toLowerCase();
+                        const filtered = allChoices.filter(
+                            (c) =>
+                                c.value === "__manual__" ||
+                                c.value.toLowerCase().includes(lower)
+                        );
+                        return filtered;
+                    },
                     default: currentModel,
-                    pageSize: 15,
+                    theme: {
+                        ...inquirerTheme,
+                        style: {
+                            ...inquirerTheme.style,
+                            searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                        },
+                    },
                 },
             ]);
 
@@ -45,32 +62,45 @@ export class ModelSelector {
 
             return selectedModel;
         }
-        console.log(chalk.yellow("⚠️  No Ollama models found. Make sure Ollama is running."));
+        console.log(amber("⚠️  No Ollama models found. Make sure Ollama is running."));
         console.log(chalk.gray("Showing popular models (you'll need to pull them first)."));
 
         const popular = getPopularOllamaModels();
-        const choices = [];
+        const popularChoices: Array<{ name: string; value: string; short: string }> = [];
         for (const [category, models] of Object.entries(popular)) {
-            choices.push(new inquirer.Separator(`--- ${category} ---`));
-            choices.push(
-                ...models.map((m) => ({
-                    name: m,
+            for (const m of models) {
+                popularChoices.push({
+                    name: `${m} ${chalk.gray(`(${category})`)}`,
                     value: m,
-                }))
-            );
+                    short: m,
+                });
+            }
         }
-
-        choices.push(new inquirer.Separator());
-        choices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__" });
+        popularChoices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" });
 
         const { selectedModel } = await inquirer.prompt([
             {
-                type: "select",
+                type: "search",
                 name: "selectedModel",
                 message: "Select model:",
+                source: (term: string | undefined) => {
+                    if (!term) return popularChoices;
+                    const lower = term.toLowerCase();
+                    return popularChoices.filter(
+                        (c) =>
+                            c.value === "__manual__" ||
+                            c.value.toLowerCase().includes(lower) ||
+                            c.name.toLowerCase().includes(lower)
+                    );
+                },
                 default: currentModel,
-                choices,
-                pageSize: 15,
+                theme: {
+                    ...inquirerTheme,
+                    style: {
+                        ...inquirerTheme.style,
+                        searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                    },
+                },
             },
         ]);
 
@@ -82,7 +112,7 @@ export class ModelSelector {
     }
 
     /**
-     * Select an OpenRouter model interactively
+     * Select an OpenRouter model interactively with fuzzy search
      */
     static async selectOpenRouterModel(currentModel?: string): Promise<string> {
         console.log(chalk.gray("Fetching available OpenRouter models..."));
@@ -92,51 +122,42 @@ export class ModelSelector {
         if (openRouterModels.length > 0) {
             console.log(chalk.green(`✓ Found ${openRouterModels.length} available models`));
 
-            // Group models by provider
-            const modelsByProvider: Record<string, typeof openRouterModels> = {};
-            for (const model of openRouterModels) {
-                const provider = model.id.split("/")[0] || "other";
-                if (!modelsByProvider[provider]) {
-                    modelsByProvider[provider] = [];
-                }
-                modelsByProvider[provider].push(model);
-            }
+            const allChoices = openRouterModels.map((model) => {
+                const pricing = `$${model.pricing.prompt}/$${model.pricing.completion}/1M`;
+                const context = `${Math.round(model.context_length / 1000)}k`;
+                const freeTag = model.id.endsWith(":free") ? chalk.green(" [FREE]") : "";
 
-            // Build choices
-            const choices = [];
-            const sortedProviders = Object.keys(modelsByProvider).sort();
+                return {
+                    name: `${model.id}${freeTag} ${chalk.gray(`- ${context} ctx, ${pricing}`)}`,
+                    value: model.id,
+                    short: model.id,
+                };
+            });
 
-            for (const provider of sortedProviders) {
-                choices.push(
-                    new inquirer.Separator(chalk.yellow(`--- ${provider.toUpperCase()} ---`))
-                );
-                const providerModels = modelsByProvider[provider];
-
-                for (const model of providerModels) {
-                    const pricing = `$${model.pricing.prompt}/$${model.pricing.completion}/1M`;
-                    const context = `${Math.round(model.context_length / 1000)}k`;
-                    const freeTag = model.id.endsWith(":free") ? chalk.green(" [FREE]") : "";
-
-                    choices.push({
-                        name: `${model.id}${freeTag} ${chalk.gray(`- ${context} context, ${pricing}`)}`,
-                        value: model.id,
-                        short: model.id,
-                    });
-                }
-            }
-
-            choices.push(new inquirer.Separator());
-            choices.push({ name: chalk.cyan("→ Type model ID manually"), value: "__manual__" });
+            allChoices.push({ name: chalk.cyan("→ Type model ID manually"), value: "__manual__", short: "manual" });
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "select",
+                    type: "search",
                     name: "selectedModel",
                     message: "Select model:",
-                    choices,
+                    source: (term: string | undefined) => {
+                        if (!term) return allChoices;
+                        const lower = term.toLowerCase();
+                        return allChoices.filter(
+                            (c) =>
+                                c.value === "__manual__" ||
+                                c.value.toLowerCase().includes(lower)
+                        );
+                    },
                     default: currentModel,
-                    pageSize: 20,
-                    loop: false,
+                    theme: {
+                        ...inquirerTheme,
+                        style: {
+                            ...inquirerTheme.style,
+                            searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                        },
+                    },
                 },
             ]);
 
@@ -146,7 +167,7 @@ export class ModelSelector {
 
             return selectedModel;
         }
-        console.log(chalk.yellow("⚠️  Failed to fetch models from OpenRouter API"));
+        console.log(amber("⚠️  Failed to fetch models from OpenRouter API"));
         console.log(
             chalk.gray("You can still enter a model ID manually or select from popular models.")
         );
@@ -160,35 +181,121 @@ export class ModelSelector {
                     { name: "Quick select from popular models", value: "quick" },
                     { name: "Type model ID manually", value: "manual" },
                 ],
+                theme: inquirerTheme,
             },
         ]);
 
         if (selectionMethod === "quick") {
             const popular = getPopularModels();
-            const choices = [];
+            const popularChoices: Array<{ name: string; value: string; short: string }> = [];
             for (const [category, models] of Object.entries(popular)) {
-                choices.push(new inquirer.Separator(`--- ${category} ---`));
-                choices.push(
-                    ...models.map((m) => ({
-                        name: m,
+                for (const m of models) {
+                    popularChoices.push({
+                        name: `${m} ${chalk.gray(`(${category})`)}`,
                         value: m,
-                    }))
-                );
+                        short: m,
+                    });
+                }
             }
 
             const { selectedModel } = await inquirer.prompt([
                 {
-                    type: "select",
+                    type: "search",
                     name: "selectedModel",
                     message: "Select model:",
-                    default: currentModel,
-                    choices,
-                    pageSize: 15,
+                    source: (term: string | undefined) => {
+                        if (!term) return popularChoices;
+                        const lower = term.toLowerCase();
+                        return popularChoices.filter(
+                            (c) =>
+                                c.value.toLowerCase().includes(lower) ||
+                                c.name.toLowerCase().includes(lower)
+                        );
+                    },
+                    theme: {
+                        ...inquirerTheme,
+                        style: {
+                            ...inquirerTheme.style,
+                            searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                        },
+                    },
                 },
             ]);
             return selectedModel;
         }
         return await ModelSelector.promptManualModel(currentModel || "openai/gpt-4");
+    }
+
+    /**
+     * Select a model from models.dev data (for Anthropic, OpenAI, etc.)
+     * Returns { id, name } so callers can use the human name for config naming.
+     */
+    static async selectModelsDevModel(
+        provider: string,
+        defaultModel?: string
+    ): Promise<{ id: string; name: string }> {
+        await ensureCacheLoaded();
+        const models = getProviderModels(provider);
+
+        if (models.length > 0) {
+            const allChoices = [
+                ...models.map((m) => {
+                    const ctx = m.limit?.context
+                        ? `${Math.round(m.limit.context / 1000)}k ctx`
+                        : "";
+                    const pricing = m.cost
+                        ? `$${m.cost.input}/$${m.cost.output}/M`
+                        : "";
+                    const meta = [ctx, pricing].filter(Boolean).join(", ");
+
+                    return {
+                        name: `${m.name} ${chalk.gray(`(${m.id})`)} ${chalk.gray(meta ? `- ${meta}` : "")}`,
+                        value: m.id,
+                        short: m.id,
+                        humanName: m.name,
+                    };
+                }),
+                { name: chalk.cyan("→ Type model ID manually"), value: "__manual__", short: "manual", humanName: "" },
+            ];
+
+            const { selectedModel } = await inquirer.prompt([
+                {
+                    type: "search",
+                    name: "selectedModel",
+                    message: "Select model:",
+                    source: (term: string | undefined) => {
+                        if (!term) return allChoices;
+                        const lower = term.toLowerCase();
+                        return allChoices.filter(
+                            (c) =>
+                                c.value === "__manual__" ||
+                                c.value.toLowerCase().includes(lower) ||
+                                c.humanName.toLowerCase().includes(lower)
+                        );
+                    },
+                    default: defaultModel,
+                    theme: {
+                        ...inquirerTheme,
+                        style: {
+                            ...inquirerTheme.style,
+                            searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                        },
+                    },
+                },
+            ]);
+
+            if (selectedModel === "__manual__") {
+                const id = await ModelSelector.promptManualModel(defaultModel || "");
+                return { id, name: id };
+            }
+
+            const selected = allChoices.find((c) => c.value === selectedModel);
+            return { id: selectedModel, name: selected?.humanName || selectedModel };
+        }
+
+        // No models.dev data available — fall back to manual
+        const id = await ModelSelector.promptManualModel(defaultModel || "");
+        return { id, name: id };
     }
 
     /**
@@ -205,6 +312,7 @@ export class ModelSelector {
                     if (!input.trim()) return "Model name is required";
                     return true;
                 },
+                theme: inquirerTheme,
             },
         ]);
         return inputModel;

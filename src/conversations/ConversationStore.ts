@@ -409,6 +409,16 @@ export class ConversationStore {
         return index;
     }
 
+    relocateToEnd(eventId: string, updates: Partial<ConversationEntry>): boolean {
+        const index = this.state.messages.findIndex(m => m.eventId === eventId);
+        if (index === -1) return false;
+
+        const [entry] = this.state.messages.splice(index, 1);
+        Object.assign(entry, updates);
+        this.state.messages.push(entry);
+        return true;
+    }
+
     getAllMessages(): ConversationEntry[] {
         return this.state.messages;
     }

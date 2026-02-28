@@ -950,6 +950,69 @@ describe("ConversationStore", () => {
         });
     });
 
+    describe("relocateToEnd", () => {
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+        });
+
+        it("should move existing entry to end and apply updates", () => {
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "user message",
+                messageType: "text",
+                eventId: "evt-1",
+            });
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                content: "tool call",
+                messageType: "tool-call",
+                ral: 1,
+            });
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                content: "tool result",
+                messageType: "tool-result",
+                ral: 1,
+            });
+
+            const result = store.relocateToEnd("evt-1", {
+                ral: 1,
+                senderPubkey: USER_PUBKEY,
+                targetedPubkeys: [AGENT1_PUBKEY],
+            });
+
+            expect(result).toBe(true);
+
+            const messages = store.getAllMessages();
+            expect(messages).toHaveLength(3);
+
+            // The user message should now be last
+            const last = messages[2];
+            expect(last.content).toBe("user message");
+            expect(last.eventId).toBe("evt-1");
+            expect(last.ral).toBe(1);
+            expect(last.senderPubkey).toBe(USER_PUBKEY);
+            expect(last.targetedPubkeys).toEqual([AGENT1_PUBKEY]);
+
+            // Tool messages should be first two
+            expect(messages[0].messageType).toBe("tool-call");
+            expect(messages[1].messageType).toBe("tool-result");
+        });
+
+        it("should return false when eventId is not found", () => {
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "hello",
+                messageType: "text",
+                eventId: "evt-1",
+            });
+
+            const result = store.relocateToEnd("nonexistent", { ral: 1 });
+            expect(result).toBe(false);
+            expect(store.getAllMessages()).toHaveLength(1);
+        });
+    });
+
     describe("Persistence", () => {
         it("should persist activeRal state", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);

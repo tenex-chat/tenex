@@ -25,16 +25,31 @@ export interface ModelLimits {
 }
 
 /**
+ * Full model info from models.dev
+ */
+export interface ModelsDevModel {
+    id: string;
+    name: string;
+    cost?: { input: number; output: number };
+    limit?: { context?: number; output?: number };
+    last_updated?: string;
+}
+
+/**
  * models.dev API response structure
  */
 interface ModelsDevResponse {
     [provider: string]: {
         models: {
             [modelId: string]: {
+                id?: string;
+                name?: string;
+                cost?: { input: number; output: number };
                 limit?: {
                     context?: number;
                     output?: number;
                 };
+                last_updated?: string;
             };
         };
     };
@@ -213,6 +228,50 @@ export async function refreshCache(): Promise<void> {
 }
 
 /**
+ * Resolve the raw model data entry from the cache.
+ *
+ * Lookup order:
+ * 1. Direct: cache[mappedProvider].models[model]
+ * 2. Vendor split: for "vendor/bare" IDs, try cache[vendor].models[bare]
+ * 3. Global scan: search all providers for a matching model ID
+ *
+ * Steps 2–3 handle proxied providers (OpenRouter, Codex App Server) whose
+ * model IDs originate from upstream providers (OpenAI, Anthropic, etc.).
+ */
+function resolveModelData(provider: string, model: string): { modelId: string; data: ModelsDevResponse[string]["models"][string] } | undefined {
+    if (!cache) return undefined;
+
+    // 1. Direct lookup in the mapped provider section
+    const modelsDevProvider = PROVIDER_MAPPING[provider];
+    if (modelsDevProvider !== null && modelsDevProvider !== undefined) {
+        const providerData = cache[modelsDevProvider];
+        if (providerData?.models?.[model]) {
+            return { modelId: model, data: providerData.models[model] };
+        }
+    }
+
+    // 2. If the model ID contains "vendor/bare", try the vendor's section
+    if (model.includes("/")) {
+        const slashIndex = model.indexOf("/");
+        const vendor = model.slice(0, slashIndex);
+        const bareModel = model.slice(slashIndex + 1);
+        const vendorData = cache[vendor];
+        if (vendorData?.models?.[bareModel]) {
+            return { modelId: bareModel, data: vendorData.models[bareModel] };
+        }
+    }
+
+    // 3. Global scan: search every provider for a matching model ID
+    for (const section of Object.values(cache)) {
+        if (section?.models?.[model]) {
+            return { modelId: model, data: section.models[model] };
+        }
+    }
+
+    return undefined;
+}
+
+/**
  * Get model limits for a specific provider and model
  *
  * @param provider Our provider ID (e.g., "anthropic", "openai", "openrouter")
@@ -220,42 +279,62 @@ export async function refreshCache(): Promise<void> {
  * @returns Model limits or undefined if not found/unsupported
  */
 export function getModelLimits(provider: string, model: string): ModelLimits | undefined {
-    if (!cache) {
-        return undefined;
-    }
+    const resolved = resolveModelData(provider, model);
+    if (!resolved?.data?.limit) return undefined;
 
-    // Map our provider ID to models.dev provider ID
-    const modelsDevProvider = PROVIDER_MAPPING[provider];
-    if (modelsDevProvider === null || modelsDevProvider === undefined) {
-        // Provider not supported by models.dev
-        return undefined;
-    }
-
-    const providerData = cache[modelsDevProvider];
-    if (!providerData?.models) {
-        return undefined;
-    }
-
-    const modelData = providerData.models[model];
-    if (!modelData?.limit) {
-        return undefined;
-    }
-
-    const { context, output } = modelData.limit;
-    if (context === undefined || output === undefined) {
-        return undefined;
-    }
+    const { context, output } = resolved.data.limit;
+    if (context === undefined || output === undefined) return undefined;
 
     return { context, output };
 }
 
 /**
+ * Get full model info from models.dev for a specific provider and model.
+ * Returns cost, limits, name, etc. for use in scoring/display.
+ */
+export function getModelInfo(provider: string, model: string): ModelsDevModel | undefined {
+    const resolved = resolveModelData(provider, model);
+    if (!resolved) return undefined;
+
+    const { modelId, data } = resolved;
+    return {
+        id: data.id ?? modelId,
+        name: data.name ?? modelId,
+        cost: data.cost,
+        limit: data.limit,
+        last_updated: data.last_updated,
+    };
+}
+
+/**
  * Get just the context window for a model
- * Convenience function for backwards compatibility with context-window-cache
  */
 export function getContextWindowFromModelsdev(provider: string, model: string): number | undefined {
     const limits = getModelLimits(provider, model);
     return limits?.context;
+}
+
+/**
+ * Get all models for a provider, sorted by last_updated descending
+ */
+export function getProviderModels(provider: string): ModelsDevModel[] {
+    if (!cache) return [];
+
+    const modelsDevProvider = PROVIDER_MAPPING[provider];
+    if (modelsDevProvider === null || modelsDevProvider === undefined) return [];
+
+    const providerData = cache[modelsDevProvider];
+    if (!providerData?.models) return [];
+
+    return Object.entries(providerData.models)
+        .map(([modelId, data]) => ({
+            id: data.id ?? modelId,
+            name: data.name ?? modelId,
+            cost: data.cost,
+            limit: data.limit,
+            last_updated: data.last_updated,
+        }))
+        .sort((a, b) => (b.last_updated ?? "").localeCompare(a.last_updated ?? ""));
 }
 
 /**

@@ -1,6 +1,8 @@
 import * as fileSystem from "@/lib/fs";
 import { config as configService } from "@/services/ConfigService";
+import { amber, amberBold } from "@/utils/cli-theme";
 import { logger } from "@/utils/logger";
+import chalk from "chalk";
 import { Command } from "commander";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs/promises";
@@ -88,12 +90,12 @@ export const globalSystemPromptCommand = new Command("global-system-prompt")
                 const enabled = existingConfig.globalSystemPrompt?.enabled !== false;
 
                 if (!content || content.trim().length === 0) {
-                    logger.info("No global system prompt configured.");
+                    console.log(chalk.gray("No global system prompt configured."));
                 } else {
-                    logger.info(`Global System Prompt (${enabled ? "enabled" : "disabled"}):`);
-                    logger.info("─".repeat(50));
+                    console.log(amberBold(`Global System Prompt (${enabled ? "enabled" : "disabled"}):`));
+                    console.log(amber("─".repeat(50)));
                     console.log(content);
-                    logger.info("─".repeat(50));
+                    console.log(amber("─".repeat(50)));
                 }
                 return;
             }
@@ -108,7 +110,7 @@ export const globalSystemPromptCommand = new Command("global-system-prompt")
                     },
                 };
                 await configService.saveGlobalConfig(newConfig);
-                logger.info("Global system prompt disabled.");
+                console.log(chalk.green("✓") + chalk.bold(" Global system prompt disabled."));
                 return;
             }
 
@@ -122,7 +124,7 @@ export const globalSystemPromptCommand = new Command("global-system-prompt")
                     },
                 };
                 await configService.saveGlobalConfig(newConfig);
-                logger.info("Global system prompt enabled.");
+                console.log(chalk.green("✓") + chalk.bold(" Global system prompt enabled."));
                 return;
             }
 
@@ -157,10 +159,8 @@ ${CONTENT_DELIMITER}
 
             await fs.writeFile(tempFile, templateContent, "utf-8");
 
-            logger.info(
-                "Opening editor to configure global system prompt...\n" +
-                    `(Using editor: ${getEditor()})\n`
-            );
+            console.log(amberBold("Opening editor to configure global system prompt..."));
+            console.log(chalk.gray(`(Using editor: ${getEditor()})\n`));
 
             // Open editor and wait for it to close - use try/finally for cleanup
             let editedContent: string;
@@ -202,13 +202,11 @@ ${CONTENT_DELIMITER}
             await configService.saveGlobalConfig(newConfig);
 
             if (cleanedContent.length === 0) {
-                logger.info("Global system prompt cleared (no content).");
+                console.log(chalk.green("✓") + chalk.bold(" Global system prompt cleared (no content)."));
             } else {
-                logger.info(
-                    "Global system prompt saved successfully!\n" +
-                        `Content length: ${cleanedContent.length} characters\n\n` +
-                        "This prompt will be added to all agents' system prompts."
-                );
+                console.log(chalk.green("✓") + chalk.bold(" Global system prompt saved successfully!"));
+                console.log(chalk.gray(`Content length: ${cleanedContent.length} characters`));
+                console.log(chalk.gray("\nThis prompt will be added to all agents' system prompts."));
             }
         } catch (error: unknown) {
             // Handle SIGINT (Ctrl+C) gracefully
@@ -217,7 +215,7 @@ ${CONTENT_DELIMITER}
                 return;
             }
 
-            logger.error(`Failed to configure global system prompt: ${error}`);
+            console.log(chalk.red(`❌ Failed to configure global system prompt: ${error}`));
             process.exitCode = 1;
         }
     });

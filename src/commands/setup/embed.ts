@@ -5,7 +5,8 @@ import {
     EmbeddingProviderFactory,
 } from "@/services/rag/EmbeddingProviderFactory";
 import { config as configService } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
+import { inquirerTheme } from "@/utils/cli-theme";
+import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
 
@@ -61,9 +62,7 @@ export const embedCommand = new Command("embed")
             if (scope === "project") {
                 // Check if we're in a TENEX project
                 if (!(await fileSystem.directoryExists(baseDir))) {
-                    logger.error(
-                        "No .tenex directory found. Make sure you're in a TENEX project directory."
-                    );
+                    console.log(chalk.red("❌ No .tenex directory found. Make sure you're in a TENEX project directory."));
                     process.exitCode = 1;
                     return;
                 }
@@ -81,9 +80,7 @@ export const embedCommand = new Command("embed")
             // Load configured providers from providers.json
             const providersConfig = await configService.loadTenexProviders(configService.getGlobalPath());
             if (Object.keys(providersConfig.providers).length === 0) {
-                logger.error(
-                    "No providers configured. Run `tenex setup providers` before configuring embeddings."
-                );
+                console.log(chalk.red("❌ No providers configured. Run `tenex setup providers` before configuring embeddings."));
                 process.exitCode = 1;
                 return;
             }
@@ -112,6 +109,7 @@ export const embedCommand = new Command("embed")
                     message: "Select embedding provider:",
                     choices: providerChoices,
                     default: existing?.provider || "local",
+                    theme: inquirerTheme,
                 },
             ]);
 
@@ -136,6 +134,7 @@ export const embedCommand = new Command("embed")
                         message: `Select ${displayName} embedding model:`,
                         choices: modelChoices,
                         default: existing?.provider === provider ? existing?.model : modelChoices[0]?.value,
+                        theme: inquirerTheme,
                     },
                 ]);
 
@@ -145,6 +144,7 @@ export const embedCommand = new Command("embed")
                             type: "input",
                             name: "customModel",
                             message: "Enter model ID:",
+                            theme: inquirerTheme,
                             validate: (input: string) =>
                                 input.trim().length > 0 || "Model ID cannot be empty",
                         },
@@ -160,6 +160,7 @@ export const embedCommand = new Command("embed")
                         type: "select",
                         name: "model",
                         message: "Select local embedding model:",
+                        theme: inquirerTheme,
                         choices: [
                             {
                                 name: "all-MiniLM-L6-v2 (default, fast, good for general use)",
@@ -189,6 +190,7 @@ export const embedCommand = new Command("embed")
                             name: "customModel",
                             message:
                                 "Enter HuggingFace model ID (e.g., sentence-transformers/all-MiniLM-L6-v2):",
+                            theme: inquirerTheme,
                             validate: (input: string) =>
                                 input.trim().length > 0 || "Model ID cannot be empty",
                         },
@@ -210,11 +212,9 @@ export const embedCommand = new Command("embed")
                 projectPath: scope === "project" ? projectPath : undefined,
             });
 
-            logger.info(
-                `✅ Embedding configuration saved to ${scope} config\n` +
-                    `   Provider: ${provider}\n` +
-                    `   Model: ${model}`
-            );
+            console.log("\n" + chalk.green("✓") + chalk.bold(` Embedding configuration saved to ${scope} config`));
+            console.log(chalk.gray(`   Provider: ${provider}`));
+            console.log(chalk.gray(`   Model: ${model}`));
         } catch (error: unknown) {
             // Handle SIGINT (Ctrl+C) gracefully
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -222,7 +222,7 @@ export const embedCommand = new Command("embed")
                 return;
             }
 
-            logger.error(`Failed to configure embedding model: ${error}`);
+            console.log(chalk.red(`❌ Failed to configure embedding model: ${error}`));
             process.exitCode = 1;
         }
     });

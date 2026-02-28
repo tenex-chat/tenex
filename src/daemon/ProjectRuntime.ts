@@ -301,26 +301,23 @@ export class ProjectRuntime {
 
         // Stop status publisher
         if (this.statusPublisher) {
-            process.stdout.write(chalk.gray("   Stopping status publisher..."));
+            logger.info(`[ProjectRuntime] Stopping status publisher: ${this.projectId}`);
             await this.statusPublisher.stopPublishing();
             this.statusPublisher = null;
-            console.log(chalk.gray(" done"));
         }
 
         // Stop operations status publisher
         if (this.operationsStatusPublisher) {
-            process.stdout.write(chalk.gray("   Stopping operations status..."));
+            logger.info(`[ProjectRuntime] Stopping operations status: ${this.projectId}`);
             this.operationsStatusPublisher.stop();
             this.operationsStatusPublisher = null;
-            console.log(chalk.gray(" done"));
         }
 
         // Cleanup event handler
         if (this.eventHandler) {
-            process.stdout.write(chalk.gray("   Cleaning up event handler..."));
+            logger.info(`[ProjectRuntime] Cleaning up event handler: ${this.projectId}`);
             await this.eventHandler.cleanup();
             this.eventHandler = null;
-            console.log(chalk.gray(" done"));
         }
 
         // Shutdown MCP subscription service
@@ -332,20 +329,17 @@ export class ProjectRuntime {
         }
 
         // Save conversation state
-        process.stdout.write(chalk.gray("   Saving conversations..."));
+        logger.info(`[ProjectRuntime] Saving conversations: ${this.projectId}`);
         await ConversationStore.cleanup();
-        console.log(chalk.gray(" done"));
 
         // Reset local report store
-        process.stdout.write(chalk.gray("   Resetting report store..."));
+        logger.info(`[ProjectRuntime] Resetting report store: ${this.projectId}`);
         this.localReportStore.reset();
-        console.log(chalk.gray(" done"));
 
         // Release our reference to the prefix KV store (but don't close it -
         // it's a daemon-global resource that outlives individual project runtimes)
-        process.stdout.write(chalk.gray("   Releasing storage..."));
+        logger.info(`[ProjectRuntime] Releasing storage: ${this.projectId}`);
         await prefixKVStore.close();
-        console.log(chalk.gray(" done"));
 
         // Clear context
         this.context = null;

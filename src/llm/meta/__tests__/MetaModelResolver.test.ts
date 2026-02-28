@@ -10,24 +10,20 @@ const createTestConfig = (): MetaModelConfiguration => ({
             model: "claude-haiku",
             keywords: ["fast", "quick"],
             description: "Low-budget model for fast responses",
-            tier: 1,
         },
         standard: {
             model: "claude-sonnet",
             keywords: ["think", "ponder"],
             description: "Standard model for most tasks",
-            tier: 2,
         },
         deep: {
             model: "claude-opus",
             keywords: ["ultrathink", "deep"],
             description: "High-cost model for complex reasoning",
             systemPrompt: "Take your time and reason step by step.",
-            tier: 3,
         },
     },
     default: "standard",
-    description: "Meta model with multiple variants",
 });
 
 describe("MetaModelResolver", () => {
@@ -153,11 +149,11 @@ describe("MetaModelResolver", () => {
             expect(fragment).toContain("High-cost model for complex reasoning");
         });
 
-        it("should include config description if present", () => {
+        it("should not include preamble description", () => {
             const config = createTestConfig();
             const fragment = MetaModelResolver.generateSystemPromptFragment(config);
 
-            expect(fragment).toContain("Meta model with multiple variants");
+            expect(fragment).toStartWith("You have access to the following models");
         });
 
         it("should include keywords in variant descriptions", () => {

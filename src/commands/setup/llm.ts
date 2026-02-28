@@ -1,13 +1,19 @@
 import * as fileSystem from "@/lib/fs";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
+import { ensureCacheLoaded } from "@/llm/utils/models-dev-cache";
 import { config } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
+import { amber } from "@/utils/cli-theme";
+import chalk from "chalk";
 import { Command } from "commander";
 
 export const llmCommand = new Command("llm")
     .description("Manage LLM configurations (global only)")
-    .action(async () => {
+    .option("--advanced", "Show advanced options (temperature, max tokens)")
+    .action(async (opts) => {
         try {
+            // Preload models.dev cache in background so model lists are ready
+            ensureCacheLoaded().catch(() => {});
+
             // LLM configuration is global only
             const globalConfigDir = config.getGlobalPath();
 
@@ -16,14 +22,13 @@ export const llmCommand = new Command("llm")
 
             const providersConfig = await config.loadTenexProviders(globalConfigDir);
             if (Object.keys(providersConfig.providers).length === 0) {
-                logger.error(
-                    "No providers configured. Run `tenex setup providers` before configuring LLMs."
-                );
+                console.log(chalk.red("❌ No providers configured."));
+                console.log(amber("→") + chalk.bold(" Run tenex setup providers first"));
                 process.exitCode = 1;
                 return;
             }
 
-            const llmManager = new LLMConfigEditor();
+            const llmManager = new LLMConfigEditor({ advanced: opts.advanced });
             await llmManager.showMainMenu();
         } catch (error: unknown) {
             // Handle SIGINT (Ctrl+C) gracefully - just exit without error
@@ -32,7 +37,7 @@ export const llmCommand = new Command("llm")
                 return;
             }
             // Only show error for actual problems
-            logger.error(`Failed to start LLM configuration: ${error}`);
+            console.log(chalk.red(`❌ Failed to start LLM configuration: ${error}`));
             process.exitCode = 1;
         }
     });

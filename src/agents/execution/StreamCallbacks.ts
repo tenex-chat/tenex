@@ -147,15 +147,25 @@ export function createPrepareStep(
                                 content: injection.content,
                             });
                         } else {
-                            conversationStore.addMessage({
-                                pubkey: context.triggeringEvent.pubkey,
-                                ral: ralNumber,
-                                content: injection.content,
-                                messageType: "text",
-                                targetedPubkeys: [context.agent.pubkey],
-                                senderPubkey: injection.senderPubkey,
-                                eventId: injection.eventId,
-                            });
+                            const relocated = injection.eventId
+                                ? conversationStore.relocateToEnd(injection.eventId, {
+                                      ral: ralNumber,
+                                      senderPubkey: injection.senderPubkey,
+                                      targetedPubkeys: [context.agent.pubkey],
+                                  })
+                                : false;
+
+                            if (!relocated) {
+                                conversationStore.addMessage({
+                                    pubkey: context.triggeringEvent.pubkey,
+                                    ral: ralNumber,
+                                    content: injection.content,
+                                    messageType: "text",
+                                    targetedPubkeys: [context.agent.pubkey],
+                                    senderPubkey: injection.senderPubkey,
+                                    eventId: injection.eventId,
+                                });
+                            }
                         }
                     }
 

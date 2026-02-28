@@ -1,7 +1,7 @@
 import * as fileSystem from "@/lib/fs";
 import { runProviderSetup } from "@/llm/utils/provider-setup";
 import { config } from "@/services/ConfigService";
-import { logger } from "@/utils/logger";
+import chalk from "chalk";
 import { Command } from "commander";
 
 export const providersCommand = new Command("providers")
@@ -15,13 +15,13 @@ export const providersCommand = new Command("providers")
             const updatedProviders = await runProviderSetup(existingProviders);
 
             await config.saveGlobalProviders(updatedProviders);
-            logger.info(`✅ Provider credentials saved to ${globalPath}/providers.json`);
+            console.log(chalk.green("✓") + chalk.bold(` Provider credentials saved to ${globalPath}/providers.json`));
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {
                 return;
             }
-            logger.error(`Failed to configure providers: ${error}`);
+            console.log(chalk.red(`❌ Failed to configure providers: ${error}`));
             process.exitCode = 1;
         }
     });

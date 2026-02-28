@@ -17,10 +17,7 @@ const DEFAULT_ENDPOINT = "http://localhost:4318/v1/traces";
 class ErrorHandlingExporterWrapper implements SpanExporter {
     private disabled = false;
 
-    constructor(
-        private traceExporter: OTLPTraceExporter,
-        private exporterUrl: string
-    ) {}
+    constructor(private traceExporter: OTLPTraceExporter) {}
 
     export(spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
         // Once disabled, drop all spans silently
@@ -31,14 +28,6 @@ class ErrorHandlingExporterWrapper implements SpanExporter {
 
         this.traceExporter.export(spans, (result) => {
             if (result.error && !this.disabled) {
-                const errorMessage = result.error?.message || String(result.error);
-                const isConnectionError = errorMessage.includes("ECONNREFUSED") || errorMessage.includes("connect");
-                if (isConnectionError) {
-                    console.warn(`[Telemetry] ⚠️  Collector not available at ${this.exporterUrl}`);
-                } else {
-                    console.error("[Telemetry] Export error:", errorMessage);
-                }
-                console.warn("[Telemetry] Disabling trace export");
                 this.disabled = true;
             }
             resultCallback(result);
@@ -106,7 +95,7 @@ export function initializeTelemetry(
     });
 
     // Wrap the exporter with error handling
-    const wrappedExporter = new ErrorHandlingExporterWrapper(traceExporter, exporterUrl);
+    const wrappedExporter = new ErrorHandlingExporterWrapper(traceExporter);
 
     sdk = createSDK(serviceName, wrappedExporter);
     sdk.start();
