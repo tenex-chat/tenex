@@ -8,7 +8,7 @@ import { getAgentHomeDirectory } from "@/lib/agent-home";
 import { config as configService } from "@/services/ConfigService";
 import type { LLMConfiguration } from "@/services/config/types";
 import { detectOpenClawStateDir, readOpenClawAgents, convertModelFormat } from "./openclaw-reader";
-import { distillAgentIdentity } from "./openclaw-distiller";
+import { distillAgentIdentity, distillUserContext } from "./openclaw-distiller";
 import type { OpenClawAgent } from "./openclaw-reader";
 
 function toSlug(name: string): string {
@@ -73,11 +73,17 @@ Source: ${workspacePath}
     return homeDir;
 }
 
-async function appendUserMdToGlobalPrompt(userMdContent: string): Promise<void> {
+async function appendUserMdToGlobalPrompt(
+    rawUserMd: string,
+    llmConfigs: LLMConfiguration[],
+): Promise<void> {
+    const distilled = await distillUserContext(rawUserMd, llmConfigs);
+    if (!distilled) return;
+
     const globalPath = configService.getGlobalPath();
     const existingConfig = await configService.loadTenexConfig(globalPath);
 
-    const userSection = `\n## About the User (imported from OpenClaw)\n\n${userMdContent.trim()}`;
+    const userSection = `\n## About the User (imported from OpenClaw)\n\n${distilled}`;
     const existingContent = existingConfig.globalSystemPrompt?.content ?? "";
     const newContent = existingContent ? `${existingContent}${userSection}` : userSection.trim();
 
@@ -220,8 +226,9 @@ export const openclawImportCommand = new Command("openclaw")
                 await importOneAgent(agent, llmConfigs, { noSync: options.noSync });
 
                 if (!userMdProcessed && agent.workspaceFiles.user) {
-                    await appendUserMdToGlobalPrompt(agent.workspaceFiles.user);
-                    console.log(chalk.green("  ✓ USER.md appended to global system prompt"));
+                    console.log(chalk.blue(`\nDistilling user context from USER.md...`));
+                    await appendUserMdToGlobalPrompt(agent.workspaceFiles.user, llmConfigs);
+                    console.log(chalk.green("  ✓ USER.md distilled and appended to global system prompt"));
                     userMdProcessed = true;
                 }
             }

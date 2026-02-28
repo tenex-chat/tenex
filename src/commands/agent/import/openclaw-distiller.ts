@@ -42,32 +42,72 @@ Given these workspace files, return a JSON object with exactly these fields:
 ${sections.join("\n\n")}`;
 }
 
-export async function distillAgentIdentity(
-    files: OpenClawWorkspaceFiles,
-    llmConfigs: LLMConfiguration[]
-): Promise<DistilledAgentIdentity> {
+async function distillWithRetry<T>(
+    llmConfigs: LLMConfiguration[],
+    run: (service: ReturnType<typeof llmServiceFactory.createService>) => Promise<T>,
+): Promise<T> {
     if (llmConfigs.length === 0) {
         throw new Error("No LLM configurations available for distillation");
     }
-
-    const prompt = buildDistillationPrompt(files);
-    const messages = [{ role: "user" as const, content: prompt }];
 
     let lastError: unknown;
     for (const config of llmConfigs) {
         try {
             const service = llmServiceFactory.createService(config);
-            const { object } = await service.generateObject(messages, DistilledIdentitySchema);
-            return object;
+            return await run(service);
         } catch (error) {
             lastError = error;
             if (llmConfigs.length > 1) {
                 logger.warn(
-                    `[distiller] generateObject failed with ${config.provider}:${config.model}, trying next model...`
+                    `[distiller] call failed with ${config.provider}:${config.model}, trying next model...`
                 );
             }
         }
     }
 
     throw lastError;
+}
+
+export async function distillAgentIdentity(
+    files: OpenClawWorkspaceFiles,
+    llmConfigs: LLMConfiguration[]
+): Promise<DistilledAgentIdentity> {
+    const prompt = buildDistillationPrompt(files);
+    const messages = [{ role: "user" as const, content: prompt }];
+
+    return distillWithRetry(llmConfigs, async (service) => {
+        const { object } = await service.generateObject(messages, DistilledIdentitySchema);
+        return object;
+    });
+}
+
+export function buildUserContextPrompt(rawUserMd: string): string {
+    return `You are cleaning up a user profile document for use as context in an AI assistant's system prompt.
+
+Given the raw USER.md content below, produce a clean, concise summary of everything that would be useful for an AI assistant to know about this user. Write it as a brief markdown section.
+
+Keep anything that helps the assistant interact better: name, preferences, timezone, communication style, interests, projects, technical background, etc.
+
+Drop anything that is noise: unknown/empty fields, platform-specific metadata (IDs, timestamps of first conversations), internal bookkeeping, and formatting artifacts.
+
+If the document contains almost nothing useful, return an empty string.
+
+<USER.md>
+${rawUserMd}
+</USER.md>`;
+}
+
+export async function distillUserContext(
+    rawUserMd: string,
+    llmConfigs: LLMConfiguration[],
+): Promise<string> {
+    const prompt = buildUserContextPrompt(rawUserMd);
+    const messages = [{ role: "user" as const, content: prompt }];
+
+    const result = await distillWithRetry(llmConfigs, async (service) => {
+        const { text } = await service.generateText(messages);
+        return text;
+    });
+
+    return result.trim();
 }

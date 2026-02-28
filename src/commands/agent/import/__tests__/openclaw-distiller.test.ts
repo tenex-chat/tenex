@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildDistillationPrompt } from "../openclaw-distiller";
+import { buildDistillationPrompt, buildUserContextPrompt } from "../openclaw-distiller";
 
 describe("buildDistillationPrompt", () => {
     it("includes all provided files in prompt", () => {
@@ -24,5 +24,21 @@ describe("buildDistillationPrompt", () => {
         expect(prompt).toContain("Soul content");
         expect(prompt).not.toContain("IDENTITY.md");
         expect(prompt).not.toContain("AGENTS.md");
+    });
+});
+
+describe("buildUserContextPrompt", () => {
+    it("includes the raw user content in the prompt", () => {
+        const raw = "- **Name:** Pablo\n- **Timezone:** GMT+2";
+        const prompt = buildUserContextPrompt(raw);
+        expect(prompt).toContain("Pablo");
+        expect(prompt).toContain("GMT+2");
+        expect(prompt).toContain("<USER.md>");
+    });
+
+    it("instructs the model to drop noise and keep useful info", () => {
+        const prompt = buildUserContextPrompt("anything");
+        expect(prompt).toContain("Drop anything that is noise");
+        expect(prompt).toContain("useful for an AI assistant");
     });
 });
