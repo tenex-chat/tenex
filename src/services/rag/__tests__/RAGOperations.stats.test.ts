@@ -48,7 +48,7 @@ const createMockEmbeddingProvider = () => ({
 
 // Import after mocks
 import { RAGOperations } from "../RAGOperations";
-import { escapeSqlLikeValue } from "@/services/search/sqlEscaping";
+import { escapeSqlLikeValue } from "@/utils/sqlEscaping";
 
 describe("RAGOperations", () => {
     describe("getCollectionStats", () => {

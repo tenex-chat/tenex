@@ -10,8 +10,8 @@
  * "project_id" (legacy, used by older rag_add_documents ingestion).
  */
 
-import { PROJECT_ID_KEYS } from "./metadataKeys";
-import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "./sqlEscaping";
+import { PROJECT_ID_KEYS } from "@/utils/metadataKeys";
+import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "@/utils/sqlEscaping";
 
 /**
  * Build a SQL prefilter string for project isolation in LanceDB queries.

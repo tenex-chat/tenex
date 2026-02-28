@@ -1,7 +1,7 @@
 import type { DocumentMetadata, LanceDBResult, LanceDBStoredDocument } from "@/services/rag/rag-utils";
 import { calculateRelevanceScore, mapLanceResultToDocument } from "@/services/rag/rag-utils";
-import { AGENT_PUBKEY_KEYS } from "@/services/search/metadataKeys";
-import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "@/services/search/sqlEscaping";
+import { AGENT_PUBKEY_KEYS } from "@/utils/metadataKeys";
+import { SQL_LIKE_ESCAPE_CLAUSE, escapeSqlLikeValue } from "@/utils/sqlEscaping";
 import { handleError } from "@/utils/error-handler";
 import { logger } from "@/utils/logger";
 import type { Table, VectorQuery } from "@lancedb/lancedb";
