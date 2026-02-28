@@ -3,13 +3,31 @@ import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
-import NDK, { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { Command } from "commander";
 import inquirer from "inquirer";
+import { nip19 } from "nostr-tools";
+
+function decodeToPubkey(identifier: string): string {
+    // If it's already a 64-char hex pubkey, return as-is
+    if (/^[a-f0-9]{64}$/i.test(identifier)) {
+        return identifier;
+    }
+    const decoded = nip19.decode(identifier);
+    switch (decoded.type) {
+        case "npub":
+            return decoded.data;
+        case "nprofile":
+            return decoded.data.pubkey;
+        default:
+            throw new Error(`Unsupported identifier type: ${decoded.type}`);
+    }
+}
 
 export const onboardingCommand = new Command("init")
     .description("Initial setup wizard for TENEX")
-    .action(async () => {
+    .option("--pubkey <pubkeys...>", "Pubkeys to whitelist (npub, nprofile, or hex)")
+    .action(async (options: { pubkey?: string[] }) => {
         try {
             console.log("\nWelcome to TENEX! Let's get you set up.\n");
 
@@ -21,15 +39,16 @@ export const onboardingCommand = new Command("init")
             // Step 1: Manage whitelisted pubkeys
             let whitelistedPubkeys = [...(existingConfig.whitelistedPubkeys || [])];
 
-            // Create temporary NDK instance for fetching users
-            const tempNdk = new NDK({
-                explicitRelayUrls: [
-                    "wss://relay.damus.io",
-                    "wss://nos.lol",
-                    "wss://relay.nostr.band",
-                ],
-            });
-            await tempNdk.connect();
+            // Add pubkeys from CLI flags
+            if (options.pubkey) {
+                for (const pk of options.pubkey) {
+                    const pubkey = decodeToPubkey(pk.trim());
+                    if (!whitelistedPubkeys.includes(pubkey)) {
+                        whitelistedPubkeys.push(pubkey);
+                        console.log(`✓ Added pubkey: ${pubkey}`);
+                    }
+                }
+            }
 
             let managingPubkeys = true;
             while (managingPubkeys) {
@@ -39,7 +58,7 @@ export const onboardingCommand = new Command("init")
                         {
                             type: "input",
                             name: "userIdentifier",
-                            message: "Enter npub, nprofile, or NIP-05 identifier to whitelist:",
+                            message: "Enter npub, nprofile, or hex pubkey to whitelist:",
                             validate: (input: string) => {
                                 if (!input || input.trim().length === 0) {
                                     return "Please enter a valid identifier";
@@ -50,16 +69,12 @@ export const onboardingCommand = new Command("init")
                     ]);
 
                     try {
-                        const user = await tempNdk.getUser({ npub: userIdentifier.trim() });
-                        if (!user?.pubkey) {
-                            console.log("❌ Failed to fetch user. Please try again.\n");
-                        } else {
-                            whitelistedPubkeys.push(user.pubkey);
-                            console.log(`✓ Added pubkey: ${user.pubkey}\n`);
-                        }
+                        const pubkey = decodeToPubkey(userIdentifier.trim());
+                        whitelistedPubkeys.push(pubkey);
+                        console.log(`✓ Added pubkey: ${pubkey}\n`);
                     } catch {
                         console.log(
-                            "❌ Failed to fetch user. Please verify the identifier is correct.\n"
+                            "❌ Invalid identifier. Please enter a valid npub or nprofile.\n"
                         );
                     }
                 } else {
@@ -89,7 +104,7 @@ export const onboardingCommand = new Command("init")
                             {
                                 type: "input",
                                 name: "userIdentifier",
-                                message: "Enter npub, nprofile, or NIP-05 identifier:",
+                                message: "Enter npub, nprofile, or hex pubkey:",
                                 validate: (input: string) => {
                                     if (!input || input.trim().length === 0) {
                                         return "Please enter a valid identifier";
@@ -100,18 +115,16 @@ export const onboardingCommand = new Command("init")
                         ]);
 
                         try {
-                            const user = await tempNdk.getUser({ npub: userIdentifier.trim() });
-                            if (!user?.pubkey) {
-                                console.log("❌ Failed to fetch user. Please try again.\n");
-                            } else if (whitelistedPubkeys.includes(user.pubkey)) {
+                            const pubkey = decodeToPubkey(userIdentifier.trim());
+                            if (whitelistedPubkeys.includes(pubkey)) {
                                 console.log("⚠️  Pubkey already in whitelist\n");
                             } else {
-                                whitelistedPubkeys.push(user.pubkey);
-                                console.log(`✓ Added pubkey: ${user.pubkey}\n`);
+                                whitelistedPubkeys.push(pubkey);
+                                console.log(`✓ Added pubkey: ${pubkey}\n`);
                             }
                         } catch {
                             console.log(
-                                "❌ Failed to fetch user. Please verify the identifier is correct.\n"
+                                "❌ Invalid identifier. Please enter a valid npub or nprofile.\n"
                             );
                         }
                     } else if (action.startsWith("remove:")) {
@@ -121,13 +134,6 @@ export const onboardingCommand = new Command("init")
                         );
                         console.log("✓ Removed pubkey\n");
                     }
-                }
-            }
-
-            // Disconnect temporary NDK
-            if (tempNdk.pool?.relays) {
-                for (const relay of tempNdk.pool.relays.values()) {
-                    relay.disconnect();
                 }
             }
 
