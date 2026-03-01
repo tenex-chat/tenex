@@ -106,9 +106,8 @@ interface AgentsMdContext {
  * Rules:
  * - Explicit role override: If entry.role is set (for synthetic entries like compressed summaries), use it
  * - assistant: Only for the viewing agent's own messages
- * - user: All other messages (regardless of targeting)
+ * - user: All other messages (regardless of targeting), including compressed summaries
  * - tool: Tool results (fixed)
- * - system: Synthetic system messages (compressed summaries, etc.)
  *
  * Note: Attribution context is not added to LLM input. Role simply distinguishes
  * between the agent's own messages and messages from others.

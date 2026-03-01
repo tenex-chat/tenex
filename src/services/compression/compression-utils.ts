@@ -314,9 +314,11 @@ export function applySegments(
       currentIndex++;
     }
 
-    // Add compressed summary as system message
+    // Add compressed summary as user message
+    // NOTE: Cannot use "system" role here because Anthropic requires all system
+    // messages at the top of the prompt, not interleaved with user/assistant turns.
     result.push({
-      role: "system",
+      role: "user",
       content: `[Compressed history]\n${segment.compressed}`,
       eventId: `compressed-${segment.fromEventId}-${segment.toEventId}`,
     });
@@ -359,10 +361,12 @@ export function truncateSlidingWindow(
 
   const kept = messages.slice(-windowSize);
 
-  // Add a system message at the start indicating truncation
+  // Add a user message at the start indicating truncation
+  // NOTE: Cannot use "system" role because Anthropic requires all system
+  // messages at the top of the prompt, not interleaved with user/assistant turns.
   return [
     {
-      role: "system",
+      role: "user",
       content: `[Earlier messages truncated. Showing last ${windowSize} messages.]`,
       eventId: `truncated-${currentTimestamp}`,
     },
@@ -407,15 +411,16 @@ export function applySegmentsToEntries(
       currentIndex++;
     }
 
-    // Add compressed summary as system entry with explicit role
-    // CRITICAL: role field prevents deriveRole from misclassifying as "user"
+    // Add compressed summary as user entry with explicit role
+    // NOTE: Cannot use "system" role here because Anthropic requires all system
+    // messages at the top of the prompt, not interleaved with user/assistant turns.
     result.push({
       pubkey: "system",
       content: `[Compressed history]\n${segment.compressed}`,
       messageType: "text",
       eventId: `compressed-${segment.fromEventId}-${segment.toEventId}`,
       timestamp: segment.createdAt / 1000,
-      role: "system",
+      role: "user",
     });
 
     // Skip the compressed range
@@ -521,11 +526,14 @@ export function truncateSlidingWindowEntries(
   const kept = entries.slice(-windowSize);
 
   // Add a synthetic entry indicating truncation
+  // NOTE: Explicit role: "user" because Anthropic requires all system
+  // messages at the top of the prompt, not interleaved with user/assistant turns.
   const truncationEntry: ConversationEntry = {
     pubkey: "system",
     content: `[Earlier messages truncated. Showing last ${windowSize} messages.]`,
     messageType: "text",
     timestamp: currentTimestamp / 1000,
+    role: "user",
   };
 
   return [truncationEntry, ...kept];

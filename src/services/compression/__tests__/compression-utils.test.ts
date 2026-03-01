@@ -310,7 +310,7 @@ describe("applySegments", () => {
     expect(result.length).toBe(7); // 0,1, compressed, 6,7,8,9
     expect(result[0].content).toBe("Message 0");
     expect(result[1].content).toBe("Message 1");
-    expect(result[2].role).toBe("system");
+    expect(result[2].role).toBe("user");
     expect(result[2].content).toContain("Compressed summary");
     expect(result[3].content).toBe("Message 6");
   });
@@ -337,7 +337,7 @@ describe("applySegments", () => {
 
     // Should have: 0,1, compressed1, 6-9, compressed2, 16-19
     expect(result.length).toBe(12);
-    expect(result[2].role).toBe("system");
+    expect(result[2].role).toBe("user");
     expect(result[2].content).toContain("Summary 1");
   });
 
@@ -407,7 +407,7 @@ describe("truncateSlidingWindow", () => {
     const result = truncateSlidingWindow(messages, 10, 123456);
 
     expect(result.length).toBe(11); // 10 + truncation message
-    expect(result[0].role).toBe("system");
+    expect(result[0].role).toBe("user");
     expect(result[0].content).toContain("last 10 messages");
     expect(result[0].eventId).toBe("truncated-123456");
     expect(result[1].content).toBe("Message 90");
