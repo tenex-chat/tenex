@@ -1158,6 +1158,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     let whitelistedPubkeys: string[];
     let generatedNsec: string | undefined;
     let userPrivateKeyHex: string | undefined;
+    let newIdentityUsername: string | undefined;
 
     if (options.pubkey) {
         whitelistedPubkeys = options.pubkey.map((pk) => decodeToPubkey(pk.trim()));
@@ -1176,6 +1177,20 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         ]);
 
         if (identityChoice === "create") {
+            const { username } = await inquirer.prompt([
+                {
+                    type: "input",
+                    name: "username",
+                    message: "Choose a username",
+                    validate: (input: string) => {
+                        if (!input.trim()) return "Username is required";
+                        if (input.trim().length < 2) return "Username must be at least 2 characters";
+                        return true;
+                    },
+                    theme: inquirerTheme,
+                },
+            ]);
+
             const signer = NDKPrivateKeySigner.generate();
             if (!signer.privateKey) throw new Error("Failed to generate private key");
             const privkey = signer.privateKey;
@@ -1187,11 +1202,13 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
             whitelistedPubkeys = [pubkey];
             generatedNsec = nsec;
             userPrivateKeyHex = privkey;
+            newIdentityUsername = username.trim();
 
             if (!jsonMode) {
                 display.blank();
                 display.success("Identity created");
                 display.blank();
+                display.summaryLine("username", newIdentityUsername!);
                 display.summaryLine("npub", npub);
                 display.summaryLine("nsec", nsec);
                 display.blank();
@@ -1303,6 +1320,27 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     // background while the user configures providers, models, etc. (steps 3-7).
     // By step 8, agents have already accumulated.
     const agentDiscovery = startAgentDiscovery(relays);
+
+    // Publish kind:0 profile for new identity (fire-and-forget)
+    if (newIdentityUsername && userPrivateKeyHex) {
+        const userSigner = new NDKPrivateKeySigner(userPrivateKeyHex);
+        const pubkey = whitelistedPubkeys[0];
+        const avatarFamilies = ["lorelei", "miniavs", "dylan", "pixel-art", "rings", "avataaars"];
+        const familyIndex = Number.parseInt(pubkey.substring(0, 8), 16) % avatarFamilies.length;
+        const avatarStyle = avatarFamilies[familyIndex];
+        const avatarUrl = `https://api.dicebear.com/7.x/${avatarStyle}/png?seed=${pubkey}`;
+
+        const profileEvent = new NDKEvent(agentDiscovery.ndk, {
+            kind: 0,
+            content: JSON.stringify({
+                name: newIdentityUsername,
+                picture: avatarUrl,
+            }),
+        });
+        profileEvent.sign(userSigner).then(() => {
+            profileEvent.publish().catch(() => {});
+        }).catch(() => {});
+    }
 
     // Save configuration
     const newConfig = {
