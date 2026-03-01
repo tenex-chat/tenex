@@ -22,7 +22,7 @@ import type { z } from "zod";
 import { ChunkHandler, type ChunkHandlerState } from "./ChunkHandler";
 import { createFinishHandler, type FinishHandlerConfig, type FinishHandlerState } from "./FinishHandler";
 import { extractLastUserMessage, extractSystemContent, prepareMessagesForRequest } from "./MessageProcessor";
-import { createFlightRecorderMiddleware } from "./middleware/flight-recorder";
+import { createMessageSanitizerMiddleware } from "./middleware/message-sanitizer";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
@@ -199,8 +199,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         // Build middleware chain
         const middlewares: LanguageModelMiddleware[] = [];
 
-        // Flight recorder - records LLM interactions when enabled via 'r' key
-        middlewares.push(createFlightRecorderMiddleware());
+        // Message sanitizer — fix message array issues before every API call
+        // Must be first so it sanitizes before anything else processes messages
+        middlewares.push(createMessageSanitizerMiddleware());
+
 
         // Extract reasoning from thinking tags
         middlewares.push(

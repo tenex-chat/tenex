@@ -55,11 +55,6 @@ mock.module("ai", () => ({
     extractReasoningMiddleware: mock(() => ({})),
 }));
 
-// Mock flight recorder
-mock.module("../middleware/flight-recorder", () => ({
-    createFlightRecorderMiddleware: mock(() => ({})),
-}));
-
 // Mock OpenTelemetry - must be comprehensive to avoid polluting other tests
 const mockSpan = {
     addEvent: mock(() => {}),

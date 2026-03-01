@@ -43,7 +43,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### LLM Layer (`src/llm`)
 - **Services & Factories**: `LLMServiceFactory`, `service.ts`, and `LLMConfigEditor` manage provider initialization, request pipelines, and CLI editing tasks.
-- **Selection & Middleware**: `utils/ModelSelector`, `middleware/flight-recorder`, and `chunk-validators` coordinate model choice and response validation.
+- **Selection & Middleware**: `utils/ModelSelector` and `chunk-validators` coordinate model choice and response validation.
 - **Providers**: `providers/base`, `providers/standard`, `providers/agent`, and `providers/registry` house adapters for Claude, OpenRouter, Ollama, Codex CLI, Gemini CLI, and mock providers. Agent providers (Claude Code, Codex App Server) use specialized adapters:
   - **`ClaudeCodeToolsAdapter.ts`**: Converts TENEX tools to SDK MCP format for Claude Code (in-process, via `createSdkMcpServer`).
   - **`CodexAppServerToolsAdapter.ts`**: Converts TENEX tools to SDK MCP format for Codex App Server (in-process, via `createSdkMcpServer`).

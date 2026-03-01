@@ -22,7 +22,6 @@ llm/
 │   └── registry/          # Provider registration
 │
 ├── middleware/
-│   ├── flight-recorder.ts # Request/response logging
 │   └── ...
 │
 ├── utils/
@@ -84,13 +83,6 @@ const model = ModelSelector.select({
 });
 ```
 
-### Middleware
-```typescript
-// Flight recorder logs all LLM requests/responses
-import { flightRecorder } from "@/llm/middleware/flight-recorder";
-
-// Applied automatically by LLMServiceFactory
-```
 
 ## Conventions
 
