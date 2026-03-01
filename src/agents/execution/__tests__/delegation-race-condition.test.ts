@@ -49,6 +49,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(false);
       expect(result.details.queuedInjections).toBe(0);
       expect(result.details.pendingDelegations).toBe(0);
+      expect(result.details.completedDelegations).toBe(0);
     });
 
     test("returns false when RAL exists but has no outstanding work", () => {
@@ -63,6 +64,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(false);
       expect(result.details.queuedInjections).toBe(0);
       expect(result.details.pendingDelegations).toBe(0);
+      expect(result.details.completedDelegations).toBe(0);
     });
 
     test("returns true when queued injections exist", () => {
@@ -273,7 +275,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(false);
     });
 
-    test("returns false after delegation is completed", () => {
+    test("returns true after delegation is completed but not yet consumed", () => {
       const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
 
       const delegationConversationId = "del-conv-1";
@@ -304,8 +306,9 @@ describe("Delegation Race Condition Fix", () => {
       );
       expect(result.hasWork).toBe(true);
       expect(result.details.pendingDelegations).toBe(1);
+      expect(result.details.completedDelegations).toBe(0);
 
-      // Complete the delegation
+      // Complete the delegation (moves from pending to completed)
       ralRegistry.recordCompletion({
         delegationConversationId,
         recipientPubkey,
@@ -313,20 +316,86 @@ describe("Delegation Race Condition Fix", () => {
         completedAt: Date.now(),
       });
 
-      // Now should return false (pending -> completed)
+      // Should STILL have work: the completed delegation hasn't been consumed by resolveRAL yet.
+      // This is the fix for the fast-completing delegation race condition.
+      result = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+      expect(result.hasWork).toBe(true);
+      expect(result.details.pendingDelegations).toBe(0);
+      expect(result.details.completedDelegations).toBe(1);
+
+      // Only after clearCompletedDelegations (called by resolveRAL) should work be false
+      ralRegistry.clearCompletedDelegations(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
       result = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,
         ralNumber
       );
       expect(result.hasWork).toBe(false);
-      expect(result.details.pendingDelegations).toBe(0);
+      expect(result.details.completedDelegations).toBe(0);
     });
   });
 
   describe("Race Condition Scenario", () => {
     /**
-     * This test simulates the exact race condition:
+     * This test simulates the fast-completing delegation race condition:
+     * 1. Agent delegates to child during streaming
+     * 2. Child completes very quickly — recordCompletion() moves pending→completed
+     * 3. Parent's stream finishes, executor checks hasOutstandingWork()
+     * 4. Without fix: pendingDelegations=0, queuedInjections=0 → hasWork=false → premature finalization
+     * 5. With fix: completedDelegations=1 → hasWork=true → defers finalization
+     *
+     * The debounce hasn't fired yet, so there's no queued injection.
+     * The only signal is the completed delegation in the RAL registry.
+     */
+    test("detects completed delegation before debounce fires (fast-completing delegation)", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      const delegationConversationId = "del-conv-fast";
+      const recipientPubkey = "recipient-fast";
+
+      // Step 1: Agent delegates
+      ralRegistry.mergePendingDelegations(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        [{
+          delegationConversationId,
+          recipientPubkey,
+          senderPubkey: AGENT_PUBKEY,
+          prompt: "Quick task",
+          ralNumber,
+        }]
+      );
+
+      // Step 2: Child completes very quickly (recordCompletion called immediately, no debounce)
+      ralRegistry.recordCompletion({
+        delegationConversationId,
+        recipientPubkey,
+        response: "Done instantly!",
+        completedAt: Date.now(),
+      });
+
+      // Step 3: Parent's stream finishes, executor checks for outstanding work
+      // At this point: pendingDelegations=0, queuedInjections=0, completedDelegations=1
+      const result = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      // The fix: completedDelegations prevents premature finalization
+      expect(result.hasWork).toBe(true);
+      expect(result.details.pendingDelegations).toBe(0);
+      expect(result.details.queuedInjections).toBe(0);
+      expect(result.details.completedDelegations).toBe(1);
+    });
+
+    /**
+     * This test simulates the original race condition:
      * 1. Agent has pending delegations
      * 2. Delegation completes and result is queued (via debounce)
      * 3. prepareStep runs but stream ends before processing queue
@@ -455,7 +524,7 @@ describe("Delegation Race Condition Fix", () => {
         "Task 1 result"
       );
 
-      // Check state: should have work (2 pending + 1 queued)
+      // Check state: should have work (2 pending + 1 queued + 1 completed)
       let result = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,
@@ -464,6 +533,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(true);
       expect(result.details.pendingDelegations).toBe(2);
       expect(result.details.queuedInjections).toBe(1);
+      expect(result.details.completedDelegations).toBe(1);
 
       // Second delegation completes and queues result
       ralRegistry.recordCompletion({
@@ -487,6 +557,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(true);
       expect(result.details.pendingDelegations).toBe(1);
       expect(result.details.queuedInjections).toBe(2);
+      expect(result.details.completedDelegations).toBe(2);
 
       // Third delegation completes and queues result
       ralRegistry.recordCompletion({
@@ -511,9 +582,20 @@ describe("Delegation Race Condition Fix", () => {
       expect(result.hasWork).toBe(true);
       expect(result.details.pendingDelegations).toBe(0);
       expect(result.details.queuedInjections).toBe(3);
+      expect(result.details.completedDelegations).toBe(3);
 
-      // Only after consuming all injections should we finalize
+      // Consuming injections still leaves completed delegations
       ralRegistry.getAndConsumeInjections(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+      result = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+      expect(result.hasWork).toBe(true); // Still has completed delegations
+      expect(result.details.completedDelegations).toBe(3);
+
+      // Only after clearing completed delegations (done by resolveRAL) is work truly done
+      ralRegistry.clearCompletedDelegations(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
       result = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,
@@ -691,7 +773,7 @@ describe("Executor Finalization Guard", () => {
      */
     function shouldFinalize(
       hasMessageContent: boolean,
-      outstandingWork: { hasWork: boolean; details: { queuedInjections: number; pendingDelegations: number } }
+      outstandingWork: { hasWork: boolean; details: { queuedInjections: number; pendingDelegations: number; completedDelegations: number } }
     ): boolean {
       // From AgentExecutor.executeOnce():
       // if (!hasMessageContent && outstandingWork.hasWork) {
@@ -876,8 +958,20 @@ describe("Executor Finalization Guard", () => {
       // Executor should NOT finalize - the queued result needs processing
       expect(shouldFinalize(false, outstandingWork)).toBe(false);
 
-      // Step 5: After injection is consumed, finalization is allowed
+      // Step 5: After injection is consumed, still has completed delegation
       ralRegistry.getAndConsumeInjections(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
+      outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      expect(outstandingWork.hasWork).toBe(true); // Completed delegation still unprocessed
+      expect(outstandingWork.details.completedDelegations).toBe(1);
+      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+
+      // Step 6: After completed delegations are consumed (by resolveRAL), finalization is allowed
+      ralRegistry.clearCompletedDelegations(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
       outstandingWork = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,

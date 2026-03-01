@@ -388,20 +388,18 @@ export class AgentExecutor {
             "outstanding.has_work": outstandingWork.hasWork,
             "outstanding.queued_injections": outstandingWork.details.queuedInjections,
             "outstanding.pending_delegations": outstandingWork.details.pendingDelegations,
-            "fix_applied": "uses hasOutstandingWork() to check both injections and delegations",
+            "outstanding.completed_delegations": outstandingWork.details.completedDelegations,
         });
 
-        // INVARIANT GUARD: If there's outstanding work (queued injections OR pending delegations),
-        // we should NOT finalize. The executor should continue to allow the work to be processed.
+        // INVARIANT GUARD: If there's outstanding work (queued injections, pending delegations,
+        // or completed delegations not yet consumed), we should NOT finalize.
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
         if (!hasMessageContent && outstandingWork.hasWork) {
-            // This is the expected path when delegation results arrive via debounce.
-            // The executor returns undefined to allow the dispatch loop to continue
-            // and process the queued injections in the next iteration.
             trace.getActiveSpan()?.addEvent("executor.awaiting_outstanding_work", {
                 "ral.number": ralNumber,
                 "outstanding.queued_injections": outstandingWork.details.queuedInjections,
                 "outstanding.pending_delegations": outstandingWork.details.pendingDelegations,
+                "outstanding.completed_delegations": outstandingWork.details.completedDelegations,
                 "completion_event_exists": Boolean(completionEvent),
                 "scenario": "injection_debounce_await",
             });
@@ -410,6 +408,7 @@ export class AgentExecutor {
                 ralNumber,
                 queuedInjections: outstandingWork.details.queuedInjections,
                 pendingDelegations: outstandingWork.details.pendingDelegations,
+                completedDelegations: outstandingWork.details.completedDelegations,
             });
             return undefined;
         }
@@ -486,6 +485,7 @@ export class AgentExecutor {
             "outstanding.has_work": finalOutstandingWork.hasWork,
             "outstanding.queued_injections": finalOutstandingWork.details.queuedInjections,
             "outstanding.pending_delegations": finalOutstandingWork.details.pendingDelegations,
+            "outstanding.completed_delegations": finalOutstandingWork.details.completedDelegations,
         });
 
         let responseEvent: NDKEvent | undefined;

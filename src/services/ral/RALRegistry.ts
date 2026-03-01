@@ -2635,13 +2635,17 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   /**
    * Check if there's any outstanding work for a conversation that would prevent finalization.
    *
-   * This method consolidates checking for both:
+   * This method consolidates checking for:
    * 1. Queued injections (messages waiting to be processed in the next LLM step)
    * 2. Pending delegations (delegations that haven't completed yet)
+   * 3. Completed delegations (delegations that completed but whose results haven't
+   *    been incorporated into the agent's messages via resolveRAL yet)
    *
-   * This is the key guard against the race condition where delegation results arrive
-   * (via debounce) after the last prepareStep but before the executor finalizes.
-   * By checking this before publishing status:completed, we ensure no work is orphaned.
+   * Checking completed delegations is critical for fast-completing delegations:
+   * recordCompletion() moves delegations from pending→completed immediately (no debounce),
+   * but the executor only processes them via resolveRAL() after the debounce fires.
+   * Without this check, the executor sees pendingDelegations=0 and finalizes prematurely,
+   * clearing the RAL before the completed delegation can be processed.
    *
    * @param agentPubkey - The agent's pubkey
    * @param conversationId - The conversation ID
@@ -2657,6 +2661,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     details: {
       queuedInjections: number;
       pendingDelegations: number;
+      completedDelegations: number;
     };
   } {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
@@ -2669,13 +2674,23 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       ralNumber
     ).length;
 
-    // If RAL doesn't exist, we can't have queued injections but may still have pending delegations
+    // Count completed delegations that haven't been consumed by resolveRAL yet.
+    // These are delegations where recordCompletion() has run but the executor hasn't
+    // processed them into conversation markers yet.
+    const completedDelegations = this.getConversationCompletedDelegations(
+      agentPubkey,
+      conversationId,
+      ralNumber
+    ).length;
+
+    // If RAL doesn't exist, we can't have queued injections but may still have delegations
     if (!ral) {
-      const hasWork = pendingDelegations > 0;
+      const hasWork = pendingDelegations > 0 || completedDelegations > 0;
       if (hasWork) {
         trace.getActiveSpan()?.addEvent("ral.outstanding_work_no_ral", {
           "ral.number": ralNumber,
           "outstanding.pending_delegations": pendingDelegations,
+          "outstanding.completed_delegations": completedDelegations,
           "agent.pubkey": agentPubkey.substring(0, 12),
           "conversation.id": shortenConversationId(conversationId),
         });
@@ -2685,6 +2700,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         details: {
           queuedInjections: 0,
           pendingDelegations,
+          completedDelegations,
         },
       };
     }
@@ -2692,7 +2708,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     // Count queued injections from the RAL entry
     const queuedInjections = ral.queuedInjections.length;
 
-    const hasWork = queuedInjections > 0 || pendingDelegations > 0;
+    const hasWork = queuedInjections > 0 || pendingDelegations > 0 || completedDelegations > 0;
 
     // Add telemetry for debugging race conditions
     if (hasWork) {
@@ -2700,6 +2716,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         "ral.number": ralNumber,
         "outstanding.queued_injections": queuedInjections,
         "outstanding.pending_delegations": pendingDelegations,
+        "outstanding.completed_delegations": completedDelegations,
         "agent.pubkey": agentPubkey.substring(0, 12),
         "conversation.id": shortenConversationId(conversationId),
       });
@@ -2710,6 +2727,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       details: {
         queuedInjections,
         pendingDelegations,
+        completedDelegations,
       },
     };
   }
