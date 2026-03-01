@@ -557,8 +557,19 @@ export class ConversationStore {
         if (updates.abortReason) {
             dm.abortReason = updates.abortReason;
         }
-        // DON'T update entry.timestamp - it should remain the initiation time
-        // Only the delegationMarker.completedAt changes
+
+        // Move the completed marker to the end of the messages array.
+        // The pending marker was inserted during the delegate tool execution,
+        // which places it BEFORE the agent's post-delegation response text.
+        // When the marker is expanded during message building, it becomes a
+        // user message — if it stays at its original position, the conversation
+        // ends with the agent's trailing assistant message and Anthropic rejects
+        // it with "conversation must end with a user message".
+        const markerIndex = this.state.messages.indexOf(markerEntry);
+        if (markerIndex >= 0 && markerIndex < this.state.messages.length - 1) {
+            this.state.messages.splice(markerIndex, 1);
+            this.state.messages.push(markerEntry);
+        }
 
         return true;
     }
