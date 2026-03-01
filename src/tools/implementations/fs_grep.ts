@@ -421,12 +421,12 @@ async function executeGrep(
                     return `${relative(workingDirectory, filePath)}:${count}`;
                 }
             } else {
-                // Content mode: /path/to/file:line:content
-                const firstColon = line.indexOf(":");
-                if (firstColon > 0) {
-                    const filePath = line.substring(0, firstColon);
-                    const rest = line.substring(firstColon);
-                    return `${relative(workingDirectory, filePath)}${rest}`;
+                // Content mode: match lines use ":" separator (file:num:content),
+                // context lines use "-" separator (file-num-content).
+                // Strip the working directory prefix to handle both uniformly.
+                const prefix = workingDirectory + "/";
+                if (line.startsWith(prefix)) {
+                    return line.substring(prefix.length);
                 }
             }
             return line;
