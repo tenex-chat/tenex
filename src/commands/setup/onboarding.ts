@@ -1,6 +1,11 @@
+import { execFile } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
+import { agentStorage } from "@/agents/AgentStorage";
+import { installAgentFromNostrEvent } from "@/agents/agent-installer";
+import { detectOpenClawStateDir, readOpenClawCredentials, readOpenClawAgents } from "@/commands/agent/import/openclaw-reader";
+import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { LLMConfigEditor } from "@/llm/LLMConfigEditor";
 import { ensureCacheLoaded, getModelInfo } from "@/llm/utils/models-dev-cache";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -14,7 +19,7 @@ import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "./display";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey, isBackspaceKey } from "@inquirer/core";
 import { cursorHide } from "@inquirer/ansi";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import NDK, { NDKEvent, NDKPrivateKeySigner, NDKProject, type NDKSubscription } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
@@ -572,101 +577,576 @@ async function runImageGenSetup(providers: TenexProviders): Promise<void> {
     display.success(`Image generation: ${savedModelInfo?.name || selectedModel}`);
 }
 
-interface OnboardingOptions {
-    pubkey?: string[];
-    localRelayAvailable?: boolean;
-    json?: boolean;
-    stepOffset?: string;
-    totalSteps?: string;
-}
+// ─── LLM Config Seeding ──────────────────────────────────────────────────────
 
 /**
- * Delegated flow: called from Rust TUI with --pubkey --step-offset --total-steps.
- * Only runs Providers + Models steps, then exits.
+ * Seed default LLM configurations based on which providers are available.
+ * Only runs when there are zero existing configurations.
+ *
+ * Priority: Anthropic if present, then OpenAI.
+ * Creates a meta-model "Auto" config when Anthropic is available.
  */
-async function runDelegatedFlow(
-    pubkeys: string[],
-    stepOffset: number,
-    totalSteps: number,
-): Promise<void> {
+async function seedDefaultLLMConfigs(providers: TenexProviders): Promise<void> {
     const globalPath = config.getGlobalPath();
-    await ensureDirectory(globalPath);
-    const existingConfig = await config.loadTenexConfig(globalPath);
+    const llmsConfig = await config.loadTenexLLMs(globalPath);
 
-    // Silently whitelist the pubkey
-    const whitelistedPubkeys = pubkeys.map((pk) => decodeToPubkey(pk.trim()));
+    if (Object.keys(llmsConfig.configurations).length > 0) return;
 
-    // Generate tenex private key if missing
-    let tenexPrivateKey = existingConfig.tenexPrivateKey;
-    if (!tenexPrivateKey) {
-        const signer = NDKPrivateKeySigner.generate();
-        tenexPrivateKey = signer.privateKey;
-        if (!tenexPrivateKey) {
-            console.error(chalk.red("Failed to generate daemon key"));
-            process.exit(1);
+    const connected = Object.keys(providers.providers);
+    const hasAnthropic = connected.includes(PROVIDER_IDS.ANTHROPIC);
+
+    if (hasAnthropic) {
+        llmsConfig.configurations["Sonnet"] = {
+            provider: PROVIDER_IDS.ANTHROPIC,
+            model: "claude-sonnet-4-6",
+        };
+        llmsConfig.configurations["Opus"] = {
+            provider: PROVIDER_IDS.ANTHROPIC,
+            model: "claude-opus-4-6",
+        };
+        llmsConfig.configurations["Auto"] = {
+            provider: "meta",
+            variants: {
+                fast: {
+                    model: "Sonnet",
+                    keywords: ["quick", "fast"],
+                    description: "Fast, lightweight tasks",
+                },
+                powerful: {
+                    model: "Opus",
+                    keywords: ["think", "ultrathink", "ponder"],
+                    description: "Most capable, complex reasoning",
+                },
+            },
+            default: "fast",
+        };
+        llmsConfig.default = "Auto";
+    }
+
+    if (connected.includes(PROVIDER_IDS.OPENAI)) {
+        llmsConfig.configurations["GPT-4o"] = {
+            provider: PROVIDER_IDS.OPENAI,
+            model: "gpt-4o",
+        };
+        if (!llmsConfig.default) {
+            llmsConfig.default = "GPT-4o";
         }
     }
 
-    // Save config with pubkey whitelisted
-    await config.saveGlobalConfig({
-        ...existingConfig,
-        whitelistedPubkeys,
-        tenexPrivateKey,
-    });
-
-    // Step N: AI Providers
-    display.step(stepOffset, totalSteps, "AI Providers");
-    display.context("Connect the AI services your agents will use. You need at least one.");
-    display.blank();
-
-    const existingProviders = await config.loadTenexProviders(globalPath);
-    const updatedProviders = await runProviderSetup(existingProviders);
-    await config.saveGlobalProviders(updatedProviders);
-    display.success("Provider credentials saved");
-
-    // Step N+1: Models
-    if (Object.keys(updatedProviders.providers).length > 0) {
-        display.step(stepOffset + 1, totalSteps, "Models");
-        display.context("Configure which models your agents will use.");
-        display.blank();
-
-        const llmEditor = new LLMConfigEditor();
-        await llmEditor.showMainMenu();
-
-        // Step N+2: Model Roles
-        display.step(stepOffset + 2, totalSteps, "Model Roles");
-        await runRoleAssignment();
-
-        // Step N+3: Embeddings
-        display.step(stepOffset + 3, totalSteps, "Embeddings");
-        display.context("Choose an embedding model for semantic search and RAG.");
-        display.blank();
-        await runEmbeddingSetup(updatedProviders);
-
-        // Step N+4: Image Generation
-        display.step(stepOffset + 4, totalSteps, "Image Generation");
-        display.context("Configure image generation for your agents.");
-        display.blank();
-        await runImageGenSetup(updatedProviders);
-    } else {
-        display.blank();
-        display.hint("Skipping model configuration (no providers configured)");
-        display.context("Run tenex setup providers and tenex setup llm later to configure models.");
+    if (Object.keys(llmsConfig.configurations).length > 0) {
+        await config.saveGlobalLLMs(llmsConfig);
+        for (const [name, cfg] of Object.entries(llmsConfig.configurations)) {
+            const detail = cfg.provider === "meta" ? "meta-model" : `${cfg.provider}/${(cfg as { model: string }).model}`;
+            display.success(`Seeded: ${name} (${detail})`);
+        }
     }
+}
 
-    process.exit(0);
+// ─── Provider Auto-Detection ─────────────────────────────────────────────────
+
+/**
+ * Check if a command exists on the system.
+ */
+function commandExists(cmd: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        execFile("/bin/sh", ["-c", `command -v ${cmd}`], (err) => {
+            resolve(!err);
+        });
+    });
 }
 
 /**
- * Standalone flow: full onboarding when run directly (not from Rust TUI).
+ * Check if Ollama is reachable at localhost:11434.
  */
-async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
+async function ollamaReachable(): Promise<boolean> {
+    try {
+        const response = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(2000) });
+        return response.ok;
+    } catch {
+        return false;
+    }
+}
+
+interface DetectionResult {
+    providers: TenexProviders;
+    openClawStateDir: string | null;
+    detectedSources: string[];
+    claudeCliDetected: boolean;
+}
+
+/**
+ * Auto-detect provider credentials from environment variables, local commands,
+ * Ollama, and OpenClaw installations. Merges into existing providers.
+ * Pass a pre-detected openClawStateDir to avoid redundant filesystem checks.
+ */
+async function autoDetectProviders(existing: TenexProviders, preDetectedOpenClawDir?: string | null): Promise<DetectionResult> {
+    const providers = { ...existing, providers: { ...existing.providers } };
+    const detectedSources: string[] = [];
+
+    // 1. Detect local CLI commands
+    const [hasClaude, hasCodex] = await Promise.all([
+        commandExists("claude"),
+        commandExists("codex"),
+    ]);
+
+    if (hasCodex && !providers.providers[PROVIDER_IDS.CODEX_APP_SERVER]) {
+        providers.providers[PROVIDER_IDS.CODEX_APP_SERVER] = { apiKey: "none" };
+        detectedSources.push("Codex CLI (codex-app-server)");
+    }
+
+    // 2. Detect Ollama
+    if (!providers.providers[PROVIDER_IDS.OLLAMA]) {
+        if (await ollamaReachable()) {
+            providers.providers[PROVIDER_IDS.OLLAMA] = { apiKey: "http://localhost:11434" };
+            detectedSources.push("Ollama (localhost:11434)");
+        }
+    }
+
+    // 3. Environment variable API keys
+    const envMap: Array<{ envVar: string; providerId: string; label: string }> = [
+        { envVar: "ANTHROPIC_API_KEY", providerId: PROVIDER_IDS.ANTHROPIC, label: "Anthropic (from ANTHROPIC_API_KEY)" },
+        { envVar: "OPENAI_API_KEY", providerId: PROVIDER_IDS.OPENAI, label: "OpenAI (from OPENAI_API_KEY)" },
+        { envVar: "OPENROUTER_API_KEY", providerId: PROVIDER_IDS.OPENROUTER, label: "OpenRouter (from OPENROUTER_API_KEY)" },
+    ];
+    for (const { envVar, providerId, label } of envMap) {
+        const value = process.env[envVar];
+        if (value && !providers.providers[providerId]) {
+            providers.providers[providerId] = { apiKey: value };
+            detectedSources.push(label);
+        }
+    }
+
+    // 4. Anthropic OAuth setup-token
+    const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    if (authToken?.startsWith("sk-ant-oat") && !providers.providers[PROVIDER_IDS.ANTHROPIC]) {
+        providers.providers[PROVIDER_IDS.ANTHROPIC] = { apiKey: authToken };
+        detectedSources.push("Anthropic (from ANTHROPIC_AUTH_TOKEN)");
+    }
+
+    // 5. OpenClaw credentials
+    const openClawStateDir = preDetectedOpenClawDir !== undefined
+        ? preDetectedOpenClawDir
+        : await detectOpenClawStateDir();
+    if (openClawStateDir) {
+        const credentials = await readOpenClawCredentials(openClawStateDir);
+        for (const cred of credentials) {
+            if (!providers.providers[cred.provider]) {
+                providers.providers[cred.provider] = { apiKey: cred.apiKey };
+                detectedSources.push(`${cred.provider} (from OpenClaw)`);
+            }
+        }
+    }
+
+    return { providers, openClawStateDir, detectedSources, claudeCliDetected: hasClaude };
+}
+
+function buildProviderHints(detection: DetectionResult): Record<string, string> {
+    const hints: Record<string, string> = {};
+    if (detection.claudeCliDetected && !detection.providers.providers[PROVIDER_IDS.ANTHROPIC]) {
+        hints[PROVIDER_IDS.ANTHROPIC] = "via claude setup-token";
+    }
+    return hints;
+}
+
+// ─── Nostr Agent Discovery Types ─────────────────────────────────────────────
+
+interface FetchedTeam {
+    id: string;
+    title: string;
+    description: string;
+    agentEventIds: string[];
+}
+
+interface FetchedAgent {
+    id: string;
+    name: string;
+    role: string;
+    description: string;
+    event: NDKEvent;
+}
+
+interface FetchResults {
+    teams: FetchedTeam[];
+    agents: FetchedAgent[];
+}
+
+function agentsForTeam(results: FetchResults, team: FetchedTeam): FetchedAgent[] {
+    const agentIndex = new Map(results.agents.map((a) => [a.id, a]));
+    return team.agentEventIds
+        .map((eid) => agentIndex.get(eid))
+        .filter((a): a is FetchedAgent => a !== undefined);
+}
+
+// ─── Streaming Agent Discovery ──────────────────────────────────────────────
+
+interface AgentDiscovery {
+    ndk: NDK;
+    subscription: NDKSubscription;
+    events: Map<string, NDKEvent>;
+}
+
+function startAgentDiscovery(relays: string[]): AgentDiscovery {
+    const ndk = new NDK({ explicitRelayUrls: relays, enableOutboxModel: false });
+    ndk.connect(); // fire-and-forget — NDK handles reconnection, subscription queues until connected
+
+    const events = new Map<string, NDKEvent>();
+    const TEAM_KIND = 34199;
+
+    const subscription = ndk.subscribe(
+        { kinds: [...NDKAgentDefinition.kinds, TEAM_KIND] as number[] },
+        { closeOnEose: false },
+        { onEvent: (event: NDKEvent) => { events.set(event.id, event); } },
+    );
+
+    return { ndk, subscription, events };
+}
+
+// ─── Project & Agents Step ───────────────────────────────────────────────────
+
+/**
+ * Stop the streaming subscription and resolve accumulated events into
+ * typed agents and teams with deduplication.
+ */
+function resolveAgentDiscovery(discovery: AgentDiscovery): FetchResults {
+    discovery.subscription.stop();
+
+    const TEAM_KIND = 34199;
+    const teams: FetchedTeam[] = [];
+    const agents: FetchedAgent[] = [];
+
+    for (const event of discovery.events.values()) {
+        const kind = event.kind;
+
+        if (kind === TEAM_KIND) {
+            const title = event.tagValue("title") || "";
+            if (!title) continue;
+            const description = event.content || event.tagValue("description") || "";
+            const agentEventIds = event.tags
+                .filter((t: string[]) => t[0] === "e" && t[1])
+                .map((t: string[]) => t[1]);
+            teams.push({ id: event.id, title, description, agentEventIds });
+        } else if (kind !== undefined && NDKAgentDefinition.kinds.includes(kind)) {
+            const name = event.tagValue("title") || "Unnamed Agent";
+            const role = event.tagValue("role") || "";
+            const description = event.tagValue("description") || event.content || "";
+            agents.push({ id: event.id, name, role, description, event });
+        }
+    }
+
+    // Dedup teams by title (keep first)
+    const seenTeamTitles = new Set<string>();
+    const dedupedTeams = teams.filter((t) => {
+        if (seenTeamTitles.has(t.title)) return false;
+        seenTeamTitles.add(t.title);
+        return true;
+    });
+
+    // Dedup agents by pubkey+d-tag (keep newest)
+    const latestAgents = new Map<string, FetchedAgent>();
+    const noDtagAgents: FetchedAgent[] = [];
+    for (const agent of agents) {
+        const dTag = agent.event.tagValue("d") || "";
+        if (!dTag) {
+            noDtagAgents.push(agent);
+            continue;
+        }
+        const key = `${agent.event.pubkey}:${dTag}`;
+        const existing = latestAgents.get(key);
+        if (!existing || (agent.event.created_at || 0) > (existing.event.created_at || 0)) {
+            latestAgents.set(key, agent);
+        }
+    }
+    const dedupedAgents = [...Array.from(latestAgents.values()), ...noDtagAgents];
+
+    return { teams: dedupedTeams, agents: dedupedAgents };
+}
+
+/**
+ * Run the Project & Agents onboarding step.
+ *
+ * Replicates the Rust TUI's step_first_project_and_agents:
+ * 1. Ask about creating a Meta project
+ * 2. Discover agents and teams from Nostr
+ * 3. Two-tier selection: teams first, then individual agents
+ * 4. Install selected agents
+ * 5. Publish kind 31933 project event
+ */
+async function runProjectAndAgentsStep(
+    discovery: AgentDiscovery,
+    userPrivateKeyHex: string,
+    openClawStateDir: string | null,
+): Promise<void> {
+    // ── Part A: Ask about Meta project ──────────────────────────────────────
+    display.context(
+        "Projects organize what your agents work on. We suggest starting with a\n" +
+        "\"Meta\" project — a command center where agents track everything else.",
+    );
+    display.blank();
+
+    const { createMeta } = await inquirer.prompt([{
+        type: "confirm",
+        name: "createMeta",
+        message: "Create a Meta project?",
+        default: true,
+        theme: inquirerTheme,
+    }]);
+
+    if (!createMeta) {
+        display.blank();
+        display.context("Sure thing. You can create projects anytime from the dashboard.");
+        return;
+    }
+
+    // ── Part B: Agent selection ─────────────────────────────────────────────
+    display.blank();
+    display.context("Pick a pre-built agent team or choose individual agents.");
+    display.blank();
+
+    const { ndk } = discovery;
+    const fetchResults = resolveAgentDiscovery(discovery);
+
+    const hasNostrAgents = fetchResults.agents.length > 0;
+
+    if (!openClawStateDir && !hasNostrAgents) {
+        display.context("No agents available right now.");
+        display.hint("You can browse and hire agents later from the dashboard.");
+    }
+
+    let installedCount = 0;
+    const nostrAgentEventIds: string[] = [];
+
+    // ── Section B.1: OpenClaw agents ────────────────────────────────────────
+    if (openClawStateDir) {
+        const openClawAgents = await readOpenClawAgents(openClawStateDir);
+
+        if (openClawAgents.length > 0) {
+            display.hint("Found your OpenClaw agents:");
+            display.blank();
+
+            const { selected } = await inquirer.prompt([{
+                type: "checkbox",
+                name: "selected",
+                message: "Import your OpenClaw agents? (space to toggle, enter to confirm)",
+                choices: openClawAgents.map((a) => ({
+                    name: chalk.ansi256(214)(a.id),
+                    value: a.id,
+                    checked: true,
+                })),
+                theme: inquirerTheme,
+            }]);
+
+            if (selected.length > 0) {
+                display.context("Importing agents (this may take a moment)...");
+                display.blank();
+
+                const slugsArg = (selected as string[]).join(",");
+                await new Promise<void>((resolve) => {
+                    const binPath = process.argv[1];
+                    execFile(process.argv[0], [binPath, "agent", "import", "openclaw", "--slugs", slugsArg], (err, stdout, stderr) => {
+                        if (stdout) process.stdout.write(stdout);
+                        if (stderr) process.stderr.write(stderr);
+                        if (err) {
+                            display.context("OpenClaw import encountered an issue — check daemon logs.");
+                        } else {
+                            installedCount += selected.length;
+                        }
+                        resolve();
+                    });
+                });
+
+                display.blank();
+            }
+        }
+    }
+
+    // ── Section B.2: Nostr agents (team + individual selection) ─────────────
+    if (fetchResults.agents.length > 0) {
+        const results = fetchResults;
+        const installedAgentIds: string[] = [];
+
+        while (true) {
+            // Only show teams that still have uninstalled agents
+            const availableTeams = results.teams.filter((team) =>
+                agentsForTeam(results, team).some((a) => !installedAgentIds.includes(a.id)),
+            );
+
+            const hasRemainingAgents = results.agents.some(
+                (a) => !installedAgentIds.includes(a.id),
+            );
+
+            // Nothing left to offer
+            if (availableTeams.length === 0 && !hasRemainingAgents) break;
+
+            // Build menu choices
+            const menuChoices: Array<{ name: string; value: string }> = [];
+
+            // Team entries
+            for (const team of availableTeams) {
+                const agentCount = agentsForTeam(results, team)
+                    .filter((a) => !installedAgentIds.includes(a.id)).length;
+                const label = team.description
+                    ? `${team.title} — ${team.description} (${agentCount} agents)`
+                    : `${team.title} (${agentCount} agents)`;
+                menuChoices.push({ name: label, value: `team:${team.id}` });
+            }
+
+            // "Add individual agents" entry
+            if (hasRemainingAgents) {
+                menuChoices.push({ name: "Add individual agents", value: "__individual__" });
+            }
+
+            // "Done" entry
+            menuChoices.push({ name: "Done", value: "__done__" });
+
+            const { selection } = await inquirer.prompt([{
+                type: "select",
+                name: "selection",
+                message: "Add agents",
+                choices: menuChoices,
+                theme: inquirerTheme,
+            }]);
+
+            if (selection === "__done__") break;
+
+            if (selection === "__individual__") {
+                // Individual agent multi-select
+                const remaining = results.agents.filter(
+                    (a) => !installedAgentIds.includes(a.id),
+                );
+
+                const { selected } = await inquirer.prompt([{
+                    type: "checkbox",
+                    name: "selected",
+                    message: "Select agents (space to toggle, enter to confirm)",
+                    choices: remaining.map((a) => {
+                        const label = a.role
+                            ? `${a.name.padEnd(20)} ${a.role} — ${a.description}`
+                            : `${a.name.padEnd(20)} ${a.description}`;
+                        return { name: label, value: a.id };
+                    }),
+                    theme: inquirerTheme,
+                }]);
+
+                if ((selected as string[]).length > 0) {
+                    const selectedAgents = remaining.filter((a) => (selected as string[]).includes(a.id));
+
+                    for (const agent of selectedAgents) {
+                        try {
+                            await installAgentFromNostrEvent(agent.event, undefined, ndk);
+                            nostrAgentEventIds.push(agent.id);
+                            installedAgentIds.push(agent.id);
+                            installedCount++;
+                        } catch (err) {
+                            display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
+                        }
+                    }
+
+                    display.blank();
+                    const names = selectedAgents.map((a) => a.name).join(", ");
+                    display.success(`Installed ${selectedAgents.length} agent(s): ${names}`);
+                }
+                continue;
+            }
+
+            // Team selected
+            const teamId = selection.replace("team:", "");
+            const team = results.teams.find((t) => t.id === teamId);
+            if (!team) continue;
+
+            const teamAgents = agentsForTeam(results, team)
+                .filter((a) => !installedAgentIds.includes(a.id));
+
+            if (teamAgents.length === 0) continue;
+
+            display.blank();
+            display.hint(`Agents in ${team.title}:`);
+            for (const a of teamAgents) {
+                console.log(`    ${chalk.ansi256(117)("●")} ${chalk.bold(a.name.padEnd(20))} ${chalk.dim(a.role)}`);
+            }
+
+            for (const agent of teamAgents) {
+                try {
+                    await installAgentFromNostrEvent(agent.event, undefined, ndk);
+                    nostrAgentEventIds.push(agent.id);
+                    installedAgentIds.push(agent.id);
+                    installedCount++;
+                } catch (err) {
+                    display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+
+            display.blank();
+            const names = teamAgents.map((a) => a.name).join(", ");
+            display.success(`Team "${team.title}" installed: ${names}`);
+        }
+    }
+
+    if (installedCount > 0) {
+        display.blank();
+        display.success(`${installedCount} agent(s) ready.`);
+    }
+
+    // ── Part C: Publish kind 31933 project event ──────────────────────────
+    // The daemon handles directory creation, git init, and agent loading on boot.
+    // We just publish the event with agent tags — the daemon discovers it from relays.
+    try {
+        const signer = new NDKPrivateKeySigner(userPrivateKeyHex);
+        ndk.signer = signer;
+
+        const project = new NDKProject(ndk);
+        project.dTag = "meta";
+        project.title = "Meta";
+        project.tags.push(["client", "tenex-setup"]);
+
+        for (const eid of nostrAgentEventIds) {
+            project.tags.push(["agent", eid]);
+        }
+
+        await project.sign();
+        await project.publish();
+
+        display.success("Published \"Meta\" project to relays.");
+
+        // Give relays a moment to propagate
+        await new Promise((r) => setTimeout(r, 2_000));
+    } catch {
+        display.context("Could not publish project event — the daemon will pick it up later.");
+    }
+
+    // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
+    // These don't have event IDs so they aren't referenced in the project event's agent tags;
+    // the daemon needs the local storage association to find them.
+    await agentStorage.initialize();
+    const allStoredAgents = await agentStorage.getAllAgents();
+    for (const agent of allStoredAgents) {
+        if (agent.eventId) continue; // Nostr agents are associated via project event tags
+        const signer = new NDKPrivateKeySigner(agent.nsec);
+        await agentStorage.addAgentToProject(signer.pubkey, "meta");
+    }
+
+    display.blank();
+    display.success("Created \"Meta\" project.");
+}
+
+interface OnboardingOptions {
+    pubkey?: string[];
+    localRelayUrl?: string;
+    json?: boolean;
+}
+
+/**
+ * Full onboarding flow — identity, relay, providers, models, project & agents.
+ */
+async function runOnboarding(options: OnboardingOptions): Promise<void> {
     const jsonMode = options.json === true;
     const globalPath = config.getGlobalPath();
     await ensureDirectory(globalPath);
     const existingConfig = await config.loadTenexConfig(globalPath);
 
-    const totalSteps = 7;
+    // Quick OpenClaw detection so we can compute total steps upfront
+    const earlyOpenClawDir = await detectOpenClawStateDir();
+    // Steps: Identity, Communication, Providers, Models, Roles, Embeddings, Image Gen, Project & Agents
+    const totalSteps = 8;
 
     // Step 1: Identity
     if (!jsonMode) {
@@ -677,6 +1157,7 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
 
     let whitelistedPubkeys: string[];
     let generatedNsec: string | undefined;
+    let userPrivateKeyHex: string | undefined;
 
     if (options.pubkey) {
         whitelistedPubkeys = options.pubkey.map((pk) => decodeToPubkey(pk.trim()));
@@ -696,7 +1177,8 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
 
         if (identityChoice === "create") {
             const signer = NDKPrivateKeySigner.generate();
-            const privkey = signer.privateKey!;
+            if (!signer.privateKey) throw new Error("Failed to generate private key");
+            const privkey = signer.privateKey;
             const user = await signer.user();
             const pubkey = user.pubkey;
             const npub = nip19.npubEncode(pubkey);
@@ -704,6 +1186,7 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
 
             whitelistedPubkeys = [pubkey];
             generatedNsec = nsec;
+            userPrivateKeyHex = privkey;
 
             if (!jsonMode) {
                 display.blank();
@@ -745,6 +1228,7 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
             const npub = nip19.npubEncode(pubkey);
 
             whitelistedPubkeys = [pubkey];
+            userPrivateKeyHex = privkeyHex;
 
             if (!jsonMode) {
                 display.blank();
@@ -780,20 +1264,17 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
         display.blank();
     }
 
-    let relays: string[];
-    let installLocalRelay: number | undefined;
-
     const relayItems: RelayItem[] = [
         { type: "choice", name: "TENEX Community Relay", value: "wss://tenex.chat", description: "wss://tenex.chat" },
         { type: "input" },
     ];
 
-    if (options.localRelayAvailable) {
+    if (options.localRelayUrl) {
         relayItems.push({
             type: "choice",
-            name: "Install local relay",
-            value: "__local__",
-            description: "runs on localhost",
+            name: "Local relay",
+            value: options.localRelayUrl,
+            description: options.localRelayUrl,
         });
     }
 
@@ -816,13 +1297,12 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
         },
     });
 
-    if (relay === "__local__") {
-        const port = 7000 + Math.floor(Math.random() * 2000);
-        installLocalRelay = port;
-        relays = [`ws://localhost:${port}`];
-    } else {
-        relays = [relay];
-    }
+    const relays = [relay];
+
+    // Start agent discovery early — NDK connects and streams events in the
+    // background while the user configures providers, models, etc. (steps 3-7).
+    // By step 8, agents have already accumulated.
+    const agentDiscovery = startAgentDiscovery(relays);
 
     // Save configuration
     const newConfig = {
@@ -836,18 +1316,31 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
     await config.saveGlobalConfig(newConfig);
     await ensureDirectory(path.resolve(projectsBase));
 
+    // Auto-detect providers from env vars, local commands, Ollama, and OpenClaw
+    const existingProviders = await config.loadTenexProviders(globalPath);
+    const detection = await autoDetectProviders(existingProviders, earlyOpenClawDir);
+
+    if (detection.detectedSources.length > 0) {
+        for (const source of detection.detectedSources) {
+            display.success(`Detected: ${source}`);
+        }
+        display.blank();
+    }
+
     // Step 3: Providers
     display.step(3, totalSteps, "AI Providers");
     display.context("Connect the AI services your agents will use. You need at least one.");
     display.blank();
 
-    const existingProviders = await config.loadTenexProviders(globalPath);
-    const updatedProviders = await runProviderSetup(existingProviders);
+    const providerHints = buildProviderHints(detection);
+    const updatedProviders = await runProviderSetup(detection.providers, { providerHints });
     await config.saveGlobalProviders(updatedProviders);
     display.success("Provider credentials saved");
 
     // Step 4: Models
     if (Object.keys(updatedProviders.providers).length > 0) {
+        await seedDefaultLLMConfigs(updatedProviders);
+
         display.step(4, totalSteps, "Models");
         display.context("Configure which models your agents will use.");
         display.blank();
@@ -870,7 +1363,20 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
         display.context("Configure image generation for your agents.");
         display.blank();
         await runImageGenSetup(updatedProviders);
+
+        // Step 8: Project & Agents
+        if (userPrivateKeyHex) {
+            display.step(8, totalSteps, "Project & Agents");
+            await runProjectAndAgentsStep(
+                agentDiscovery,
+                userPrivateKeyHex,
+                detection.openClawStateDir,
+            );
+        } else {
+            agentDiscovery.subscription.stop();
+        }
     } else {
+        agentDiscovery.subscription.stop();
         display.blank();
         display.hint("Skipping model configuration (no providers configured)");
         display.context("Run tenex setup providers and tenex setup llm later to configure models.");
@@ -887,9 +1393,6 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
         };
         if (generatedNsec) {
             output.nsec = generatedNsec;
-        }
-        if (installLocalRelay) {
-            output.installLocalRelay = installLocalRelay;
         }
         console.log(JSON.stringify(output, null, 2));
     } else {
@@ -908,23 +1411,11 @@ async function runStandaloneFlow(options: OnboardingOptions): Promise<void> {
 export const onboardingCommand = new Command("init")
     .description("Initial setup wizard for TENEX")
     .option("--pubkey <pubkeys...>", "Pubkeys to whitelist (npub, nprofile, or hex)")
-    .option("--local-relay-available", "Show option to install a local relay")
+    .option("--local-relay-url <url>", "URL of a running local relay to offer as an option")
     .option("--json", "Output configuration as JSON")
-    .option("--step-offset <n>", "Step number to start from (used when delegated from Rust TUI)")
-    .option("--total-steps <n>", "Total steps in the parent flow (used when delegated from Rust TUI)")
     .action(async (options: OnboardingOptions) => {
         try {
-            const isDelegated = options.stepOffset !== undefined && options.totalSteps !== undefined;
-
-            if (isDelegated && options.pubkey) {
-                await runDelegatedFlow(
-                    options.pubkey,
-                    parseInt(options.stepOffset!, 10),
-                    parseInt(options.totalSteps!, 10),
-                );
-            } else {
-                await runStandaloneFlow(options);
-            }
+            await runOnboarding(options);
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             if (errorMessage?.includes("SIGINT") || errorMessage?.includes("force closed")) {

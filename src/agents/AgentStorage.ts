@@ -661,12 +661,8 @@ export class AgentStorage {
 
     /**
      * Get agent by slug (uses index for O(1) lookup).
-     *
-     * **DEPRECATED**: Use getAgentBySlugForProject() instead for project-scoped lookups.
-     * This method returns the LAST agent saved with this slug, which may not be the
-     * correct agent when multiple agents use the same slug across different projects.
-     *
-     * @deprecated Use getAgentBySlugForProject(slug, projectDTag) instead
+     * Returns the agent regardless of project assignment.
+     * Use getAgentBySlugForProject() when you need project-scoped lookups.
      */
     async getAgentBySlug(slug: string): Promise<StoredAgent | null> {
         if (!this.index) await this.loadIndex();
@@ -674,11 +670,6 @@ export class AgentStorage {
 
         const slugEntry = this.index.bySlug[slug];
         if (!slugEntry) return null;
-
-        logger.warn("Using deprecated getAgentBySlug() - consider using getAgentBySlugForProject()", {
-            slug,
-            pubkey: slugEntry.pubkey.substring(0, 8),
-        });
 
         return this.loadAgent(slugEntry.pubkey);
     }

@@ -130,6 +130,60 @@ export async function readOpenClawAgents(stateDir: string): Promise<OpenClawAgen
     );
 }
 
+export interface OpenClawCredential {
+    provider: string;
+    apiKey: string;
+}
+
+/**
+ * Read provider credentials from OpenClaw's auth-profiles.json.
+ * Supports token, api_key, and oauth profile types.
+ * Returns deduplicated credentials (first occurrence per provider wins).
+ */
+export async function readOpenClawCredentials(stateDir: string): Promise<OpenClawCredential[]> {
+    const profilePath = path.join(stateDir, "agents", "main", "agent", "auth-profiles.json");
+    const content = await readFileOrNull(profilePath);
+    if (!content) return [];
+
+    let parsed: { profiles?: Record<string, Record<string, string>> };
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        return [];
+    }
+
+    if (!parsed.profiles) return [];
+
+    const credentials: OpenClawCredential[] = [];
+    const seenProviders = new Set<string>();
+
+    // Sort keys so `:default` profiles come first
+    const sortedKeys = Object.keys(parsed.profiles).sort((a, b) => {
+        const aDefault = a.includes(":default") ? 0 : 1;
+        const bDefault = b.includes(":default") ? 0 : 1;
+        return aDefault - bDefault || a.localeCompare(b);
+    });
+
+    for (const key of sortedKeys) {
+        const profile = parsed.profiles[key];
+        const provider = profile.provider;
+        if (!provider || seenProviders.has(provider)) continue;
+
+        const apiKey =
+            profile.type === "token" ? profile.token :
+            profile.type === "api_key" ? profile.key :
+            profile.type === "oauth" ? profile.access :
+            undefined;
+
+        if (apiKey) {
+            seenProviders.add(provider);
+            credentials.push({ provider, apiKey });
+        }
+    }
+
+    return credentials;
+}
+
 /**
  * Convert OpenClaw model format to TENEX format.
  * OpenClaw uses "provider/model", TENEX uses "provider:model".

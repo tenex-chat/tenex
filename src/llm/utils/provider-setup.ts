@@ -1,5 +1,6 @@
 import password from "@inquirer/password";
 import input from "@inquirer/input";
+import chalk from "chalk";
 import { AI_SDK_PROVIDERS } from "@/llm/types";
 import type { ProviderCredentials, TenexProviders } from "@/services/config/types";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
@@ -12,6 +13,10 @@ import providerSelectPrompt, {
 import { ProviderConfigUI } from "@/llm/utils/ProviderConfigUI";
 import { inquirerTheme } from "@/utils/cli-theme";
 
+interface ProviderSetupOptions {
+    providerHints?: Record<string, string>;
+}
+
 /**
  * Interactive flow for configuring provider credentials.
  * Uses a two-level prompt: a provider list (browse/keys) and a separate
@@ -19,8 +24,10 @@ import { inquirerTheme } from "@/utils/cli-theme";
  */
 export async function runProviderSetup(
     existingProviders: TenexProviders,
+    options: ProviderSetupOptions = {},
 ): Promise<TenexProviders> {
     const providerIds = AI_SDK_PROVIDERS.filter((p) => p !== PROVIDER_IDS.CLAUDE_CODE);
+    const { providerHints } = options;
 
     let resumeState: PromptState | undefined;
 
@@ -29,6 +36,7 @@ export async function runProviderSetup(
             message: "Configure providers:",
             providerIds: [...providerIds],
             initialProviders: { ...existingProviders.providers },
+            providerHints,
             resumeState,
             theme: inquirerTheme,
         };
@@ -42,7 +50,7 @@ export async function runProviderSetup(
         // add-key: ask for the key via a separate prompt
         const { providerId, returnTo, state } = result;
         const name = ProviderConfigUI.getProviderDisplayName(providerId);
-        const apiKey = await askForKey(providerId, name);
+        const apiKey = await askForKey(providerId, name, providerHints?.[providerId]);
 
         if (apiKey) {
             const existing = getKeys(state.providers[providerId]?.apiKey);
@@ -66,7 +74,7 @@ export async function runProviderSetup(
     }
 }
 
-async function askForKey(providerId: string, displayName: string): Promise<string | undefined> {
+async function askForKey(providerId: string, displayName: string, hint?: string): Promise<string | undefined> {
     if (isOllama(providerId)) {
         const url = await input({
             message: `${displayName} URL:`,
@@ -74,6 +82,10 @@ async function askForKey(providerId: string, displayName: string): Promise<strin
             theme: inquirerTheme,
         });
         return url.trim() || undefined;
+    }
+
+    if (hint) {
+        console.log(chalk.dim(`  Run ${chalk.bold("claude setup-token")} in another terminal, then paste the key (sk-ant-...) here.`));
     }
 
     const key = await password({

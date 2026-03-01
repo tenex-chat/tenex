@@ -1770,8 +1770,8 @@ describe("AgentStorage", () => {
         });
     });
 
-    describe("getAgentBySlug deprecation warning", () => {
-        it("should emit deprecation warning when getAgentBySlug is used", async () => {
+    describe("getAgentBySlug global lookup", () => {
+        it("should find agent by slug regardless of project", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const agent = createStoredAgent({
                 nsec: signer.nsec,
@@ -1783,7 +1783,6 @@ describe("AgentStorage", () => {
             await storage.saveAgent(agent);
             await storage.addAgentToProject(signer.pubkey, "project-1");
 
-            // Call deprecated method - should still work but warn
             const result = await storage.getAgentBySlug("test-agent");
             expect(result).not.toBeNull();
             expect(result?.slug).toBe("test-agent");
@@ -1813,7 +1812,6 @@ describe("AgentStorage", () => {
             await storage.saveAgent(agent2);
             await storage.addAgentToProject(signer2.pubkey, "project-2");
 
-            // Deprecated method returns last saved (agent2)
             const result = await storage.getAgentBySlug("shared-slug");
             expect(result?.name).toBe("Agent 2");
         });

@@ -39,6 +39,7 @@ export type ProviderSelectConfig = {
     message: string;
     providerIds: string[];
     initialProviders: Record<string, ProviderCredentials>;
+    providerHints?: Record<string, string>;
     resumeState?: PromptState;
     theme?: PartialDeep<Theme>;
 };
@@ -228,12 +229,14 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
             const name = ProviderConfigUI.getProviderDisplayName(pid);
             const pfx = i === active ? `${CURSOR} ` : "  ";
             const enabled = pid in providers;
+            const hint = config.providerHints?.[pid];
 
             if (enabled) {
                 const keyInfo = formatKeyInfo(providers[pid]?.apiKey);
                 out.push(`${pfx}${display.providerCheck(name)}${keyInfo}`);
             } else {
-                out.push(`${pfx}${display.providerUncheck(name)}`);
+                const hintSuffix = hint ? chalk.dim(` — ${hint}`) : "";
+                out.push(`${pfx}${display.providerUncheck(name)}${hintSuffix}`);
             }
         }
 
