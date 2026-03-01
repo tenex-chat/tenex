@@ -4,6 +4,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { LLMService } from "@/llm/service";
 import type { ConversationEntry } from "@/conversations/types";
 import type { CompressionSegment } from "../compression-types";
+import type { ToolCallPart, ToolResultPart } from "ai";
 import { config } from "@/services/ConfigService";
 
 // Mock implementations
@@ -393,5 +394,432 @@ describe("CompressionService - fallback utility integration", () => {
     expect(segments[0].fromEventId).toBe("event-0");
     // The truncated count should leave roughly the small entries
     expect(segments[0].compressed).toContain("Truncated");
+  });
+});
+
+describe("CompressionService - tool content formatting", () => {
+  let conversationStore: ConversationStore;
+  let llmService: LLMService;
+  let service: CompressionService;
+  let originalGetConfig: typeof config.getConfig;
+  let capturedPrompt: string;
+
+  beforeEach(() => {
+    originalGetConfig = config.getConfig;
+    config.getConfig = mock(() => ({
+      compression: {
+        enabled: true,
+        tokenThreshold: 100,
+        tokenBudget: 80,
+        slidingWindowSize: 50,
+      },
+    })) as any;
+
+    conversationStore = createMockConversationStore();
+    llmService = createMockLLMService();
+    capturedPrompt = "";
+
+    // Mock generateObject to capture the prompt and return valid segments
+    (llmService as any).generateObject = mock(async (messages: any[]) => {
+      capturedPrompt = messages[0].content;
+      // Return segments that match the entry event IDs in the compressible range
+      return {
+        object: [{
+          fromEventId: "event-0",
+          toEventId: "event-39",
+          compressed: "Test compression",
+        }],
+      };
+    });
+
+    service = new CompressionService(conversationStore, llmService);
+  });
+
+  afterEach(() => {
+    config.getConfig = originalGetConfig;
+  });
+
+  it("should include tool call description and key args in prompt", async () => {
+    // 50 entries: first 40 are tool calls with descriptions, last 10 are text
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-call" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        toolData: [{
+          type: "tool-call" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_read",
+          input: {
+            path: "/src/services/InterventionService.ts",
+            description: "Read InterventionService for pattern reference",
+          },
+        }] as ToolCallPart[],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `User message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    expect(capturedPrompt).toContain("Read InterventionService for pattern reference");
+    expect(capturedPrompt).toContain("path: /src/services/InterventionService.ts");
+    expect(capturedPrompt).toContain("Tool: fs_read");
+  });
+
+  it("should fall back to JSON stringify for tool calls without description", async () => {
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-call" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        toolData: [{
+          type: "tool-call" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_grep",
+          input: { query: "some search term", glob: "**/*.ts" },
+        }] as ToolCallPart[],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `User message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    // Should contain JSON fallback with the input fields
+    expect(capturedPrompt).toContain("Tool: fs_grep");
+    expect(capturedPrompt).toContain("some search term");
+  });
+
+  it("should include tool result preview from output", async () => {
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-result" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        toolData: [{
+          type: "tool-result" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_read",
+          output: { type: "text" as const, value: "file contents here with important data" },
+        }] as ToolResultPart[],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `User message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    expect(capturedPrompt).toContain("Result[fs_read]:");
+    expect(capturedPrompt).toContain("file contents here with important data");
+  });
+
+  it("should truncate large tool data", async () => {
+    const longInput = { description: "x".repeat(300), path: "/some/path" };
+    const longOutput = { type: "text" as const, value: "y".repeat(500) };
+
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 20 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-call" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        toolData: [{
+          type: "tool-call" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_read",
+          input: longInput,
+        }] as ToolCallPart[],
+      })),
+      ...Array.from({ length: 20 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-result" as const,
+        timestamp: 1020 + i,
+        eventId: `event-${20 + i}`,
+        toolData: [{
+          type: "tool-result" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_read",
+          output: longOutput,
+        }] as ToolResultPart[],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `User message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    // Description should be truncated to 150 chars
+    expect(capturedPrompt).not.toContain("x".repeat(300));
+    // Result should be truncated to 200 chars
+    expect(capturedPrompt).not.toContain("y".repeat(500));
+    // But should contain truncated versions
+    expect(capturedPrompt).toContain("...");
+  });
+
+  it("should use humanReadable field when available instead of description+key-args", async () => {
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-call" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        humanReadable: "Reading /src/main.ts (Check entry point for initialization)",
+        toolData: [{
+          type: "tool-call" as const,
+          toolCallId: `call-${i}`,
+          toolName: "fs_read",
+          input: {
+            path: "/src/main.ts",
+            description: "Check entry point for initialization",
+          },
+        }] as ToolCallPart[],
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `User message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    // Should use the humanReadable string directly
+    expect(capturedPrompt).toContain("Reading /src/main.ts (Check entry point for initialization)");
+    // Should still include the tool name
+    expect(capturedPrompt).toContain("Tool: fs_read");
+  });
+});
+
+describe("CompressionService - previous context in prompt", () => {
+  let conversationStore: ConversationStore;
+  let llmService: LLMService;
+  let service: CompressionService;
+  let originalGetConfig: typeof config.getConfig;
+  let capturedPrompt: string;
+
+  beforeEach(() => {
+    originalGetConfig = config.getConfig;
+    config.getConfig = mock(() => ({
+      compression: {
+        enabled: true,
+        tokenThreshold: 100,
+        tokenBudget: 80,
+        slidingWindowSize: 50,
+      },
+    })) as any;
+
+    conversationStore = createMockConversationStore();
+    llmService = createMockLLMService();
+    capturedPrompt = "";
+
+    (llmService as any).generateObject = mock(async (messages: any[]) => {
+      capturedPrompt = messages[0].content;
+      return {
+        object: [{
+          fromEventId: "event-10",
+          toEventId: "event-39",
+          compressed: "Test compression",
+        }],
+      };
+    });
+
+    service = new CompressionService(conversationStore, llmService);
+  });
+
+  afterEach(() => {
+    config.getConfig = originalGetConfig;
+  });
+
+  it("should include previous compression segments in prompt", async () => {
+    const entries = createEntries(50);
+    conversationStore.getAllMessages = mock(() => entries);
+
+    // Provide existing segments — the last segment covers event-0 to event-9,
+    // so the candidate range starts at event-10
+    const existingSegments: CompressionSegment[] = [
+      {
+        fromEventId: "event-0",
+        toEventId: "event-9",
+        compressed: "User discussed project setup and configuration options.",
+        createdAt: Date.now() - 10000,
+        model: "test-model",
+      },
+    ];
+    conversationStore.loadCompressionLog = mock(async () => existingSegments);
+
+    // Budget must be high enough that rangeTokens >= overage (so LLM is called, not fallback)
+    await service.ensureUnderLimit("test-conv", 200);
+
+    expect(capturedPrompt).toContain("Previous conversation context (already compressed):");
+    expect(capturedPrompt).toContain("User discussed project setup and configuration options.");
+    expect(capturedPrompt).toContain("[Previous context 1]:");
+  });
+
+  it("should include at most 3 previous segments even when more exist", async () => {
+    const entries = createEntries(50);
+    conversationStore.getAllMessages = mock(() => entries);
+
+    const existingSegments: CompressionSegment[] = Array.from({ length: 5 }, (_, i) => ({
+      fromEventId: `old-event-${i * 2}`,
+      toEventId: `old-event-${i * 2 + 1}`,
+      compressed: `Segment ${i} summary content.`,
+      createdAt: Date.now() - (5 - i) * 10000,
+      model: "test-model",
+    }));
+    // The last segment's toEventId needs to match an entry for range selection to work
+    existingSegments[existingSegments.length - 1].toEventId = "event-9";
+    conversationStore.loadCompressionLog = mock(async () => existingSegments);
+
+    // Budget must be high enough that rangeTokens >= overage (so LLM is called, not fallback).
+    // Existing segments have non-matching fromEventIds so applySegmentsToEntries won't reduce
+    // effective tokens (~875). Range is entries 10-39 (~525 tokens). Budget 400 → overage 475 < 525.
+    await service.ensureUnderLimit("test-conv", 400);
+
+    // Should include last 3 segments (indices 2, 3, 4)
+    expect(capturedPrompt).toContain("Segment 2 summary content.");
+    expect(capturedPrompt).toContain("Segment 3 summary content.");
+    expect(capturedPrompt).toContain("Segment 4 summary content.");
+    // Should NOT include earlier segments (indices 0, 1)
+    expect(capturedPrompt).not.toContain("Segment 0 summary content.");
+    expect(capturedPrompt).not.toContain("Segment 1 summary content.");
+  });
+});
+
+describe("CompressionService - minimum impact bypass", () => {
+  let conversationStore: ConversationStore;
+  let llmService: LLMService;
+  let originalGetConfig: typeof config.getConfig;
+
+  beforeEach(() => {
+    originalGetConfig = config.getConfig;
+    conversationStore = createMockConversationStore();
+    llmService = createMockLLMService();
+    (llmService as any).generateObject = mock(async () => {
+      throw new Error("LLM should not be called");
+    });
+  });
+
+  afterEach(() => {
+    config.getConfig = originalGetConfig;
+  });
+
+  it("should skip to fallback when candidate range can't cover the overage", async () => {
+    config.getConfig = mock(() => ({
+      compression: {
+        enabled: true,
+        tokenThreshold: 100,
+        tokenBudget: 80,
+        slidingWindowSize: 50,
+      },
+    })) as any;
+
+    const service = new CompressionService(conversationStore, llmService);
+
+    // Create entries where most tokens are in the recent 20% window (kept entries).
+    // 50 entries total: first 40 are short (compressible range), last 10 are huge.
+    const entries: ConversationEntry[] = [
+      // Entries 0-39: short text (~15 chars each, total ~150 chars = ~38 tokens)
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: i % 2 === 0 ? "user" : "assistant",
+        content: `Msg ${i}`,
+        messageType: "text" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+      })),
+      // Entries 40-49: massive content (kept in recent window, causing overage)
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: "z".repeat(2000),
+        messageType: "text" as const,
+        timestamp: 1040 + i,
+        eventId: `event-${40 + i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+
+    // Budget = 80 tokens. The 10 massive entries alone are ~5000 tokens.
+    // The candidate range (entries 0-39) is ~38 tokens, which is < the overage.
+    // Even compressing the range to zero can't close the gap — skip to fallback.
+    await service.ensureUnderLimit("test-conv", 80);
+
+    // generateObject should NOT have been called
+    expect((llmService as any).generateObject).not.toHaveBeenCalled();
+    // But fallback should have been used
+    expect(conversationStore.appendCompressionSegments).toHaveBeenCalled();
+    const segments = conversationStore.appendCompressionSegments.mock.calls[0][1] as CompressionSegment[];
+    expect(segments[0].model).toBe("fallback-truncation");
+  });
+
+  it("should skip proactive compression on tiny candidate range", async () => {
+    config.getConfig = mock(() => ({
+      compression: {
+        enabled: true,
+        tokenThreshold: 50,
+        tokenBudget: 40,
+        slidingWindowSize: 50,
+      },
+    })) as any;
+
+    const service = new CompressionService(conversationStore, llmService);
+
+    // 30 entries of moderate length to get over threshold, but
+    // the candidate range (first ~24 entries minus last 20%) will be small
+    // We need entries that push total over threshold but keep the candidate range < 500 tokens
+    const entries: ConversationEntry[] = Array.from({ length: 30 }, (_, i) => ({
+      pubkey: i % 2 === 0 ? "user" : "assistant",
+      content: `Message ${i} short`,
+      messageType: "text" as const,
+      timestamp: 1000 + i,
+      eventId: `event-${i}`,
+    }));
+
+    conversationStore.getAllMessages = mock(() => entries);
+
+    await service.maybeCompressAsync("test-conv");
+    // Small wait for fire-and-forget
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // generateObject should NOT be called for such a tiny range
+    expect((llmService as any).generateObject).not.toHaveBeenCalled();
+    // No segments should be appended either (proactive skip, not fallback)
+    expect(conversationStore.appendCompressionSegments).not.toHaveBeenCalled();
   });
 });

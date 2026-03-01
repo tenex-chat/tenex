@@ -16,6 +16,14 @@ The following are **NEVER acceptable**:
 
 **If code isn't right, fix it properly or don't write it.**
 
+### THE RIGHT FIX, NOT THE FAST FIX
+The goal is **always** the right long-term, sustainable, idiomatic, coherent fix. Never the simplest or fastest one.
+- Speed and convenience are not values. Correctness, coherence, and long-term sustainability are.
+- Never hack things in the name of expediency.
+- Never frame a fix as "for now" — every change should be one you'd be comfortable maintaining for years.
+- If the right fix is hard, do the hard thing. If it's unclear, investigate until it's clear.
+- Technical debt is never an acceptable tradeoff for shipping faster.
+
 ### NO OVER-ENGINEERING
 - Don't add features beyond what's requested
 - Don't create abstractions for single-use code
@@ -202,8 +210,9 @@ export const rag_search = tool({
 ## Summary
 
 1. **No temporary solutions** - Do it right or don't do it
-2. **No backwards compatibility** - Clean breaks only
-3. **No over-engineering** - Minimal changes for the task
-4. **Respect layer boundaries** - Dependencies flow down
-5. **Use `nostr/` wrappers** - Keep NDK publishing/decoding inside `src/nostr`
-6. **Delete unused code** - Don't comment or underscore it
+2. **Right fix, not fast fix** - Sustainable, idiomatic, coherent — never expedient
+3. **No backwards compatibility** - Clean breaks only
+4. **No over-engineering** - Minimal changes for the task
+5. **Respect layer boundaries** - Dependencies flow down
+6. **Use `nostr/` wrappers** - Keep NDK publishing/decoding inside `src/nostr`
+7. **Delete unused code** - Don't comment or underscore it

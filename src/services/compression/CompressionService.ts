@@ -8,6 +8,7 @@ import { config } from "@/services/ConfigService";
 import type {
   CompressionSegment,
 } from "./compression-types.js";
+import type { ToolCallPart, ToolResultPart } from "ai";
 import {
   CompressionSegmentsSchema,
   type CompressionSegmentInput,
@@ -22,6 +23,65 @@ import {
 } from "./compression-utils.js";
 
 const tracer = trace.getTracer("tenex.compression");
+
+function formatToolCallForCompression(tool: ToolCallPart): string {
+  const input = tool.input as Record<string, unknown> | null;
+  if (!input) return `Tool: ${tool.toolName}`;
+
+  // Prioritize description — it's the agent's own summary of intent
+  if (typeof input.description === "string" && input.description.length > 0) {
+    const keyArgs: string[] = [];
+    for (const key of ["path", "pattern", "query", "file_path", "glob"]) {
+      if (typeof input[key] === "string") {
+        keyArgs.push(`${key}: ${(input[key] as string).substring(0, 80)}`);
+      }
+    }
+    const argsSuffix = keyArgs.length > 0 ? ` (${keyArgs.join(", ")})` : "";
+    const desc = input.description as string;
+    return `Tool: ${tool.toolName} — ${desc.substring(0, 150)}${argsSuffix}`;
+  }
+
+  // Fallback: truncated JSON of input
+  const json = JSON.stringify(input);
+  return `Tool: ${tool.toolName} — ${json.substring(0, 200)}${json.length > 200 ? "..." : ""}`;
+}
+
+function extractToolResultPreview(output: unknown, maxLen: number): string {
+  if (!output) return "(empty)";
+
+  if (typeof output === "string") {
+    return output.substring(0, maxLen) + (output.length > maxLen ? "..." : "");
+  }
+
+  if (typeof output === "object" && output !== null) {
+    // ToolResultOutput union: {type, value} or {type: 'execution-denied'}
+    if ("type" in output) {
+      const typed = output as { type: string; value?: unknown; reason?: string };
+      if (typed.type === "execution-denied") {
+        return `[execution-denied${typed.reason ? `: ${typed.reason}` : ""}]`;
+      }
+      if ("value" in typed) {
+        const val = typeof typed.value === "string"
+          ? typed.value
+          : JSON.stringify(typed.value) ?? "";
+        return val.substring(0, maxLen) + (val.length > maxLen ? "..." : "");
+      }
+    }
+
+    // Object with plain .value field (legacy / defensive)
+    if ("value" in output) {
+      const val = (output as { value: unknown }).value;
+      const str = typeof val === "string" ? val : JSON.stringify(val) ?? "";
+      return str.substring(0, maxLen) + (str.length > maxLen ? "..." : "");
+    }
+
+    // Arbitrary object
+    const json = JSON.stringify(output) ?? "";
+    return json.substring(0, maxLen) + (json.length > maxLen ? "..." : "");
+  }
+
+  return String(output).substring(0, maxLen);
+}
 
 /**
  * CompressionService - Orchestrates conversation history compression.
@@ -162,10 +222,45 @@ export class CompressionService {
           return;
         }
 
+        // Compute range impact before attempting LLM call
+        const rangeEntries = entries.slice(range.startIndex, range.endIndex);
+        const rangeTokens = estimateTokensFromEntries(rangeEntries);
+
+        // Skip LLM when range can't meaningfully help
+        if (blocking) {
+          const tokenOverage = currentTokens - effectiveBudget;
+          if (rangeTokens < tokenOverage) {
+            // Even compressing the entire range to zero can't close the gap
+            span.addEvent("compression.skip_to_fallback", {
+              "reason": "range_too_small_for_overage",
+              "range.tokens": rangeTokens,
+              "token.overage": tokenOverage,
+            });
+            await this.useFallback(
+              conversationId,
+              entries,
+              compressionConfig.slidingWindowSize,
+              span,
+              effectiveBudget
+            );
+            span.setStatus({ code: SpanStatusCode.OK });
+            return;
+          }
+        } else {
+          // Proactive mode: skip if range is tiny (not worth an LLM call)
+          if (rangeTokens < 500) {
+            span.addEvent("compression.skip_proactive", {
+              "reason": "range_too_small",
+              "range.tokens": rangeTokens,
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+            return;
+          }
+        }
+
         // Attempt LLM compression
         try {
-          const rangeEntries = entries.slice(range.startIndex, range.endIndex);
-          const newSegments = await this.compressEntries(rangeEntries);
+          const newSegments = await this.compressEntries(rangeEntries, existingSegments);
 
           // Emit telemetry for successful summary generation
           span.addEvent("compression.summary_generated", {
@@ -267,7 +362,8 @@ export class CompressionService {
    * Compress a range of entries using LLM.
    */
   private async compressEntries(
-    entries: ConversationEntry[]
+    entries: ConversationEntry[],
+    existingSegments: CompressionSegment[]
   ): Promise<CompressionSegment[]> {
     return tracer.startActiveSpan(
       "compression.llm_compress",
@@ -289,16 +385,17 @@ export class CompressionService {
               if (e.toolData && e.toolData.length > 0) {
                 const toolSummary = e.toolData
                   .map((tool) => {
-                    if ('toolName' in tool) {
-                      // ToolCallPart
-                      return `Tool: ${tool.toolName}`;
-                    } else if ('toolCallId' in tool) {
-                      // ToolResultPart - cast to any to avoid type narrowing issues
-                      const toolResult = tool as any;
-                      const resultPreview = typeof toolResult.result === 'string'
-                        ? toolResult.result.substring(0, 100)
-                        : JSON.stringify(toolResult.result).substring(0, 100);
-                      return `Result: ${resultPreview}${resultPreview.length >= 100 ? '...' : ''}`;
+                    if (tool.type === "tool-call") {
+                      // Prefer pre-computed humanReadable from the tool's own formatter
+                      if (e.humanReadable) {
+                        return `Tool: ${(tool as ToolCallPart).toolName} — ${e.humanReadable}`;
+                      }
+                      return formatToolCallForCompression(tool as ToolCallPart);
+                    } else if (tool.type === "tool-result") {
+                      const tr = tool as ToolResultPart;
+                      const output = tr.output as unknown;
+                      const preview = extractToolResultPreview(output, 200);
+                      return `Result[${tr.toolName}]: ${preview}`;
                     }
                     return '';
                   })
@@ -322,6 +419,16 @@ export class CompressionService {
             throw new Error("No eventIds found in entries to compress");
           }
 
+          // Build context preamble from last 3 existing segments
+          let contextPreamble = "";
+          if (existingSegments.length > 0) {
+            const recentSegments = existingSegments.slice(-3);
+            const contextLines = recentSegments.map(
+              (seg, i) => `[Previous context ${i + 1}]: ${seg.compressed}`
+            );
+            contextPreamble = `Previous conversation context (already compressed):\n${contextLines.join("\n")}\n\n`;
+          }
+
           // Call LLM to compress
           const result = await this.effectiveLlmService.generateObject(
             [
@@ -334,7 +441,7 @@ For each segment, provide:
 - toEventId: ending message event ID
 - compressed: a concise summary (2-4 sentences) of the key points
 
-Messages to compress:
+${contextPreamble}Messages to compress:
 ${formattedEntries}
 
 Event IDs in order: ${eventIds.join(", ")}

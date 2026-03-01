@@ -77,6 +77,10 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             event.args
         );
 
+        // Generate human-readable summary from the tool's own formatter
+        const toolDef = toolsObject[event.toolName];
+        const humanReadable = toolDef?.getHumanReadableContent?.(event.args ?? {});
+
         conversationStore.addMessage({
             pubkey: context.agent.pubkey,
             ral: ralNumber,
@@ -90,6 +94,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                     input: event.args ?? {},
                 },
             ] as ToolCallPart[],
+            ...(humanReadable ? { humanReadable } : {}),
         });
 
         const toolEvent = await toolTracker.trackExecution({
