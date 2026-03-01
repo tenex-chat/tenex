@@ -372,6 +372,46 @@ export class AgentDispatchService {
                     "ral.is_streaming": activeRal.isStreaming,
                 });
             }
+
+            // IMMEDIATE MARKER UPDATE: Update delegation markers in ConversationStore
+            // right away, BEFORE the debounce. This ensures that if the executor's
+            // supervision re-engages and recompiles messages during the debounce window,
+            // it sees "DELEGATION COMPLETED" instead of stale "DELEGATION IN PROGRESS".
+            // The debounce still handles re-execution triggering and clearCompletedDelegations.
+            if (activeRal) {
+                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                    delegationTarget.agent.pubkey,
+                    delegationTarget.conversationId,
+                    activeRal.ralNumber
+                );
+
+                const parentStore = ConversationStore.get(delegationTarget.conversationId);
+                if (parentStore && completedDelegations.length > 0) {
+                    let markersUpdated = 0;
+                    for (const completion of completedDelegations) {
+                        const updated = parentStore.updateDelegationMarker(
+                            completion.delegationConversationId,
+                            {
+                                status: completion.status,
+                                completedAt: completion.completedAt,
+                                abortReason: completion.status === "aborted" ? completion.abortReason : undefined,
+                            }
+                        );
+                        if (updated) markersUpdated++;
+                    }
+
+                    if (markersUpdated > 0) {
+                        await parentStore.save();
+                    }
+
+                    span.addEvent("dispatch.markers_updated_before_debounce", {
+                        "ral.number": activeRal.ralNumber,
+                        "delegation.completed_count": completedDelegations.length,
+                        "markers.updated_count": markersUpdated,
+                    });
+                }
+            }
+
             const debounceKey = `${delegationTarget.agent.pubkey}:${delegationTarget.conversationId}`;
             const debounceSequence = await this.waitForDelegationDebounce(debounceKey, span);
             if (this.delegationDebounceSequence.get(debounceKey) !== debounceSequence) {
