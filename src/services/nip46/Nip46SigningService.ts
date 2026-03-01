@@ -89,7 +89,7 @@ export class Nip46SigningService {
     isEnabled(): boolean {
         try {
             const cfg = config.getConfig();
-            return cfg.nip46?.enabled === true;
+            return cfg.nip46?.enabled !== false;
         } catch {
             return false;
         }
