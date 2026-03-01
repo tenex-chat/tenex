@@ -57,27 +57,13 @@ export const agentsMdGuidanceFragment: PromptFragment<AgentsMdGuidanceArgs> = {
 - Deeper, more specific AGENTS.md files override general root instructions.
 
 ### Writing AGENTS.md Files
-When working in a directory that needs specific agent guidance:
-1. Create an AGENTS.md file in that directory.
-2. Focus on **executable commands** (test/build) and **strict conventions**.
-3. Do not duplicate generic info; focus on what is unique to this directory.
-
-### AGENTS.md Format
-\`\`\`markdown
-# Directory Context
-Specific architectural details or business logic for this directory.
-
-## Commands
-- Test: \`npm test path/to/dir\`
-- Lint: \`npm run lint:specific\`
-
-## Conventions
-- Code Style: Functional patterns preferred
-- Naming: CamelCase for files, PascalCase for classes
-
-## Related
-- [API Docs](./docs/api.md)
-\`\`\``);
+When creating or updating an AGENTS.md file:
+1. **Maximum 50 lines.** If it's longer, you're including too much. Cut aggressively.
+2. **No code examples.** Don't include correct/incorrect patterns, usage snippets, or testing templates. Just state the rule in plain English.
+3. **No boilerplate sections.** Don't add Anti-Patterns, Testing, Dependencies, or Related sections. Only include what's genuinely unique to this directory.
+4. **Don't repeat parent info.** Import patterns, naming conventions, layer rules — if it's in a parent directory's AGENTS.md, don't restate it.
+5. **List actual files.** Name the real files that exist, not idealized directory trees. Keep it to key files only, not every file.
+6. **State rules, not ideology.** "Tools delegate to services" is a rule. A 10-line example showing correct vs incorrect delegation is ideology.`);
 
         // If root AGENTS.md content is available and short, include it
         if (rootAgentsMdContent && rootAgentsMdContent.length < MAX_ROOT_CONTENT_LENGTH_FOR_SYSTEM_PROMPT) {

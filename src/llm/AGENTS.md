@@ -1,193 +1,32 @@
-# LLM Layer (Layer 2)
+# llm/ — LLM Layer (Layer 2)
 
-## Directory Purpose
-Abstraction layer for Large Language Model providers. Manages provider initialization, request pipelines, model selection, and response validation. **Agents and services never talk to provider SDKs directly** - this module ensures credentials, retries, and middleware are consistent.
+Abstraction layer for LLM providers. Agents and services never talk to provider SDKs directly.
 
-## Architecture Overview
+## Key Files
 
-```
-llm/
-├── LLMServiceFactory.ts   # Provider initialization
-├── service.ts             # Core LLM service
-├── LLMConfigEditor.ts     # CLI config editing
-│
-├── providers/
-│   ├── base/              # Base provider interfaces
-│   ├── standard/          # Standard providers (OpenAI, Claude, etc.)
-│   ├── agent/             # Agent-specific adapters
-│   │   ├── ClaudeCodeToolsAdapter.ts
-│   │   ├── ClaudeCodeProvider.ts
-│   │   ├── CodexAppServerToolsAdapter.ts
-│   │   └── CodexAppServerProvider.ts
-│   └── registry/          # Provider registration
-│
-├── middleware/
-│   └── ...
-│
-├── utils/
-│   └── ModelSelector.ts   # Model selection logic
-│
-├── meta/                  # Provider metadata
-└── __tests__/
-```
+- `LLMServiceFactory.ts` — Provider initialization and configuration
+- `service.ts` — Core LLM service orchestration
+- `ChunkHandler.ts` — Stream chunk processing
+- `FinishHandler.ts` — Stream completion handling
+- `StreamPublisher.ts` — Publishes stream output to Nostr
+- `MessageProcessor.ts` — Message pre-processing
+- `LLMConfigEditor.ts` — CLI config editing for LLM settings
+- `TracingUtils.ts` — LLM call tracing
+- `chunk-validators.ts` — Validates incoming stream chunks
 
-## Commands
+## Subdirectories
 
-```bash
-# Test LLM module
-bun test src/llm/
+- `providers/standard/` — Standard providers (Claude, OpenAI, OpenRouter, Ollama, Gemini)
+- `providers/agent/` — Agent-specific providers (ClaudeCode, CodexAppServer) with tool adapters
+- `providers/registry/` — Provider registration
+- `providers/base/` — Base provider interfaces
+- `middleware/` — Request/response middleware pipeline
+- `meta/` — Provider metadata
+- `utils/` — ModelSelector and other utilities
 
-# Test specific provider
-bun test src/llm/providers/
+## Rules
 
-# Test with coverage
-bun test --coverage src/llm/
-```
-
-## Key Components
-
-### LLMServiceFactory
-Creates and configures LLM provider instances:
-
-```typescript
-import { LLMServiceFactory } from "@/llm/LLMServiceFactory";
-
-const provider = await LLMServiceFactory.create({
-  provider: "claude",
-  model: "claude-sonnet-4-20250514"
-});
-```
-
-### Provider Types
-
-**Standard Providers** (`providers/standard/`):
-- Claude (Anthropic)
-- OpenAI
-- OpenRouter
-- Ollama
-- Gemini
-
-**Agent-Specific Providers** (`providers/agent/`):
-- **ClaudeCodeToolsAdapter**: Converts TENEX tools to SDK MCP format for Claude Code (in-process)
-- **ClaudeCodeProvider**: Claude Code agent provider with built-in tools and MCP support
-- **CodexAppServerToolsAdapter**: Converts TENEX tools to SDK MCP format for Codex App Server (in-process)
-- **CodexAppServerProvider**: Codex App Server agent provider with mid-execution injection support
-
-### Model Selection
-```typescript
-import { ModelSelector } from "@/llm/utils/ModelSelector";
-
-const model = ModelSelector.select({
-  task: "complex-reasoning",
-  budget: "standard"
-});
-```
-
-
-## Conventions
-
-### Provider Implementation
-All providers must implement the base interface:
-
-```typescript
-import { LLMProvider } from "@/llm/providers/base";
-
-class MyProvider implements LLMProvider {
-  async complete(messages: Message[]): Promise<Response> { }
-  async stream(messages: Message[]): AsyncIterable<Chunk> { }
-}
-```
-
-### Tool Adaptation Pattern
-
-**For Claude Code** (in-process):
-```typescript
-// ClaudeCodeToolsAdapter converts TENEX tools to MCP format
-const mcpTools = adapter.convertTools(tenexTools);
-```
-
-**For Codex App Server** (in-process):
-```typescript
-// CodexAppServerToolsAdapter converts TENEX tools to MCP format
-const mcpTools = CodexAppServerToolsAdapter.createSdkMcpServer(tenexTools, options);
-```
-
-### Adding New Providers
-
-1. Create provider in `providers/standard/` or `providers/agent/`
-2. Implement `LLMProvider` interface
-3. Register in `providers/registry/`
-4. Add configuration schema
-5. Update `LLMServiceFactory`
-
-## Anti-Patterns
-
-```typescript
-// REJECT: Direct SDK access outside this module
-import Anthropic from "@anthropic-ai/sdk";
-const client = new Anthropic();  // Use LLMServiceFactory instead
-
-// REJECT: Hardcoded API keys
-const apiKey = "sk-...";  // Use ConfigService
-
-// REJECT: Provider-specific code in agents/
-if (provider === "claude") {
-  // Special handling
-}
-// Provider differences should be abstracted here
-
-// REJECT: Inline retry logic
-for (let i = 0; i < 3; i++) {
-  try { await llm.complete(); break; }
-  catch { continue; }
-}
-// Retries are handled by middleware
-```
-
-## Testing
-
-Use mock providers from `src/test-utils/mock-llm/`:
-
-```typescript
-import { createMockLLMProvider } from "@/test-utils/mock-llm";
-
-describe("MyFeature", () => {
-  it("should handle LLM response", async () => {
-    const mockLLM = createMockLLMProvider({
-      response: "Mocked response"
-    });
-
-    const result = await myFeature.process(mockLLM);
-    expect(result).toBe("expected");
-  });
-});
-```
-
-## Dependencies
-
-**Imports from:**
-- `utils/` - Utility functions
-- `lib/` - Pure utilities
-- `events/` - Event schemas
-- External: AI SDK packages, provider SDKs
-
-**Imported by:**
-- `agents/` - Agent execution
-- `services/` - LLM operations registry
-- `commands/` - Setup commands
-
-## Environment Variables
-
-Providers read credentials from environment:
-- `ANTHROPIC_API_KEY` - Claude
-- `OPENAI_API_KEY` - OpenAI
-- `OPENROUTER_API_KEY` - OpenRouter
-- `GEMINI_API_KEY` - Gemini
-
-Or from `~/.tenex/llms.json` via ConfigService.
-
-## Related
-- [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md) - Architecture reference
-- `../agents/` - Agent execution (consumer)
-- `../services/ConfigService.ts` - Configuration
-- `../tools/` - Tool definitions for MCP adapters
+- All providers implement the base provider interface from `providers/base/`
+- Provider-specific code stays in this module — no `if (provider === "claude")` in agents/
+- Retries and middleware are handled by the middleware pipeline, not inline
+- Credentials come from environment variables or `~/.tenex/llms.json` via ConfigService
