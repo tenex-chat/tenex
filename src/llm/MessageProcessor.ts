@@ -1,5 +1,4 @@
 import type { ModelMessage } from "ai";
-import { logger } from "@/utils/logger";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 
 /**
@@ -34,29 +33,6 @@ export function addCacheControl(messages: ModelMessage[], provider: string): Mod
 }
 
 /**
- * Strip trailing assistant messages from the message array.
- * After history compression, the last message can end up being an assistant turn,
- * which causes API rejections (e.g., Anthropic requires the last message to be user or tool).
- * The model will naturally regenerate from the compressed context.
- */
-export function stripTrailingAssistantMessages(messages: ModelMessage[]): ModelMessage[] {
-    let end = messages.length;
-    while (end > 0 && messages[end - 1].role === "assistant") {
-        end--;
-    }
-
-    if (end < messages.length) {
-        const stripped = messages.length - end;
-        logger.warn(
-            `Stripped ${stripped} trailing assistant message(s) before API call — likely caused by history compression`,
-        );
-        return messages.slice(0, end);
-    }
-
-    return messages;
-}
-
-/**
  * Prepare messages for sending to the LLM.
  * Handles provider-specific transformations.
  */
@@ -67,8 +43,6 @@ export function prepareMessagesForRequest(messages: ModelMessage[], provider: st
     if (provider === PROVIDER_IDS.CLAUDE_CODE) {
         processedMessages = messages.filter((m) => m.role !== "system");
     }
-
-    processedMessages = stripTrailingAssistantMessages(processedMessages);
 
     return addCacheControl(processedMessages, provider);
 }
