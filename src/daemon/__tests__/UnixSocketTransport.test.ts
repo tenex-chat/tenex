@@ -67,4 +67,65 @@ describe("UnixSocketTransport", () => {
             data: {},
         });
     });
+
+    test("broadcasts to multiple clients", async () => {
+        await transport.start();
+
+        const client1 = net.createConnection(testSocketPath);
+        await new Promise<void>((resolve) => client1.on("connect", resolve));
+
+        const client2 = net.createConnection(testSocketPath);
+        await new Promise<void>((resolve) => client2.on("connect", resolve));
+
+        // Both clients should receive the chunk
+        const data1 = new Promise<string>((resolve) => {
+            client1.once("data", (data) => resolve(data.toString()));
+        });
+        const data2 = new Promise<string>((resolve) => {
+            client2.once("data", (data) => resolve(data.toString()));
+        });
+
+        transport.write({
+            agent_pubkey: "abc123",
+            conversation_id: "def456",
+            data: { type: "text-delta", textDelta: "Hello" },
+        });
+
+        const [received1, received2] = await Promise.all([data1, data2]);
+        expect(JSON.parse(received1.trim()).data.textDelta).toBe("Hello");
+        expect(JSON.parse(received2.trim()).data.textDelta).toBe("Hello");
+
+        client1.destroy();
+        client2.destroy();
+    });
+
+    test("continues broadcasting after one client disconnects", async () => {
+        await transport.start();
+
+        const client1 = net.createConnection(testSocketPath);
+        await new Promise<void>((resolve) => client1.on("connect", resolve));
+
+        const client2 = net.createConnection(testSocketPath);
+        await new Promise<void>((resolve) => client2.on("connect", resolve));
+
+        // Disconnect client1
+        client1.destroy();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Client2 should still receive chunks
+        const data2 = new Promise<string>((resolve) => {
+            client2.once("data", (data) => resolve(data.toString()));
+        });
+
+        transport.write({
+            agent_pubkey: "abc123",
+            conversation_id: "def456",
+            data: { type: "text-delta", textDelta: "Still here" },
+        });
+
+        const received = await data2;
+        expect(JSON.parse(received.trim()).data.textDelta).toBe("Still here");
+
+        client2.destroy();
+    });
 });

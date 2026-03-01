@@ -29,11 +29,11 @@ type SocketFileInfoResult =
 
 /**
  * Unix domain socket transport for local streaming
- * Single client connection model
+ * Multi-client broadcast model — all connected clients receive every chunk
  */
 export class UnixSocketTransport implements StreamTransport {
     private server: net.Server | null = null;
-    private client: net.Socket | null = null;
+    private clients: Set<net.Socket> = new Set();
     private socketPath: string;
 
     constructor(socketPath?: string) {
@@ -73,37 +73,27 @@ export class UnixSocketTransport implements StreamTransport {
 
         return new Promise((resolve, reject) => {
             this.server = net.createServer((socket) => {
+                this.clients.add(socket);
                 logger.info(`${LOG_PREFIX} Client connected to streaming socket`, {
                     socketPath: this.socketPath,
+                    totalClients: this.clients.size,
                 });
 
-                // Only one client at a time
-                if (this.client) {
-                    logger.warn(`${LOG_PREFIX} Replacing existing client connection`, {
-                        socketPath: this.socketPath,
-                    });
-                    this.client.destroy();
-                }
-
-                this.client = socket;
-
                 socket.on("close", () => {
+                    this.clients.delete(socket);
                     logger.info(`${LOG_PREFIX} Client disconnected from streaming socket`, {
                         socketPath: this.socketPath,
+                        totalClients: this.clients.size,
                     });
-                    if (this.client === socket) {
-                        this.client = null;
-                    }
                 });
 
                 socket.on("error", (err) => {
+                    this.clients.delete(socket);
                     logger.error(`${LOG_PREFIX} Socket client error`, {
                         error: err.message,
                         socketPath: this.socketPath,
+                        totalClients: this.clients.size,
                     });
-                    if (this.client === socket) {
-                        this.client = null;
-                    }
                 });
             });
 
@@ -125,38 +115,43 @@ export class UnixSocketTransport implements StreamTransport {
     }
 
     write(chunk: LocalStreamChunk): void {
-        if (!this.client) return;
+        if (this.clients.size === 0) return;
 
-        try {
-            const line = JSON.stringify(chunk) + "\n";
-            this.client.write(line);
-        } catch (err) {
-            logger.error(`${LOG_PREFIX} Failed to write chunk`, {
-                error: err instanceof Error ? err.message : String(err),
-                socketPath: this.socketPath,
-            });
+        const line = JSON.stringify(chunk) + "\n";
+        for (const client of this.clients) {
+            try {
+                client.write(line);
+            } catch (err) {
+                logger.error(`${LOG_PREFIX} Failed to write chunk to client, removing`, {
+                    error: err instanceof Error ? err.message : String(err),
+                    socketPath: this.socketPath,
+                });
+                this.clients.delete(client);
+            }
         }
     }
 
     isConnected(): boolean {
-        return this.client !== null && !this.client.destroyed;
+        return this.clients.size > 0;
     }
 
     async stop(): Promise<void> {
         const callerContext = getCallerContext();
         logger.info(`${LOG_PREFIX} stop() called`, {
             socketPath: this.socketPath,
-            hasClient: !!this.client,
+            clientCount: this.clients.size,
             hasServer: !!this.server,
             ...(callerContext && { callerContext }),
         });
 
-        if (this.client) {
-            logger.info(`${LOG_PREFIX} Destroying client connection in stop()`, {
+        if (this.clients.size > 0) {
+            logger.info(`${LOG_PREFIX} Destroying ${this.clients.size} client connection(s) in stop()`, {
                 socketPath: this.socketPath,
             });
-            this.client.destroy();
-            this.client = null;
+            for (const client of this.clients) {
+                client.destroy();
+            }
+            this.clients.clear();
         }
 
         return new Promise((resolve) => {
