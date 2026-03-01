@@ -196,13 +196,20 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             throw new Error("No provider available for model creation");
         }
 
-        // Build middleware chain
+        return this.wrapWithMiddleware(baseModel);
+    }
+
+    /**
+     * Wrap a base model with the standard middleware chain.
+     * Used by both getLanguageModel() and createLanguageModelFromRegistry()
+     * so all call paths get sanitization and reasoning extraction.
+     */
+    private wrapWithMiddleware(baseModel: LanguageModel): LanguageModel {
         const middlewares: LanguageModelMiddleware[] = [];
 
         // Message sanitizer — fix message array issues before every API call
         // Must be first so it sanitizes before anything else processes messages
         middlewares.push(createMessageSanitizerMiddleware());
-
 
         // Extract reasoning from thinking tags
         middlewares.push(
@@ -213,15 +220,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             })
         );
 
-        // Wrap with middlewares
-        // Note: Type assertion needed because AI SDK v6 beta uses LanguageModelV3 internally
-        // but stable providers export LanguageModel (union type). This is a beta compatibility issue.
-        const wrappedModel = wrapLanguageModel({
+        return wrapLanguageModel({
             model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
             middleware: middlewares,
         });
-
-        return wrappedModel;
     }
 
     async stream(
@@ -551,15 +553,17 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     }
 
     /**
-     * Create a language model instance for dynamic model switching.
-     * Used by AgentExecutor when the change_model tool switches variants mid-run.
+     * Create a wrapped language model for dynamic model switching.
+     * Wraps the registry model with the same middleware chain
+     * (sanitizer, reasoning extraction) used by all other call paths.
      */
-    static createLanguageModelFromRegistry(
+    createLanguageModelFromRegistry(
         provider: string,
         model: string,
         registry: ProviderRegistryProvider
     ): LanguageModel {
-        return registry.languageModel(`${provider}:${model}`);
+        const baseModel = registry.languageModel(`${provider}:${model}`);
+        return this.wrapWithMiddleware(baseModel);
     }
 
     /**

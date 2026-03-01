@@ -6,7 +6,6 @@
  */
 
 import { formatAnyError } from "@/lib/error-formatter";
-import { LLMService } from "@/llm/service";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
@@ -14,7 +13,7 @@ import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
-import type { LanguageModel, ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
 import { MessageCompiler } from "./MessageCompiler";
@@ -53,7 +52,11 @@ export interface StepData {
  */
 export interface PrepareStepConfig {
     context: FullRuntimeContext;
-    llmService: { provider: string; updateUsageFromSteps: (steps: StepData["steps"]) => void };
+    llmService: {
+        provider: string;
+        updateUsageFromSteps: (steps: StepData["steps"]) => void;
+        createLanguageModelFromRegistry: (provider: string, model: string, registry: ProviderRegistryProvider) => LanguageModel;
+    };
     messageCompiler: MessageCompiler;
     ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     nudgeContent: string;
@@ -269,7 +272,7 @@ export function createPrepareStep(
 
                             try {
                                 const registry = llmServiceFactory.getRegistry();
-                                const newModel = LLMService.createLanguageModelFromRegistry(
+                                const newModel = llmService.createLanguageModelFromRegistry(
                                     newLlmConfig.provider,
                                     newLlmConfig.model,
                                     registry
