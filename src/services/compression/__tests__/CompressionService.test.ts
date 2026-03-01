@@ -339,4 +339,59 @@ describe("CompressionService - fallback utility integration", () => {
     expect(segments[0].compressed).toContain("Truncated");
     expect(segments[0].model).toBe("fallback-truncation");
   });
+
+  it("few entries with massive token content should truncate via token-aware fallback", async () => {
+    const conversationStore = createMockConversationStore();
+    const llmService = createMockLLMService();
+
+    // Use a generous slidingWindowSize (50) — but a tight token budget
+    config.getConfig = mock(() => ({
+      compression: {
+        enabled: true,
+        tokenThreshold: 50000,
+        tokenBudget: 40000,
+        slidingWindowSize: 50,
+      },
+    })) as any;
+
+    const service = new CompressionService(conversationStore, llmService);
+
+    // 10 entries, some small and some massive (simulating tool results with huge content)
+    const entries: ConversationEntry[] = [
+      // Entries 0-4: massive tool results (~100K tokens each via toolData)
+      ...Array.from({ length: 5 }, (_, i) => ({
+        pubkey: "assistant",
+        content: `Tool result ${i}`,
+        messageType: "tool-result" as const,
+        timestamp: 1000 + i,
+        eventId: `event-${i}`,
+        toolData: [{ toolCallId: `call-${i}`, type: "tool-result" as const, result: "x".repeat(400000) }] as any,
+      })),
+      // Entries 5-9: small text messages (~10 tokens each)
+      ...Array.from({ length: 5 }, (_, i) => ({
+        pubkey: "user",
+        content: `Short message ${i + 5}`,
+        messageType: "text" as const,
+        timestamp: 1005 + i,
+        eventId: `event-${i + 5}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+
+    // Budget of 200 tokens — the 5 small entries (~50 tokens) fit,
+    // but the massive entries don't. Without token-aware fallback,
+    // slidingWindowSize=50 > 10 entries, so createFallbackSegmentForEntries returns null.
+    // With token-aware fallback, effectiveWindow = min(50, ~5) = 5, truncating the massive entries.
+    await service.ensureUnderLimit("test-conv", 200);
+
+    expect(conversationStore.appendCompressionSegments).toHaveBeenCalled();
+    const segments = conversationStore.appendCompressionSegments.mock.calls[0][1] as CompressionSegment[];
+    expect(segments.length).toBe(1);
+    expect(segments[0].model).toBe("fallback-truncation");
+    // The segment should cover the heavy entries at the beginning
+    expect(segments[0].fromEventId).toBe("event-0");
+    // The truncated count should leave roughly the small entries
+    expect(segments[0].compressed).toContain("Truncated");
+  });
 });

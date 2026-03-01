@@ -437,6 +437,18 @@ export function applySegmentsToEntries(
 }
 
 /**
+ * Estimate the character count for a single conversation entry.
+ * Accounts for both text content and tool payloads (toolData).
+ */
+function estimateEntryChars(entry: ConversationEntry): number {
+  let chars = entry.content.length;
+  if (entry.toolData && entry.toolData.length > 0) {
+    chars += JSON.stringify(entry.toolData).length;
+  }
+  return chars;
+}
+
+/**
  * Estimate token count for conversation entries using rough heuristic (chars/4).
  * This is faster than actual tokenization and sufficient for compression decisions.
  *
@@ -447,18 +459,35 @@ export function applySegmentsToEntries(
  * @returns Estimated token count
  */
 export function estimateTokensFromEntries(entries: ConversationEntry[]): number {
-  const totalChars = entries.reduce((sum, entry) => {
-    let entryChars = entry.content.length;
-
-    // Account for tool payloads (tool-call/tool-result)
-    if (entry.toolData && entry.toolData.length > 0) {
-      const toolDataSize = JSON.stringify(entry.toolData).length;
-      entryChars += toolDataSize;
-    }
-
-    return sum + entryChars;
-  }, 0);
+  const totalChars = entries.reduce((sum, entry) => sum + estimateEntryChars(entry), 0);
   return Math.ceil(totalChars / 4);
+}
+
+/**
+ * Compute how many trailing entries fit within a token budget.
+ * Walks entries backwards, accumulating estimated tokens, and stops when the budget is exhausted.
+ *
+ * @param entries - All conversation entries
+ * @param tokenBudget - Maximum tokens the trailing window should contain
+ * @returns Number of trailing entries that fit within the budget (minimum 1)
+ */
+export function computeTokenAwareWindowSize(
+  entries: ConversationEntry[],
+  tokenBudget: number
+): number {
+  let accumulatedTokens = 0;
+  let count = 0;
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entryTokens = Math.ceil(estimateEntryChars(entries[i]) / 4);
+    if (accumulatedTokens + entryTokens > tokenBudget && count > 0) {
+      break;
+    }
+    accumulatedTokens += entryTokens;
+    count++;
+  }
+
+  return Math.max(1, count);
 }
 
 /**

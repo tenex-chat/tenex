@@ -13,6 +13,7 @@ import {
   applySegmentsToEntries,
   truncateSlidingWindow,
   truncateSlidingWindowEntries,
+  computeTokenAwareWindowSize,
 } from "../compression-utils";
 
 describe("estimateTokens", () => {
@@ -578,6 +579,86 @@ describe("createFallbackSegmentForEntries", async () => {
     // toEventId should be at or before index 49 (truncateCount - 1)
     const toIndex = parseInt(segment!.toEventId.split("-")[1]);
     expect(toIndex).toBeLessThan(50);
+  });
+});
+
+describe("computeTokenAwareWindowSize", () => {
+  it("should return correct count for entries with uniform token sizes", () => {
+    // Each entry: 20 chars content = 5 tokens
+    const entries: ConversationEntry[] = Array.from({ length: 10 }, (_, i) => ({
+      pubkey: "user",
+      content: "a".repeat(20),
+      messageType: "text",
+      timestamp: 1000 + i,
+    }));
+    // Budget of 25 tokens = 5 entries × 5 tokens
+    const windowSize = computeTokenAwareWindowSize(entries, 25);
+    expect(windowSize).toBe(5);
+  });
+
+  it("should skip massive entry and keep smaller trailing ones", () => {
+    const smallEntry: ConversationEntry = {
+      pubkey: "user",
+      content: "a".repeat(40), // 10 tokens
+      messageType: "text",
+      timestamp: 1000,
+    };
+    const massiveEntry: ConversationEntry = {
+      pubkey: "assistant",
+      content: "x".repeat(400000), // 100K tokens
+      messageType: "text",
+      timestamp: 1001,
+    };
+    // Entries: [small, massive, small, small]
+    const entries = [smallEntry, massiveEntry, { ...smallEntry, timestamp: 1002 }, { ...smallEntry, timestamp: 1003 }];
+    // Budget of 25 tokens: last 2 small entries fit (20 tokens), massive doesn't
+    const windowSize = computeTokenAwareWindowSize(entries, 25);
+    expect(windowSize).toBe(2);
+  });
+
+  it("should return entries.length when all entries fit within budget", () => {
+    const entries: ConversationEntry[] = Array.from({ length: 5 }, (_, i) => ({
+      pubkey: "user",
+      content: "a".repeat(20), // 5 tokens each
+      messageType: "text",
+      timestamp: 1000 + i,
+    }));
+    // Budget of 1000 tokens — all 5 entries (25 tokens total) easily fit
+    const windowSize = computeTokenAwareWindowSize(entries, 1000);
+    expect(windowSize).toBe(5);
+  });
+
+  it("should return 1 when no entries fit within budget", () => {
+    const entries: ConversationEntry[] = Array.from({ length: 3 }, (_, i) => ({
+      pubkey: "user",
+      content: "x".repeat(40000), // 10K tokens each
+      messageType: "text",
+      timestamp: 1000 + i,
+    }));
+    // Budget of 100 tokens — even a single entry exceeds it, but minimum is 1
+    const windowSize = computeTokenAwareWindowSize(entries, 100);
+    expect(windowSize).toBe(1);
+  });
+
+  it("should account for toolData in token estimation", () => {
+    const entries: ConversationEntry[] = [
+      {
+        pubkey: "assistant",
+        content: "",
+        messageType: "tool-result",
+        timestamp: 1000,
+        toolData: [{ toolCallId: "call-1", type: "tool-result", result: "x".repeat(40000) }] as any,
+      },
+      {
+        pubkey: "user",
+        content: "a".repeat(40), // 10 tokens
+        messageType: "text",
+        timestamp: 1001,
+      },
+    ];
+    // Budget of 50 tokens: last entry (10 tokens) fits, but tool-result entry is ~10K tokens
+    const windowSize = computeTokenAwareWindowSize(entries, 50);
+    expect(windowSize).toBe(1);
   });
 });
 

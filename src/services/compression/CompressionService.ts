@@ -18,6 +18,7 @@ import {
   validateSegmentsForEntries,
   applySegmentsToEntries,
   createFallbackSegmentForEntries,
+  computeTokenAwareWindowSize,
 } from "./compression-utils.js";
 
 const tracer = trace.getTracer("tenex.compression");
@@ -153,7 +154,8 @@ export class CompressionService {
               conversationId,
               entries,
               compressionConfig.slidingWindowSize,
-              span
+              span,
+              effectiveBudget
             );
           }
           span.setStatus({ code: SpanStatusCode.OK });
@@ -195,7 +197,8 @@ export class CompressionService {
                 conversationId,
                 entries,
                 compressionConfig.slidingWindowSize,
-                span
+                span,
+                effectiveBudget
               );
             }
             return;
@@ -239,7 +242,8 @@ export class CompressionService {
               conversationId,
               entries,
               compressionConfig.slidingWindowSize,
-              span
+              span,
+              effectiveBudget
             );
           } else {
             // Proactive mode: fail silently, don't throw
@@ -375,19 +379,27 @@ Create segments that group related topics together. Preserve important decisions
     conversationId: string,
     entries: ConversationEntry[],
     windowSize: number,
-    span: Span
+    span: Span,
+    tokenBudget: number
   ): Promise<void> {
+    const tokenAwareWindowSize = computeTokenAwareWindowSize(entries, tokenBudget);
+    const effectiveWindowSize = Math.min(windowSize, tokenAwareWindowSize);
+
     span.setAttribute("fallback.used", true);
-    span.setAttribute("fallback.window_size", windowSize);
+    span.setAttribute("fallback.configured_window", windowSize);
+    span.setAttribute("fallback.token_aware_window", tokenAwareWindowSize);
+    span.setAttribute("fallback.effective_window", effectiveWindowSize);
 
     logger.warn("Compression fallback triggered - using sliding window truncation", {
       conversationId,
       entriesCount: entries.length,
-      windowSize,
+      configuredWindow: windowSize,
+      tokenAwareWindow: tokenAwareWindowSize,
+      effectiveWindow: effectiveWindowSize,
     });
 
     // Delegate to pure utility function
-    const fallbackSegment = createFallbackSegmentForEntries(entries, windowSize);
+    const fallbackSegment = createFallbackSegmentForEntries(entries, effectiveWindowSize);
 
     if (!fallbackSegment) {
       // Can't create a valid segment (too few entries or insufficient event IDs)
