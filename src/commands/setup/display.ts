@@ -5,6 +5,12 @@ const ACCENT = chalk.ansi256(214); // amber #FFC107
 const INFO = chalk.ansi256(117); // sky blue
 const SELECTED = chalk.ansi256(114); // bright green
 
+// Logo palette (xterm-256)
+const DARK = chalk.ansi256(130);
+const MID = chalk.ansi256(172);
+const BRIGHT = chalk.ansi256(220);
+const GLOW = chalk.ansi256(222);
+
 /**
  * Print an onboarding step header with step number and color rule.
  *
@@ -50,14 +56,34 @@ export function blank(): void {
 }
 
 /**
- * Print the welcome banner.
+ * Print the welcome banner — stippled Sierpinski triangle
+ * with "T E N E X" and tagline to the right.
+ * Matches the Rust TUI's logo.rs exactly.
  */
 export function welcome(): void {
+    const art: Array<[string, (typeof ACCENT)]> = [
+        ["        •        ", GLOW],
+        ["       • •       ", BRIGHT],
+        ["      • • •      ", BRIGHT],
+        ["     • • • •     ", ACCENT],
+        ["    •   •   •    ", ACCENT],
+        ["   • • • • • •   ", MID],
+        ["  • • • • • • •  ", MID],
+        [" • • • • • • • • ", DARK],
+    ];
+
     console.log();
-    console.log(`  ${ACCENT.bold("▲ T E N E X")}`);
-    console.log();
-    console.log(`  ${chalk.bold("Your AI agent team, powered by Nostr.")}`);
-    console.log(`  ${chalk.dim("Let's get everything set up.")}`);
+    for (let i = 0; i < art.length; i++) {
+        const [line, color] = art[i];
+        let row = "  ";
+        for (const ch of line) {
+            row += ch === " " ? " " : color.bold(ch);
+        }
+        if (i === 3) row += "  " + ACCENT.bold("T E N E X");
+        if (i === 5) row += "  " + chalk.bold("Your AI agent team, powered by Nostr.");
+        if (i === 6) row += "  " + chalk.dim("Let's get everything set up.");
+        process.stdout.write(row + "\n");
+    }
     console.log();
 }
 

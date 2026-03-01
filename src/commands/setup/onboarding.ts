@@ -1148,8 +1148,9 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     // Steps: Identity, Communication, Providers, Models, Roles, Embeddings, Image Gen, Project & Agents
     const totalSteps = 8;
 
-    // Step 1: Identity
+    // Welcome banner + Step 1: Identity
     if (!jsonMode) {
+        display.welcome();
         display.step(1, totalSteps, "Identity");
         display.context("Your identity is how your agents know you, and how others can reach you.");
         display.blank();
@@ -1177,11 +1178,13 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         ]);
 
         if (identityChoice === "create") {
+            const randomName = generateRandomUsername();
             const { username } = await inquirer.prompt([
                 {
                     type: "input",
                     name: "username",
-                    message: "Choose a username",
+                    message: "Choose a username (this is how agents and other nostr users will see you)",
+                    default: randomName,
                     validate: (input: string) => {
                         if (!input.trim()) return "Username is required";
                         if (input.trim().length < 2) return "Username must be at least 2 characters";
@@ -1444,6 +1447,24 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     }
 
     process.exit(0);
+}
+
+const ADJECTIVES = [
+    "swift", "bright", "calm", "bold", "keen", "warm", "wild", "cool", "fair", "glad",
+    "brave", "clever", "deft", "eager", "fierce", "gentle", "happy", "jolly", "kind", "lively",
+    "mighty", "noble", "plucky", "quick", "sharp", "steady", "true", "vivid", "witty", "zesty",
+];
+
+const NOUNS = [
+    "fox", "owl", "bear", "wolf", "hawk", "deer", "lynx", "crow", "hare", "wren",
+    "otter", "raven", "crane", "finch", "panda", "tiger", "eagle", "cobra", "bison", "whale",
+    "badger", "falcon", "heron", "robin", "viper", "squid", "gecko", "moose", "stork", "manta",
+];
+
+function generateRandomUsername(): string {
+    const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+    const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+    return `${adj}-${noun}`;
 }
 
 export const onboardingCommand = new Command("init")
