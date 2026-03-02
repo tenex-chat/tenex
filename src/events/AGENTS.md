@@ -8,7 +8,6 @@ Typed NDK event classes for every event TENEX produces or consumes. Each file is
 - `NDKAgentLesson.ts` — Agent lesson events (kind 4129)
 - `NDKEventMetadata.ts` — Event metadata (kind 513)
 - `NDKMCPTool.ts` — MCP tool events
-- `NDKProjectStatus.ts` — Project status events (kind 24010)
 
 ## Event Kinds
 
@@ -18,4 +17,4 @@ All kind constants are defined in `src/nostr/kinds.ts` — that is the single so
 
 1. Create `NDK<Name>.ts` extending the appropriate NDK class
 2. Add the kind constant to `src/nostr/kinds.ts`
-3. Export from `index.ts`
+3. Import the new class directly where it is needed

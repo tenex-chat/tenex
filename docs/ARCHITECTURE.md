@@ -69,7 +69,6 @@ The `services/` layer contains stateful business logic and domain services:
 - `lib/string.ts` - String utilities
 - `lib/error-formatter.ts` - Error formatting
 - `lib/time.ts` - Time utilities
-- `lib/json-parser.ts` - JSON parsing helpers
 
 **Dependencies:** Node.js built-ins, npm packages only
 
@@ -93,7 +92,7 @@ import { config } from "@/services/ConfigService";
 - `utils/nostr-entity-parser.ts` - Nostr parsing utilities
 - `utils/git/` - Git operations (including worktree management)
 - `utils/phase-utils.ts` - Phase management
-- `utils/conversation-utils.ts` - Conversation helpers
+- `utils/conversation-id.ts` - Conversation identifier helpers
 - `utils/logger.ts` - Logging (can depend on services/config)
 
 **Dependencies:** `lib/`, Node.js built-ins, npm packages

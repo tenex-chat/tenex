@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import * as worktreeModule from "@/utils/git/worktree";
 import * as initializeGitRepoModule from "@/utils/git/initializeGitRepo";
+
+type ConversationCoordinator = {
+    getConversation: (conversationId: string) => unknown;
+};
 
 describe("ExecutionContextFactory", () => {
     const mockAgent: AgentInstance = {

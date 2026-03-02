@@ -5,13 +5,16 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
 import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { createWorktree, listWorktrees, WORKTREES_DIR, sanitizeBranchName } from "@/utils/git/worktree";
 
 const execAsync = promisify(exec);
+
+type ConversationCoordinator = {
+    getConversation: (conversationId: string) => unknown;
+};
 
 describe("ExecutionContextFactory Integration", () => {
     let testRepoPath: string;

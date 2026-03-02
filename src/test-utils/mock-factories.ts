@@ -1,6 +1,5 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
-import type { ConversationCoordinator } from "@/conversations";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { MockToolCall } from "@/test-utils/mock-llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
@@ -9,6 +8,15 @@ import type { TodoItem } from "@/services/ral/types";
 import type { ToolRegistryContext } from "@/tools/types";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+
+type ConversationCoordinator = {
+    initialize: () => Promise<void>;
+    createConversation: () => Promise<ConversationStore>;
+    getConversation: (conversationId: string) => ConversationStore | undefined;
+    addEvent: () => Promise<void>;
+    updateMetadata: () => Promise<void>;
+    getAllConversations: () => ConversationStore[];
+};
 
 /**
  * Factory functions for creating mock objects in tests

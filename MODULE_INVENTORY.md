@@ -33,7 +33,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Event Handling & Workflow Orchestration
 - **`src/events`**: Typed schemas, utils, and constants for every event TENEX produces or consumes (Nostr kinds, internal telemetry events). Treat as a contract; modifications require updates to this file.
-- **`src/event-handler`**: Domain orchestrators triggered by incoming Nostr events. `newConversation` and `reply` decode events using `nostr/AgentEventDecoder`, resolve participants via `agents/` + `conversations/services`, then delegate routing/execution to `services/dispatch`.
+- **`src/event-handler`**: Domain orchestrators triggered by incoming Nostr events. `reply` plus focused handlers (`project`, `agentDeletion`) decode events using `nostr/AgentEventDecoder`, resolve participants via `agents/` + `conversations/services`, then delegate routing/execution to `services/dispatch`.
 
 ### Nostr Integration (`src/nostr`)
 - **Core Clients**: `ndkClient` bootstraps NDK, while `AgentPublisher`, `AgentEventEncoder/Decoder`, `InterventionPublisher`, and `kinds.ts` encapsulate event creation.
@@ -76,6 +76,7 @@ Use this section to understand each service’s scope and dependencies:
 | `ProjectContext` + `ProjectContextStore` | `src/services/projects/` | Maintains view of open projects, current working dirs, and runtime metadata used by CLI + daemon. |
 | `PubkeyService` | `src/services/PubkeyService.ts` | Provides caching and lookup for pubkey display names from Nostr. |
 | `TrustPubkeyService` | `src/services/trust-pubkeys/` | Determines if a pubkey should be trusted (heeded or ignored). A pubkey is trusted if it's whitelisted in config, the backend's own pubkey, or a registered agent. Enforces precedence: whitelisted > backend > agent. Provides both async (`isTrusted`) and sync (`isTrustedSync`) checks with backend pubkey caching. |
+| `SystemPubkeyListService` | `src/services/trust-pubkeys/SystemPubkeyListService.ts` | Rebuilds `$TENEX_BASE_DIR/daemon/whitelist.txt` (one pubkey per line) with all known system pubkeys: whitelisted users, backend, stored agents, plus call-site additions. Used before kind:0 profile publishes to keep daemon whitelist current. |
 | `RAG*` services | `src/services/rag/` | Manage LanceDB collections, document ingestion, query APIs, subscriptions, and embedding integration (`EmbeddingProviderFactory`, `RagSubscriptionService`). Tools in `src/tools/implementations/rag_*` should call these. |
 | `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
@@ -95,8 +96,8 @@ Use this section to understand each service’s scope and dependencies:
 - **`src/telemetry`**: OpenTelemetry initialization, exporters, span helpers. Modules needing tracing should import helpers rather than reconfiguring OTel.
 
 ### Utilities & Shared Libraries
-- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`) and pure utilities (`string.ts`, `error-formatter.ts`, `time.ts`, `json-parser.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
-- **`src/utils`**: Higher-level utilities tied to TENEX behavior (agent fetchers, Nostr parsing, phase helpers, Git helpers including worktree management, logger configuration). Can import from `lib/` and infrastructure, but not from `services/` or higher layers.
+- **`src/lib`**: Platform-level primitives such as file-system helpers (`lib/fs/*`) and pure utilities (`string.ts`, `error-formatter.ts`, `time.ts`). **Critical rule**: `lib/` must have ZERO imports from TENEX modules (`utils/`, `services/`, etc.). Use `console.error` instead of TENEX logger.
+- **`src/utils`**: Higher-level utilities tied to TENEX behavior (Nostr parsing, lesson formatting, Git helpers including worktree management, logger configuration). Can import from `lib/` and infrastructure, but not from `services/` or higher layers.
 
 ### Tools for Tests & Scripts
 - **`src/test-utils`**: Mock LLM providers, nostr fixtures, and scenario harnesses shared by unit tests. Any new reusable fixture belongs here to avoid duplicating test helpers.

@@ -8,17 +8,15 @@ When a utility needs data from services, accept it as a parameter — don't impo
 
 - `git/` — Git operations including worktree management
 - `logger.ts` — TENEX logging configuration
-- `agentFetcher.ts` — Agent discovery and fetching
 - `delegation-chain.ts` — Delegation chain tracking
 - `nostr-entity-parser.ts` — Nostr entity (npub, note, etc.) parsing
 - `lessonFormatter.ts` — Lesson content formatting
 - `lockfile.ts` — File locking (accepts path parameter)
-- `conversation-id.ts`, `conversation-utils.ts` — Conversation helpers
+- `conversation-id.ts` — Conversation identifier helpers
 - `metadataKeys.ts` — Metadata key constants
 - `sqlEscaping.ts` — SQL escaping utilities
 - `cli-theme.ts`, `cli-error.ts` — CLI display helpers
 - `error-handler.ts` — Error handling utilities
-- `process.ts` — Process management utilities
 
 ## Boundary
 
