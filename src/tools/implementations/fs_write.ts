@@ -9,6 +9,7 @@ import {
     getFsErrorDescription,
     isExpectedFsError,
 } from "@/tools/utils";
+import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -109,5 +110,6 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
         configurable: true,
     });
 
+    attachTranscriptArgs(toolInstance as AISdkTool, [{ key: "path", attribute: "file_path" }]);
     return toolInstance as AISdkTool;
 }

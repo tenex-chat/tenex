@@ -13,6 +13,7 @@
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { ConversationEntry, DelegationMarker } from "./types";
+import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
 import { processToolResult, shouldTruncateToolResult, type TruncationContext } from "./utils/tool-result-truncator";
@@ -136,6 +137,19 @@ function deriveRole(
 }
 
 /**
+ * Resolve a display name through PubkeyService, falling back to its sync path.
+ * This keeps all name formatting centralized in PubkeyService.
+ */
+async function resolveDisplayName(pubkey: string): Promise<string> {
+    const pubkeyService = getPubkeyService();
+    try {
+        return await pubkeyService.getName(pubkey);
+    } catch {
+        return pubkeyService.getNameSync(pubkey);
+    }
+}
+
+/**
  * Compute an attribution prefix for a conversation entry.
  *
  * Returns a string prefix (or empty string) to prepend to the message content,
@@ -165,14 +179,7 @@ export function computeAttributionPrefix(
     agentPubkeys: Set<string>,
     resolveDisplayName?: (pubkey: string) => string
 ): string {
-    const resolve = resolveDisplayName ?? ((pk: string) => {
-        try {
-            const name = getPubkeyService().getNameSync(pk);
-            return name || pk.substring(0, 8);
-        } catch {
-            return pk.substring(0, 8);
-        }
-    });
+    const resolve = resolveDisplayName ?? ((pk: string) => getPubkeyService().getNameSync(pk));
 
     // Determine the actual sender (injected messages track original sender via senderPubkey)
     const senderPubkey = entry.senderPubkey ?? entry.pubkey;
@@ -356,41 +363,25 @@ async function expandDelegationMarker(
     marker: DelegationMarker,
     delegationMessages: ConversationEntry[] | undefined
 ): Promise<ModelMessage> {
-    const pubkeyService = getPubkeyService();
-
     // Handle pending delegations - show that work is in progress
     if (marker.status === "pending") {
-        try {
-            const recipientName = await pubkeyService.getName(marker.recipientPubkey);
-            return {
-                role: "user",
-                content: `# DELEGATION IN PROGRESS\n\n@${recipientName} is currently working on this task.`,
-            };
-        } catch {
-            return {
-                role: "user",
-                content: `# DELEGATION IN PROGRESS\n\nAgent ${marker.recipientPubkey.substring(0, 12)} is currently working on this task.`,
-            };
-        }
+        const recipientName = await resolveDisplayName(marker.recipientPubkey);
+        return {
+            role: "user",
+            content: `# DELEGATION IN PROGRESS\n\n@${recipientName} is currently working on this task.`,
+        };
     }
 
     if (!delegationMessages) {
         // Delegation conversation not found - return placeholder
-        try {
-            const recipientName = await pubkeyService.getName(marker.recipientPubkey);
-            const statusText = marker.status === "aborted"
-                ? `was aborted: ${marker.abortReason || "unknown reason"}`
-                : "completed (transcript unavailable)";
-            return {
-                role: "user",
-                content: `# DELEGATION ${marker.status.toUpperCase()}\n\n@${recipientName} ${statusText}`,
-            };
-        } catch {
-            return {
-                role: "user",
-                content: `# DELEGATION ${marker.status.toUpperCase()}\n\nAgent ${marker.recipientPubkey.substring(0, 12)} ${marker.status === "aborted" ? "was aborted" : "completed"} (transcript unavailable)`,
-            };
-        }
+        const recipientName = await resolveDisplayName(marker.recipientPubkey);
+        const statusText = marker.status === "aborted"
+            ? `was aborted: ${marker.abortReason || "unknown reason"}`
+            : "completed (transcript unavailable)";
+        return {
+            role: "user",
+            content: `# DELEGATION ${marker.status.toUpperCase()}\n\n@${recipientName} ${statusText}`,
+        };
     }
 
     // Build flat transcript from delegation conversation
@@ -409,32 +400,15 @@ async function expandDelegationMarker(
         lines.push("");
     }
 
-    // Filter for targeted text messages only (no tool calls, no nested markers)
-    const transcriptMessages = delegationMessages.filter(msg =>
-        msg.messageType === "text" &&
-        msg.targetedPubkeys &&
-        msg.targetedPubkeys.length > 0
-    );
+    const { xml: transcriptXml } = renderConversationXml(delegationMessages, {
+        conversationId: marker.delegationConversationId,
+        includeMessageTypes: ["text"],
+        requireTargetedPubkeys: true,
+        includeToolCalls: false,
+    });
 
-    if (transcriptMessages.length === 0) {
-        lines.push("(No messages in delegation transcript)");
-    } else {
-        lines.push("### Transcript:");
-        for (const msg of transcriptMessages) {
-            try {
-                const senderName = await pubkeyService.getName(msg.pubkey);
-                const recipientName = msg.targetedPubkeys?.[0]
-                    ? await pubkeyService.getName(msg.targetedPubkeys[0])
-                    : "unknown";
-                lines.push(`[@${senderName} -> @${recipientName}]: ${msg.content}`);
-            } catch {
-                // Fallback to shortened pubkeys
-                const senderFallback = msg.pubkey.substring(0, 12);
-                const recipientFallback = msg.targetedPubkeys?.[0]?.substring(0, 12) || "unknown";
-                lines.push(`[@${senderFallback} -> @${recipientFallback}]: ${msg.content}`);
-            }
-        }
-    }
+    lines.push("### Transcript:");
+    lines.push(transcriptXml);
 
     return {
         role: "user",
@@ -461,14 +435,7 @@ async function expandDelegationMarker(
 async function formatNestedDelegationMarker(
     marker: DelegationMarker
 ): Promise<ModelMessage> {
-    const pubkeyService = getPubkeyService();
-
-    let recipientName: string;
-    try {
-        recipientName = await pubkeyService.getName(marker.recipientPubkey);
-    } catch {
-        recipientName = marker.recipientPubkey.substring(0, 12);
-    }
+    const recipientName = await resolveDisplayName(marker.recipientPubkey);
 
     const shortConversationId = marker.delegationConversationId.substring(0, 12);
 

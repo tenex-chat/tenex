@@ -20,6 +20,106 @@ import type { FullRuntimeContext } from "./types";
 import { getHeuristicEngine } from "@/services/heuristics";
 import { buildHeuristicContext } from "@/services/heuristics/ContextBuilder";
 
+const TRANSCRIPT_RAW_ARGS_MAX_LENGTH = 200;
+
+function truncateForTranscript(value: string, maxLength: number): string {
+    if (value.length <= maxLength) {
+        return value;
+    }
+    const truncatedChars = value.length - maxLength;
+    return `${value.slice(0, maxLength)}... [truncated ${truncatedChars} chars]`;
+}
+
+function normalizeTranscriptAttrName(value: string): string {
+    const normalized = value.replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+    if (/^[a-zA-Z_]/.test(normalized)) {
+        return normalized;
+    }
+    return `arg_${normalized}`;
+}
+
+function serializeTranscriptArg(value: unknown): string | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+    if (typeof value === "string") {
+        return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    try {
+        return JSON.stringify(value);
+    } catch {
+        return "[Unserializable]";
+    }
+}
+
+function buildTranscriptToolAttributes(
+    toolName: string,
+    args: unknown,
+    toolDef: AISdkTool | undefined
+): Record<string, string> | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+        if (toolName.startsWith("mcp_") && args !== undefined) {
+            const raw = truncateForTranscript(String(args), TRANSCRIPT_RAW_ARGS_MAX_LENGTH);
+            return { args: raw };
+        }
+        return undefined;
+    }
+
+    const argsObject = args as Record<string, unknown>;
+    const attrs: Record<string, string> = {};
+
+    const description = argsObject.description;
+    if (typeof description === "string" && description.trim().length > 0) {
+        attrs.description = description.trim();
+    }
+
+    const specs = toolDef?.transcriptArgsToInclude;
+    if (specs && specs.length > 0) {
+        for (const spec of specs) {
+            const raw = argsObject[spec.key];
+            const serialized = serializeTranscriptArg(raw);
+            if (!serialized || serialized.length === 0) {
+                continue;
+            }
+            const attrName = normalizeTranscriptAttrName(spec.attribute ?? spec.key);
+            attrs[attrName] = serialized;
+        }
+    } else if (toolName.startsWith("mcp_")) {
+        const rawArgs = truncateForTranscript(
+            JSON.stringify(argsObject),
+            TRANSCRIPT_RAW_ARGS_MAX_LENGTH
+        );
+        attrs.args = rawArgs;
+    }
+
+    return Object.keys(attrs).length > 0 ? attrs : undefined;
+}
+
+function setToolCallEventIdFromToolCallId(
+    conversationStore: FullRuntimeContext["conversationStore"],
+    toolCallId: string,
+    toolEventId: string
+): void {
+    const messages = conversationStore.getAllMessages();
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (message.messageType !== "tool-call" || !message.toolData) {
+            continue;
+        }
+        const hasToolCallId = (message.toolData as ToolCallPart[]).some(
+            (part) => part.toolCallId === toolCallId
+        );
+        if (!hasToolCallId) {
+            continue;
+        }
+        conversationStore.setEventId(i, toolEventId);
+        return;
+    }
+}
+
 /**
  * Configuration for setting up tool event handlers
  */
@@ -80,6 +180,11 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
         // Generate human-readable summary from the tool's own formatter
         const toolDef = toolsObject[event.toolName];
         const humanReadable = toolDef?.getHumanReadableContent?.(event.args ?? {});
+        const transcriptToolAttributes = buildTranscriptToolAttributes(
+            event.toolName,
+            event.args,
+            toolDef
+        );
 
         conversationStore.addMessage({
             pubkey: context.agent.pubkey,
@@ -95,6 +200,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                 },
             ] as ToolCallPart[],
             ...(humanReadable ? { humanReadable } : {}),
+            ...(transcriptToolAttributes ? { transcriptToolAttributes } : {}),
         });
 
         const toolEvent = await toolTracker.trackExecution({
@@ -230,6 +336,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
 
         if (toolEventId) {
             conversationStore.setEventId(toolResultMessageIndex, toolEventId);
+            setToolCallEventIdFromToolCallId(conversationStore, event.toolCallId, toolEventId);
         }
 
         ralRegistry.setToolActive(

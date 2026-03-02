@@ -1,13 +1,12 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
-import { getPubkeyService } from "@/services/PubkeyService";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { isHexPrefix, resolvePrefixToId, PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+import { isHexPrefix, resolvePrefixToId } from "@/utils/nostr-entity-parser";
 import { tool } from "ai";
-import type { ToolCallPart, ToolResultPart } from "ai";
 import { z } from "zod";
 import { nip19 } from "nostr-tools";
 
@@ -74,12 +73,12 @@ const conversationGetSchema = z.object({
         .describe(
             "Optional prompt to analyze the conversation. When provided, the conversation will be processed through an LLM which will provide an explanation based on this prompt. Useful for extracting specific information or getting a summary of the conversation."
         ),
-    includeToolResults: z
+    includeToolCalls: z
         .boolean()
         .optional()
         .default(false)
         .describe(
-            "Whether to include tool result content in the response. WARNING: This can significantly increase token usage (up to 50k tokens). Tool results are truncated at 10k chars each with a 50k total budget. Only enable if you specifically need to analyze tool outputs."
+            "Whether to include tool-call events in the XML transcript. Tool-result entries are intentionally omitted; tool-call attributes are summarized/truncated by the shared transcript formatter."
         ),
 });
 
@@ -162,109 +161,14 @@ function safeCopy<T>(data: T): T {
 }
 
 /**
- * Safely stringify a value, handling BigInt, circular refs, and other edge cases
- * Returns a JSON string representation or "[Unserializable]" on failure
- */
-function safeStringify(value: unknown): string {
-    if (value === undefined) return "";
-    if (value === null) return "null";
-    try {
-        return JSON.stringify(value);
-    } catch {
-        // Handle BigInt, circular references, or other unserializable values
-        return '"[Unserializable]"';
-    }
-}
-
-const MAX_PARAM_LENGTH = 100;
-
-/**
- * Format tool input parameters with per-param truncation
- * Each param value is truncated at MAX_PARAM_LENGTH chars
- * Format: param1="value1" param2="value2..." (N chars truncated)
- */
-function formatToolInput(input: unknown): string {
-    if (input === undefined || input === null) return "";
-
-    // If input is not an object, just stringify and truncate the whole thing
-    if (typeof input !== "object" || Array.isArray(input)) {
-        const str = safeStringify(input);
-        if (str.length > MAX_PARAM_LENGTH) {
-            const truncated = str.length - MAX_PARAM_LENGTH;
-            return `${str.slice(0, MAX_PARAM_LENGTH)}... (${truncated} chars truncated)`;
-        }
-        return str;
-    }
-
-    // For objects, format each param with truncation
-    const parts: string[] = [];
-    const obj = input as Record<string, unknown>;
-
-    for (const [key, value] of Object.entries(obj)) {
-        let valueStr: string;
-        try {
-            valueStr = JSON.stringify(value);
-        } catch {
-            valueStr = '"[Unserializable]"';
-        }
-
-        if (valueStr.length > MAX_PARAM_LENGTH) {
-            const truncated = valueStr.length - MAX_PARAM_LENGTH;
-            parts.push(`${key}=${valueStr.slice(0, MAX_PARAM_LENGTH)}... (${truncated} chars truncated)`);
-        } else {
-            parts.push(`${key}=${valueStr}`);
-        }
-    }
-
-    return parts.join(" ");
-}
-
-const MAX_LINE_LENGTH = 1500;
-
-/**
- * Format a single line with timestamp, sender, target(s), and content
- * Truncates the full line INCLUDING suffix to maxLength chars
- */
-function formatLine(
-    relativeSeconds: number,
-    from: string,
-    targets: string[] | undefined,
-    content: string,
-    maxLength: number = MAX_LINE_LENGTH
-): string {
-    // Build target string: no target = "", single = "-> @to", multiple = "-> @to1, @to2"
-    let targetStr = "";
-    if (targets && targets.length > 0) {
-        targetStr = ` -> ${targets.map(t => `@${t}`).join(", ")}`;
-    }
-
-    // Escape newlines to preserve single-line format
-    const escapedContent = content.replace(/\n/g, "\\n");
-
-    const line = `[+${relativeSeconds}] [@${from}${targetStr}] ${escapedContent}`;
-
-    if (line.length > maxLength) {
-        // Calculate suffix first, then determine how much content to keep
-        // We want: kept_content + suffix <= maxLength
-        const truncatedChars = line.length - maxLength;
-        const suffix = `... [truncated ${truncatedChars} chars]`;
-        const keepLength = Math.max(0, maxLength - suffix.length);
-        return line.slice(0, keepLength) + suffix;
-    }
-    return line;
-}
-
-/**
  * Serialize a Conversation object to a JSON-safe plain object
- * Formats messages as a single multi-line string with relative timestamps
- * Format: [+seconds] [@from -> @to] content
+ * Formats messages as XML with relative timestamps and root t0.
  */
 function serializeConversation(
     conversation: ConversationStore,
-    options: { includeToolResults?: boolean; untilId?: string } = {}
+    options: { includeToolCalls?: boolean; untilId?: string } = {}
 ): Record<string, unknown> {
     let messages = conversation.getAllMessages();
-    const pubkeyService = getPubkeyService();
 
     // Filter messages up to and including untilId if provided
     if (options.untilId) {
@@ -281,174 +185,18 @@ function serializeConversation(
         }
     }
 
-    // Find the first DEFINED timestamp to use as baseline for relative times.
-    // This handles edge cases where early messages (e.g., tool-calls synced via
-    // MessageSyncer) may lack timestamps. Using the first defined timestamp
-    // ensures later messages don't show huge epoch offsets.
-    let baselineTimestamp = 0;
-    for (const msg of messages) {
-        if (msg.timestamp !== undefined) {
-            baselineTimestamp = msg.timestamp;
-            break;
-        }
-    }
-
-    const formattedLines: string[] = [];
-
-    // Track the last known timestamp for fallback on entries without timestamps.
-    // This provides more accurate ordering than always falling back to baseline.
-    let lastKnownTimestamp = baselineTimestamp;
-
-    for (let i = 0; i < messages.length; i++) {
-        const entry = messages[i];
-        // Use lastKnownTimestamp as fallback when entry.timestamp is undefined.
-        // This ensures entries without timestamps (e.g., tool-calls synced via MessageSyncer)
-        // appear at their approximate position rather than showing [+0] or huge negative
-        // numbers like [+-1771103685].
-        const effectiveTimestamp = entry.timestamp ?? lastKnownTimestamp;
-        const relativeSeconds = Math.floor(effectiveTimestamp - baselineTimestamp);
-
-        // Update lastKnownTimestamp if this entry has a defined timestamp
-        if (entry.timestamp !== undefined) {
-            lastKnownTimestamp = entry.timestamp;
-        }
-        const from = pubkeyService.getNameSync(entry.pubkey);
-        const targets = entry.targetedPubkeys?.map(pk => pubkeyService.getNameSync(pk));
-
-        if (entry.messageType === "text") {
-            // Text messages: straightforward format
-            formattedLines.push(formatLine(relativeSeconds, from, targets, entry.content));
-        } else if (entry.messageType === "tool-call") {
-            // Only include tool calls if includeToolResults is true
-            if (!options.includeToolResults) {
-                // Skip tool call entries when not including tool results
-                continue;
-            }
-
-            // Tool call: look for matching tool-results by toolCallId or adjacency
-            const toolData = (entry.toolData ?? []) as ToolCallPart[];
-
-            // Check if we have toolCallIds to match with
-            const hasToolCallIds = toolData.some(tc => tc.toolCallId);
-
-            // Build a map of toolCallId -> result for matching (when IDs are present)
-            const toolResultsMap = new Map<string, ToolResultPart>();
-            // Also keep an ordered array for fallback adjacency matching
-            let adjacentResults: ToolResultPart[] = [];
-            let shouldSkipNext = false;
-
-            if (i + 1 < messages.length) {
-                const nextMsg = messages[i + 1];
-                if (nextMsg.messageType === "tool-result" && nextMsg.pubkey === entry.pubkey) {
-                    const resultData = (nextMsg.toolData ?? []) as ToolResultPart[];
-                    adjacentResults = resultData;
-
-                    // Build toolCallId map for ID-based matching
-                    for (const tr of resultData) {
-                        if (tr.toolCallId) {
-                            toolResultsMap.set(tr.toolCallId, tr);
-                        }
-                    }
-                }
-            }
-
-            // Format tool calls with their matched results
-            const toolCallParts: string[] = [];
-            const matchedResultIds = new Set<string>();
-            let adjacentResultIndex = 0;
-
-            for (const tc of toolData) {
-                const toolName = tc.toolName || "unknown";
-                const input = tc.input !== undefined ? formatToolInput(tc.input) : "";
-                let toolCallStr = `[tool-use ${toolName} ${input}]`;
-
-                let matchingResult: ToolResultPart | undefined;
-
-                // Try to find matching result by toolCallId first
-                if (tc.toolCallId && toolResultsMap.has(tc.toolCallId)) {
-                    matchingResult = toolResultsMap.get(tc.toolCallId);
-                    matchedResultIds.add(tc.toolCallId);
-                } else if (!hasToolCallIds && adjacentResultIndex < adjacentResults.length) {
-                    // Fallback: when no toolCallIds, match by position (adjacency)
-                    matchingResult = adjacentResults[adjacentResultIndex++];
-                }
-
-                if (matchingResult) {
-                    const resultContent =
-                        matchingResult.output !== undefined
-                            ? safeStringify(matchingResult.output)
-                            : "";
-                    toolCallStr += ` [tool-result ${resultContent}]`;
-                    shouldSkipNext = true;
-                }
-                toolCallParts.push(toolCallStr);
-            }
-
-            // Skip the next tool-result message if we merged all results
-            if (shouldSkipNext && i + 1 < messages.length) {
-                const nextMsg = messages[i + 1];
-                if (nextMsg.messageType === "tool-result" && nextMsg.pubkey === entry.pubkey) {
-                    // For ID-based matching, verify all were matched
-                    // For adjacency-based, we already processed them all
-                    if (!hasToolCallIds || adjacentResults.every(tr => !tr.toolCallId || matchedResultIds.has(tr.toolCallId))) {
-                        i++;
-                    }
-                }
-            }
-
-            const content = toolCallParts.join(" ");
-            formattedLines.push(formatLine(relativeSeconds, from, targets, content));
-        } else if (entry.messageType === "tool-result") {
-            // Standalone tool-result (not merged with tool-call)
-            // Only show if includeToolResults is true
-            if (options.includeToolResults) {
-                const resultData = (entry.toolData ?? []) as ToolResultPart[];
-                const resultParts: string[] = [];
-                for (const tr of resultData) {
-                    const resultContent =
-                        tr.output !== undefined ? safeStringify(tr.output) : "";
-                    resultParts.push(`[tool-result ${resultContent}]`);
-                }
-                formattedLines.push(formatLine(relativeSeconds, from, targets, resultParts.join(" ")));
-            }
-        } else if (entry.messageType === "delegation-marker") {
-            // Delegation markers: always shown (regardless of includeToolResults)
-            const marker = entry.delegationMarker;
-
-            // Validate required fields - skip gracefully if missing
-            if (!marker?.delegationConversationId || !marker?.recipientPubkey || !marker?.status) {
-                // Skip malformed delegation marker - don't crash, just omit from output
-                continue;
-            }
-
-            const shortConversationId = marker.delegationConversationId.slice(0, PREFIX_LENGTH);
-            const recipientName = pubkeyService.getNameSync(marker.recipientPubkey);
-
-            // Format based on status
-            let emoji: string;
-            let statusText: string;
-            if (marker.status === "pending") {
-                emoji = "⏳";
-                statusText = "in progress";
-            } else if (marker.status === "completed") {
-                emoji = "✅";
-                statusText = "completed";
-            } else {
-                emoji = "⚠️";
-                statusText = "aborted";
-            }
-            const content = `${emoji} Delegation ${shortConversationId} → ${recipientName} ${statusText}`;
-
-            formattedLines.push(formatLine(relativeSeconds, from, targets, content));
-        }
-    }
+    const includeToolCalls = options.includeToolCalls ?? false;
+    const { xml } = renderConversationXml(messages, {
+        conversationId: String(conversation.id),
+        includeToolCalls,
+    });
 
     return {
         id: String(conversation.id),
         title: conversation.title ? String(conversation.title) : undefined,
         executionTime: safeCopy(conversation.executionTime),
         messageCount: messages.length,
-        messages: formattedLines.join("\n"),
+        messages: xml,
     };
 }
 
@@ -497,11 +245,23 @@ async function executeConversationGet(
         agent: context.agent.name,
     });
 
+    // Allow custom runtimes/tests to resolve arbitrary conversation IDs through context.
+    const resolveFromContext = context.getConversation as unknown as (
+        conversationId?: string
+    ) => ConversationStore | undefined;
+    const contextConversationCandidate = resolveFromContext(targetConversationId);
+    const contextConversation =
+        contextConversationCandidate &&
+        String(contextConversationCandidate.id).toLowerCase() === targetConversationId
+            ? contextConversationCandidate
+            : undefined;
+
     // Get conversation from ConversationStore
     const conversation =
-        targetConversationId === context.conversationId
+        contextConversation ??
+        (targetConversationId === context.conversationId
             ? context.getConversation()
-            : ConversationStore.get(targetConversationId);
+            : ConversationStore.get(targetConversationId));
 
     if (!conversation) {
         logger.info("📭 Conversation not found", {
@@ -524,7 +284,7 @@ async function executeConversationGet(
     });
 
     const serializedConversation = serializeConversation(conversation, {
-        includeToolResults: input.includeToolResults,
+        includeToolCalls: input.includeToolCalls,
         untilId: targetUntilId,
     });
 
@@ -634,7 +394,7 @@ ${conversationText}`,
 export function createConversationGetTool(context: ToolExecutionContext): AISdkTool {
     const aiTool = tool({
         description:
-            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation info (id, title, messageCount, executionTime) and a formatted messages string. Messages are formatted as: [+seconds] [@from -> @to] content, where seconds is relative to the first message. Tool calls and results can be merged into single lines when includeToolResults is true. Useful for reviewing conversation context, analyzing message history, or debugging agent interactions.",
+            "Retrieve a conversation by its ID, including all messages/events in the conversation history. Returns conversation info (id, title, messageCount, executionTime) and an XML transcript string. XML includes absolute t0 on the root and per-entry relative time indicators via time=\"+seconds\", plus author/recipient attribution and short event ids.",
 
         inputSchema: conversationGetSchema,
 

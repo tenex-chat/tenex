@@ -5,6 +5,11 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
+export interface ToolTranscriptArgSpec {
+    key: string;
+    attribute?: string;
+}
+
 /**
  * Tool names available in the system.
  * Keep this list in sync with implementations registered in the tool registry.
@@ -72,6 +77,11 @@ export type ToolName =
  */
 export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
     getHumanReadableContent?: (args: TInput) => string;
+    /**
+     * Optional list of input argument keys to expose in conversation transcript XML.
+     * Keys are read from tool input args at execution time and serialized as XML attributes.
+     */
+    transcriptArgsToInclude?: ToolTranscriptArgSpec[];
     /**
      * Whether this tool has side effects (modifies state, writes files, sends messages, etc.)
      * Default is true (assume side effects unless explicitly declared false).

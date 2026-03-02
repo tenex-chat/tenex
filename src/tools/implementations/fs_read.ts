@@ -11,6 +11,7 @@ import {
     isExpectedFsError,
     isExpectedNotFoundError,
 } from "@/tools/utils";
+import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
 import { z } from "zod";
@@ -328,5 +329,6 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
         configurable: true,
     });
 
+    attachTranscriptArgs(toolInstance as AISdkTool, [{ key: "path", attribute: "file_path" }]);
     return toolInstance as AISdkTool;
 }

@@ -41,8 +41,8 @@ mock.module("@/services/PubkeyService", () => ({
 const mockPrefixLookup = mock((prefix: string) => {
     // Return predefined mappings for test prefixes
     const mappings: Record<string, string> = {
-        "abc123def456": "abc123def456789012345678901234567890123456789012345678901234",
-        "event1234567": "event123456789012345678901234567890123456789012345678901234",
+        "abc123def456": "abc123def456789012345678901234567890123456789012345678901234abcd",
+        "event1234567": "event123456789012345678901234567890123456789012345678901234cd",
     };
     return mappings[prefix] ?? null;
 });
@@ -118,7 +118,87 @@ const mockGetConversation = mock(() => mockConversationData ? {
     getAllMessages: mockGetAllMessages,
     getMessageCount: mockGetMessageCount,
 } : null);
+import { ConversationStore } from "@/conversations/ConversationStore";
 import { createConversationGetTool } from "../conversation_get";
+
+interface TranscriptNode {
+    tag: "message" | "tool";
+    attrs: Record<string, string>;
+    content: string;
+}
+
+function decodeXmlEntities(value: string): string {
+    return value
+        .replaceAll("&lt;", "<")
+        .replaceAll("&gt;", ">")
+        .replaceAll("&quot;", "\"")
+        .replaceAll("&apos;", "'")
+        .replaceAll("&amp;", "&");
+}
+
+function parseAttributes(rawAttrs: string): Record<string, string> {
+    const attrs: Record<string, string> = {};
+    const attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = attrRegex.exec(rawAttrs)) !== null) {
+        attrs[match[1]] = decodeXmlEntities(match[2]);
+    }
+    return attrs;
+}
+
+function parseTranscriptXml(xml: string): TranscriptNode[] {
+    const nodes: TranscriptNode[] = [];
+    const nodeRegex = /<message\s+([^>]*)>([\s\S]*?)<\/message>|<tool\s+([^>]*)\/>/g;
+    let match: RegExpExecArray | null;
+    while ((match = nodeRegex.exec(xml)) !== null) {
+        if (match[1] !== undefined) {
+            nodes.push({
+                tag: "message",
+                attrs: parseAttributes(match[1]),
+                content: decodeXmlEntities(match[2] ?? ""),
+            });
+        } else {
+            nodes.push({
+                tag: "tool",
+                attrs: parseAttributes(match[3] ?? ""),
+                content: "",
+            });
+        }
+    }
+    return nodes;
+}
+
+function xmlToLegacyLines(xml: string): string[] {
+    const nodes = parseTranscriptXml(xml);
+    const lines: string[] = [];
+
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        const rawTime = node.attrs.time ?? "+0";
+        const time = rawTime.startsWith("+") ? `[${rawTime}]` : rawTime;
+        const author = node.attrs.author ?? node.attrs.user ?? "unknown";
+        const recipientList = node.attrs.recipient
+            ? node.attrs.recipient.split(",").map((v) => v.trim()).filter(Boolean)
+            : [];
+        const target = recipientList.length > 0
+            ? ` -> ${recipientList.map((r) => `@${r}`).join(", ")}`
+            : "";
+
+        if (node.tag === "tool") {
+            const toolName = node.attrs.name ?? "unknown";
+            const attrSegments = Object.entries(node.attrs)
+                .filter(([key]) => !["id", "user", "name", "time"].includes(key))
+                .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+            const args = attrSegments.length > 0 ? ` ${attrSegments.join(" ")}` : "";
+            lines.push(`${time} [@${author}${target}] [tool-use ${toolName}${args}]`);
+            continue;
+        }
+
+        lines.push(`${time} [@${author}${target}] ${node.content}`);
+    }
+
+    return lines;
+}
 
 describe("conversation_get Tool", () => {
     let mockContext: ToolExecutionContext;
@@ -197,7 +277,7 @@ describe("conversation_get Tool", () => {
             expect(typeof messages).toBe("string");
 
             // Should contain formatted lines
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
             expect(lines).toHaveLength(2);
             expect(lines[0]).toBe("[+0] [@user-pub1234] Hello");
             expect(lines[1]).toBe("[+2] [@agent-pu1234 -> @user-pub1234] Hi there!");
@@ -258,7 +338,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines[0]).toContain("[+0]");
             expect(lines[1]).toContain("[+10]");
@@ -285,8 +365,9 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@user-pubkey1] No target message");
-            expect(messages).not.toContain("->");
+            const lines = xmlToLegacyLines(messages);
+            expect(lines).toEqual(["[+0] [@user-pubkey1] No target message"]);
+            expect(lines[0]).not.toContain("->");
         });
 
         it("should show single arrow for single target", async () => {
@@ -308,7 +389,8 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@sender-pk123 -> @target-pk123] Single target");
+            const lines = xmlToLegacyLines(messages);
+            expect(lines).toEqual(["[+0] [@sender-pk123 -> @target-pk123] Single target"]);
         });
 
         it("should show comma-separated targets for multiple targets", async () => {
@@ -330,12 +412,13 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toBe("[+0] [@sender-pk123 -> @target-1pk12, @target-2pk12] Multi target");
+            const lines = xmlToLegacyLines(messages);
+            expect(lines).toEqual(["[+0] [@sender-pk123 -> @target-1pk12, @target-2pk12] Multi target"]);
         });
     });
 
-    describe("Tool Call and Result Merging", () => {
-        it("should skip tool-calls and tool-results by default (includeToolResults=false)", async () => {
+    describe("Tool Call Rendering", () => {
+        it("should skip tool-calls and tool-results by default (includeToolCalls=false)", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -377,7 +460,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should have only 2 lines: text messages only (no tool-call or tool-result)
             expect(lines).toHaveLength(2);
@@ -388,7 +471,7 @@ describe("conversation_get Tool", () => {
             expect(messages).not.toContain("[tool-result");
         });
 
-        it("should merge tool-call and tool-result into single line when includeToolResults=true", async () => {
+        it("should include tool-call line and omit tool-result content when includeToolCalls=true", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -415,20 +498,20 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
-            // Should be merged into single line
+            // Tool result entries are intentionally omitted from transcript XML
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("[tool-use shell");
-            expect(lines[0]).toContain("[tool-result");
-            expect(lines[0]).toContain("2020-01-01");
+            expect(lines[0]).not.toContain("[tool-result");
+            expect(messages).not.toContain("2020-01-01");
         });
 
-        it("should handle standalone tool-result when not preceded by tool-call", async () => {
+        it("should omit standalone tool-result entries", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -446,12 +529,13 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toContain("[tool-result");
-            expect(messages).toContain("standalone result");
+            const lines = xmlToLegacyLines(messages);
+            expect(lines).toHaveLength(0);
+            expect(messages).not.toContain("standalone result");
         });
     });
 
@@ -499,12 +583,11 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            expect(messages).toContain("[truncated");
-            expect(messages.length).toBeLessThan(content.length + 100); // Significantly shorter
+            expect(messages).toContain(content);
         });
 
-        it("should truncate tool-call + tool-result merged lines", async () => {
-            // Create large tool data that will exceed 1500 chars when merged
+        it("should include tool-call metadata without including tool-result payload", async () => {
+            // Tool results are omitted from transcript XML; only tool-call metadata should render.
             const largeArgs = { data: "y".repeat(800) };
             const largeResult = "z".repeat(800);
 
@@ -534,12 +617,12 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            // Check for either line-level truncation "[truncated" or param-level truncation "(N chars truncated)"
-            expect(messages).toMatch(/\[truncated|chars truncated\)/);
+            expect(messages).toContain("big_tool");
+            expect(messages).not.toContain(largeResult.slice(0, 50));
         });
     });
 
@@ -596,6 +679,68 @@ describe("conversation_get Tool", () => {
         });
     });
 
+    describe("Cross-Conversation Resolution", () => {
+        it("should ignore context conversation when IDs do not match requested conversationId", async () => {
+            const currentConversationId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const targetConversationId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+            const currentConversation = {
+                id: currentConversationId,
+                title: "Current Conversation",
+                getAllMessages: () => [
+                    {
+                        messageType: "text",
+                        content: "Current conversation message",
+                        pubkey: "user-pubkey",
+                        eventId: "1111111111111111111111111111111111111111111111111111111111111111",
+                        timestamp: 1700000000,
+                    },
+                ],
+                getMessageCount: () => 1,
+            };
+
+            const targetConversation = {
+                id: targetConversationId,
+                title: "Target Conversation",
+                getAllMessages: () => [
+                    {
+                        messageType: "text",
+                        content: "Target conversation message",
+                        pubkey: "user-pubkey",
+                        eventId: "2222222222222222222222222222222222222222222222222222222222222222",
+                        timestamp: 1700000001,
+                    },
+                ],
+                getMessageCount: () => 1,
+            };
+
+            mockContext.conversationId = currentConversationId;
+            mockContext.getConversation = mock((_conversationId?: string) => currentConversation as any) as any;
+
+            const conversationStoreGetSpy = spyOn(ConversationStore, "get").mockImplementation(
+                (conversationId: string) => {
+                    if (conversationId === targetConversationId) {
+                        return targetConversation as any;
+                    }
+                    return undefined;
+                }
+            );
+
+            try {
+                const tool = createConversationGetTool(mockContext);
+                const result = await tool.execute({ conversationId: targetConversationId });
+
+                expect(result.success).toBe(true);
+                expect((result.conversation as any).id).toBe(targetConversationId);
+                expect((result.conversation as any).messages).toContain("Target conversation message");
+                expect((result.conversation as any).messages).not.toContain("Current conversation message");
+                expect(conversationStoreGetSpy).toHaveBeenCalledWith(targetConversationId);
+            } finally {
+                conversationStoreGetSpy.mockRestore();
+            }
+        });
+    });
+
     describe("Multiple Tool Calls", () => {
         it("should handle multiple tool calls in sequence", async () => {
             mockConversationData = {
@@ -641,18 +786,18 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
-            // Should merge each pair, resulting in 2 lines
+            // Tool results are omitted, so only tool-call rows remain.
             expect(lines).toHaveLength(2);
             expect(lines[0]).toContain("tool1");
-            expect(lines[0]).toContain("result1");
+            expect(lines[0]).not.toContain("result1");
             expect(lines[1]).toContain("tool2");
-            expect(lines[1]).toContain("result2");
+            expect(lines[1]).not.toContain("result2");
         });
     });
 
@@ -687,8 +832,9 @@ describe("conversation_get Tool", () => {
 
             // Should show the first 12 characters of the pubkey (PREFIX_LENGTH)
             // "abc123def456789xyz" -> "abc123def456"
-            expect(messages).toContain("@abc123def456");
-            expect(messages).toBe("[+0] [@abc123def456] Message from uncached user");
+            const lines = xmlToLegacyLines(messages);
+            expect(lines[0]).toContain("@abc123def456");
+            expect(lines).toEqual(["[+0] [@abc123def456] Message from uncached user"]);
         });
 
         it("should handle multiple uncached pubkeys with distinct truncated names", async () => {
@@ -721,7 +867,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Both should use truncated pubkeys, not "User"
             expect(lines[0]).toBe("[+0] [@user1abcdef1] First message");
@@ -765,7 +911,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(3);
             expect(lines[0]).toContain("First");
@@ -808,7 +954,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should only have first two messages (up to and including event-2)
             expect(lines).toHaveLength(2);
@@ -845,7 +991,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
@@ -880,7 +1026,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(2);
             expect(lines[0]).toContain("First");
@@ -915,7 +1061,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should return all messages when untilId not found
             expect(lines).toHaveLength(2);
@@ -923,7 +1069,7 @@ describe("conversation_get Tool", () => {
             expect(lines[1]).toContain("Second");
         });
 
-        it("should work with includeToolResults parameter", async () => {
+        it("should work with includeToolCalls parameter", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -965,17 +1111,18 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 untilId: "3333333333333333333333333333333333333333333333333333333333333333",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
-            // Should have 2 lines: "Hello" and merged tool-call/tool-result (up to event-3)
+            // Should have 2 lines: "Hello" and tool-call (up to event-3).
+            // Tool-result entries are intentionally omitted from transcript XML.
             expect(lines).toHaveLength(2);
             expect(lines[0]).toContain("Hello");
             expect(lines[1]).toContain("[tool-use test_tool");
-            expect(lines[1]).toContain("[tool-result");
+            expect(lines[1]).not.toContain("[tool-result");
             expect(messages).not.toContain("Thanks!");
         });
 
@@ -1014,11 +1161,11 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 untilId: "2222222222222222222222222222222222222222222222222222222222222222",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should have 2 lines: "Hello" and tool-call (without merged result since event-3 is excluded)
             expect(lines).toHaveLength(2);
@@ -1095,7 +1242,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should show agent slugs, NOT truncated pubkeys
             expect(lines[0]).toBe("[+0] [@claude-code] Starting the task");
@@ -1139,7 +1286,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // User should show truncated pubkey (first 12 chars)
             expect(lines[0]).toBe("[+0] [@user12345678] Hello agents");
@@ -1179,7 +1326,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
@@ -1187,7 +1334,7 @@ describe("conversation_get Tool", () => {
         });
 
         it("should accept and resolve 12-character hex prefixes via PrefixKVStore", async () => {
-            const fullEventId = "abc123def456789012345678901234567890123456789012345678901234";
+            const fullEventId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -1215,7 +1362,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should resolve prefix and filter correctly
             expect(lines).toHaveLength(1);
@@ -1252,7 +1399,7 @@ describe("conversation_get Tool", () => {
 
             // Should return all messages (graceful fallback)
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
             expect(lines).toHaveLength(2);
             expect(lines[0]).toContain("First");
             expect(lines[1]).toContain("Second");
@@ -1290,7 +1437,7 @@ describe("conversation_get Tool", () => {
 
             // Should return all messages (graceful fallback when store not initialized)
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
             expect(lines).toHaveLength(2);
         });
 
@@ -1298,8 +1445,7 @@ describe("conversation_get Tool", () => {
             // note1 encodes a full hex event ID
             // For testing, we'll use a real note1 encoding
             const hexEventId = "0000000000000000000000000000000000000000000000000000000000000001";
-            // note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgfjq9j
-            const note1Id = "note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgfjq9j";
+            const note1Id = nip19.noteEncode(hexEventId);
 
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
@@ -1328,7 +1474,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
@@ -1370,7 +1516,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
@@ -1406,7 +1552,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(1);
             expect(lines[0]).toContain("First");
@@ -1441,7 +1587,7 @@ describe("conversation_get Tool", () => {
 
             // Should return all messages (graceful fallback)
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
             expect(lines).toHaveLength(2);
         });
 
@@ -1476,7 +1622,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should match case-insensitively
             expect(lines).toHaveLength(1);
@@ -1526,11 +1672,11 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // CRITICAL: Tool calls without timestamps should show [+0], NOT malformed [+-N] values
             // Bug behavior was: [+-1771103685] - the +- combination from subtracting baseline from 0
@@ -1581,11 +1727,11 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // First message (tool-call without timestamp) should show [+0] using baseline
             // NOT a huge negative number from using 0 as first message timestamp
@@ -1643,11 +1789,11 @@ describe("conversation_get Tool", () => {
             const tool = createConversationGetTool(mockContext);
             const result = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines[0]).toContain("[+0]");   // First: baseline
             expect(lines[1]).toContain("[+10]"); // Second: +10 from baseline
@@ -1701,7 +1847,7 @@ describe("conversation_get Tool", () => {
             const result = await tool.execute({ conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef" });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Verify exact relative timestamps - these should NOT all be [+0]
             // Prior to the fix, dividing by 1000 caused all these to be [+0]
@@ -1735,7 +1881,7 @@ describe("conversation_get Tool", () => {
         });
 
         it("should accept 12-char prefix for conversationId", async () => {
-            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234ab";
+            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234abcd";
             mockConversationData = {
                 id: fullConvId,
                 messages: [
@@ -1774,7 +1920,7 @@ describe("conversation_get Tool", () => {
         });
 
         it("should accept full 64-char hex for conversationId", async () => {
-            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234cd";
+            const fullConvId = "abc123def456789012345678901234567890123456789012345678901234abce";
             mockConversationData = {
                 id: fullConvId,
                 messages: [
@@ -1854,7 +2000,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(3);
             expect(lines[0]).toBe("[+0] [@claude-code] I'll delegate this task");
@@ -1898,7 +2044,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(2);
             expect(lines[0]).toBe("[+0] [@claude-code] Starting delegation");
@@ -1940,7 +2086,7 @@ describe("conversation_get Tool", () => {
             });
 
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             expect(lines).toHaveLength(2);
             expect(lines[0]).toBe("[+0] [@claude-code] Delegating task now");
@@ -1948,7 +2094,7 @@ describe("conversation_get Tool", () => {
             expect(lines[1]).toBe("[+5] [@claude-code] ⏳ Delegation f78g012e3gh4 → explore-agent in progress");
         });
 
-        it("should display delegation markers regardless of includeToolResults setting", async () => {
+        it("should display delegation markers regardless of includeToolCalls setting", async () => {
             mockConversationData = {
                 id: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
                 messages: [
@@ -1971,18 +2117,18 @@ describe("conversation_get Tool", () => {
 
             const tool = createConversationGetTool(mockContext);
 
-            // Test with includeToolResults=false (default)
+            // Test with includeToolCalls=false (default)
             const resultWithoutTools = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: false,
+                includeToolCalls: false,
             });
 
             expect((resultWithoutTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
 
-            // Test with includeToolResults=true
+            // Test with includeToolCalls=true
             const resultWithTools = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
             expect((resultWithTools.conversation as any).messages).toContain("✅ Delegation d56f890c4fa0");
@@ -2035,24 +2181,24 @@ describe("conversation_get Tool", () => {
 
             const tool = createConversationGetTool(mockContext);
 
-            // Without includeToolResults: should show delegation marker but not tool calls
+            // Without includeToolCalls: should show delegation marker but not tool calls
             const resultWithoutTools = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: false,
+                includeToolCalls: false,
             });
 
-            const linesWithoutTools = (resultWithoutTools.conversation as any).messages.split("\n");
+            const linesWithoutTools = xmlToLegacyLines((resultWithoutTools.conversation as any).messages);
             expect(linesWithoutTools).toHaveLength(2); // delegation marker + text
             expect(linesWithoutTools[0]).toContain("✅ Delegation e67f901d5fb1");
             expect(linesWithoutTools[1]).toContain("Done!");
 
-            // With includeToolResults: should show both tool calls and delegation marker
+            // With includeToolCalls: should show both tool calls and delegation marker
             const resultWithTools = await tool.execute({
                 conversationId: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-                includeToolResults: true,
+                includeToolCalls: true,
             });
 
-            const linesWithTools = (resultWithTools.conversation as any).messages.split("\n");
+            const linesWithTools = xmlToLegacyLines((resultWithTools.conversation as any).messages);
             expect(linesWithTools).toHaveLength(3); // merged tool call/result + delegation marker + text
             expect(linesWithTools[0]).toContain("[tool-use delegate");
             expect(linesWithTools[1]).toContain("✅ Delegation e67f901d5fb1");
@@ -2127,7 +2273,7 @@ describe("conversation_get Tool", () => {
 
             // Should skip the malformed delegation marker and not crash
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should only have 2 lines (the text messages, skipping the malformed marker)
             expect(lines).toHaveLength(2);
@@ -2179,7 +2325,7 @@ describe("conversation_get Tool", () => {
 
             // Should skip the malformed delegation marker and not crash
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should only have 2 lines (the text messages, skipping the marker with empty delegationConversationId)
             expect(lines).toHaveLength(2);
@@ -2230,7 +2376,7 @@ describe("conversation_get Tool", () => {
 
             // Should skip the malformed delegation marker and not crash
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should only have 2 lines (the text messages, skipping the marker with empty recipientPubkey)
             expect(lines).toHaveLength(2);
@@ -2281,7 +2427,7 @@ describe("conversation_get Tool", () => {
 
             // Should skip the malformed delegation marker and not crash
             const messages = (result.conversation as any).messages;
-            const lines = messages.split("\n");
+            const lines = xmlToLegacyLines(messages);
 
             // Should only have 2 lines (the text messages, skipping the marker with missing status)
             expect(lines).toHaveLength(2);

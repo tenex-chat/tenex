@@ -2,13 +2,13 @@ import type { LLMService } from "@/llm/service";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationEntry } from "@/conversations/types";
+import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { trace, SpanStatusCode, type Span } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import { config } from "@/services/ConfigService";
 import type {
   CompressionSegment,
 } from "./compression-types.js";
-import type { ToolCallPart, ToolResultPart } from "ai";
 import {
   CompressionSegmentsSchema,
   type CompressionSegmentInput,
@@ -23,64 +23,47 @@ import {
 } from "./compression-utils.js";
 
 const tracer = trace.getTracer("tenex.compression");
+const CONTEXT_SEGMENT_LIMIT = 3;
 
-function formatToolCallForCompression(tool: ToolCallPart): string {
-  const input = tool.input as Record<string, unknown> | null;
-  if (!input) return `Tool: ${tool.toolName}`;
-
-  // Prioritize description — it's the agent's own summary of intent
-  if (typeof input.description === "string" && input.description.length > 0) {
-    const keyArgs: string[] = [];
-    for (const key of ["path", "pattern", "query", "file_path", "glob"]) {
-      if (typeof input[key] === "string") {
-        keyArgs.push(`${key}: ${(input[key] as string).substring(0, 80)}`);
-      }
-    }
-    const argsSuffix = keyArgs.length > 0 ? ` (${keyArgs.join(", ")})` : "";
-    const desc = input.description as string;
-    return `Tool: ${tool.toolName} — ${desc.substring(0, 150)}${argsSuffix}`;
+function buildContextPreamble(existingSegments: CompressionSegment[]): string {
+  if (existingSegments.length === 0) {
+    return "";
   }
 
-  // Fallback: truncated JSON of input
-  const json = JSON.stringify(input);
-  return `Tool: ${tool.toolName} — ${json.substring(0, 200)}${json.length > 200 ? "..." : ""}`;
+  const recentSegments = existingSegments.slice(-CONTEXT_SEGMENT_LIMIT);
+  const contextLines = recentSegments.map(
+    (segment, index) => `[Previous context ${index + 1}]: ${segment.compressed}`
+  );
+
+  return `Previous conversation context (already compressed):\n${contextLines.join("\n")}\n\n`;
 }
 
-function extractToolResultPreview(output: unknown, maxLen: number): string {
-  if (!output) return "(empty)";
+function buildCompressionPrompt(
+  transcriptXml: string,
+  firstShortId: string,
+  lastShortId: string,
+  existingSegments: CompressionSegment[]
+): string {
+  const contextPreamble = buildContextPreamble(existingSegments);
 
-  if (typeof output === "string") {
-    return output.substring(0, maxLen) + (output.length > maxLen ? "..." : "");
-  }
+  return `You are compressing conversation history represented as XML. Analyze the conversation and create 1-3 compressed segments that preserve key information while being concise.
 
-  if (typeof output === "object" && output !== null) {
-    // ToolResultOutput union: {type, value} or {type: 'execution-denied'}
-    if ("type" in output) {
-      const typed = output as { type: string; value?: unknown; reason?: string };
-      if (typed.type === "execution-denied") {
-        return `[execution-denied${typed.reason ? `: ${typed.reason}` : ""}]`;
-      }
-      if ("value" in typed) {
-        const val = typeof typed.value === "string"
-          ? typed.value
-          : JSON.stringify(typed.value) ?? "";
-        return val.substring(0, maxLen) + (val.length > maxLen ? "..." : "");
-      }
-    }
+For each segment, provide:
+- fromEventId: starting message id from XML (the id attribute)
+- toEventId: ending message id from XML (the id attribute)
+- compressed: a concise summary (2-4 sentences) of the key points
 
-    // Object with plain .value field (legacy / defensive)
-    if ("value" in output) {
-      const val = (output as { value: unknown }).value;
-      const str = typeof val === "string" ? val : JSON.stringify(val) ?? "";
-      return str.substring(0, maxLen) + (str.length > maxLen ? "..." : "");
-    }
+Rules:
+- Preserve attribution: who said or did what.
+- Preserve recipient targeting when present.
+- Preserve temporal flow using the time="+seconds" indicators and conversation t0.
+- Use IDs exactly as shown in XML id attributes (do not invent IDs).
+- The first segment must start at id "${firstShortId}" and the last segment must end at id "${lastShortId}".
 
-    // Arbitrary object
-    const json = JSON.stringify(output) ?? "";
-    return json.substring(0, maxLen) + (json.length > maxLen ? "..." : "");
-  }
+${contextPreamble}Messages to compress:
+${transcriptXml}
 
-  return String(output).substring(0, maxLen);
+Create segments that group related topics together. Preserve important decisions, errors, and outcomes.`;
 }
 
 /**
@@ -260,7 +243,11 @@ export class CompressionService {
 
         // Attempt LLM compression
         try {
-          const newSegments = await this.compressEntries(rangeEntries, existingSegments);
+          const newSegments = await this.compressEntries(
+            conversationId,
+            rangeEntries,
+            existingSegments
+          );
 
           // Emit telemetry for successful summary generation
           span.addEvent("compression.summary_generated", {
@@ -362,6 +349,7 @@ export class CompressionService {
    * Compress a range of entries using LLM.
    */
   private async compressEntries(
+    conversationId: string,
     entries: ConversationEntry[],
     existingSegments: CompressionSegment[]
   ): Promise<CompressionSegment[]> {
@@ -371,82 +359,30 @@ export class CompressionService {
         try {
           span.setAttribute("entries.count", entries.length);
 
-          // Format entries for LLM, including tool payloads
-          const formattedEntries = entries
-            .map((e) => {
-              let formatted = `[${e.messageType}]`;
+          const {
+            xml: transcriptXml,
+            shortIdToEventId,
+            firstShortId,
+            lastShortId,
+          } = renderConversationXml(entries, { conversationId });
 
-              // Add text content if present
-              if (e.content) {
-                formatted += ` ${e.content}`;
-              }
-
-              // Add tool payload summary for tool-call/tool-result entries
-              if (e.toolData && e.toolData.length > 0) {
-                const toolSummary = e.toolData
-                  .map((tool) => {
-                    if (tool.type === "tool-call") {
-                      // Prefer pre-computed humanReadable from the tool's own formatter
-                      if (e.humanReadable) {
-                        return `Tool: ${(tool as ToolCallPart).toolName} — ${e.humanReadable}`;
-                      }
-                      return formatToolCallForCompression(tool as ToolCallPart);
-                    } else if (tool.type === "tool-result") {
-                      const tr = tool as ToolResultPart;
-                      const output = tr.output as unknown;
-                      const preview = extractToolResultPreview(output, 200);
-                      return `Result[${tr.toolName}]: ${preview}`;
-                    }
-                    return '';
-                  })
-                  .filter(Boolean)
-                  .join(', ');
-
-                if (toolSummary) {
-                  formatted += ` [${toolSummary}]`;
-                }
-              }
-
-              return formatted;
-            })
-            .join("\n\n");
-
-          const eventIds = entries
-            .filter((e) => e.eventId)
-            .map((e) => e.eventId!);
-
-          if (eventIds.length === 0) {
+          if (shortIdToEventId.size === 0 || !firstShortId || !lastShortId) {
             throw new Error("No eventIds found in entries to compress");
           }
 
-          // Build context preamble from last 3 existing segments
-          let contextPreamble = "";
-          if (existingSegments.length > 0) {
-            const recentSegments = existingSegments.slice(-3);
-            const contextLines = recentSegments.map(
-              (seg, i) => `[Previous context ${i + 1}]: ${seg.compressed}`
-            );
-            contextPreamble = `Previous conversation context (already compressed):\n${contextLines.join("\n")}\n\n`;
-          }
+          const prompt = buildCompressionPrompt(
+            transcriptXml,
+            firstShortId,
+            lastShortId,
+            existingSegments
+          );
 
           // Call LLM to compress
           const result = await this.effectiveLlmService.generateObject(
             [
               {
                 role: "user",
-                content: `You are compressing conversation history. Analyze the following messages and create 1-3 compressed segments that preserve key information while being concise.
-
-For each segment, provide:
-- fromEventId: starting message event ID
-- toEventId: ending message event ID
-- compressed: a concise summary (2-4 sentences) of the key points
-
-${contextPreamble}Messages to compress:
-${formattedEntries}
-
-Event IDs in order: ${eventIds.join(", ")}
-
-Create segments that group related topics together. Preserve important decisions, errors, and outcomes.`,
+                content: prompt,
               },
             ],
             CompressionSegmentsSchema
@@ -454,13 +390,17 @@ Create segments that group related topics together. Preserve important decisions
 
           // Convert LLM output to CompressionSegment format
           const segments: CompressionSegment[] = result.object.map(
-            (seg: CompressionSegmentInput) => ({
-              fromEventId: seg.fromEventId,
-              toEventId: seg.toEventId,
-              compressed: seg.compressed,
-              createdAt: Date.now(),
-              model: this.effectiveLlmService.model,
-            })
+            (seg: CompressionSegmentInput) => {
+              const fromId = seg.fromEventId.trim();
+              const toId = seg.toEventId.trim();
+              return {
+                fromEventId: shortIdToEventId.get(fromId) ?? fromId,
+                toEventId: shortIdToEventId.get(toId) ?? toId,
+                compressed: seg.compressed,
+                createdAt: Date.now(),
+                model: this.effectiveLlmService.model,
+              };
+            }
           );
 
           span.setAttribute("segments.count", segments.length);

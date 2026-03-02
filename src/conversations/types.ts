@@ -51,6 +51,11 @@ export interface ConversationEntry {
      */
     humanReadable?: string;
     /**
+     * XML transcript attributes captured from tool input at execution time.
+     * Example: { description: "...", file_path: "/repo/file.ts" }.
+     */
+    transcriptToolAttributes?: Record<string, string>;
+    /**
      * For delegation-marker messageType: contains the marker data.
      * This allows lazy expansion of delegation transcripts when building messages.
      */

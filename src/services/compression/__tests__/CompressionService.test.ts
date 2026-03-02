@@ -439,7 +439,7 @@ describe("CompressionService - tool content formatting", () => {
     config.getConfig = originalGetConfig;
   });
 
-  it("should include tool call description and key args in prompt", async () => {
+  it("should include tool call description and selected args in prompt", async () => {
     // 50 entries: first 40 are tool calls with descriptions, last 10 are text
     const entries: ConversationEntry[] = [
       ...Array.from({ length: 40 }, (_, i) => ({
@@ -470,12 +470,62 @@ describe("CompressionService - tool content formatting", () => {
     conversationStore.getAllMessages = mock(() => entries);
     await service.ensureUnderLimit("test-conv", 80);
 
-    expect(capturedPrompt).toContain("Read InterventionService for pattern reference");
-    expect(capturedPrompt).toContain("path: /src/services/InterventionService.ts");
-    expect(capturedPrompt).toContain("Tool: fs_read");
+    expect(capturedPrompt).toContain("<conversation id=\"test-conv\" t0=\"1000\">");
+    expect(capturedPrompt).toContain("time=\"+0\"");
+    expect(capturedPrompt).toContain('description=\"Read InterventionService for pattern reference\"');
+    expect(capturedPrompt).toContain('file_path=\"/src/services/InterventionService.ts\"');
+    expect(capturedPrompt).not.toContain("Event IDs in order:");
   });
 
-  it("should fall back to JSON stringify for tool calls without description", async () => {
+  it("should include attribution/recipient/time in XML and map short ids back to full event ids", async () => {
+    (llmService as any).generateObject = mock(async (messages: any[]) => {
+      capturedPrompt = messages[0].content;
+      const ids = Array.from(
+        capturedPrompt.matchAll(/<(?:message|tool)\s+[^>]*\bid="([^"]+)"/g)
+      ).map((m) => m[1]);
+      return {
+        object: [{
+          fromEventId: ids[0],
+          toEventId: ids[39],
+          compressed: "XML compression summary",
+        }],
+      };
+    });
+
+    const entries: ConversationEntry[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        pubkey: i % 2 === 0 ? "author-a" : "author-b",
+        content: `Message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1700000000 + i,
+        eventId: `ev${i.toString().padStart(2, "0")}-abcdefghijklmnopqrstuvwxyz`,
+        ...(i === 1 ? { targetedPubkeys: ["debugger"] } : {}),
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        pubkey: "user",
+        content: `Recent message ${i}`,
+        messageType: "text" as const,
+        timestamp: 1700000100 + i,
+        eventId: `recent-${i}`,
+      })),
+    ];
+
+    conversationStore.getAllMessages = mock(() => entries);
+    await service.ensureUnderLimit("test-conv", 80);
+
+    expect(capturedPrompt).toContain("<conversation id=\"test-conv\" t0=\"1700000000\">");
+    expect(capturedPrompt).toContain("author=\"author-a\"");
+    expect(capturedPrompt).toContain("recipient=\"debugger\"");
+    expect(capturedPrompt).toContain("time=\"+1\"");
+    expect(capturedPrompt).not.toContain("Event IDs in order:");
+
+    expect(conversationStore.appendCompressionSegments).toHaveBeenCalled();
+    const segments = conversationStore.appendCompressionSegments.mock.calls[0][1] as CompressionSegment[];
+    expect(segments[0].fromEventId).toBe(entries[0].eventId);
+    expect(segments[0].toEventId).toBe(entries[39].eventId);
+  });
+
+  it("should fall back to selected key args for tool calls without description", async () => {
     const entries: ConversationEntry[] = [
       ...Array.from({ length: 40 }, (_, i) => ({
         pubkey: "assistant",
@@ -502,12 +552,12 @@ describe("CompressionService - tool content formatting", () => {
     conversationStore.getAllMessages = mock(() => entries);
     await service.ensureUnderLimit("test-conv", 80);
 
-    // Should contain JSON fallback with the input fields
-    expect(capturedPrompt).toContain("Tool: fs_grep");
-    expect(capturedPrompt).toContain("some search term");
+    expect(capturedPrompt).toContain('name=\"fs_grep\"');
+    expect(capturedPrompt).toContain('query=\"some search term\"');
+    expect(capturedPrompt).toContain('glob=\"**/*.ts\"');
   });
 
-  it("should include tool result preview from output", async () => {
+  it("should exclude tool results from transcript XML", async () => {
     const entries: ConversationEntry[] = [
       ...Array.from({ length: 40 }, (_, i) => ({
         pubkey: "assistant",
@@ -534,8 +584,8 @@ describe("CompressionService - tool content formatting", () => {
     conversationStore.getAllMessages = mock(() => entries);
     await service.ensureUnderLimit("test-conv", 80);
 
-    expect(capturedPrompt).toContain("Result[fs_read]:");
-    expect(capturedPrompt).toContain("file contents here with important data");
+    expect(capturedPrompt).not.toContain("tool-result");
+    expect(capturedPrompt).not.toContain("file contents here with important data");
   });
 
   it("should truncate large tool data", async () => {
@@ -583,13 +633,13 @@ describe("CompressionService - tool content formatting", () => {
 
     // Description should be truncated to 150 chars
     expect(capturedPrompt).not.toContain("x".repeat(300));
-    // Result should be truncated to 200 chars
+    // Tool results are not included in transcript XML
     expect(capturedPrompt).not.toContain("y".repeat(500));
-    // But should contain truncated versions
-    expect(capturedPrompt).toContain("...");
+    // But should contain truncated description marker
+    expect(capturedPrompt).toContain("[truncated ");
   });
 
-  it("should use humanReadable field when available instead of description+key-args", async () => {
+  it("should include description and selected args as XML attributes", async () => {
     const entries: ConversationEntry[] = [
       ...Array.from({ length: 40 }, (_, i) => ({
         pubkey: "assistant",
@@ -620,10 +670,9 @@ describe("CompressionService - tool content formatting", () => {
     conversationStore.getAllMessages = mock(() => entries);
     await service.ensureUnderLimit("test-conv", 80);
 
-    // Should use the humanReadable string directly
-    expect(capturedPrompt).toContain("Reading /src/main.ts (Check entry point for initialization)");
-    // Should still include the tool name
-    expect(capturedPrompt).toContain("Tool: fs_read");
+    expect(capturedPrompt).toContain('name=\"fs_read\"');
+    expect(capturedPrompt).toContain('description=\"Check entry point for initialization\"');
+    expect(capturedPrompt).toContain('file_path=\"/src/main.ts\"');
   });
 });
 
