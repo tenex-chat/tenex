@@ -241,6 +241,23 @@ export class AgentExecutor {
                     }
                 }
 
+                logger.writeToWarnLog({
+                    timestamp: new Date().toISOString(),
+                    level: "error",
+                    component: "AgentExecutor",
+                    message: isCreditsError
+                        ? "Execution failed due to insufficient credits"
+                        : "Agent execution failed",
+                    context: {
+                        agentSlug: context.agent.slug,
+                        conversationId: conversation?.id?.substring(0, 12),
+                        isCreditsError,
+                        errorType: isCreditsError ? "insufficient_credits" : "execution_error",
+                    },
+                    error: errorMessage,
+                    stack: error instanceof Error ? error.stack : undefined,
+                });
+
                 logger.error(
                     isCreditsError
                         ? "[AgentExecutor] Execution failed due to insufficient credits"
@@ -319,6 +336,18 @@ export class AgentExecutor {
             logger.error("[AgentExecutor] Streaming failed", {
                 agent: context.agent.slug,
                 error: formatAnyError(streamError),
+            });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentExecutor",
+                message: "LLM streaming execution failed",
+                context: {
+                    agentSlug: context.agent.slug,
+                    ralNumber,
+                },
+                error: formatAnyError(streamError),
+                stack: streamError instanceof Error ? streamError.stack : undefined,
             });
             throw streamError;
         }

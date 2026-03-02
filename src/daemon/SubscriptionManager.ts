@@ -288,6 +288,19 @@ export class SubscriptionManager {
                 eventId: event.id,
                 eventKind: event.kind,
             });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "SubscriptionManager",
+                message: "Error handling incoming Nostr event",
+                context: {
+                    eventId: event.id,
+                    eventKind: event.kind,
+                    pubkey: event.pubkey,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
         }
     }
 

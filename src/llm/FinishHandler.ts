@@ -183,6 +183,20 @@ export function createFinishHandler(
             logger.error("[LLMService] Error in onFinish handler", {
                 error: error instanceof Error ? error.message : String(error),
             });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "FinishHandler",
+                message: "Error in LLM onFinish handler",
+                context: {
+                    provider: config.provider,
+                    model: config.model,
+                    finishReason: e.finishReason,
+                    stepsCount: e.steps.length,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             throw error;
         }
     };

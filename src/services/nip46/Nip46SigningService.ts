@@ -233,6 +233,19 @@ export class Nip46SigningService {
                 durationMs,
             });
 
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "Nip46SigningService",
+                message: "NIP-46 signer connection failed",
+                context: {
+                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    durationMs,
+                },
+                error: errorMsg,
+                stack: error instanceof Error ? error.stack : undefined,
+            });
+
             this.signingLog.log({
                 op: "sign_error",
                 requestId,
@@ -428,6 +441,22 @@ export class Nip46SigningService {
             retries: maxRetries,
             error: errorMsg,
             durationMs,
+        });
+
+        logger.writeToWarnLog({
+            timestamp: new Date().toISOString(),
+            level: "error",
+            component: "Nip46SigningService",
+            message: `NIP-46 signing failed after ${maxRetries} retries`,
+            context: {
+                ownerPubkey: ownerPubkey.substring(0, 12),
+                eventKind: event.kind,
+                retries: maxRetries,
+                durationMs,
+                isTimeout: errorMsg.includes("timed out"),
+            },
+            error: errorMsg,
+            stack: lastError?.stack,
         });
 
         return { outcome: "failed", reason: errorMsg };

@@ -520,6 +520,22 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 "stream.finish_part_seen": finishPartSeen,
                 "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
             });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "LLMService",
+                message: "LLM stream loop error",
+                context: {
+                    provider: this.provider,
+                    model: this.model,
+                    chunkCount,
+                    lastChunkType: lastChunkType ?? "none",
+                    finishPartSeen,
+                    abortSignalAborted: options?.abortSignal?.aborted ?? false,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             await this.handleStreamError(error, startTime);
             throw error;
         }
@@ -712,6 +728,19 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 model: this.model,
                 duration,
                 error: error instanceof Error ? error.message : String(error),
+            });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "LLMService",
+                message: `${operationName} failed`,
+                context: {
+                    provider: this.provider,
+                    model: this.model,
+                    duration,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
             });
             throw error;
         }

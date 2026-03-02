@@ -40,6 +40,8 @@ const emojis = {
 
 // File logging state
 let logFilePath: string | null = null;
+let warnLogFilePath: string | null = null;
+const WARN_LOG_MAX_SIZE = 100 * 1024 * 1024; // 100MB
 
 // Helper to format timestamp for file output
 function formatTimestamp(): string {
@@ -64,6 +66,55 @@ function writeToFile(level: string, message: string, args: unknown[]): void {
     fs.appendFileSync(logFilePath, logLine);
 }
 
+/**
+ * Structured entry written to warn.log for operator troubleshooting.
+ */
+export interface WarnLogEntry {
+    timestamp: string;
+    level: "warn" | "error";
+    component: string;
+    message: string;
+    context?: Record<string, unknown>;
+    error?: string;
+    stack?: string;
+}
+
+/**
+ * Rotate warn.log when it exceeds WARN_LOG_MAX_SIZE.
+ * Renames current file to warn.log.1, discarding any previous .1.
+ */
+function rotateWarnLogIfNeeded(): void {
+    if (!warnLogFilePath) return;
+    try {
+        const stat = fs.statSync(warnLogFilePath);
+        if (stat.size >= WARN_LOG_MAX_SIZE) {
+            const rotatedPath = `${warnLogFilePath}.1`;
+            try {
+                fs.unlinkSync(rotatedPath);
+            } catch {
+                // .1 doesn't exist, fine
+            }
+            fs.renameSync(warnLogFilePath, rotatedPath);
+        }
+    } catch {
+        // File doesn't exist yet, no rotation needed
+    }
+}
+
+/**
+ * Write a structured JSON entry to warn.log.
+ * Only writes if warn.log transport has been initialized.
+ */
+function writeToWarnLog(entry: WarnLogEntry): void {
+    if (!warnLogFilePath) return;
+    try {
+        rotateWarnLogIfNeeded();
+        fs.appendFileSync(warnLogFilePath, JSON.stringify(entry) + "\n");
+    } catch {
+        // Swallow — we can't let warn.log failures crash the system
+    }
+}
+
 // Initialize daemon logging
 async function initDaemonLogging(): Promise<void> {
     // Lazy-load config to avoid circular dependency
@@ -76,11 +127,15 @@ async function initDaemonLogging(): Promise<void> {
     // Ensure directory exists
     const logDir = path.dirname(logFilePath);
     fs.mkdirSync(logDir, { recursive: true });
+
+    // Initialize warn.log in the same directory
+    warnLogFilePath = path.join(logDir, "warn.log");
 }
 
 // Main logger object
 export const logger = {
     initDaemonLogging,
+    writeToWarnLog,
 
     /**
      * Check if a specific log level is enabled

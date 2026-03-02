@@ -304,6 +304,19 @@ export function createPrepareStep(
                                     variant: currentVariant,
                                     config: resolution.configName,
                                 });
+                                logger.writeToWarnLog({
+                                    timestamp: new Date().toISOString(),
+                                    level: "error",
+                                    component: "StreamCallbacks",
+                                    message: "Failed to create new model for variant switch",
+                                    context: {
+                                        agent: context.agent.slug,
+                                        variant: currentVariant,
+                                        config: resolution.configName,
+                                    },
+                                    error: formatAnyError(modelError),
+                                    stack: modelError instanceof Error ? modelError.stack : undefined,
+                                });
                             }
                         }
                     }
@@ -315,6 +328,20 @@ export function createPrepareStep(
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
+                logger.writeToWarnLog({
+                    timestamp: new Date().toISOString(),
+                    level: "error",
+                    component: "StreamCallbacks",
+                    message: "LLM streaming prepareStep failed",
+                    context: {
+                        agent: context.agent.slug,
+                        conversationId: context.conversationId,
+                        stepNumber: step.stepNumber,
+                        ralNumber,
+                    },
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                });
                 throw error;
             } finally {
                 span.end();

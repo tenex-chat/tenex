@@ -92,6 +92,19 @@ export class AgentDispatchService {
                 error: formatAnyError(error),
                 eventId: event.id,
             });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentDispatchService",
+                message: "Failed to route incoming reply",
+                context: {
+                    eventId: event.id,
+                    eventKind: event.kind,
+                    pubkey: event.pubkey,
+                },
+                error: formatAnyError(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
         } finally {
             span.end();
         }
@@ -575,6 +588,19 @@ export class AgentDispatchService {
                 code: SpanStatusCode.ERROR,
                 message: (error as Error).message,
             });
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "AgentDispatchService",
+                message: "Delegation routing execution failed",
+                context: {
+                    agentSlug: delegationTarget.agent.slug,
+                    conversationId: delegationTarget.conversationId,
+                    triggerEventId: event.id,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
             throw error;
         } finally {
             span.end();
@@ -744,6 +770,19 @@ export class AgentDispatchService {
                 agentSpan.setStatus({
                     code: SpanStatusCode.ERROR,
                     message: (error as Error).message,
+                });
+                logger.writeToWarnLog({
+                    timestamp: new Date().toISOString(),
+                    level: "error",
+                    component: "AgentDispatchService",
+                    message: "Agent execution failed during dispatch",
+                    context: {
+                        agentSlug: targetAgent.slug,
+                        conversationId,
+                        triggerEventId: event.id,
+                    },
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
                 });
                 throw error;
             } finally {
