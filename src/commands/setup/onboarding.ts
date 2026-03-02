@@ -790,11 +790,16 @@ interface AgentDiscovery {
     subscription: NDKSubscription;
     events: Map<string, NDKEvent>;
     initialSync: Promise<void>;
+    startedAtMs: number | null;
 }
 
-function startAgentDiscovery(relays: string[]): AgentDiscovery {
+function startAgentDiscovery(relays: string[], signer?: NDKPrivateKeySigner): AgentDiscovery {
     const ndk = new NDK({ explicitRelayUrls: relays, enableOutboxModel: false });
-    ndk.connect(); // fire-and-forget — NDK handles reconnection, subscription queues until connected
+
+    if (signer) {
+        ndk.signer = signer;
+        ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk, signer });
+    }
 
     const events = new Map<string, NDKEvent>();
     const TEAM_KIND = 34199;
@@ -820,13 +825,25 @@ function startAgentDiscovery(relays: string[]): AgentDiscovery {
         },
     );
 
-    return { ndk, subscription, events, initialSync };
+    return { ndk, subscription, events, initialSync, startedAtMs: null };
+}
+
+function connectAgentDiscovery(discovery: AgentDiscovery): void {
+    discovery.startedAtMs = Date.now();
+    // Fire-and-forget — NDK handles reconnection and the subscription queues until connected.
+    // Swallow connection errors to avoid unhandled rejections in background setup flow.
+    void discovery.ndk.connect().catch(() => {});
 }
 
 async function waitForAgentDiscovery(discovery: AgentDiscovery, timeoutMs = 3_000): Promise<void> {
+    const startedAtMs = discovery.startedAtMs ?? Date.now();
+    const elapsedMs = Date.now() - startedAtMs;
+    const remainingMs = Math.max(0, timeoutMs - elapsedMs);
+    if (remainingMs === 0) return;
+
     await Promise.race([
         discovery.initialSync,
-        new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+        new Promise<void>((resolve) => setTimeout(resolve, remainingMs)),
     ]);
 }
 
@@ -906,6 +923,7 @@ async function runProjectAndAgentsStep(
     openClawStateDir: string | null,
 ): Promise<boolean> {
     const { ndk } = discovery;
+    const discoveryReady = waitForAgentDiscovery(discovery);
 
     // ── Part A: OpenClaw agents (if detected) ───────────────────────────────
     let installedCount = 0;
@@ -1012,7 +1030,7 @@ async function runProjectAndAgentsStep(
         return false;
     }
 
-    await waitForAgentDiscovery(discovery);
+    await discoveryReady;
     const fetchResults = resolveAgentDiscovery(discovery);
     const hasNostrAgents = fetchResults.agents.length > 0;
 
@@ -1433,7 +1451,11 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     // Start agent discovery early — NDK connects and streams events in the
     // background while the user configures providers, models, etc. (steps 3-7).
     // By step 8, agents have already accumulated.
-    const agentDiscovery = startAgentDiscovery(relays);
+    const agentDiscovery = startAgentDiscovery(
+        relays,
+        userPrivateKeyHex ? new NDKPrivateKeySigner(userPrivateKeyHex) : undefined,
+    );
+    connectAgentDiscovery(agentDiscovery);
 
     // Publish kind:0 profile for new identity (fire-and-forget)
     if (newIdentityUsername && userPrivateKeyHex) {
