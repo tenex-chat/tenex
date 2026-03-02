@@ -85,7 +85,13 @@ export class PubkeyService {
      * Uses AgentRegistry's getAgentByPubkey for efficient O(1) lookup.
      */
     private getAgentSlug(pubkey: Hexpubkey): string | undefined {
-        const projectCtx = getProjectContext();
+        let projectCtx;
+        try {
+            projectCtx = getProjectContext();
+        } catch {
+            // Name resolution must remain available even outside a project-scoped context
+            return undefined;
+        }
 
         // Use direct pubkey lookup from AgentRegistry (O(1) instead of O(n))
         const agent = projectCtx.getAgentByPubkey(pubkey);
