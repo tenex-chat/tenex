@@ -56,24 +56,32 @@ export function createFinishHandler(
             // This creates intentional duplication (conversation + completion both have same text)
             // but ensures delegated agents receive the full response via p-tag on completion.
             //
-            // Three-level fallback for finalMessage:
-            // 1. Use cachedContent if available (normal case)
-            // 2. Use e.text if cachedContent is empty AND e.text is non-empty (fallback when content was already published)
-            // 3. Use error message if both are empty (edge case where no content was captured)
+            // Multi-level fallback for finalMessage:
+            // 1. Use cachedContent if available (normal case: text is still buffered)
+            // 2. Use e.text if non-empty (text was already published via chunk-type-change,
+            //    but we still re-publish for delegations - see comment above)
+            // 3. Use accumulated steps text if non-empty (handles multi-step flows where
+            //    the final step has no text - e.g., last step processed a tool result and
+            //    stopped immediately; e.text = finalStep.text which is "" in that case,
+            //    but the real response text is in an earlier step)
+            // 4. Use error message if all sources are empty
             const ERROR_FALLBACK_MESSAGE =
                 "There was an error capturing the work done, please review the conversation for the results";
 
             const cachedContent = state.getCachedContent();
             const text = e.text ?? "";
+            const stepsText = e.steps.reduce((acc, step) => acc + step.text, "");
 
             const fallbackLevel =
                 cachedContent.length > 0 ? "cached" :
                 text.length > 0 ? "text" :
+                stepsText.length > 0 ? "steps" :
                 "error";
 
             const finalMessage =
                 fallbackLevel === "cached" ? cachedContent :
                 fallbackLevel === "text" ? text :
+                fallbackLevel === "steps" ? stepsText :
                 ERROR_FALLBACK_MESSAGE;
 
             const usedFallbackToText = fallbackLevel === "text";
@@ -108,6 +116,8 @@ export function createFinishHandler(
                 "complete.message_length": finalMessage.length,
                 "complete.cached_content_length": cachedContent.length,
                 "complete.e_text_length": text.length,
+                "complete.steps_text_length": stepsText.length,
+                "complete.fallback_level": fallbackLevel,
                 "complete.used_fallback_to_e_text": usedFallbackToText,
                 "complete.used_error_fallback": usedErrorFallback,
                 "complete.usage_input_tokens": usage.inputTokens,
