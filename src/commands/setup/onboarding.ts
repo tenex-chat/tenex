@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import * as os from "node:os";
 import * as path from "node:path";
 import { ensureDirectory } from "@/lib/fs";
@@ -789,6 +789,7 @@ interface AgentDiscovery {
     ndk: NDK;
     subscription: NDKSubscription;
     events: Map<string, NDKEvent>;
+    initialSync: Promise<void>;
 }
 
 function startAgentDiscovery(relays: string[]): AgentDiscovery {
@@ -797,14 +798,36 @@ function startAgentDiscovery(relays: string[]): AgentDiscovery {
 
     const events = new Map<string, NDKEvent>();
     const TEAM_KIND = 34199;
+    let initialSyncResolved = false;
+    let resolveInitialSync: (() => void) | null = null;
+    const initialSync = new Promise<void>((resolve) => {
+        resolveInitialSync = resolve;
+    });
+
+    const markInitialSyncComplete = (): void => {
+        if (initialSyncResolved) return;
+        initialSyncResolved = true;
+        resolveInitialSync?.();
+    };
 
     const subscription = ndk.subscribe(
         { kinds: [...NDKAgentDefinition.kinds, TEAM_KIND] as number[] },
         { closeOnEose: false },
-        { onEvent: (event: NDKEvent) => { events.set(event.id, event); } },
+        {
+            onEvent: (event: NDKEvent) => { events.set(event.id, event); },
+            onEose: markInitialSyncComplete,
+            onClose: markInitialSyncComplete,
+        },
     );
 
-    return { ndk, subscription, events };
+    return { ndk, subscription, events, initialSync };
+}
+
+async function waitForAgentDiscovery(discovery: AgentDiscovery, timeoutMs = 3_000): Promise<void> {
+    await Promise.race([
+        discovery.initialSync,
+        new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
 }
 
 // ─── Project & Agents Step ───────────────────────────────────────────────────
@@ -871,57 +894,55 @@ function resolveAgentDiscovery(discovery: AgentDiscovery): FetchResults {
  * Run the Project & Agents onboarding step.
  *
  * Replicates the Rust TUI's step_first_project_and_agents:
- * 1. Ask about creating a Meta project
- * 2. Discover agents and teams from Nostr
- * 3. Two-tier selection: teams first, then individual agents
- * 4. Install selected agents
- * 5. Publish kind 31933 project event
+ * 1. Import OpenClaw agents (if detected)
+ * 2. Ask about creating a Meta project
+ * 3. Discover/select Nostr teams and individual agents
+ * 4. Install selected agents locally (best-effort)
+ * 5. Publish kind 31933 project event with final ["agent", "<event-id>"] tags
  */
 async function runProjectAndAgentsStep(
     discovery: AgentDiscovery,
     userPrivateKeyHex: string,
     openClawStateDir: string | null,
 ): Promise<boolean> {
-    // ── Part A: Ask about Meta project ──────────────────────────────────────
-    display.context(
-        "Projects organize what your agents work on. We suggest starting with a\n" +
-        "\"Meta\" project — a command center where agents track everything else.",
-    );
-    display.blank();
-
-    const { createMeta } = await inquirer.prompt([{
-        type: "confirm",
-        name: "createMeta",
-        message: "Create a Meta project?",
-        default: true,
-        theme: inquirerTheme,
-    }]);
-
-    if (!createMeta) {
-        display.blank();
-        display.context("Sure thing. You can create projects anytime from the dashboard.");
-        return false;
-    }
-
-    // ── Part B: Agent selection ─────────────────────────────────────────────
-    display.blank();
-    display.context("Pick a pre-built agent team or choose individual agents.");
-    display.blank();
-
     const { ndk } = discovery;
-    const fetchResults = resolveAgentDiscovery(discovery);
 
-    const hasNostrAgents = fetchResults.agents.length > 0;
-
-    if (!openClawStateDir && !hasNostrAgents) {
-        display.context("No agents available right now.");
-        display.hint("You can browse and hire agents later from the dashboard.");
-    }
-
+    // ── Part A: OpenClaw agents (if detected) ───────────────────────────────
     let installedCount = 0;
-    const nostrAgentEventIds: string[] = [];
+    const selectedNostrAgentEventIds = new Set<string>();
+    let openClawImportInFlight = false;
+    let openClawImportPromise: Promise<{
+        importedCount: number;
+        stdout: string;
+        stderr: string;
+        failed: boolean;
+    }> | null = null;
 
-    // ── Section B.1: OpenClaw agents ────────────────────────────────────────
+    const waitForOpenClawImportIfNeeded = async (): Promise<void> => {
+        if (!openClawImportPromise) return;
+
+        if (openClawImportInFlight) {
+            display.context("Waiting for OpenClaw import to finish...");
+            display.blank();
+        }
+
+        const result = await openClawImportPromise;
+        openClawImportPromise = null;
+        openClawImportInFlight = false;
+
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+
+        if (result.failed) {
+            display.context("OpenClaw import encountered an issue — check daemon logs.");
+        } else if (result.importedCount > 0) {
+            installedCount += result.importedCount;
+            display.success(`Imported ${result.importedCount} OpenClaw agent(s).`);
+        }
+
+        display.blank();
+    };
+
     if (openClawStateDir) {
         const openClawAgents = await readOpenClawAgents(openClawStateDir);
 
@@ -942,42 +963,78 @@ async function runProjectAndAgentsStep(
             }]);
 
             if (selected.length > 0) {
-                display.context("Importing agents (this may take a moment)...");
+                display.context("Importing OpenClaw agents in background while setup continues...");
                 display.blank();
 
                 const slugsArg = (selected as string[]).join(",");
-                await new Promise<void>((resolve) => {
+                openClawImportInFlight = true;
+                openClawImportPromise = new Promise((resolve) => {
+                    const selectedCount = selected.length;
                     const binPath = process.argv[1];
                     execFile(process.argv[0], [binPath, "agent", "import", "openclaw", "--slugs", slugsArg], (err, stdout, stderr) => {
-                        if (stdout) process.stdout.write(stdout);
-                        if (stderr) process.stderr.write(stderr);
-                        if (err) {
-                            display.context("OpenClaw import encountered an issue — check daemon logs.");
-                        } else {
-                            installedCount += selected.length;
-                        }
-                        resolve();
+                        resolve({
+                            importedCount: err ? 0 : selectedCount,
+                            stdout: stdout ?? "",
+                            stderr: stderr ?? "",
+                            failed: !!err,
+                        });
                     });
                 });
-
-                display.blank();
             }
         }
     }
 
-    // ── Section B.2: Nostr agents (team + individual selection) ─────────────
-    if (fetchResults.agents.length > 0) {
+    // ── Part B: Ask about Meta project ──────────────────────────────────────
+    display.context(
+        "Projects organize what your agents work on. We suggest starting with a\n" +
+        "\"Meta\" project — a command center where agents track everything else.",
+    );
+    display.blank();
+
+    const { createMeta } = await inquirer.prompt([{
+        type: "confirm",
+        name: "createMeta",
+        message: "Create a Meta project?",
+        default: true,
+        theme: inquirerTheme,
+    }]);
+
+    if (!createMeta) {
+        discovery.subscription.stop();
+        await waitForOpenClawImportIfNeeded();
+
+        if (installedCount > 0) {
+            display.blank();
+            display.success(`${installedCount} agent(s) ready.`);
+        }
+        display.blank();
+        display.context("Sure thing. You can create projects anytime from the dashboard.");
+        return false;
+    }
+
+    await waitForAgentDiscovery(discovery);
+    const fetchResults = resolveAgentDiscovery(discovery);
+    const hasNostrAgents = fetchResults.agents.length > 0;
+
+    // ── Part C: Nostr agents (team + individual selection) ──────────────────
+    display.blank();
+    display.context("Pick a pre-built agent team or choose individual agents.");
+    display.blank();
+
+    if (!hasNostrAgents) {
+        display.context("No Nostr agents available right now.");
+        display.hint("You can browse and hire agents later from the dashboard.");
+    } else {
         const results = fetchResults;
-        const installedAgentIds: string[] = [];
 
         while (true) {
-            // Only show teams that still have uninstalled agents
+            // Only show teams that still have unselected agents
             const availableTeams = results.teams.filter((team) =>
-                agentsForTeam(results, team).some((a) => !installedAgentIds.includes(a.id)),
+                agentsForTeam(results, team).some((a) => !selectedNostrAgentEventIds.has(a.id)),
             );
 
             const hasRemainingAgents = results.agents.some(
-                (a) => !installedAgentIds.includes(a.id),
+                (a) => !selectedNostrAgentEventIds.has(a.id),
             );
 
             // Nothing left to offer
@@ -989,7 +1046,7 @@ async function runProjectAndAgentsStep(
             // Team entries
             for (const team of availableTeams) {
                 const agentCount = agentsForTeam(results, team)
-                    .filter((a) => !installedAgentIds.includes(a.id)).length;
+                    .filter((a) => !selectedNostrAgentEventIds.has(a.id)).length;
                 const label = team.description
                     ? `${team.title} — ${team.description} (${agentCount} agents)`
                     : `${team.title} (${agentCount} agents)`;
@@ -1017,7 +1074,7 @@ async function runProjectAndAgentsStep(
             if (selection === "__individual__") {
                 // Individual agent multi-select
                 const remaining = results.agents.filter(
-                    (a) => !installedAgentIds.includes(a.id),
+                    (a) => !selectedNostrAgentEventIds.has(a.id),
                 );
 
                 const { selected } = await inquirer.prompt([{
@@ -1035,12 +1092,15 @@ async function runProjectAndAgentsStep(
 
                 if ((selected as string[]).length > 0) {
                     const selectedAgents = remaining.filter((a) => (selected as string[]).includes(a.id));
+                    for (const agent of selectedAgents) {
+                        selectedNostrAgentEventIds.add(agent.id);
+                    }
 
+                    let installedNow = 0;
                     for (const agent of selectedAgents) {
                         try {
                             await installAgentFromNostrEvent(agent.event, undefined, ndk);
-                            nostrAgentEventIds.push(agent.id);
-                            installedAgentIds.push(agent.id);
+                            installedNow++;
                             installedCount++;
                         } catch (err) {
                             display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
@@ -1049,7 +1109,10 @@ async function runProjectAndAgentsStep(
 
                     display.blank();
                     const names = selectedAgents.map((a) => a.name).join(", ");
-                    display.success(`Installed ${selectedAgents.length} agent(s): ${names}`);
+                    display.success(`Added ${selectedAgents.length} agent tag(s): ${names}`);
+                    if (installedNow !== selectedAgents.length) {
+                        display.hint(`Installed ${installedNow}/${selectedAgents.length} locally. Remaining agents will load from project tags.`);
+                    }
                 }
                 continue;
             }
@@ -1060,7 +1123,7 @@ async function runProjectAndAgentsStep(
             if (!team) continue;
 
             const teamAgents = agentsForTeam(results, team)
-                .filter((a) => !installedAgentIds.includes(a.id));
+                .filter((a) => !selectedNostrAgentEventIds.has(a.id));
 
             if (teamAgents.length === 0) continue;
 
@@ -1071,10 +1134,14 @@ async function runProjectAndAgentsStep(
             }
 
             for (const agent of teamAgents) {
+                selectedNostrAgentEventIds.add(agent.id);
+            }
+
+            let installedNow = 0;
+            for (const agent of teamAgents) {
                 try {
                     await installAgentFromNostrEvent(agent.event, undefined, ndk);
-                    nostrAgentEventIds.push(agent.id);
-                    installedAgentIds.push(agent.id);
+                    installedNow++;
                     installedCount++;
                 } catch (err) {
                     display.context(`Failed to install "${agent.name}": ${err instanceof Error ? err.message : String(err)}`);
@@ -1083,16 +1150,14 @@ async function runProjectAndAgentsStep(
 
             display.blank();
             const names = teamAgents.map((a) => a.name).join(", ");
-            display.success(`Team "${team.title}" installed: ${names}`);
+            display.success(`Team "${team.title}" added (${teamAgents.length} agent tag(s)): ${names}`);
+            if (installedNow !== teamAgents.length) {
+                display.hint(`Installed ${installedNow}/${teamAgents.length} locally. Remaining agents will load from project tags.`);
+            }
         }
     }
 
-    if (installedCount > 0) {
-        display.blank();
-        display.success(`${installedCount} agent(s) ready.`);
-    }
-
-    // ── Part C: Publish kind 31933 project event ──────────────────────────
+    // ── Part D: Publish kind 31933 project event ──────────────────────────
     // The daemon handles directory creation, git init, and agent loading on boot.
     // We just publish the event with agent tags — the daemon discovers it from relays.
     try {
@@ -1105,7 +1170,7 @@ async function runProjectAndAgentsStep(
         project.title = "Meta";
         project.tags.push(["client", "tenex-setup"]);
 
-        for (const eid of nostrAgentEventIds) {
+        for (const eid of selectedNostrAgentEventIds) {
             project.tags.push(["agent", eid]);
         }
 
@@ -1121,6 +1186,8 @@ async function runProjectAndAgentsStep(
         display.context(`Could not publish project event (${message}) — the daemon will pick it up later.`);
     }
 
+    await waitForOpenClawImportIfNeeded();
+
     // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
     // These don't have event IDs so they aren't referenced in the project event's agent tags;
     // the daemon needs the local storage association to find them.
@@ -1132,6 +1199,11 @@ async function runProjectAndAgentsStep(
         await agentStorage.addAgentToProject(signer.pubkey, "meta");
     }
 
+    if (installedCount > 0) {
+        display.blank();
+        display.success(`${installedCount} agent(s) ready.`);
+    }
+
     display.blank();
     display.success("Created \"Meta\" project.");
     return true;
@@ -1141,6 +1213,32 @@ interface OnboardingOptions {
     pubkey?: string[];
     localRelayUrl?: string;
     json?: boolean;
+}
+
+async function startDaemonFromSetup(metaProjectCreated: boolean): Promise<never> {
+    const entrypoint = process.argv[1];
+    if (!entrypoint) {
+        throw new Error("Cannot determine TENEX CLI entrypoint for daemon startup");
+    }
+
+    const isWrapperEntrypoint =
+        entrypoint.endsWith("wrapper.ts") || entrypoint.endsWith("daemon-wrapper.cjs");
+
+    const daemonArgs = isWrapperEntrypoint
+        ? [...(metaProjectCreated ? ["--boot", "meta"] : [])]
+        : ["daemon", ...(metaProjectCreated ? ["--boot", "meta"] : [])];
+
+    const child = spawn(process.argv[0], [entrypoint, ...daemonArgs], {
+        stdio: "inherit",
+        env: process.env,
+    });
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+        child.on("error", reject);
+        child.on("close", (code) => resolve(code ?? 1));
+    });
+
+    process.exit(exitCode);
 }
 
 /**
@@ -1294,11 +1392,9 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         display.blank();
     }
 
-    const relayItems: RelayItem[] = [
-        { type: "choice", name: "TENEX Community Relay", value: "wss://tenex.chat", description: "wss://tenex.chat" },
-        { type: "input" },
-    ];
+    const relayItems: RelayItem[] = [];
 
+    // When provided, prefer local relay by default (first selected item in relayPrompt).
     if (options.localRelayUrl) {
         relayItems.push({
             type: "choice",
@@ -1307,6 +1403,11 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
             description: options.localRelayUrl,
         });
     }
+
+    relayItems.push(
+        { type: "choice", name: "TENEX Community Relay", value: "wss://tenex.chat", description: "wss://tenex.chat" },
+        { type: "input" },
+    );
 
     const relay = await relayPrompt({
         message: "Relay",
@@ -1455,12 +1556,12 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         display.summaryLine("Projects", path.resolve(projectsBase));
         display.summaryLine("Relays", relays.join(", "));
         display.blank();
-        if (metaProjectCreated) {
-            display.hint("Run tenex daemon --boot meta to start TENEX and auto-boot your Meta project.");
-        } else {
-            display.hint("Run tenex daemon to start TENEX.");
-        }
+        display.context(metaProjectCreated
+            ? "Starting daemon with auto-boot for the Meta project..."
+            : "Starting daemon...");
         display.blank();
+
+        await startDaemonFromSetup(metaProjectCreated);
     }
 
     process.exit(0);
