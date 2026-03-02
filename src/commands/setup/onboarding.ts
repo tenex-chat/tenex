@@ -19,7 +19,13 @@ import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "./display";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey, isBackspaceKey } from "@inquirer/core";
 import { cursorHide } from "@inquirer/ansi";
-import NDK, { NDKEvent, NDKPrivateKeySigner, NDKProject, type NDKSubscription } from "@nostr-dev-kit/ndk";
+import NDK, {
+    NDKEvent,
+    NDKPrivateKeySigner,
+    NDKProject,
+    NDKRelayAuthPolicies,
+    type NDKSubscription,
+} from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import { Command } from "commander";
 import inquirer from "inquirer";
@@ -875,7 +881,7 @@ async function runProjectAndAgentsStep(
     discovery: AgentDiscovery,
     userPrivateKeyHex: string,
     openClawStateDir: string | null,
-): Promise<void> {
+): Promise<boolean> {
     // ── Part A: Ask about Meta project ──────────────────────────────────────
     display.context(
         "Projects organize what your agents work on. We suggest starting with a\n" +
@@ -894,7 +900,7 @@ async function runProjectAndAgentsStep(
     if (!createMeta) {
         display.blank();
         display.context("Sure thing. You can create projects anytime from the dashboard.");
-        return;
+        return false;
     }
 
     // ── Part B: Agent selection ─────────────────────────────────────────────
@@ -1092,6 +1098,7 @@ async function runProjectAndAgentsStep(
     try {
         const signer = new NDKPrivateKeySigner(userPrivateKeyHex);
         ndk.signer = signer;
+        ndk.relayAuthDefaultPolicy = NDKRelayAuthPolicies.signIn({ ndk, signer });
 
         const project = new NDKProject(ndk);
         project.dTag = "meta";
@@ -1109,8 +1116,9 @@ async function runProjectAndAgentsStep(
 
         // Give relays a moment to propagate
         await new Promise((r) => setTimeout(r, 2_000));
-    } catch {
-        display.context("Could not publish project event — the daemon will pick it up later.");
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        display.context(`Could not publish project event (${message}) — the daemon will pick it up later.`);
     }
 
     // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
@@ -1126,6 +1134,7 @@ async function runProjectAndAgentsStep(
 
     display.blank();
     display.success("Created \"Meta\" project.");
+    return true;
 }
 
 interface OnboardingOptions {
@@ -1160,6 +1169,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     let generatedNsec: string | undefined;
     let userPrivateKeyHex: string | undefined;
     let newIdentityUsername: string | undefined;
+    let metaProjectCreated = false;
 
     if (options.pubkey) {
         whitelistedPubkeys = options.pubkey.map((pk) => decodeToPubkey(pk.trim()));
@@ -1408,7 +1418,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         // Step 8: Project & Agents
         if (userPrivateKeyHex) {
             display.step(8, totalSteps, "Project & Agents");
-            await runProjectAndAgentsStep(
+            metaProjectCreated = await runProjectAndAgentsStep(
                 agentDiscovery,
                 userPrivateKeyHex,
                 detection.openClawStateDir,
@@ -1439,10 +1449,17 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
     } else {
         display.setupComplete();
         display.summaryLine("Identity", nip19.npubEncode(whitelistedPubkeys[0]));
+        if (generatedNsec) {
+            display.summaryLine("nsec", generatedNsec);
+        }
         display.summaryLine("Projects", path.resolve(projectsBase));
         display.summaryLine("Relays", relays.join(", "));
         display.blank();
-        display.hint("You can now start using TENEX!");
+        if (metaProjectCreated) {
+            display.hint("Run tenex daemon --boot meta to start TENEX and auto-boot your Meta project.");
+        } else {
+            display.hint("Run tenex daemon to start TENEX.");
+        }
         display.blank();
     }
 

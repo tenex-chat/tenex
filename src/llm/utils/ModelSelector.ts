@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { amber, inquirerTheme } from "@/utils/cli-theme";
-import { fetchOllamaModels, getPopularOllamaModels } from "../providers/ollama-models";
+import { fetchOllamaModels } from "../providers/ollama-models";
 import { fetchOpenRouterModels, getPopularModels } from "../providers/openrouter-models";
 import { ensureCacheLoaded, getProviderModels } from "./models-dev-cache";
 
@@ -62,53 +62,9 @@ export class ModelSelector {
 
             return selectedModel;
         }
-        console.log(amber("⚠️  No Ollama models found. Make sure Ollama is running."));
-        console.log(chalk.gray("Showing popular models (you'll need to pull them first)."));
-
-        const popular = getPopularOllamaModels();
-        const popularChoices: Array<{ name: string; value: string; short: string }> = [];
-        for (const [category, models] of Object.entries(popular)) {
-            for (const m of models) {
-                popularChoices.push({
-                    name: `${m} ${chalk.gray(`(${category})`)}`,
-                    value: m,
-                    short: m,
-                });
-            }
-        }
-        popularChoices.push({ name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" });
-
-        const { selectedModel } = await inquirer.prompt([
-            {
-                type: "search",
-                name: "selectedModel",
-                message: "Select model:",
-                source: (term: string | undefined) => {
-                    if (!term) return popularChoices;
-                    const lower = term.toLowerCase();
-                    return popularChoices.filter(
-                        (c) =>
-                            c.value === "__manual__" ||
-                            c.value.toLowerCase().includes(lower) ||
-                            c.name.toLowerCase().includes(lower)
-                    );
-                },
-                default: currentModel,
-                theme: {
-                    ...inquirerTheme,
-                    style: {
-                        ...inquirerTheme.style,
-                        searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
-                    },
-                },
-            },
-        ]);
-
-        if (selectedModel === "__manual__") {
-            return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
-        }
-
-        return selectedModel;
+        console.log(amber("⚠️  No local Ollama models were discovered."));
+        console.log(chalk.gray("Check `ollama list` and run `ollama pull <model>` if needed."));
+        return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
     }
 
     /**
