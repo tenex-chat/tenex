@@ -4,6 +4,8 @@ import { AgentProfilePublisher } from "../AgentProfilePublisher";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
 
+const mockSyncWhitelistFile = mock(() => Promise.resolve());
+
 // Mock the NDK client
 mock.module("../ndkClient", () => ({
     getNDK: mock(() => ({
@@ -34,7 +36,15 @@ mock.module("@/agents/AgentStorage", () => ({
     agentStorage: {
         getAgentProjects: mock(() => Promise.resolve([])),
         getProjectAgents: mock(() => Promise.resolve([])),
+        loadAgent: mock(() => Promise.resolve(null)),
+        getAgentBySlugForProject: mock(() => Promise.resolve(null)),
     },
+}));
+
+mock.module("@/services/trust-pubkeys/SystemPubkeyListService", () => ({
+    getSystemPubkeyListService: () => ({
+        syncWhitelistFile: mockSyncWhitelistFile,
+    }),
 }));
 
 describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
@@ -49,6 +59,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
 
     beforeEach(() => {
         capturedEvents = [];
+        mockSyncWhitelistFile.mockClear();
 
         // Mock NDKEvent to capture all published events
         mockPublish = mock();
@@ -78,6 +89,29 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     const getKind0Event = (): NDKEvent | undefined => capturedEvents.find(e => e.kind === 0);
 
     describe("publishAgentProfile", () => {
+        it("syncs daemon whitelist file before publishing kind:0", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const projectEvent = new NDKProject(getNDK());
+            projectEvent.tagValue = mock(() => "Test Project");
+            projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
+
+            await AgentProfilePublisher.publishAgentProfile(
+                signer,
+                "TestAgent",
+                "Tester",
+                "Test Project",
+                projectEvent,
+                undefined,
+                undefined,
+                ["user-pubkey-1"]
+            );
+
+            expect(mockSyncWhitelistFile).toHaveBeenCalledTimes(1);
+            expect(mockSyncWhitelistFile).toHaveBeenCalledWith({
+                additionalPubkeys: [signer.pubkey, "user-pubkey-1"],
+            });
+        });
+
         it("should include metadata tags for agents without NDKAgentDefinition event ID", async () => {
             const signer = NDKPrivateKeySigner.generate();
             const projectEvent = new NDKProject(getNDK());

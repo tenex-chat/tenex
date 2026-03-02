@@ -4,6 +4,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
+import { getSystemPubkeyListService } from "@/services/trust-pubkeys/SystemPubkeyListService";
 import { logger } from "@/utils/logger";
 import {
     NDKEvent,
@@ -291,6 +292,10 @@ export class AgentProfilePublisher {
         let profileEvent: NDKEvent;
 
         try {
+            await getSystemPubkeyListService().syncWhitelistFile({
+                additionalPubkeys: [signer.pubkey, ...(whitelistedPubkeys ?? [])],
+            });
+
             // Check if there are other agents with the same slug (name) in this project
             // If so, append pubkey prefix for disambiguation
             const projectDTag = projectEvent.dTag;
@@ -493,6 +498,10 @@ export class AgentProfilePublisher {
         whitelistedPubkeys?: string[]
     ): Promise<void> {
         try {
+            await getSystemPubkeyListService().syncWhitelistFile({
+                additionalPubkeys: [signer.pubkey, ...(whitelistedPubkeys ?? [])],
+            });
+
             const avatarUrl = AgentProfilePublisher.buildAvatarUrl(signer.pubkey);
 
             const profile = {
@@ -583,6 +592,10 @@ export class AgentProfilePublisher {
         projectTitle: string
     ): Promise<void> {
         try {
+            await getSystemPubkeyListService().syncWhitelistFile({
+                additionalPubkeys: [signer.pubkey],
+            });
+
             // Hash-based deduplication: skip if instructions haven't changed
             const instructionHash = crypto
                 .createHash("sha256")
