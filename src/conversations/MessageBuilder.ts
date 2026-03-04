@@ -634,9 +634,21 @@ export async function buildMessagesFromEntries(
 
         // TOOL-RESULT: Add to result and mark tool-call as resolved
         if (entry.messageType === "tool-result" && entry.toolData) {
+            const parts = entry.toolData as ToolResultPart[];
+
+            // Skip orphaned tool-results whose tool-calls were removed by compression/truncation.
+            // If the corresponding tool-call is not in pendingToolCalls, sending this result
+            // to the LLM would produce an API error (tool_result without matching tool_use).
+            if (parts.some((part) => !pendingToolCalls.has(part.toolCallId))) {
+                trace.getActiveSpan?.()?.addEvent("conversation.orphaned_tool_result_skipped", {
+                    "orphan.tool_call_ids": parts.map((p) => p.toolCallId).join(","),
+                });
+                continue;
+            }
+
             result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
 
-            for (const part of entry.toolData as ToolResultPart[]) {
+            for (const part of parts) {
                 pendingToolCalls.delete(part.toolCallId);
             }
 

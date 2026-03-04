@@ -1,3 +1,4 @@
+import type { ToolCallPart, ToolResultPart } from "ai";
 import type { CompiledMessage } from "@/agents/execution/MessageCompiler";
 import type { ConversationEntry } from "@/conversations/types";
 import type {
@@ -258,13 +259,20 @@ export function validateSegmentsForEntries(
       };
     }
 
-    // Check for gaps between segments
+    // Check for gaps between segments.
+    // Non-eventId entries (tool-calls, tool-results) between two segments are fine:
+    // applySegmentsToEntries keeps them as-is in the output between the two summaries.
+    // Only flag a gap when eventId-bearing entries sit between segments and would
+    // be left uncompressed while we expected the LLM to cover the full range.
     if (i > 0) {
       const prevSegment = segments[i - 1];
       const prevToIndex = rangeEntries.findIndex(
         (e) => e.eventId === prevSegment.toEventId
       );
-      if (fromIndex !== prevToIndex + 1) {
+      const hasEventIdInGap = rangeEntries
+        .slice(prevToIndex + 1, fromIndex)
+        .some((e) => !!e.eventId);
+      if (hasEventIdInGap) {
         return {
           valid: false,
           error: `Gap between segment ${i - 1} and ${i}`,
@@ -612,12 +620,58 @@ export function createFallbackSegmentForEntries(
     }
   }
 
+  // Ensure the boundary doesn't cut in the middle of a tool-call/tool-result pair.
+  // Collect tool-calls in [0, toEntry.index] that have no matching result in the same range.
+  const pendingCallIds = new Set<string>();
+  for (let i = 0; i <= toEntry.index; i++) {
+    const entry = entries[i];
+    if (entry.messageType === "tool-call" && entry.toolData) {
+      for (const part of entry.toolData as ToolCallPart[]) {
+        pendingCallIds.add(part.toolCallId);
+      }
+    } else if (entry.messageType === "tool-result" && entry.toolData) {
+      for (const part of entry.toolData as ToolResultPart[]) {
+        pendingCallIds.delete(part.toolCallId);
+      }
+    }
+  }
+
+  // If there are unresolved tool-calls, their results live just after the boundary.
+  // Extend the segment past those orphaned tool-results so they are not left dangling.
+  if (pendingCallIds.size > 0) {
+    let i = toEntry.index + 1;
+    while (i < entries.length) {
+      const entry = entries[i];
+      if (
+        entry.messageType === "tool-result" &&
+        entry.toolData &&
+        (entry.toolData as ToolResultPart[]).some((p) => pendingCallIds.has(p.toolCallId))
+      ) {
+        for (const p of entry.toolData as ToolResultPart[]) {
+          pendingCallIds.delete(p.toolCallId);
+        }
+        i++;
+      } else {
+        break;
+      }
+    }
+    // Find the next entry with an eventId at or after position i to use as the new boundary.
+    for (let j = i; j < entries.length; j++) {
+      if (entries[j].eventId) {
+        toEntry = { entry: entries[j], index: j };
+        break;
+      }
+    }
+    // If no eventId is found we keep the original toEntry; MessageBuilder will skip
+    // any remaining orphaned tool-results as a safety net.
+  }
+
   const toEventId = toEntry.entry.eventId!;
 
   return {
     fromEventId,
     toEventId,
-    compressed: `[Truncated ${truncateCount} earlier messages due to compression failure]`,
+    compressed: `[Truncated ${toEntry.index + 1} earlier messages due to compression failure]`,
     createdAt: Date.now(),
     model: "fallback-truncation",
   };
