@@ -17,6 +17,7 @@ import type {
     EventContext,
     InterventionReviewIntent,
     LessonIntent,
+    StreamTextDeltaIntent,
     ToolUseIntent,
 } from "./types";
 
@@ -557,6 +558,42 @@ export class AgentEventEncoder {
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }
+
+        return event;
+    }
+
+    /**
+     * Encode an ephemeral stream text-delta event.
+     * These events are best-effort live updates and do not replace kind:1 snapshots.
+     */
+    encodeStreamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): NDKEvent {
+        const event = new NDKEvent(getNDK());
+        event.kind = NDKKind.TenexStreamTextDelta;
+        event.content = intent.delta;
+
+        // Keep thread association via root conversation e-tag.
+        this.addConversationTags(event, context);
+
+        // Required project association for project-scoped filtering.
+        this.aTagProject(event);
+
+        // Include model when available for diagnostics/client metadata.
+        if (context.model) {
+            const modelString =
+                typeof context.model === "string"
+                    ? context.model
+                    : (context.model as { model?: string }).model;
+            if (modelString) {
+                event.tag(["llm-model", modelString]);
+            }
+        }
+
+        // Preserve RAL and strict delta ordering for client reconstruction.
+        event.tag(["llm-ral", context.ralNumber.toString()]);
+        event.tag(["stream-seq", intent.sequence.toString()]);
+
+        // Forward branch tag when present to preserve worktree context.
+        this.forwardBranchTag(event, context);
 
         return event;
     }

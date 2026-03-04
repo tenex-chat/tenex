@@ -111,6 +111,17 @@ export interface ToolUseIntent {
 }
 
 /**
+ * Intent for ephemeral stream text-delta events.
+ * These events are best-effort live updates and do not replace kind:1 snapshots.
+ */
+export interface StreamTextDeltaIntent {
+    /** Delta text payload (coalesced by throttle interval) */
+    delta: string;
+    /** Strictly monotonic sequence number for client-side reordering */
+    sequence: number;
+}
+
+/**
  * Intent for intervention review requests.
  * Used when the InterventionService detects that a user hasn't responded
  * to an agent's completion and triggers a human-replica review.
@@ -160,6 +171,7 @@ export type AgentIntent =
     | LessonIntent
     | StatusIntent
     | ToolUseIntent
+    | StreamTextDeltaIntent
     | InterventionReviewIntent
     | DelegationMarkerIntent;
 

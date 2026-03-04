@@ -32,6 +32,7 @@ export const NDKKind = {
     TenexConfigUpdate: 25000 as BaseNDKKind, // Encrypted config updates (e.g., APNs device tokens)
     TenexOperationsStatus: 24133 as BaseNDKKind,
     TenexStopCommand: 24134 as BaseNDKKind,
+    TenexStreamTextDelta: 24135 as BaseNDKKind,
 } as const;
 
 export type NDKKind = (typeof NDKKind)[keyof typeof NDKKind];

@@ -40,7 +40,7 @@ export class ChunkHandler {
             return;
         }
 
-        // Emit raw-chunk event for consumers (e.g., local streaming)
+        // Emit raw-chunk event for low-level stream observers.
         logger.debug("[LLMService] emitting raw-chunk", { chunkType: chunk.type });
         this.emitter.emit("raw-chunk", { chunk: event.chunk });
 

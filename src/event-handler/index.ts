@@ -57,6 +57,7 @@ const IGNORED_EVENT_KINDS = [
     NDKKind.Contacts,
     NDKKind.TenexProjectStatus,
     NDKKind.TenexOperationsStatus,
+    NDKKind.TenexStreamTextDelta,
 ];
 
 export class EventHandler {

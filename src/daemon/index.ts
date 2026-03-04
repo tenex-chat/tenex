@@ -6,4 +6,3 @@
  */
 
 export { getDaemon } from "./Daemon";
-export { UnixSocketTransport } from "./UnixSocketTransport";

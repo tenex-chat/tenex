@@ -209,6 +209,7 @@ export class AgentEventDecoder {
         NDKKind.Contacts, // kind:3 - contact list
         NDKKind.TenexProjectStatus,
         NDKKind.TenexOperationsStatus,
+        NDKKind.TenexStreamTextDelta,
     ];
 
     /**

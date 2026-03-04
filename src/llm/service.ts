@@ -438,7 +438,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 // tool-call, tool-input-start, tool-input-delta, tool-result, raw.
                 // Events like "finish" and "tool-error" must be forwarded explicitly.
                 if (part.type === "finish") {
-                    // Emit raw-chunk directly to reach StreamPublisher (for HTTP wrapper SSE)
+                    // Emit raw-chunk directly for low-level listeners.
                     // WITHOUT going through ChunkHandler which would trigger chunk-type-change
                     // and cause AgentExecutor to publish a duplicate kind:1 event.
                     this.emit("raw-chunk", { chunk: part as TextStreamPart<Record<string, AISdkTool>> });

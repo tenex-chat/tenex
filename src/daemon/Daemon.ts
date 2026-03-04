@@ -27,8 +27,6 @@ import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
-import { UnixSocketTransport } from "./UnixSocketTransport";
-import { streamPublisher } from "@/llm";
 import { getConversationIndexingJob } from "@/conversations/search/embeddings";
 import { getLanceDBMaintenanceService } from "@/services/rag/LanceDBMaintenanceService";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -63,7 +61,6 @@ export class Daemon {
     private isRunning = false;
     private shutdownHandlers: Array<() => Promise<void>> = [];
     private lockfile: Lockfile | null = null;
-    private streamTransport: UnixSocketTransport | null = null;
 
     // Runtime management delegated to RuntimeLifecycle
     private runtimeLifecycle: RuntimeLifecycle | null = null;
@@ -236,22 +233,15 @@ export class Daemon {
             await this.subscriptionManager.start();
             logger.debug("Subscription manager started");
 
-            // 10. Start local streaming socket
-            logger.debug("Starting local streaming socket");
-            this.streamTransport = new UnixSocketTransport();
-            await this.streamTransport.start();
-            streamPublisher.setTransport(this.streamTransport);
-            logger.info("Local streaming socket started", { path: this.streamTransport.getSocketPath() });
-
-            // 11. Start automatic conversation indexing job
+            // 10. Start automatic conversation indexing job
             getConversationIndexingJob().start();
             logger.info("Automatic conversation indexing job started");
 
-            // 11b. Start LanceDB maintenance service (periodic compaction)
+            // 10b. Start LanceDB maintenance service (periodic compaction)
             getLanceDBMaintenanceService().start();
             logger.info("LanceDB maintenance service started");
 
-            // 12. Initialize InterventionService (after projects are loaded)
+            // 11. Initialize InterventionService (after projects are loaded)
             // This must happen after subscriptions start so agent slugs can be resolved
             logger.debug("Initializing intervention service");
             const interventionService = InterventionService.getInstance();
@@ -266,20 +256,20 @@ export class Daemon {
 
             await interventionService.initialize();
 
-            // 12b. Initialize APNs push notification service
+            // 11b. Initialize APNs push notification service
             logger.debug("Initializing APNs service");
             await APNsService.getInstance().initialize();
 
-            // 13. Initialize restart state manager
+            // 12. Initialize restart state manager
             logger.debug("Initializing restart state manager");
             this.restartState = new RestartState(this.daemonDir);
 
-            // 14. Setup RAL completion listener for graceful restart
+            // 13. Setup RAL completion listener for graceful restart
             if (this.supervisedMode) {
                 this.setupRALCompletionListener();
             }
 
-            // 15. Start agent definition monitor for auto-upgrades
+            // 14. Start agent definition monitor for auto-upgrades
             logger.debug("Starting agent definition monitor");
             this.agentDefinitionMonitor = new AgentDefinitionMonitor(
                 this.ndk,
@@ -289,7 +279,7 @@ export class Daemon {
             await this.agentDefinitionMonitor.start();
             logger.info("Agent definition monitor started");
 
-            // 16. Setup graceful shutdown
+            // 15. Setup graceful shutdown
             this.setupShutdownHandlers();
 
             this.isRunning = true;
@@ -1415,14 +1405,6 @@ export class Daemon {
                     console.log(`[Daemon] Saved ${bootedProjects.length} booted project(s) for restart`);
                 }
 
-                if (this.streamTransport) {
-                    logger.info("Stopping stream transport...");
-                    await this.streamTransport.stop();
-                    streamPublisher.setTransport(null);
-                    this.streamTransport = null;
-                    logger.info("Stream transport stopped");
-                }
-
                 // Stop conversation indexing job
                 logger.info("Stopping conversation indexing job...");
                 getConversationIndexingJob().stop();
@@ -1864,13 +1846,6 @@ export class Daemon {
 
 
         this.isRunning = false;
-
-        // Stop streaming socket
-        if (this.streamTransport) {
-            await this.streamTransport.stop();
-            streamPublisher.setTransport(null);
-            this.streamTransport = null;
-        }
 
         // Stop conversation indexing job
         getConversationIndexingJob().stop();

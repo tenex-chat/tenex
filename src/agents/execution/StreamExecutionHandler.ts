@@ -11,12 +11,10 @@ import {
     type ChunkTypeChangeEvent,
     type CompleteEvent,
     type ContentEvent,
-    type RawChunkEvent,
     type ReasoningEvent,
     type SessionCapturedEvent,
     type StreamErrorEvent,
 } from "@/llm/types";
-import { streamPublisher } from "@/llm";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
@@ -68,8 +66,15 @@ export interface StreamExecutionConfig {
  * Handles all LLM stream event processing and coordination
  */
 export class StreamExecutionHandler {
+    private static readonly STREAM_TEXT_DELTA_THROTTLE_MS = 1000;
+
     private contentBuffer = "";
     private reasoningBuffer = "";
+    private streamTextDeltaBuffer = "";
+    private streamTextDeltaSequence = 0;
+    private streamTextDeltaTimer: NodeJS.Timeout | undefined;
+    private streamTextDeltaFlushChain: Promise<void> = Promise.resolve();
+    private streamTextDeltaEventContext: EventContext | undefined;
     private result: StreamExecutionResult | undefined;
     private lastUsedVariant: string | undefined;
     private currentModel: LanguageModel | undefined;
@@ -134,19 +139,6 @@ export class StreamExecutionHandler {
                 });
             }
 
-            // Subscribe to raw chunks and forward to local streaming socket
-            llmService.on("raw-chunk", (event: RawChunkEvent) => {
-                logger.debug("[StreamExecutionHandler] raw-chunk received", {
-                    chunkType: event.chunk.type,
-                    agentPubkey: context.agent.pubkey.substring(0, 8),
-                });
-                streamPublisher.write({
-                    agent_pubkey: context.agent.pubkey,
-                    conversation_id: context.conversationId,
-                    data: event.chunk,
-                });
-            });
-
             // Create callbacks using extracted factory functions
             const prepareStep = createPrepareStep({
                 context,
@@ -180,6 +172,11 @@ export class StreamExecutionHandler {
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,
+            });
+
+            await this.flushStreamTextDeltas({
+                force: true,
+                reason: "stream-return",
             });
 
             // DIAGNOSTIC: Track when stream() returns with process state comparison
@@ -284,11 +281,13 @@ export class StreamExecutionHandler {
         const { context, llmService, toolTracker, toolsObject } = this.config;
         const agentPublisher = context.agentPublisher;
         const eventContext = this.createEventContext();
+        this.streamTextDeltaEventContext = eventContext;
         const ralNumber = this.config.ralNumber;
 
         llmService.on("content", (event: ContentEvent) => {
             process.stdout.write(chalk.white(event.delta));
             this.contentBuffer += event.delta;
+            this.enqueueStreamTextDelta(event.delta);
         });
 
         llmService.on("reasoning", (event: ReasoningEvent) => {
@@ -301,6 +300,10 @@ export class StreamExecutionHandler {
                 await this.flushReasoningBuffer();
             }
             if (event.from === "text-delta") {
+                await this.flushStreamTextDeltas({
+                    force: true,
+                    reason: "chunk-type-change",
+                });
                 await this.flushContentBuffer();
             }
         });
@@ -312,7 +315,12 @@ export class StreamExecutionHandler {
             "ral.number": ralNumber,
         });
 
-        llmService.on("complete", (event: CompleteEvent) => {
+        llmService.on("complete", async (event: CompleteEvent) => {
+            await this.flushStreamTextDeltas({
+                force: true,
+                reason: "complete",
+            });
+
             const completeReceivedTime = Date.now();
             const timeSinceRegistration = completeReceivedTime - completeListenerRegisteredAt;
             this.executionSpan?.addEvent("executor.complete_received", {
@@ -349,6 +357,11 @@ export class StreamExecutionHandler {
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
+            await this.flushStreamTextDeltas({
+                force: true,
+                reason: "stream-error",
+            });
+
             const errorReceivedTime = Date.now();
             const timeSinceRegistration = errorReceivedTime - completeListenerRegisteredAt;
             this.executionSpan?.addEvent("executor.stream_error_received", {
@@ -500,6 +513,11 @@ export class StreamExecutionHandler {
         const { context } = this.config;
         const ralNumber = this.config.ralNumber;
 
+        await this.flushStreamTextDeltas({
+            force: true,
+            reason: "handle-stream-error",
+        });
+
         if (abortSignal.aborted) {
             this.executionSpan?.addEvent("executor.aborted_by_stop_signal", {
                 "ral.number": ralNumber,
@@ -565,6 +583,8 @@ export class StreamExecutionHandler {
         const ralNumber = this.config.ralNumber;
         const ralRegistry = RALRegistry.getInstance();
 
+        this.clearStreamTextDeltaTimer();
+
         ralRegistry.endLLMStream(context.agent.pubkey, context.conversationId, ralNumber);
         ralRegistry.setStreaming(context.agent.pubkey, context.conversationId, ralNumber, false);
 
@@ -575,5 +595,79 @@ export class StreamExecutionHandler {
         if (currentSpan) {
             clearLLMSpanId(currentSpan.spanContext().traceId);
         }
+    }
+
+    private enqueueStreamTextDelta(delta: string): void {
+        if (delta.length === 0) {
+            return;
+        }
+
+        this.streamTextDeltaBuffer += delta;
+        if (this.streamTextDeltaTimer) {
+            return;
+        }
+
+        this.streamTextDeltaTimer = setTimeout(() => {
+            this.streamTextDeltaTimer = undefined;
+            void this.flushStreamTextDeltas({
+                force: false,
+                reason: "throttle-window",
+            });
+        }, StreamExecutionHandler.STREAM_TEXT_DELTA_THROTTLE_MS);
+    }
+
+    private clearStreamTextDeltaTimer(): void {
+        if (this.streamTextDeltaTimer) {
+            clearTimeout(this.streamTextDeltaTimer);
+            this.streamTextDeltaTimer = undefined;
+        }
+    }
+
+    private flushStreamTextDeltas(options: { force: boolean; reason: string }): Promise<void> {
+        this.streamTextDeltaFlushChain = this.streamTextDeltaFlushChain
+            .then(async () => {
+                if (options.force) {
+                    this.clearStreamTextDeltaTimer();
+                }
+
+                if (this.streamTextDeltaBuffer.length === 0) {
+                    return;
+                }
+
+                const eventContext = this.streamTextDeltaEventContext;
+                if (!eventContext) {
+                    this.streamTextDeltaBuffer = "";
+                    return;
+                }
+
+                const deltaToPublish = this.streamTextDeltaBuffer;
+                this.streamTextDeltaBuffer = "";
+                this.streamTextDeltaSequence += 1;
+
+                this.executionSpan?.addEvent("executor.stream_delta_flush", {
+                    "delta.sequence": this.streamTextDeltaSequence,
+                    "delta.length": deltaToPublish.length,
+                    "delta.reason": options.reason,
+                    "ral.number": this.config.ralNumber,
+                });
+
+                await this.config.context.agentPublisher.streamTextDelta(
+                    {
+                        delta: deltaToPublish,
+                        sequence: this.streamTextDeltaSequence,
+                    },
+                    eventContext
+                );
+            })
+            .catch((error) => {
+                logger.warn("[StreamExecutionHandler] Failed to flush stream text deltas", {
+                    error: formatAnyError(error),
+                    conversationId: this.config.context.conversationId.substring(0, 12),
+                    agent: this.config.context.agent.slug,
+                    ralNumber: this.config.ralNumber,
+                });
+            });
+
+        return this.streamTextDeltaFlushChain;
     }
 }

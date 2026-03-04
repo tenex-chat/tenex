@@ -61,15 +61,12 @@ export function blank(): void {
  * Matches the Rust TUI's logo.rs exactly.
  */
 export function welcome(): void {
-    const art: Array<[string, (typeof ACCENT)]> = [
-        ["        •        ", GLOW],
-        ["       • •       ", BRIGHT],
-        ["      • • •      ", BRIGHT],
-        ["     • • • •     ", ACCENT],
-        ["    •   •   •    ", ACCENT],
-        ["   • • • • • •   ", MID],
-        ["  • • • • • • •  ", MID],
-        [" • • • • • • • • ", DARK],
+    const art: Array<[string, typeof ACCENT]> = [
+        ["       •       ", GLOW],
+        ["      • •      ", BRIGHT],
+        ["    •     •    ", ACCENT],
+        ["   • • • • •   ", MID],
+        ["  • • • • • •  ", DARK],
     ];
 
     console.log();
@@ -79,9 +76,9 @@ export function welcome(): void {
         for (const ch of line) {
             row += ch === " " ? " " : color.bold(ch);
         }
-        if (i === 3) row += "  " + ACCENT.bold("T E N E X");
-        if (i === 5) row += "  " + chalk.bold("Your AI agent team, powered by Nostr.");
-        if (i === 6) row += "  " + chalk.dim("Let's get everything set up.");
+        if (i === 2) row += "  " + ACCENT.bold("T E N E X");
+        if (i === 3) row += "  " + chalk.bold("Your AI agent team, powered by Nostr.");
+        if (i === 4) row += "  " + chalk.dim("Let's get everything set up.");
         process.stdout.write(row + "\n");
     }
     console.log();

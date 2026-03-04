@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { InterventionPublisher } from "@/nostr/InterventionPublisher";
+import { NDKKind } from "@/nostr/kinds";
 import { config } from "@/services/ConfigService";
 import { PubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
@@ -76,7 +77,8 @@ interface NotifiedEntry {
 
 /**
  * Persisted state for InterventionService.
- * Stored in ~/.tenex/intervention_state_<projectId>.json (project-scoped)
+ * Stored in ~/.tenex/intervention_state_<stateScope>.json (project-scoped).
+ * For NIP-33 project coordinates, stateScope is the project's dTag.
  */
 interface InterventionState {
     pending: PendingIntervention[];
@@ -176,10 +178,68 @@ export class InterventionService {
 
     /**
      * Get the state file path for a given project.
-     * State files are scoped by project ID.
+     * State files are scoped by dTag when projectId is a NIP-33 coordinate.
      */
     private getStateFilePath(projectId: string): string {
+        const stateScope = this.getStateScope(projectId);
+        return path.join(this.configDir, `intervention_state_${stateScope}.json`);
+    }
+
+    /**
+     * Derive stable state scope from a project identifier.
+     * Project coordinates use format: "<kind>:<authorPubkey>:<dTag>".
+     */
+    private getStateScope(projectId: string): string {
+        const parts = projectId.split(":");
+        const isProjectCoordinate = parts.length >= 3 && parts[0] === String(NDKKind.Project);
+        if (!isProjectCoordinate) {
+            return projectId;
+        }
+
+        const dTag = parts.slice(2).join(":");
+        return dTag || projectId;
+    }
+
+    /**
+     * Legacy path used before dTag-scoped filenames.
+     * Returns null when projectId already represents the state scope.
+     */
+    private getLegacyStateFilePath(projectId: string): string | null {
+        const stateScope = this.getStateScope(projectId);
+        if (stateScope === projectId) {
+            return null;
+        }
         return path.join(this.configDir, `intervention_state_${projectId}.json`);
+    }
+
+    /**
+     * Read state file from canonical location, with fallback to legacy path.
+     */
+    private async readStateFile(projectId: string): Promise<{ data: string; loadedFromLegacyPath: boolean } | null> {
+        const stateFilePath = this.getStateFilePath(projectId);
+        try {
+            const data = await fs.readFile(stateFilePath, "utf-8");
+            return { data, loadedFromLegacyPath: false };
+        } catch (error: unknown) {
+            if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+                throw error;
+            }
+        }
+
+        const legacyStateFilePath = this.getLegacyStateFilePath(projectId);
+        if (!legacyStateFilePath) {
+            return null;
+        }
+
+        try {
+            const data = await fs.readFile(legacyStateFilePath, "utf-8");
+            return { data, loadedFromLegacyPath: true };
+        } catch (error: unknown) {
+            if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+                return null;
+            }
+            throw error;
+        }
     }
 
     /**
@@ -996,8 +1056,6 @@ export class InterventionService {
      * Load persisted state from disk for the given project.
      */
     private async loadState(projectId: string): Promise<void> {
-        const stateFilePath = this.getStateFilePath(projectId);
-
         // Cancel all active timers from the previous project before clearing state.
         // Without this, timers from a previous project continue running and fire
         // against the new project's data, causing duplicate notifications and
@@ -1014,7 +1072,15 @@ export class InterventionService {
         this.triggeringConversations.clear();
 
         try {
-            const data = await fs.readFile(stateFilePath, "utf-8");
+            const stateFile = await this.readStateFile(projectId);
+            if (!stateFile) {
+                logger.debug("No existing intervention state file, starting fresh", {
+                    projectId: projectId.substring(0, 12),
+                });
+                return;
+            }
+
+            const data = stateFile.data;
             const state = JSON.parse(data) as InterventionState;
 
             for (const pending of state.pending) {
@@ -1039,13 +1105,20 @@ export class InterventionService {
                 projectId: projectId.substring(0, 12),
                 pendingCount: this.pendingInterventions.size,
                 notifiedCount: this.notifiedConversations.size,
+                loadedFromLegacyPath: stateFile.loadedFromLegacyPath,
             });
 
             trace.getActiveSpan()?.addEvent("intervention.state_loaded", {
                 "intervention.project_id": projectId.substring(0, 12),
                 "intervention.pending_count": this.pendingInterventions.size,
                 "intervention.notified_count": this.notifiedConversations.size,
+                "intervention.loaded_from_legacy_path": stateFile.loadedFromLegacyPath,
             });
+
+            // Persist back using canonical (dTag-scoped) filename after legacy load.
+            if (stateFile.loadedFromLegacyPath) {
+                this.saveState();
+            }
         } catch (error: unknown) {
             if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
                 // No existing file, starting fresh - this is expected

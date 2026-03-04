@@ -16,6 +16,7 @@ import type {
     ErrorIntent,
     EventContext,
     LessonIntent,
+    StreamTextDeltaIntent,
     ToolUseIntent,
 } from "./types";
 
@@ -416,6 +417,31 @@ export class AgentPublisher {
         await this.safePublish(event, `tool:${intent.toolName}`);
 
         return event;
+    }
+
+    /**
+     * Publish an ephemeral stream text-delta event.
+     * Best-effort only: failures are logged and swallowed to avoid disrupting execution.
+     *
+     * IMPORTANT: This path intentionally does NOT consume RAL runtime counters.
+     * Runtime accounting remains tied to persistent kind:1 publications.
+     */
+    async streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void> {
+        try {
+            const event = this.encoder.encodeStreamTextDelta(intent, context);
+            injectTraceContext(event);
+            await this.agent.sign(event);
+            await event.publish();
+        } catch (error) {
+            logger.warn("[AgentPublisher.streamTextDelta] Failed to publish stream delta (best-effort)", {
+                error: error instanceof Error ? error.message : String(error),
+                agent: this.agent.slug,
+                conversationId: context.conversationId.substring(0, 12),
+                ralNumber: context.ralNumber,
+                sequence: intent.sequence,
+                deltaLength: intent.delta.length,
+            });
+        }
     }
 
     /**

@@ -101,7 +101,7 @@ function routeChunk(
     chunkHandler: ChunkHandler
 ): void {
     if (part.type === "finish") {
-        // Emit raw-chunk directly to reach StreamPublisher (for HTTP wrapper SSE)
+        // Emit raw-chunk directly for low-level listeners.
         // WITHOUT going through ChunkHandler which would trigger chunk-type-change
         emitter.emit("raw-chunk", { chunk: part });
     } else if (part.type === "tool-error") {

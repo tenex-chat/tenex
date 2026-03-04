@@ -8,7 +8,6 @@ Abstraction layer for LLM providers. Agents and services never talk to provider 
 - `service.ts` — Core LLM service orchestration
 - `ChunkHandler.ts` — Stream chunk processing
 - `FinishHandler.ts` — Stream completion handling
-- `StreamPublisher.ts` — Publishes stream output to Nostr
 - `MessageProcessor.ts` — Message pre-processing
 - `LLMConfigEditor.ts` — CLI config editing for LLM settings
 - `TracingUtils.ts` — LLM call tracing

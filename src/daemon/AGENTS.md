@@ -9,7 +9,6 @@ Long-running background orchestration. Manages relay subscriptions, event proces
 - `SubscriptionManager.ts` — Relay subscription management
 - `RuntimeLifecycle.ts` — Startup/shutdown coordination
 - `RestartState.ts` — Restart state tracking
-- `UnixSocketTransport.ts` — IPC via Unix sockets
 
 ## Subdirectories
 

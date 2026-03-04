@@ -146,6 +146,9 @@ import { InterventionService } from "../InterventionService";
 
 /** Fixed timestamp for deterministic tests (avoids Date.now() non-determinism). */
 const FIXED_COMPLETION_TIME = 1_700_000_000_000;
+const PROJECT_COORDINATE_PUBKEY = "a".repeat(64);
+
+const buildProjectCoordinate = (dTag: string): string => `31933:${PROJECT_COORDINATE_PUBKEY}:${dTag}`;
 
 describe("InterventionService", () => {
     let tempDir: string;
@@ -746,6 +749,70 @@ describe("InterventionService", () => {
             expect(state.pending).toHaveLength(1);
             expect(state.pending[0].conversationId).toBe("test-conv-1");
             expect(state.pending[0].projectId).toBe("test-project-123");
+        });
+
+        it("should use dTag for state filename when projectId is a project coordinate", async () => {
+            const dTag = "TENEX-ff3ssq";
+            const projectId = buildProjectCoordinate(dTag);
+            projectAgents.set(projectId, defaultTestAgents);
+
+            const service = await initServiceWithResolver();
+            await service.setProject(projectId);
+
+            service.onAgentCompletion(
+                "test-conv-1",
+                Date.now() + 10000,
+                "agent-123",
+                "user-456",
+                projectId
+            );
+
+            await service.waitForWrites();
+
+            const canonicalStateFile = path.join(tempDir, `intervention_state_${dTag}.json`);
+            const data = await fs.readFile(canonicalStateFile, "utf-8");
+            const state = JSON.parse(data);
+
+            expect(state.pending).toHaveLength(1);
+            expect(state.pending[0].projectId).toBe(projectId);
+
+            const files = await fs.readdir(tempDir);
+            expect(files).not.toContain(`intervention_state_${projectId}.json`);
+        });
+
+        it("should load legacy coordinate-scoped state file when dTag-scoped file does not exist", async () => {
+            const dTag = "TENEX-ff3ssq";
+            const projectId = buildProjectCoordinate(dTag);
+            projectAgents.set(projectId, defaultTestAgents);
+
+            const legacyStateFile = path.join(tempDir, `intervention_state_${projectId}.json`);
+            const futureTime = Date.now() + 60000;
+            await fs.writeFile(
+                legacyStateFile,
+                JSON.stringify({
+                    pending: [
+                        {
+                            conversationId: "persisted-conv",
+                            completedAt: futureTime,
+                            agentPubkey: "agent-111",
+                            userPubkey: "user-222",
+                            projectId,
+                        },
+                    ],
+                })
+            );
+
+            const service = await initServiceWithResolver();
+            await service.setProject(projectId);
+
+            expect(service.getPendingCount()).toBe(1);
+            expect(service.getPending("persisted-conv")?.agentPubkey).toBe("agent-111");
+
+            await service.waitForWrites();
+            const canonicalStateFile = path.join(tempDir, `intervention_state_${dTag}.json`);
+            const canonicalData = await fs.readFile(canonicalStateFile, "utf-8");
+            const canonicalState = JSON.parse(canonicalData);
+            expect(canonicalState.pending).toHaveLength(1);
         });
 
         it("should load state on setProject", async () => {

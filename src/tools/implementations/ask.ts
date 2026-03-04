@@ -12,7 +12,6 @@ import { z } from "zod";
 import { RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import { APNsService } from "@/services/apns";
-import { streamPublisher } from "@/llm";
 
 /**
  * Schema for a single-select question.
@@ -303,10 +302,11 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
     });
   }
 
-  // Send APNs push notification if user is not connected
+  // Send APNs push notification if APNs is enabled.
+  // Unix socket presence detection was removed with local socket streaming.
   try {
     const apnsService = APNsService.getInstance();
-    if (apnsService.isEnabled() && !streamPublisher.isConnected()) {
+    if (apnsService.isEnabled()) {
       const bodyPreview = askContext.length > 100 ? askContext.substring(0, 100) + "…" : askContext;
       await apnsService.notifyIfNeeded(ownerPubkey, {
         title: "Agent needs your input",
