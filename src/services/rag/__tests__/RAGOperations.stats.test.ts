@@ -138,7 +138,7 @@ describe("RAGOperations", () => {
             expect(stats).toHaveLength(0);
         });
 
-        it("should propagate errors from individual collections", async () => {
+        it("should skip failing collections and return partial results", async () => {
             const mockTable1 = createMockTable({ totalRows: 100, filteredRows: 25 });
             // Table2 throws an error
             const mockTable2 = {
@@ -151,8 +151,11 @@ describe("RAGOperations", () => {
             const mockProvider = createMockEmbeddingProvider();
             const ops = new RAGOperations(mockDbManager as any, mockProvider as any);
 
-            // Errors from individual collections now propagate through Promise.all
-            await expect(ops.getAllCollectionStats("agent123")).rejects.toThrow();
+            const stats = await ops.getAllCollectionStats("agent123");
+            expect(stats).toHaveLength(1);
+            expect(stats[0].name).toBe("collection1");
+            expect(stats[0].totalDocCount).toBe(100);
+            expect(stats[0].agentDocCount).toBe(25);
         });
     });
 });

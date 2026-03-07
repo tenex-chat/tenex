@@ -475,9 +475,9 @@ export class RAGOperations {
         collectionName: string,
         agentPubkey?: string
     ): Promise<{ totalCount: number; agentCount?: number }> {
-        const table = await this.dbManager.getTable(collectionName);
-
         try {
+            const table = await this.dbManager.getTable(collectionName);
+
             // Get total document count
             const totalCount = await table.countRows();
 
@@ -514,7 +514,7 @@ export class RAGOperations {
     ): Promise<Array<{ name: string; agentDocCount: number; totalDocCount: number }>> {
         const collections = await this.listCollections();
 
-        const stats = await Promise.all(
+        const results = await Promise.allSettled(
             collections.map(async (name) => {
                 const { totalCount, agentCount } = await this.getCollectionStats(name, agentPubkey);
                 return {
@@ -525,7 +525,15 @@ export class RAGOperations {
             })
         );
 
-        return stats;
+        return results
+            .filter((r): r is PromiseFulfilledResult<{ name: string; agentDocCount: number; totalDocCount: number }> => {
+                if (r.status === "rejected") {
+                    logger.warn(`Failed to get stats for collection: ${r.reason}`);
+                    return false;
+                }
+                return true;
+            })
+            .map(r => r.value);
     }
 
     /**
