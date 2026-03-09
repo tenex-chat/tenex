@@ -14,57 +14,75 @@ export class ModelSelector {
      * Select an Ollama model interactively with fuzzy search
      */
     static async selectOllamaModel(currentModel?: string): Promise<string> {
-        console.log(chalk.gray("Fetching available Ollama models..."));
+        while (true) {
+            console.log(chalk.gray("Fetching available Ollama models..."));
+            const ollamaModels = await fetchOllamaModels();
 
-        const ollamaModels = await fetchOllamaModels();
+            if (ollamaModels.length > 0) {
+                console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
 
-        if (ollamaModels.length > 0) {
-            console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
+                const allChoices = [
+                    ...ollamaModels.map((m) => ({
+                        name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
+                        value: m.name,
+                        short: m.name,
+                    })),
+                    { name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" },
+                ];
 
-            const allChoices = [
-                ...ollamaModels.map((m) => ({
-                    name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
-                    value: m.name,
-                    short: m.name,
-                })),
-                { name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" },
-            ];
-
-            const { selectedModel } = await inquirer.prompt([
-                {
-                    type: "search",
-                    name: "selectedModel",
-                    message: "Select model:",
-                    source: (term: string | undefined) => {
-                        if (!term) return allChoices;
-                        const lower = term.toLowerCase();
-                        const filtered = allChoices.filter(
-                            (c) =>
-                                c.value === "__manual__" ||
-                                c.value.toLowerCase().includes(lower)
-                        );
-                        return filtered;
-                    },
-                    default: currentModel,
-                    theme: {
-                        ...inquirerTheme,
-                        style: {
-                            ...inquirerTheme.style,
-                            searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                const { selectedModel } = await inquirer.prompt([
+                    {
+                        type: "search",
+                        name: "selectedModel",
+                        message: "Select model:",
+                        source: (term: string | undefined) => {
+                            if (!term) return allChoices;
+                            const lower = term.toLowerCase();
+                            return allChoices.filter(
+                                (c) =>
+                                    c.value === "__manual__" ||
+                                    c.value.toLowerCase().includes(lower)
+                            );
+                        },
+                        default: currentModel,
+                        theme: {
+                            ...inquirerTheme,
+                            style: {
+                                ...inquirerTheme.style,
+                                searchTerm: (text: string) => amber(text || chalk.gray("Search models...")),
+                            },
                         },
                     },
+                ]);
+
+                if (selectedModel === "__manual__") {
+                    return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
+                }
+
+                return selectedModel;
+            }
+
+            console.log(amber("⚠️  Could not reach Ollama — is it running?"));
+            console.log(chalk.gray("Start it with: ollama serve"));
+
+            const { action } = await inquirer.prompt([
+                {
+                    type: "select",
+                    name: "action",
+                    message: "What would you like to do?",
+                    choices: [
+                        { name: "Retry", value: "retry" },
+                        { name: "Enter model name manually", value: "manual" },
+                    ],
+                    theme: inquirerTheme,
                 },
             ]);
 
-            if (selectedModel === "__manual__") {
+            if (action === "manual") {
                 return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
             }
-
-            return selectedModel;
+            // action === "retry" — loop
         }
-        console.log(amber("⚠️  No local Ollama models were discovered."));
-        console.log(chalk.gray("Check `ollama list` and run `ollama pull <model>` if needed."));
-        return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
     }
 
     /**
