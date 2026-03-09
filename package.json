@@ -1,6 +1,6 @@
 {
   "name": "@tenex-chat/backend",
-  "version": "0.9.12",
+  "version": "0.9.13",
   "description": "TENEX Command Line Interface",
   "bin": {
     "tenex-backend": "./dist/daemon-wrapper.cjs"

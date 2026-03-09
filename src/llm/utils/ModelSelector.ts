@@ -26,14 +26,11 @@ export class ModelSelector {
 
         console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
 
-        const allChoices = [
-            ...ollamaModels.map((m) => ({
-                name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
-                value: m.name,
-                short: m.name,
-            })),
-            { name: chalk.cyan("→ Type model name manually"), value: "__manual__", short: "manual" },
-        ];
+        const choices = ollamaModels.map((m) => ({
+            name: `${m.name} ${chalk.gray(`(${m.size})`)}`,
+            value: m.name,
+            short: m.name,
+        }));
 
         const { selectedModel } = await inquirer.prompt([
             {
@@ -41,13 +38,9 @@ export class ModelSelector {
                 name: "selectedModel",
                 message: "Select model:",
                 source: (term: string | undefined) => {
-                    if (!term) return allChoices;
+                    if (!term) return choices;
                     const lower = term.toLowerCase();
-                    return allChoices.filter(
-                        (c) =>
-                            c.value === "__manual__" ||
-                            c.value.toLowerCase().includes(lower)
-                    );
+                    return choices.filter((c) => c.value.toLowerCase().includes(lower));
                 },
                 default: currentModel,
                 theme: {
@@ -59,10 +52,6 @@ export class ModelSelector {
                 },
             },
         ]);
-
-        if (selectedModel === "__manual__") {
-            return await ModelSelector.promptManualModel(currentModel || "llama3.1:8b");
-        }
 
         return selectedModel;
     }
