@@ -1,4 +1,6 @@
 import * as path from "node:path";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateText } from "ai";
 import { fileExists, readJsonFile, writeJsonFile, ensureDirectory } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { resolveApiKey } from "@/services/config/types";
@@ -148,10 +150,6 @@ export class ImageGenerationService {
             aspectRatio,
             imageSize,
         });
-
-        // Dynamic import of dependencies
-        const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
-        const { generateText } = await import("ai");
 
         const openrouter = createOpenRouter({
             apiKey: this.apiKey,

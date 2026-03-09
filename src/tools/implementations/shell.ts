@@ -2,7 +2,7 @@ import { exec, spawn, type ExecException } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -180,7 +180,6 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
     let workingDir: string;
     if (cwd) {
         // If cwd is relative (like "."), resolve it against the project working directory
-        const { isAbsolute, resolve } = await import("node:path");
         workingDir = isAbsolute(cwd) ? cwd : resolve(context.workingDirectory, cwd);
     } else {
         workingDir = context.workingDirectory;

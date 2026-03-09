@@ -1,6 +1,6 @@
 {
   "name": "@tenex-chat/daemon",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "TENEX Command Line Interface",
   "bin": {
     "tenex-backend": "./dist/daemon-wrapper.cjs"
@@ -68,6 +68,8 @@
     "commander": "^14.0.3",
     "cron-parser": "^5.5.0",
     "duck-duck-scrape": "^2.2.7",
+    "@inquirer/ansi": "^2.0.3",
+    "@inquirer/core": "^11.1.5",
     "inquirer": "^13.2.2",
     "lmdb": "^3.5.1",
     "lodash": "^4.17.23",

@@ -13,6 +13,7 @@ import { config } from "@/services/ConfigService";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext, type ProjectContext } from "@/services/projects";
+import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { RALRegistry } from "@/services/ral";
 import type { RALRegistryEntry } from "@/services/ral/types";
 import { logger } from "@/utils/logger";
@@ -832,7 +833,6 @@ export class AgentDispatchService {
         span: ReturnType<typeof tracer.startSpan>,
         eventType: "delegation_completion" | "routing"
     ): Promise<boolean> {
-        const { CooldownRegistry } = await import("@/services/CooldownRegistry");
         const cooldownRegistry = CooldownRegistry.getInstance();
 
         if (cooldownRegistry.isInCooldown(projectId, conversationId, agentPubkey)) {

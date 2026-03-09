@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { fileExists, readJsonFile } from "@/lib/fs";
+import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { config } from "@/services/ConfigService";
 import { resolveApiKey } from "@/services/config/types";
 import { logger } from "@/utils/logger";
@@ -252,7 +252,6 @@ export class EmbeddingProviderFactory {
             configToSave.baseUrl = embeddingConfig.baseUrl;
         }
 
-        const { writeJsonFile, ensureDirectory } = await import("@/lib/fs");
         await ensureDirectory(basePath);
         await writeJsonFile(configPath, configToSave);
 

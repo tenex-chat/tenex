@@ -10,6 +10,7 @@ import { createProviderRegistry } from "ai";
 import type { ProviderRegistryProvider } from "ai";
 import type { ProviderV3 } from "@ai-sdk/provider";
 import { logger } from "@/utils/logger";
+import { createMockProvider } from "../MockProvider";
 import { keyManager } from "../key-manager";
 import type {
     ILLMProvider,
@@ -253,7 +254,6 @@ export class ProviderRegistry {
      */
     private async initializeMockProvider(): Promise<void> {
         try {
-            const { createMockProvider } = await import("../MockProvider");
             const mockProvider = createMockProvider();
 
             // Create a wrapper that satisfies ILLMProvider

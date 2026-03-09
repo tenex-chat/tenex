@@ -12,6 +12,8 @@ import { getProjectContext } from "@/services/projects";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
+import { agentsMdService } from "@/services/agents-md";
+import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
@@ -251,7 +253,6 @@ async function addCoreAgentFragments(
     // Add RAG collection attribution - shows agents their contributions to RAG collections
     // This uses the provenance tracking metadata (agent_pubkey) from document ingestion
     try {
-        const { RAGService } = await import("@/services/rag/RAGService");
         const ragService = RAGService.getInstance();
         const collections = await ragService.getAllCollectionStats(agent.pubkey);
 
@@ -716,7 +717,6 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // When no AGENTS.md exists, the fragment explicitly states so
     if (projectBasePath) {
         try {
-            const { agentsMdService } = await import("@/services/agents-md");
             const hasRootAgentsMd = await agentsMdService.hasRootAgentsMd(projectBasePath);
             const rootContent = hasRootAgentsMd
                 ? await agentsMdService.getRootAgentsMdContent(projectBasePath)
