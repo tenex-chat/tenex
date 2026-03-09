@@ -46,23 +46,18 @@ function exitWithError(message) {
 }
 
 const passthroughArgs = process.argv.slice(2);
-const helpFlags = new Set(["-h", "--help"]);
-const versionFlags = new Set(["-V", "--version"]);
-const wantsHelp = passthroughArgs.some((arg) => helpFlags.has(arg));
-const wantsVersion =
-    passthroughArgs.length > 0 &&
-    passthroughArgs.every((arg) => versionFlags.has(arg));
+const isDaemonMode = passthroughArgs[0] === "daemon";
 
-const targetScript = wantsHelp || wantsVersion
-    ? path.join(__dirname, "index.js")
-    : path.join(__dirname, "wrapper.js");
+const targetScript = isDaemonMode
+    ? path.join(__dirname, "wrapper.js")
+    : path.join(__dirname, "index.js");
 
 if (!existsSync(targetScript)) {
     exitWithError(\`Missing runtime entrypoint: \${targetScript}\`);
 }
 
-const forwardedArgs = wantsHelp
-    ? ["daemon", ...passthroughArgs]
+const forwardedArgs = isDaemonMode
+    ? passthroughArgs.slice(1)
     : passthroughArgs;
 
 const child = spawn(process.execPath, [targetScript, ...forwardedArgs], {
