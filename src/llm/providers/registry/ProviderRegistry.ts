@@ -9,8 +9,8 @@
 import { createProviderRegistry } from "ai";
 import type { ProviderRegistryProvider } from "ai";
 import type { ProviderV3 } from "@ai-sdk/provider";
-import { logger } from "@/utils/logger";
 import { createMockProvider } from "../MockProvider";
+import { logger } from "@/utils/logger";
 import { keyManager } from "../key-manager";
 import type {
     ILLMProvider,
