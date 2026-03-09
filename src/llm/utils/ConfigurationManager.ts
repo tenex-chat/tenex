@@ -13,7 +13,7 @@ import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "@/commands/setup/display";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { AISdkProvider } from "../types";
-import { ModelSelector } from "./ModelSelector";
+import { ModelSelector, OllamaNotRunningError } from "./ModelSelector";
 import { ProviderConfigUI } from "./ProviderConfigUI";
 import { listCodexModels } from "./codex-models";
 import { variantListPrompt } from "./variant-list-prompt";
@@ -57,7 +57,14 @@ export class ConfigurationManager {
         if (provider === "openrouter") {
             model = await ModelSelector.selectOpenRouterModel();
         } else if (provider === "ollama") {
-            model = await ModelSelector.selectOllamaModel();
+            try {
+                model = await ModelSelector.selectOllamaModel();
+            } catch (e) {
+                if (e instanceof OllamaNotRunningError) {
+                    return ConfigurationManager.add(llmsConfig, advanced);
+                }
+                throw e;
+            }
         } else if (provider === PROVIDER_IDS.CODEX_APP_SERVER) {
             const result = await ConfigurationManager.selectCodexModel();
             model = result.model;
