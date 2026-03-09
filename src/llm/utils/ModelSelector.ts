@@ -21,7 +21,6 @@ export class ModelSelector {
 
         if (ollamaModels.length === 0) {
             console.log(amber("⚠️  Could not reach Ollama. Is Ollama running?"));
-            await inquirer.prompt([{ type: "input", name: "_", message: "Press Enter to go back" }]);
             throw new OllamaNotRunningError();
         }
 
