@@ -5,11 +5,13 @@
  * Categories do NOT restrict tool access — all agents have access to all tools.
  *
  * Categories represent operational roles:
- * - `principal`    — Human proxy (e.g., human-replica)
- * - `orchestrator` — PMs, coordinators
- * - `worker`       — Developers, implementers
- * - `advisor`      — Experts, reviewers
- * - `auditor`      — Testers, code reviewers
+ * - `principal`    — The human (e.g., human-replica)
+ * - `orchestrator` — Routes work, coordinates (e.g., PMs, coordinators)
+ * - `executor`     — Does the work (e.g., developers, implementers)
+ * - `expert`       — Deep domain knowledge (e.g., ndk-core-expert)
+ * - `advisor`      — Evaluates quality, validates plans (e.g., clean-code-nazi)
+ * - `creator`      — Creates/manufactures other agents (e.g., expert-agent-creator)
+ * - `assistant`    — General-purpose helpers
  *
  * Unknown/missing category remains undefined. Only set a category when explicitly known.
  */
@@ -17,7 +19,7 @@
 /**
  * Valid agent categories.
  */
-export type AgentCategory = "principal" | "orchestrator" | "worker" | "advisor" | "auditor";
+export type AgentCategory = "principal" | "orchestrator" | "executor" | "expert" | "advisor" | "creator" | "assistant";
 
 
 /**
@@ -26,9 +28,11 @@ export type AgentCategory = "principal" | "orchestrator" | "worker" | "advisor" 
 export const VALID_CATEGORIES: readonly AgentCategory[] = [
     "principal",
     "orchestrator",
-    "worker",
+    "executor",
+    "expert",
     "advisor",
-    "auditor",
+    "creator",
+    "assistant",
 ] as const;
 
 /**

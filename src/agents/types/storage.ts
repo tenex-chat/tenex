@@ -63,9 +63,9 @@ export interface StoredAgentData {
     name: string;
     role: string;
     /**
-     * Agent category for role-based tool restrictions (TIP-01).
-     * Valid values: "principal", "orchestrator", "worker", "advisor", "auditor".
-     * When missing or unrecognized, defaults to "advisor" (most restrictive).
+     * Agent category for semantic classification.
+     * Valid values: "principal", "orchestrator", "executor", "expert", "advisor", "creator", "assistant".
+     * When missing or unrecognized, remains undefined.
      */
     category?: AgentCategory;
     description?: string;
