@@ -79,7 +79,8 @@ async function main(): Promise<void> {
         { Command },
         { getHeuristicEngine, getDefaultHeuristics },
         { daemonCommand },
-        { setupCommand },
+        { configCommand },
+        { onboardCommand },
         { doctorCommand },
         { agentCommand },
         { handleCliError },
@@ -87,7 +88,8 @@ async function main(): Promise<void> {
         import("commander"),
         import("@/services/heuristics"),
         import("@/commands/daemon"),
-        import("@/commands/setup/index"),
+        import("@/commands/config/index"),
+        import("@/commands/onboard"),
         import("@/commands/doctor"),
         import("@/commands/agent"),
         import("@/utils/cli-error"),
@@ -112,7 +114,8 @@ async function main(): Promise<void> {
 
     // Register subcommands
     program.addCommand(daemonCommand);
-    program.addCommand(setupCommand);
+    program.addCommand(configCommand);
+    program.addCommand(onboardCommand);
     program.addCommand(doctorCommand);
     program.addCommand(agentCommand);
 

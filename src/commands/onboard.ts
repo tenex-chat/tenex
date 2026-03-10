@@ -16,7 +16,7 @@ import { config } from "@/services/ConfigService";
 import { type EmbeddingConfig, EmbeddingProviderFactory } from "@/services/rag/EmbeddingProviderFactory";
 import { ImageGenerationService, OPENROUTER_IMAGE_MODELS, ASPECT_RATIOS, IMAGE_SIZES, type ImageConfig } from "@/services/image/ImageGenerationService";
 import { inquirerTheme } from "@/utils/cli-theme";
-import * as display from "./display";
+import * as display from "@/commands/config/display";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey, isBackspaceKey } from "@inquirer/core";
 import { cursorHide } from "@inquirer/ansi";
 import NDK, {
@@ -235,7 +235,7 @@ async function runRoleAssignment(): Promise<void> {
 
     if (configNames.length === 0) {
         display.hint("No model configurations found. Skipping role assignment.");
-        display.context("Run tenex setup llm to configure models first.");
+        display.context("Run tenex config llm to configure models first.");
         return;
     }
 
@@ -501,7 +501,7 @@ async function runEmbeddingSetup(providers: TenexProviders): Promise<void> {
 async function runImageGenSetup(providers: TenexProviders): Promise<void> {
     if (!providers.providers[PROVIDER_IDS.OPENROUTER]?.apiKey) {
         display.hint("Image generation requires OpenRouter. Skipping.");
-        display.context("Run tenex setup providers to add OpenRouter, then tenex setup image.");
+        display.context("Run tenex config providers to add OpenRouter, then tenex config image.");
         return;
     }
 
@@ -526,7 +526,7 @@ async function runImageGenSetup(providers: TenexProviders): Promise<void> {
     }]);
 
     if (action === "skip") {
-        display.hint("Skipped. Run tenex setup image later to configure.");
+        display.hint("Skipped. Run tenex config image later to configure.");
         return;
     }
 
@@ -802,6 +802,7 @@ function startAgentDiscovery(relays: string[], signer?: NDKPrivateKeySigner): Ag
     }
 
     const events = new Map<string, NDKEvent>();
+    const fetchedAgentIds = new Set<string>();
     const TEAM_KIND = 34199;
     let initialSyncResolved = false;
     let resolveInitialSync: (() => void) | null = null;
@@ -815,11 +816,25 @@ function startAgentDiscovery(relays: string[], signer?: NDKPrivateKeySigner): Ag
         resolveInitialSync?.();
     };
 
+    const fetchReferencedAgents = (teamEvent: NDKEvent): void => {
+        const missingIds = teamEvent.tags
+            .filter((t: string[]) => t[0] === "e" && t[1] && !fetchedAgentIds.has(t[1]))
+            .map((t: string[]) => t[1]);
+        if (missingIds.length === 0) return;
+        for (const id of missingIds) fetchedAgentIds.add(id);
+        void ndk.fetchEvents({ ids: missingIds }).then((fetched) => {
+            for (const event of fetched) events.set(event.id, event);
+        });
+    };
+
     const subscription = ndk.subscribe(
         { kinds: [...NDKAgentDefinition.kinds, TEAM_KIND] as number[] },
         { closeOnEose: false },
         {
-            onEvent: (event: NDKEvent) => { events.set(event.id, event); },
+            onEvent: (event: NDKEvent) => {
+                events.set(event.id, event);
+                if (event.kind === TEAM_KIND) fetchReferencedAgents(event);
+            },
             onEose: markInitialSyncComplete,
             onClose: markInitialSyncComplete,
         },
@@ -1240,7 +1255,7 @@ async function startDaemonFromSetup(metaProjectCreated: boolean): Promise<never>
     }
 
     const isWrapperEntrypoint =
-        entrypoint.endsWith("wrapper.ts") || entrypoint.endsWith("daemon-wrapper.cjs");
+        entrypoint.endsWith("wrapper.ts") || entrypoint.endsWith("wrapper.js");
 
     const daemonArgs = isWrapperEntrypoint
         ? [...(metaProjectCreated ? ["--boot", "meta"] : [])]
@@ -1553,7 +1568,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
         agentDiscovery.subscription.stop();
         display.blank();
         display.hint("Skipping model configuration (no providers configured)");
-        display.context("Run tenex setup providers and tenex setup llm later to configure models.");
+        display.context("Run tenex config providers and tenex config llm later to configure models.");
         display.blank();
     }
 
@@ -1607,7 +1622,7 @@ function generateRandomUsername(): string {
     return `${adj}-${noun}`;
 }
 
-export const onboardingCommand = new Command("init")
+export const onboardCommand = new Command("onboard")
     .description("Initial setup wizard for TENEX")
     .option("--pubkey <pubkeys...>", "Pubkeys to whitelist (npub, nprofile, or hex)")
     .option("--local-relay-url <url>", "URL of a running local relay to offer as an option")

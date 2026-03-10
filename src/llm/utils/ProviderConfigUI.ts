@@ -2,7 +2,7 @@ import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { hasApiKey } from "@/llm/providers/key-manager";
 import type { TenexLLMs } from "@/services/config/types";
 import chalk from "chalk";
-import * as display from "@/commands/setup/display";
+import * as display from "@/commands/config/display";
 
 /**
  * Extended type for editor use - includes providers

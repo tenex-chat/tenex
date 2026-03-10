@@ -69,7 +69,7 @@ async function openInEditor(filePath: string): Promise<void> {
  * Opens the user's preferred editor to edit a system prompt fragment that
  * will be added to ALL projects' system prompts.
  */
-export const globalSystemPromptCommand = new Command("global-system-prompt")
+export const systemPromptCommand = new Command("system-prompt")
     .description("Configure a global system prompt that is added to all projects")
     .option("--disable", "Disable the global system prompt without deleting it")
     .option("--enable", "Enable the global system prompt")

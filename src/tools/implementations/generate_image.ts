@@ -177,7 +177,7 @@ function mapErrorToUserMessage(errorMsg: string, originalError: unknown): Error 
     // Most specific first: OpenRouter API key not configured
     if (errorMsg.includes("OpenRouter API key required")) {
         return new Error(
-            "OpenRouter API key not configured. Run 'tenex setup providers' and add your OpenRouter API key.",
+            "OpenRouter API key not configured. Run 'tenex config providers' and add your OpenRouter API key.",
             { cause: originalError }
         );
     }
@@ -185,7 +185,7 @@ function mapErrorToUserMessage(errorMsg: string, originalError: unknown): Error 
     // Generic API key / authentication issues
     if (errorMsg.includes("API key") || errorMsg.includes("authentication") || errorMsg.includes("apiKey")) {
         return new Error(
-            "Image generation is not configured. Run 'tenex setup image' to configure it.",
+            "Image generation is not configured. Run 'tenex config image' to configure it.",
             { cause: originalError }
         );
     }

@@ -16,7 +16,7 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import { inquirerTheme } from "@/utils/cli-theme";
 import type { MetaModelConfiguration, MetaModelVariant } from "@/services/config/types";
-import * as display from "@/commands/setup/display";
+import * as display from "@/commands/config/display";
 
 type VariantListAction =
     | { action: "edit"; variantName: string }

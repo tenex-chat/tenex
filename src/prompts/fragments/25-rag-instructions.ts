@@ -27,10 +27,10 @@ Configure your preferred embedding model using the CLI:
 
 \`\`\`bash
 # Global configuration (applies to all projects)
-tenex setup embed
+tenex config embed
 
 # Project-specific configuration
-tenex setup embed --project
+tenex config embed --project
 \`\`\`
 
 The system supports:
@@ -323,7 +323,7 @@ rag_add_documents({
    - Use cloud-based embeddings for better performance
 
 4. **Configuration Not Found**
-   - Run \`tenex setup embed\` to configure
+   - Run \`tenex config embed\` to configure
    - Check \`.tenex/embed.json\` exists
    - Verify environment variables for API keys
 

@@ -10,7 +10,7 @@ type TenexLLMsWithProviders = TenexLLMs & {
 import chalk from "chalk";
 import inquirer from "inquirer";
 import { inquirerTheme } from "@/utils/cli-theme";
-import * as display from "@/commands/setup/display";
+import * as display from "@/commands/config/display";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import type { AISdkProvider } from "../types";
 import { ModelSelector, OllamaNotRunningError } from "./ModelSelector";

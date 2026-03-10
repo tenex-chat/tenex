@@ -126,7 +126,7 @@ export class ImageGenerationService {
         const apiKey = await ImageGenerationService.loadProviderApiKey("openrouter");
         if (!apiKey) {
             throw new Error(
-                "OpenRouter API key required for image generation. Configure with 'tenex setup providers'."
+                "OpenRouter API key required for image generation. Configure with 'tenex config providers'."
             );
         }
 
@@ -262,7 +262,7 @@ export class ImageGenerationService {
 
                 if (errorMessage.includes("model") && errorMessage.includes("not found")) {
                     throw new Error(
-                        `Model "${modelId}" not found. Run 'tenex setup image' to select a valid model.`,
+                        `Model "${modelId}" not found. Run 'tenex config image' to select a valid model.`,
                         { cause: error }
                     );
                 }

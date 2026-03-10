@@ -116,7 +116,7 @@ export class EmbeddingProviderFactory {
         // All other providers are treated as OpenAI-compatible
         if (!embeddingConfig.apiKey) {
             throw new Error(
-                `API key required for ${embeddingConfig.provider}. Configure with 'tenex setup embed'.`
+                `API key required for ${embeddingConfig.provider}. Configure with 'tenex config embed'.`
             );
         }
 

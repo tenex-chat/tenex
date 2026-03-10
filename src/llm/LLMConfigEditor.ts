@@ -15,7 +15,7 @@ import {
 import { cursorHide } from "@inquirer/ansi";
 import chalk from "chalk";
 import { inquirerTheme } from "@/utils/cli-theme";
-import * as display from "@/commands/setup/display";
+import * as display from "@/commands/config/display";
 import { llmServiceFactory } from "./LLMServiceFactory";
 import { ConfigurationManager } from "./utils/ConfigurationManager";
 import { ConfigurationTester } from "./utils/ConfigurationTester";
@@ -48,9 +48,9 @@ const menuTheme = {
 const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
     const { items, actions } = config;
     const theme = makeTheme(menuTheme);
-    // items + actions + Done
-    const doneIndex = items.length + actions.length;
-    const totalNavigable = doneIndex + 1;
+    // actions + Done + items
+    const doneIndex = actions.length;
+    const totalNavigable = actions.length + 1 + items.length;
 
     const [active, setActive] = useState(0);
     const resultsRef = useRef<Record<string, TestResult>>({});
@@ -82,19 +82,19 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
         if (testing) return;
 
         if (isEnterKey(key)) {
-            if (active < items.length) {
-                done(items[active]!.value);
-            } else if (active < doneIndex) {
-                done(actions[active - items.length]!.value);
-            } else {
+            if (active < doneIndex) {
+                done(actions[active]!.value);
+            } else if (active === doneIndex) {
                 done("done");
+            } else {
+                done(items[active - doneIndex - 1]!.value);
             }
         } else if (isUpKey(key) || isDownKey(key)) {
             rl.clearLine(0);
             const offset = isUpKey(key) ? -1 : 1;
             setActive((active + offset + totalNavigable) % totalNavigable);
-        } else if (key.name === "t" && active < items.length) {
-            const item = items[active];
+        } else if (key.name === "t" && active > doneIndex) {
+            const item = items[active - doneIndex - 1];
             if (item?.configName && config.onTest) {
                 if (resultsRef.current[item.configName]) return;
                 setTesting(item.configName);
@@ -103,8 +103,8 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
                     setTesting(null);
                 });
             }
-        } else if (key.name === "d" && active < items.length) {
-            const configValue = items[active]?.value;
+        } else if (key.name === "d" && active > doneIndex) {
+            const configValue = items[active - doneIndex - 1]?.value;
             if (configValue?.startsWith("config:")) {
                 const configName = configValue.slice("config:".length);
                 done(`delete:${configName}`);
@@ -123,12 +123,25 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
 
     lines.push(`${prefix} ${message}`);
 
+    for (let i = 0; i < actions.length; i++) {
+        const action = actions[i]!;
+        const isActive = active === i;
+        const pfx = isActive ? `${cursor} ` : "  ";
+        lines.push(`${pfx}${chalk.cyan(action.name)}`);
+    }
+
+    const donePfx = active === doneIndex ? `${cursor} ` : "  ";
+    lines.push(`${donePfx}${display.doneLabel()}`);
+
+    lines.push(`  ${"─".repeat(40)}`);
+
     if (items.length === 0) {
         lines.push(chalk.dim("  No configurations yet"));
     } else {
         for (let i = 0; i < items.length; i++) {
             const item = items[i]!;
-            const isActive = i === active;
+            const idx = doneIndex + 1 + i;
+            const isActive = idx === active;
             const pfx = isActive ? `${cursor} ` : "  ";
             const color = isActive ? theme.style.highlight : (x: string) => x;
             const name = item.configName;
@@ -148,19 +161,6 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
             }
         }
     }
-
-    lines.push(`  ${"─".repeat(40)}`);
-
-    for (let i = 0; i < actions.length; i++) {
-        const action = actions[i]!;
-        const idx = items.length + i;
-        const isActive = active === idx;
-        const pfx = isActive ? `${cursor} ` : "  ";
-        lines.push(`${pfx}${chalk.cyan(action.name)}`);
-    }
-
-    const donePfx = active === doneIndex ? `${cursor} ` : "  ";
-    lines.push(`${donePfx}${display.doneLabel()}`);
 
     const helpParts = [
         `${chalk.bold("↑↓")} ${chalk.dim("navigate")}`,

@@ -23,7 +23,7 @@ export const llmCommand = new Command("llm")
             const providersConfig = await config.loadTenexProviders(globalConfigDir);
             if (Object.keys(providersConfig.providers).length === 0) {
                 console.log(chalk.red("❌ No providers configured."));
-                console.log(amber("→") + chalk.bold(" Run tenex setup providers first"));
+                console.log(amber("→") + chalk.bold(" Run tenex config providers first"));
                 process.exitCode = 1;
                 return;
             }

@@ -18,7 +18,7 @@ import chalk from "chalk";
 import type { ProviderCredentials } from "@/services/config/types";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { ProviderConfigUI } from "@/llm/utils/ProviderConfigUI";
-import * as display from "@/commands/setup/display";
+import * as display from "@/commands/config/display";
 
 // --- Public types ---
 

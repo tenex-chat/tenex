@@ -50,7 +50,7 @@ export const imageCommand = new Command("image")
             // Check if OpenRouter is configured
             const providersConfig = await configService.loadTenexProviders(configService.getGlobalPath());
             if (!providersConfig.providers.openrouter?.apiKey) {
-                console.log(chalk.red("❌ OpenRouter is not configured. Run `tenex setup providers` and add your OpenRouter API key first."));
+                console.log(chalk.red("❌ OpenRouter is not configured. Run `tenex config providers` and add your OpenRouter API key first."));
                 console.log(amber("→") + chalk.bold(" Image generation requires OpenRouter. Get an API key at: https://openrouter.ai/keys"));
                 process.exitCode = 1;
                 return;
