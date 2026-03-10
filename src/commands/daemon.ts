@@ -5,14 +5,20 @@ import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { SchedulerService } from "@/services/scheduling";
 import { eventLoopMonitor } from "@/telemetry/EventLoopMonitor";
 import { logger } from "@/utils/logger";
-import { runInteractiveSetup } from "./setup/interactive";
+import { runInteractiveSetup } from "./config/interactive";
+import { daemonStatusCommand } from "./daemon-status";
+import { daemonStopCommand } from "./daemon-stop";
 import chalk from "chalk";
 import { Command } from "commander";
+import { spawn } from "node:child_process";
 
 /**
  * Daemon command - runs all projects in a single process
  */
-export const daemonCommand = new Command("daemon")
+export const daemonCommand = new Command("daemon");
+daemonCommand.addCommand(daemonStatusCommand);
+daemonCommand.addCommand(daemonStopCommand);
+daemonCommand
     .description("Start the TENEX daemon to manage all projects")
     .option("-w, --whitelist <pubkeys>", "Comma-separated list of whitelisted pubkeys")
     .option("-c, --config <path>", "Path to config file")
@@ -21,6 +27,7 @@ export const daemonCommand = new Command("daemon")
         return prev ? [...prev, value] : [value];
     }, [])
     .option("--supervised", "Run in supervised mode (enables graceful restart via SIGHUP)")
+    .option("--foreground", "Run in the foreground instead of forking to the background")
     .action(async (options) => {
         // Enable verbose logging if requested
         if (options.verbose) {
@@ -60,6 +67,33 @@ export const daemonCommand = new Command("daemon")
             await config.saveGlobalConfig(setupConfig);
         }
 
+        // Fork to background unless --foreground is set or already running as the forked child
+        if (!options.foreground && process.env.TENEX_FORKED !== "1") {
+            const child = spawn(process.execPath, process.argv.slice(1), {
+                env: { ...process.env, TENEX_FORKED: "1" },
+                detached: true,
+                stdio: ["ignore", "ignore", process.stderr, "ipc"],
+            });
+            child.on("message", (msg: unknown) => {
+                if (msg && typeof msg === "object" && (msg as { type: string }).type === "ready") {
+                    console.log(chalk.green(`✅ Daemon running in background (PID: ${child.pid})`));
+                    child.unref();
+                    process.exit(0);
+                }
+            });
+            child.on("exit", (code) => {
+                if (code !== 0) {
+                    console.error(chalk.red(`Daemon failed to start (exit code: ${code ?? 1})`));
+                    process.exit(code ?? 1);
+                }
+            });
+            child.on("error", (err) => {
+                console.error(chalk.red(`Failed to start daemon process: ${err.message}`));
+                process.exit(1);
+            });
+            return;
+        }
+
         console.log(chalk.cyan("╔════════════════════════════════════════╗"));
         console.log(chalk.cyan("║       TENEX Daemon Starting            ║"));
         console.log(chalk.cyan("╚════════════════════════════════════════╝"));
@@ -84,6 +118,13 @@ export const daemonCommand = new Command("daemon")
         // Get the daemon instance
         console.log(chalk.gray("🚀 Starting daemon..."));
         const daemon = getDaemon();
+
+        // In background-fork mode: signal the parent process once the daemon is ready
+        if (process.env.TENEX_FORKED === "1") {
+            daemon.setReadyCallback(() => {
+                process.send?.({ type: "ready" });
+            });
+        }
 
         // Set supervised mode if enabled
         if (options.supervised) {
@@ -175,6 +216,9 @@ export const daemonCommand = new Command("daemon")
             console.log(chalk.gray("⚙️  Initializing scheduler service..."));
             await schedulerService.initialize(getNDK(), ".tenex");
             console.log(chalk.gray("✓ Scheduler initialized"));
+
+            // Signal fully initialized — unblocks the ready callback once EOSE + auto-boots complete
+            daemon.markFullyInitialized();
 
             console.log(chalk.green("✅ Daemon started successfully"));
 

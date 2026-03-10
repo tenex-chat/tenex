@@ -40,16 +40,20 @@ export class SubscriptionManager {
     private agentMentionsTimer: NodeJS.Timeout | null = null;
     private pendingAgentMentionsPubkeys: Set<Hexpubkey> | null = null;
 
+    private onStaticEoseCallback?: () => void;
+
     constructor(
         ndk: NDK,
         eventHandler: (event: NDKEvent) => Promise<void>,
         whitelistedPubkeys: Hexpubkey[],
-        routingLogger: EventRoutingLogger
+        routingLogger: EventRoutingLogger,
+        onStaticEose?: () => void
     ) {
         this.ndk = ndk;
         this.eventHandler = eventHandler;
         this.whitelistedPubkeys = new Set(whitelistedPubkeys);
         this.routingLogger = routingLogger;
+        this.onStaticEoseCallback = onStaticEose;
     }
 
     /**
@@ -63,7 +67,7 @@ export class SubscriptionManager {
 
         const filters = SubscriptionFilterBuilder.buildStaticFilters(this.whitelistedPubkeys);
         if (filters.length > 0) {
-            this.staticSubscription = this.createSub(filters, "static");
+            this.staticSubscription = this.createSub(filters, "static", this.onStaticEoseCallback);
         }
 
         await this.routingLogger.logSubscriptionFilters({
@@ -257,13 +261,14 @@ export class SubscriptionManager {
     /**
      * Create an NDK subscription with the shared event handler.
      */
-    private createSub(filters: NDKFilter[], label: string): NDKSubscription {
+    private createSub(filters: NDKFilter[], label: string, onEose?: () => void): NDKSubscription {
         const sub = this.ndk.subscribe(filters, {
             closeOnEose: false,
             groupable: false,
             onEvent: (event: NDKEvent) => this.handleEvent(event),
             onEose: () => {
                 logger.debug(`Subscription EOSE received [${label}]`);
+                onEose?.();
             },
         });
 

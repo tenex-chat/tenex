@@ -36,6 +36,7 @@ import { NudgeSkillWhitelistService } from "@/services/nudge";
 import { OwnerAgentListService } from "@/services/OwnerAgentListService";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { RestartState } from "./RestartState";
+import { StatusFile } from "./StatusFile";
 import { AgentDefinitionMonitor } from "@/services/AgentDefinitionMonitor";
 import { APNsService } from "@/services/apns";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
@@ -95,6 +96,17 @@ export class Daemon {
     // Shutdown function (set by setupShutdownHandlers, used by triggerGracefulRestart)
     private shutdownFn: ((exitCode?: number, isGracefulRestart?: boolean) => Promise<void>) | null = null;
 
+    // Background-mode readiness signaling
+    private readyCallback: (() => void) | null = null;
+    private pendingAutoBootCount = 0;
+    private staticEoseReceived = false;
+    private fullyInitialized = false;
+    private readyFired = false;
+
+    // Status file for `tenex daemon status`
+    private statusFile: StatusFile | null = null;
+    private statusInterval: NodeJS.Timeout | null = null;
+
     constructor() {
         this.routingLogger = new EventRoutingLogger();
     }
@@ -135,6 +147,64 @@ export class Daemon {
     }
 
     /**
+     * Register a callback to invoke once the daemon is ready.
+     * "Ready" means the static subscription EOSE has been received and all
+     * auto-boot projects have finished starting (or attempting to start).
+     * Used by background-fork mode to signal the parent process.
+     */
+    setReadyCallback(cb: () => void): void {
+        this.readyCallback = cb;
+    }
+
+    /**
+     * Called by the command layer after all initialization (including scheduler) is complete.
+     * This is the final gate before the ready callback can fire.
+     * Also starts the periodic status writer.
+     */
+    markFullyInitialized(): void {
+        this.fullyInitialized = true;
+        this.writeStatus();
+        this.statusInterval = setInterval(() => {
+            this.writeStatus();
+        }, 60_000);
+        this.statusInterval.unref();
+        this.checkReady();
+    }
+
+    private writeStatus(): void {
+        if (!this.statusFile) return;
+        const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
+        const runtimes = Array.from(activeRuntimes.values()).map((runtime) => {
+            const s = runtime.getStatus();
+            return {
+                projectId: s.projectId,
+                title: s.title,
+                agentCount: s.agentCount,
+                startTime: s.startTime?.toISOString() ?? null,
+                lastEventTime: s.lastEventTime?.toISOString() ?? null,
+                eventCount: s.eventCount,
+            };
+        });
+        const startedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+        this.statusFile
+            .write({ pid: process.pid, startedAt, knownProjects: this.knownProjects.size, runtimes, updatedAt: new Date().toISOString() })
+            .catch((err) => logger.warn("Failed to write status file", { error: err instanceof Error ? err.message : String(err) }));
+    }
+
+    private onStaticEose(): void {
+        this.staticEoseReceived = true;
+        this.checkReady();
+    }
+
+    private checkReady(): void {
+        if (this.readyFired || !this.readyCallback) return;
+        if (this.fullyInitialized && this.staticEoseReceived && this.pendingAutoBootCount === 0) {
+            this.readyFired = true;
+            this.readyCallback();
+        }
+    }
+
+    /**
      * Initialize and start the daemon
      */
     async start(): Promise<void> {
@@ -147,6 +217,7 @@ export class Daemon {
             // 1. Initialize base directories
             logger.debug("Initializing base directories");
             await this.initializeDirectories();
+            this.statusFile = new StatusFile(this.daemonDir);
 
             // 2. Acquire lockfile to prevent multiple daemon instances
             logger.debug("Acquiring daemon lock");
@@ -171,7 +242,7 @@ export class Daemon {
             this.projectsBase = projectsBase;
 
             if (this.whitelistedPubkeys.length === 0) {
-                throw new Error("No whitelisted pubkeys configured. Run 'tenex setup' first.");
+                throw new Error("No whitelisted pubkeys configured. Run 'tenex onboard' first.");
             }
 
             // 5. Initialize NDK
@@ -213,7 +284,8 @@ export class Daemon {
                 this.ndk,
                 this.handleIncomingEvent.bind(this), // Pass event handler
                 this.whitelistedPubkeys,
-                this.routingLogger
+                this.routingLogger,
+                this.onStaticEose.bind(this)
             );
 
             // 8b. Seed trust service with all known agent pubkeys from storage
@@ -1080,6 +1152,7 @@ export class Daemon {
                     matchedPattern: matchingPattern,
                 });
 
+                this.pendingAutoBootCount++;
                 try {
                     runtime = await this.runtimeLifecycle.startRuntime(projectId, project);
                     await this.updateSubscriptionWithProjectAgents(projectId, runtime);
@@ -1092,6 +1165,10 @@ export class Daemon {
                         projectTitle,
                         error: error instanceof Error ? error.message : String(error),
                     });
+                } finally {
+                    this.pendingAutoBootCount--;
+                    this.checkReady();
+                    this.writeStatus();
                 }
             }
         }
@@ -1877,6 +1954,13 @@ export class Daemon {
 
         // Clear state
         this.knownProjects.clear();
+
+        // Stop status writer and remove status file
+        if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = null;
+        }
+        await this.statusFile?.remove();
 
         // Release lockfile
         if (this.lockfile) {
