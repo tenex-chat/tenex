@@ -1370,27 +1370,111 @@ describe("LLMService key rotation retry", () => {
             expect(streamErrorSpy).not.toHaveBeenCalled();
         });
 
-        test("does not retry after chunks have been emitted", async () => {
-            mockStreamText.mockImplementation(() => ({
-                fullStream: (async function* () {
-                    yield { type: "text-delta", textDelta: "Hello" };
-                    throw Object.assign(new Error("Rate limited"), { status: 429 });
-                })(),
-            }));
+        test("retries when the first attempt only emitted protocol chunks before failing", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            yield { type: "start" };
+                            throw Object.assign(new Error("Rate limited"), { status: 429 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", text: "Hello" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
 
             const service = createServiceWithRotation();
             const streamErrorSpy = mock(() => {});
             service.on("stream-error", streamErrorSpy);
 
-            await expect(
-                service.stream(
-                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
-                    {}
-                )
-            ).rejects.toThrow("Rate limited");
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {}
+            );
 
-            expect(mockRotationHandler).not.toHaveBeenCalled();
-            expect(streamErrorSpy).toHaveBeenCalledTimes(1);
+            expect(callCount).toBe(2);
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(streamErrorSpy).not.toHaveBeenCalled();
+        });
+
+        test("retries after text chunks have been emitted", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            yield { type: "text-delta", text: "Hello" };
+                            throw Object.assign(new Error("Rate limited"), { status: 429 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", text: "Recovered" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
+
+            const service = createServiceWithRotation();
+            const streamErrorSpy = mock(() => {});
+            service.on("stream-error", streamErrorSpy);
+
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {}
+            );
+
+            expect(callCount).toBe(2);
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(streamErrorSpy).not.toHaveBeenCalled();
+        });
+
+        test("retries after a tool call has been emitted", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            yield {
+                                type: "tool-call",
+                                toolCallId: "call-1",
+                                toolName: "lookup",
+                                input: {},
+                            };
+                            throw Object.assign(new Error("Rate limited"), { status: 429 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", text: "Recovered" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
+
+            const service = createServiceWithRotation();
+            const streamErrorSpy = mock(() => {});
+            service.on("stream-error", streamErrorSpy);
+
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                { lookup: {} as any }
+            );
+
+            expect(callCount).toBe(2);
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(streamErrorSpy).not.toHaveBeenCalled();
         });
 
         test("does not emit stream-error on suppressed first attempt", async () => {
@@ -1623,23 +1707,30 @@ describe("LLMService key rotation retry", () => {
             );
         });
 
-        test("does not retry when generateObject receives tools", async () => {
+        test("retries when generateObject receives tools", async () => {
+            let callCount = 0;
             mockGenerateObject.mockImplementation(() => {
-                throw Object.assign(new Error("Forbidden"), { status: 403 });
+                callCount++;
+                if (callCount === 1) {
+                    throw Object.assign(new Error("Forbidden"), { status: 403 });
+                }
+                return Promise.resolve({
+                    object: { result: "with-tools" },
+                    usage: { inputTokens: 10, outputTokens: 5 },
+                });
             });
 
             const { z } = await import("zod");
             const service = createServiceWithRotation();
+            const result = await service.generateObject(
+                [{ role: "user", content: [{ type: "text", text: "Generate" }] }],
+                z.object({ result: z.string() }),
+                { lookup: {} as any }
+            );
 
-            await expect(
-                service.generateObject(
-                    [{ role: "user", content: [{ type: "text", text: "Generate" }] }],
-                    z.object({ result: z.string() }),
-                    { lookup: {} as any }
-                )
-            ).rejects.toThrow("Forbidden");
-
-            expect(mockRotationHandler).not.toHaveBeenCalled();
+            expect(result.object).toEqual({ result: "with-tools" });
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(callCount).toBe(2);
 
             mockGenerateObject.mockImplementation(() =>
                 Promise.resolve({ object: { result: "test" }, usage: { inputTokens: 5, outputTokens: 10 } })

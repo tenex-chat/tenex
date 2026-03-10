@@ -315,12 +315,20 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         if (firstResult.success) return;
 
         // Check if retry is possible
+        const retryableKeyError = isRetryableKeyError(firstResult.error);
         if (
-            firstResult.chunkCount !== 0 ||
-            !attemptKey ||
-            !this.keyRotationHandler ||
-            !isRetryableKeyError(firstResult.error)
+            attemptKey === undefined ||
+            this.keyRotationHandler === undefined ||
+            !retryableKeyError
         ) {
+            trace.getActiveSpan()?.addEvent("llm.stream_retry_not_attempted", {
+                "retry.active_key_present": attemptKey !== undefined,
+                "retry.key_rotation_handler_present": this.keyRotationHandler !== undefined,
+                "retry.error_retryable": retryableKeyError,
+                "retry.chunk_count_at_error": firstResult.chunkCount,
+                "retry.last_chunk_type": firstResult.lastChunkType ?? "none",
+            });
+
             // No retry possible — emit the suppressed stream-error and throw
             this.emit("stream-error", { error: firstResult.error });
             await this.handleStreamError(firstResult.error, startTime);
@@ -339,6 +347,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             provider: this.provider,
             model: this.model,
         });
+        trace.getActiveSpan()?.addEvent("llm.stream_retry_after_key_rotation", {
+            "llm.provider": this.provider,
+            "llm.model": this.model,
+        });
 
         // Retry with fresh model from rotated provider
         const { model: retryModel } = this.createStandardAttemptContext(messages);
@@ -354,7 +366,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     }
 
     /**
-     * Run a single stream attempt. Returns success/failure with error and chunk count.
+     * Run a single stream attempt. Returns success/failure with error and stream part stats.
      * When emitStreamError is false, the onError callback suppresses stream-error emission
      * so the caller can decide whether to retry or emit.
      */
@@ -376,7 +388,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         } | undefined,
         startTime: number,
         { emitStreamError }: { emitStreamError: boolean }
-    ): Promise<{ success: true } | { success: false; error: unknown; chunkCount: number }> {
+    ): Promise<
+        | { success: true }
+        | { success: false; error: unknown; chunkCount: number; lastChunkType?: string }
+    > {
         // ProgressMonitor is only used for providers without built-in tools
         let progressMonitor: ProgressMonitor | undefined;
         if (!this.capabilities.builtInTools) {
@@ -645,7 +660,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             } else {
                 activeSpan?.addEvent("llm.stream_loop_retry_candidate", errorEventAttributes);
             }
-            return { success: false, error, chunkCount };
+            return { success: false, error, chunkCount, lastChunkType };
         }
     }
 
@@ -739,8 +754,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 });
 
                 const result = await this.withKeyRotationRetry(
-                    (languageModel) => this.executeObjectGeneration(languageModel, messages, schema, tools),
-                    { retryAllowed: !tools || Object.keys(tools).length === 0 }
+                    (languageModel) => this.executeObjectGeneration(languageModel, messages, schema, tools)
                 );
 
                 const duration = Date.now() - startTime;
@@ -822,15 +836,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
      * rotates the key and retries with a fresh model.
      */
     private async withKeyRotationRetry<T>(
-        operation: (languageModel: LanguageModel) => Promise<T>,
-        options?: { retryAllowed?: boolean }
+        operation: (languageModel: LanguageModel) => Promise<T>
     ): Promise<T> {
         const { model, failedKey } = this.createStandardAttemptContext();
         try {
             return await operation(model);
         } catch (error) {
             if (
-                options?.retryAllowed !== false &&
                 failedKey &&
                 this.keyRotationHandler &&
                 isRetryableKeyError(error)
