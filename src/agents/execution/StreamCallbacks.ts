@@ -13,6 +13,7 @@ import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
@@ -80,7 +81,7 @@ export interface PrepareStepConfig {
  */
 export function createPrepareStep(
     config: PrepareStepConfig
-): (step: StepData) => Promise<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined> {
+): (step: StepData) => Promise<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined> {
     const {
         context,
         llmService,
@@ -224,7 +225,7 @@ export function createPrepareStep(
                 );
 
                 // Compile messages (sub-span removed - MessageCompiler.compile has its own span)
-                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
+                const { messages: rebuiltMessages, providerOptions, mode } = await messageCompiler.compile({
                     agent: context.agent,
                     project: projectContext.project,
                     conversation,
@@ -251,7 +252,7 @@ export function createPrepareStep(
                 span.setAttribute("compiled.message_count", rebuiltMessages.length);
 
                 // For delta mode with no new messages, keep original
-                if (mode === "delta" && rebuiltMessages.length === 0) {
+                if (mode === "delta" && rebuiltMessages.length === 0 && !providerOptions) {
                     logger.debug("[StreamCallbacks] prepareStep: delta mode with no new messages, keeping original");
                     return undefined;
                 }
@@ -323,8 +324,8 @@ export function createPrepareStep(
                 }
 
                 return modelState.currentModel
-                    ? { model: modelState.currentModel, messages: rebuiltMessages }
-                    : { messages: rebuiltMessages };
+                    ? { model: modelState.currentModel, messages: rebuiltMessages, providerOptions }
+                    : { messages: rebuiltMessages, providerOptions };
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
@@ -349,4 +350,3 @@ export function createPrepareStep(
         });
     };
 }
-

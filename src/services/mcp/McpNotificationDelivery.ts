@@ -16,7 +16,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
-import { wrapInSystemReminder } from "@/services/system-reminder";
+import { wrapInSystemReminder } from "ai-sdk-system-reminders";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -50,7 +50,10 @@ export async function deliverMcpNotification(
         `[MCP Resource Update | server: ${subscription.serverName} ` +
         `| resource: ${subscription.resourceUri} ` +
         `| subscription: ${subscription.id}]\n\n${content}`;
-    const formattedContent = wrapInSystemReminder(reminderBody);
+    const formattedContent = wrapInSystemReminder({
+        type: "mcp-notification",
+        content: reminderBody,
+    });
 
     // Get or load the conversation store
     const store = ConversationStore.getOrLoad(subscription.conversationId);

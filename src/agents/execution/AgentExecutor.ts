@@ -575,6 +575,7 @@ export class AgentExecutor {
             sessionManager: setup.sessionManager,
             llmService: setup.llmService,
             messageCompiler: setup.messageCompiler,
+            providerOptions: setup.providerOptions,
             nudgeContent: setup.nudgeContent,
             skillContent: setup.skillContent,
             skills: setup.skills,

@@ -8,7 +8,6 @@
  * - Message deference during pending tool execution
  * - Delegation completion pruning
  * - Message attribution for unexpected senders
- * - AGENTS.md system reminder injection for file-read operations
  */
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
@@ -16,32 +15,18 @@ import type { ConversationEntry, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
-import { processToolResult, shouldTruncateToolResult, type TruncationContext } from "./utils/tool-result-truncator";
+import type { TruncationContext } from "./utils/tool-result-truncator";
 import {
     createImageTracker,
     processToolResultWithImageTracking,
     type ImageTracker,
 } from "./utils/image-placeholder";
 import { extractImageUrls } from "./utils/image-url-utils";
-import {
-    createAgentsMdVisibilityTracker,
-    getSystemRemindersForPath,
-    shouldInjectForTool,
-    extractPathFromToolInput,
-    appendSystemReminderToOutput,
-    type AgentsMdVisibilityTracker,
-} from "@/services/agents-md";
 
-/**
- * Extract tool input from a ToolCallPart.
- * AI SDK v6 uses 'input' property, but some storage formats use 'args'.
- * This utility handles both cases in a type-safe manner.
- */
-function getToolInput(part: ToolCallPart): unknown {
-    // ToolCallPart type may not include 'args', but storage format might
-    const partWithArgs = part as ToolCallPart & { args?: unknown };
-    return partWithArgs.input ?? partWithArgs.args;
-}
+export type AddressableModelMessage = ModelMessage & {
+    id: string;
+    eventId?: string;
+};
 
 export interface MessageBuilderContext {
     /**
@@ -65,11 +50,6 @@ export interface MessageBuilderContext {
      */
     totalMessages: number;
     /**
-     * Project root directory for AGENTS.md discovery.
-     * If provided, enables system reminder injection after file-read tool results.
-     */
-    projectRoot?: string;
-    /**
      * Set of pubkeys that belong to agents (non-whitelisted).
      * Used by computeAttributionPrefix to distinguish agent messages from user messages.
      * If not provided, all non-self pubkeys are treated as users (no agent attribution).
@@ -87,18 +67,86 @@ export interface MessageBuilderContext {
      * Returns the messages array or undefined if conversation not found.
      */
     getDelegationMessages?: (delegationConversationId: string) => ConversationEntry[] | undefined;
+    /**
+     * Include stable ids on emitted messages for explicit context preprocessing.
+     */
+    includeMessageIds?: boolean;
 }
 
-/**
- * Context for AGENTS.md system reminder injection
- */
-interface AgentsMdContext {
-    /** Project root for AGENTS.md discovery */
-    projectRoot: string;
-    /** Visibility tracker for deduplication */
-    tracker: AgentsMdVisibilityTracker;
-    /** Map of toolCallId -> path for file-read tools */
-    toolCallPaths: Map<string, string>;
+function hashString(value: string): string {
+    let hash = 5381;
+
+    for (let i = 0; i < value.length; i++) {
+        hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
+    }
+
+    return (hash >>> 0).toString(36);
+}
+
+function buildEntryMessageId(entry: ConversationEntry, absoluteIndex: number): string {
+    if (entry.eventId) {
+        return entry.eventId;
+    }
+
+    if (entry.messageType === "tool-call" || entry.messageType === "tool-result") {
+        const toolCallIds = (entry.toolData ?? [])
+            .flatMap((part) => "toolCallId" in part && typeof part.toolCallId === "string" ? [part.toolCallId] : []);
+
+        if (toolCallIds.length > 0) {
+            return `${entry.messageType}:${toolCallIds.join(",")}:${absoluteIndex}`;
+        }
+    }
+
+    if (entry.messageType === "delegation-marker" && entry.delegationMarker) {
+        return `delegation:${entry.delegationMarker.delegationConversationId}:${entry.delegationMarker.status}:${absoluteIndex}`;
+    }
+
+    const stablePayload = JSON.stringify({
+        pubkey: entry.pubkey,
+        ral: entry.ral,
+        messageType: entry.messageType,
+        content: entry.content,
+        toolData: entry.toolData,
+        targetedPubkeys: entry.targetedPubkeys,
+        senderPubkey: entry.senderPubkey,
+        role: entry.role,
+        humanReadable: entry.humanReadable,
+        transcriptToolAttributes: entry.transcriptToolAttributes,
+    });
+
+    return `${entry.messageType}:${absoluteIndex}:${hashString(stablePayload)}`;
+}
+
+function withMessageIdentity(
+    message: ModelMessage,
+    entry: ConversationEntry,
+    absoluteIndex: number,
+    includeMessageIds: boolean
+): ModelMessage {
+    if (!includeMessageIds) {
+        return message;
+    }
+
+    return {
+        ...(message as object),
+        id: buildEntryMessageId(entry, absoluteIndex),
+        ...(entry.eventId ? { eventId: entry.eventId } : {}),
+    } as AddressableModelMessage;
+}
+
+function createSyntheticMessageWithId(
+    message: ModelMessage,
+    id: string,
+    includeMessageIds: boolean
+): ModelMessage {
+    if (!includeMessageIds) {
+        return message;
+    }
+
+    return {
+        ...(message as object),
+        id,
+    } as AddressableModelMessage;
 }
 
 /**
@@ -223,35 +271,18 @@ export function computeAttributionPrefix(
  * - Subsequent appearances: replaced with placeholder referencing eventId
  * - The imageTracker tracks which images have been seen
  *
- * AGENTS.md System Reminders:
- * - When a file-read tool result is processed, check for AGENTS.md files
- * - Inject system reminders after the tool output for newly visible AGENTS.md files
- * - Track visibility to avoid duplication in subsequent tool results
  */
 async function entryToMessage(
     entry: ConversationEntry,
     viewingAgentPubkey: string,
-    truncationContext: TruncationContext | undefined,
+    _truncationContext: TruncationContext | undefined,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
-    agentsMdContext?: AgentsMdContext,
     enableMultimodal: boolean = true
 ): Promise<ModelMessage> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
     if (entry.messageType === "tool-call" && entry.toolData) {
-        // Track paths from file-read tool calls for AGENTS.md injection
-        if (agentsMdContext) {
-            for (const part of entry.toolData as ToolCallPart[]) {
-                if (shouldInjectForTool(part.toolName)) {
-                    const toolInput = getToolInput(part);
-                    const path = extractPathFromToolInput(toolInput);
-                    if (path) {
-                        agentsMdContext.toolCallPaths.set(part.toolCallId, path);
-                    }
-                }
-            }
-        }
         return { role: "assistant", content: entry.toolData as ToolCallPart[] };
     }
 
@@ -262,51 +293,7 @@ async function entryToMessage(
             imageTracker,
             entry.eventId
         );
-        let toolData = imageProcessingResult.processedParts;
-
-        // Check if result will be truncated (for AGENTS.md visibility tracking)
-        const willBeTruncated = truncationContext
-            ? shouldTruncateToolResult(toolData, truncationContext)
-            : false;
-
-        // Then: Apply truncation for buried tool results to save context
-        toolData = truncationContext
-            ? processToolResult(toolData, truncationContext)
-            : toolData;
-
-        // Inject AGENTS.md system reminders after file-read tool results
-        // Only inject if:
-        // 1. AGENTS.md context is available
-        // 2. Tool result is NOT truncated (reminders would be lost)
-        // 3. Tool is a file-read operation with a tracked path
-        if (agentsMdContext && !willBeTruncated) {
-            for (const part of toolData) {
-                const path = agentsMdContext.toolCallPaths.get(part.toolCallId);
-                if (path) {
-                    const reminders = await getSystemRemindersForPath(
-                        path,
-                        agentsMdContext.projectRoot,
-                        agentsMdContext.tracker,
-                        willBeTruncated
-                    );
-
-                    if (reminders.hasReminders) {
-                        // Cast is needed because appendSystemReminderToOutput returns unknown
-                        (part as { output: unknown }).output = appendSystemReminderToOutput(part.output, reminders.content);
-
-                        // Telemetry for AGENTS.md injection
-                        trace.getActiveSpan?.()?.addEvent("conversation.agents_md_injected", {
-                            "agents_md.file_count": reminders.includedFiles.length,
-                            "agents_md.paths": reminders.includedFiles.map(f => f.directory).join(","),
-                            "agents_md.target_path": path,
-                        });
-                    }
-
-                    // Clean up the tracked path
-                    agentsMdContext.toolCallPaths.delete(part.toolCallId);
-                }
-            }
-        }
+        const toolData = imageProcessingResult.processedParts;
 
         return {
             role: "tool",
@@ -480,7 +467,7 @@ export async function buildMessagesFromEntries(
         indexOffset = 0,
         totalMessages,
         agentPubkeys = new Set<string>(),
-        projectRoot,
+        includeMessageIds = false,
     } = ctx;
 
     const result: ModelMessage[] = [];
@@ -489,15 +476,6 @@ export async function buildMessagesFromEntries(
     // Image placeholder strategy: Track seen images across all messages
     // First appearance = full image, subsequent = placeholder
     const imageTracker = createImageTracker();
-
-    // AGENTS.md system reminder context (only if projectRoot is provided)
-    const agentsMdContext: AgentsMdContext | undefined = projectRoot
-        ? {
-            projectRoot,
-            tracker: createAgentsMdVisibilityTracker(),
-            toolCallPaths: new Map(),
-        }
-        : undefined;
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
@@ -577,7 +555,12 @@ export async function buildMessagesFromEntries(
     const pendingToolCalls = new Map<string, { toolName: string; resultIndex: number }>();
 
     // Messages deferred because they arrived while tool-calls were pending
-    const deferredMessages: Array<{ entry: ConversationEntry; truncationContext: TruncationContext; enableMultimodal: boolean }> = [];
+    const deferredMessages: Array<{
+        entry: ConversationEntry;
+        truncationContext: TruncationContext;
+        enableMultimodal: boolean;
+        absoluteIndex: number;
+    }> = [];
 
     for (let i = 0; i < entries.length; i++) {
         const entry = entries[i];
@@ -598,6 +581,7 @@ export async function buildMessagesFromEntries(
             totalMessages,
             eventId: entry.eventId,
         };
+        const absoluteIndex = indexOffset + i;
 
         // Helper to check if entry should be included based on RAL visibility
         const shouldInclude = (): boolean => {
@@ -620,7 +604,12 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
+            result.push(withMessageIdentity(
+                await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker),
+                entry,
+                absoluteIndex,
+                includeMessageIds
+            ));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -646,7 +635,12 @@ export async function buildMessagesFromEntries(
                 continue;
             }
 
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext));
+            result.push(withMessageIdentity(
+                await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker),
+                entry,
+                absoluteIndex,
+                includeMessageIds
+            ));
 
             for (const part of parts) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -655,7 +649,19 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext, deferred.enableMultimodal));
+                    result.push(withMessageIdentity(
+                        await entryToMessage(
+                            deferred.entry,
+                            viewingAgentPubkey,
+                            deferred.truncationContext,
+                            agentPubkeys,
+                            imageTracker,
+                            deferred.enableMultimodal
+                        ),
+                        deferred.entry,
+                        deferred.absoluteIndex,
+                        includeMessageIds
+                    ));
                 }
                 deferredMessages.length = 0;
             }
@@ -706,9 +712,10 @@ export async function buildMessagesFromEntries(
                         },
                         truncationContext,
                         enableMultimodal: false,
+                        absoluteIndex,
                     });
                 } else {
-                    result.push(expandedMessage);
+                    result.push(withMessageIdentity(expandedMessage, entry, absoluteIndex, includeMessageIds));
                 }
 
                 trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_expanded", {
@@ -737,9 +744,10 @@ export async function buildMessagesFromEntries(
                         },
                         truncationContext,
                         enableMultimodal: false,
+                        absoluteIndex,
                     });
                 } else {
-                    result.push(nestedMarkerMessage);
+                    result.push(withMessageIdentity(nestedMarkerMessage, entry, absoluteIndex, includeMessageIds));
                 }
 
                 trace.getActiveSpan?.()?.addEvent("conversation.nested_delegation_marker_displayed", {
@@ -759,9 +767,21 @@ export async function buildMessagesFromEntries(
         const enableMultimodal = i === lastUserImageEntryIndex;
         // If tool-calls are pending, defer this message
         if (pendingToolCalls.size > 0) {
-            deferredMessages.push({ entry, truncationContext, enableMultimodal });
+            deferredMessages.push({ entry, truncationContext, enableMultimodal, absoluteIndex });
         } else {
-            result.push(await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker, agentsMdContext, enableMultimodal));
+            result.push(withMessageIdentity(
+                await entryToMessage(
+                    entry,
+                    viewingAgentPubkey,
+                    truncationContext,
+                    agentPubkeys,
+                    imageTracker,
+                    enableMultimodal
+                ),
+                entry,
+                absoluteIndex,
+                includeMessageIds
+            ));
         }
     }
 
@@ -793,7 +813,15 @@ export async function buildMessagesFromEntries(
                 }] as ToolResultPart[],
             };
             // Insert synthetic result right after the tool-call
-            result.splice(info.resultIndex, 0, syntheticResult);
+            result.splice(
+                info.resultIndex,
+                0,
+                createSyntheticMessageWithId(
+                    syntheticResult,
+                    `synthetic-tool-result:${toolCallId}`,
+                    includeMessageIds
+                )
+            );
         }
 
         // Log for debugging/monitoring orphaned tool-calls in production
@@ -805,7 +833,19 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(await entryToMessage(deferred.entry, viewingAgentPubkey, deferred.truncationContext, agentPubkeys, imageTracker, agentsMdContext, deferred.enableMultimodal));
+        result.push(withMessageIdentity(
+            await entryToMessage(
+                deferred.entry,
+                viewingAgentPubkey,
+                deferred.truncationContext,
+                agentPubkeys,
+                imageTracker,
+                deferred.enableMultimodal
+            ),
+            deferred.entry,
+            deferred.absoluteIndex,
+            includeMessageIds
+        ));
     }
 
     if (prunedDelegationCompletions > 0) {

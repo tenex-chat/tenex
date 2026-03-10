@@ -1,3 +1,4 @@
+import { createAgentsMdResolver } from "ai-sdk-fs-tools";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -12,7 +13,6 @@ import { getProjectContext } from "@/services/projects";
 import { ReportService } from "@/services/reports";
 import { SchedulerService } from "@/services/scheduling";
 import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
-import { agentsMdService } from "@/services/agents-md";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -31,6 +31,7 @@ import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
  * when the same agent pubkey is active in multiple concurrent projects.
  */
 const promptCompilerCache = new Map<string, PromptCompilerService>();
+const rootAgentsMdResolver = createAgentsMdResolver();
 
 /**
  * In-flight promise cache to prevent race conditions when multiple concurrent
@@ -717,16 +718,16 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // When no AGENTS.md exists, the fragment explicitly states so
     if (projectBasePath) {
         try {
-            const hasRootAgentsMd = await agentsMdService.hasRootAgentsMd(projectBasePath);
+            const hasRootAgentsMd = await rootAgentsMdResolver.hasRootAgentsMd(projectBasePath);
             const rootContent = hasRootAgentsMd
-                ? await agentsMdService.getRootAgentsMdContent(projectBasePath)
+                ? await rootAgentsMdResolver.getRootAgentsMdContent(projectBasePath)
                 : null;
             systemPromptBuilder.add("agents-md-guidance", {
                 hasRootAgentsMd,
                 rootAgentsMdContent: rootContent || undefined,
             });
         } catch (error) {
-            // AGENTS.md service not available or error - add fragment with no AGENTS.md state
+            // AGENTS lookup failed - add fragment with no AGENTS.md state
             logger.debug("Could not check for root AGENTS.md:", error);
             systemPromptBuilder.add("agents-md-guidance", {
                 hasRootAgentsMd: false,
@@ -764,4 +765,3 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Build and return the complete prompt with all fragments
     return systemPromptBuilder.build();
 }
-

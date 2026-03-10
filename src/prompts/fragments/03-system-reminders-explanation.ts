@@ -9,6 +9,6 @@ export const systemRemindersExplanationFragment: PromptFragment<Record<string, n
     priority: 3,
     template: () => {
         return `## System Reminders
-Tool results and user messages may include \`<system-reminder>\` tags. These contain dynamic information from the system — behavioral guidance, context updates, and state notifications. They bear no direct relation to the specific tool results or user messages in which they appear. Follow the instructions within them.`;
+Tool results and user messages may include typed \`<system-reminder type="...">\` tags. These contain dynamic information from the system such as behavioral guidance, context updates, and state notifications. The \`type\` attribute tells you what kind of reminder you are reading. These reminders bear no direct relation to the specific tool results or user messages in which they appear unless the reminder content says otherwise. Follow the instructions within them.`;
     },
 };

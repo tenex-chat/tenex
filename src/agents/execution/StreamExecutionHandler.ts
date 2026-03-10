@@ -26,6 +26,7 @@ import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { LanguageModel, ModelMessage } from "ai";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
@@ -49,6 +50,7 @@ export interface StreamExecutionConfig {
     sessionManager: SessionManager;
     llmService: LLMService;
     messageCompiler: MessageCompiler;
+    providerOptions?: ProviderOptions;
     nudgeContent: string;
     /** Concatenated skill content */
     skillContent: string;
@@ -171,6 +173,7 @@ export class StreamExecutionHandler {
 
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
+                providerOptions: this.config.providerOptions,
                 prepareStep,
             });
 

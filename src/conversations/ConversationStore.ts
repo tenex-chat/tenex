@@ -33,6 +33,11 @@ import { applySegmentsToEntries } from "@/services/compression/compression-utils
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
 
+interface BuildMessagesOptions {
+    applyPersistedCompression?: boolean;
+    includeMessageIds?: boolean;
+}
+
 /**
  * Type alias for conversation IDs accepted by ConversationStore methods.
  * Accepts both typed FullEventId and plain strings for backward compatibility.
@@ -649,7 +654,7 @@ export class ConversationStore {
     async buildMessagesForRal(
         agentPubkey: string,
         ralNumber: number,
-        projectRoot?: string
+        options: BuildMessagesOptions = {}
     ): Promise<ModelMessage[]> {
         // INVARIANT: conversationId should always be set after load()
         // If missing, delegation markers won't expand - log a warning for debugging
@@ -659,9 +664,11 @@ export class ConversationStore {
 
         const activeRals = new Set(this.getActiveRals(agentPubkey));
 
-        // Apply compression segments if they exist
-        const segments = this.conversationId ? this.loadCompressionLog(this.conversationId) : [];
-        const entries = segments.length > 0
+        const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
+        const segments = shouldApplyPersistedCompression && this.conversationId
+            ? this.loadCompressionLog(this.conversationId)
+            : [];
+        const entries = shouldApplyPersistedCompression && segments.length > 0
             ? applySegmentsToEntries(this.state.messages, segments)
             : this.state.messages;
 
@@ -677,9 +684,9 @@ export class ConversationStore {
             activeRals,
             totalMessages: entries.length,
             agentPubkeys: ConversationStore.agentPubkeys,
-            projectRoot,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
+            includeMessageIds: options.includeMessageIds,
         });
     }
 
@@ -687,7 +694,7 @@ export class ConversationStore {
         agentPubkey: string,
         ralNumber: number,
         afterIndex: number,
-        projectRoot?: string
+        options: BuildMessagesOptions = {}
     ): Promise<ModelMessage[]> {
         // INVARIANT: conversationId should always be set after load()
         // If missing, delegation markers won't expand - log a warning for debugging
@@ -698,9 +705,11 @@ export class ConversationStore {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const startIndex = Math.max(afterIndex + 1, 0);
 
-        // Apply compression segments if they exist
-        const segments = this.conversationId ? this.loadCompressionLog(this.conversationId) : [];
-        const allEntries = segments.length > 0
+        const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
+        const segments = shouldApplyPersistedCompression && this.conversationId
+            ? this.loadCompressionLog(this.conversationId)
+            : [];
+        const allEntries = shouldApplyPersistedCompression && segments.length > 0
             ? applySegmentsToEntries(this.state.messages, segments)
             : this.state.messages;
 
@@ -720,9 +729,9 @@ export class ConversationStore {
             indexOffset: startIndex,
             totalMessages: allEntries.length,
             agentPubkeys: ConversationStore.agentPubkeys,
-            projectRoot,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
+            includeMessageIds: options.includeMessageIds,
         });
     }
 

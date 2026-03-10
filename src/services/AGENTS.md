@@ -18,7 +18,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `rag/` — LanceDB document ingestion and querying
 - `mcp/` — MCP server lifecycle management (`MCPManager` is single source of truth)
 - `agents/` — NDK agent discovery
-- `agents-md/` — AGENTS.md compilation for agent prompts
 - `projects/` — Project context management
 - `embedding/` — Embedding provider wrappers
 - `scheduling/` — Cron-like scheduling
@@ -26,7 +25,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `reports/` — Task reports
 - `nudge/` — Stalled agent reminders
 - `prompt-compiler/` — Lesson + comment synthesis
-- `system-reminder/` — System reminder tag utilities
 - `compression/` — Conversation compression
 - `search/` — Unified search
 - `config/` — Config subsystem

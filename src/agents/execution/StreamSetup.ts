@@ -15,6 +15,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
@@ -35,6 +36,7 @@ export interface StreamSetupResult {
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     messages: ModelMessage[];
+    providerOptions?: ProviderOptions;
     ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     nudgeContent: string;
     /** Individual nudge data for system prompt rendering */
@@ -268,7 +270,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    const { messages, counts, mode } = await messageCompiler.compile({
+    const { messages, providerOptions, counts, mode } = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -309,6 +311,7 @@ export async function setupStreamExecution(
         llmService,
         messageCompiler,
         messages,
+        providerOptions,
         ephemeralMessages,
         nudgeContent,
         nudges: nudgeResult.nudges,

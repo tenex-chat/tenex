@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { isAbsolute, relative, resolve, normalize } from "node:path";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
 import type { ExecutionEnvironment } from "@/tools/types";
+const actualAgentHome = await import("@/lib/agent-home");
 
 // Mock the agent home directory functions BEFORE importing the tool
 // Uses cross-platform path.relative approach matching the real implementation
@@ -20,6 +21,7 @@ const isPathWithin = (checkPath: string, directory: string) => {
 };
 
 mock.module("@/lib/agent-home", () => ({
+    ...actualAgentHome,
     getAgentHomeDirectory: getTestAgentHomeDir,
     isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
         const homeDir = getTestAgentHomeDir(agentPubkey);

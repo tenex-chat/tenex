@@ -19,6 +19,16 @@ const getName = mock(async (pubkey: string) => {
     return names[pubkey] ?? "Unknown";
 });
 
+const mockStatefulProvider = {
+    id: "mock-stateful",
+    metadata: {
+        id: "mock-stateful",
+        capabilities: {
+            sessionResumption: true,
+        },
+    },
+};
+
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
 }));
@@ -33,6 +43,18 @@ mock.module("@/services/PubkeyService", () => ({
     getPubkeyService: () => ({
         getName,
     }),
+}));
+
+mock.module("@/llm/providers", () => ({
+    providerRegistry: {
+        getProvider: (id: string) => {
+            if (id === "mock-stateful") {
+                return mockStatefulProvider;
+            }
+            return undefined;
+        },
+        getRegisteredProviders: () => [mockStatefulProvider.metadata],
+    },
 }));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -103,7 +125,7 @@ describe("MessageCompiler", () => {
 
         const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
 
-        const { messages, mode } = await compiler.compile({
+        const { messages, mode, providerOptions } = await compiler.compile({
             agent,
             project,
             conversation: conversationStore,
@@ -138,9 +160,9 @@ describe("MessageCompiler", () => {
         expect(contents[1]).toBe("STATIC_SYSTEM_B");
         expect(contents[2]).toContain("hello");
         expect(contents[3]).toContain("hi");
-        // Dynamic context is now a single combined message (todos + response context)
-        expect(contents[4]).toContain("TODO LIST");
-        expect(contents[4]).toContain("Your response will be sent to @User.");
+        expect(messages).toHaveLength(4);
+        expect(JSON.stringify(providerOptions)).toContain("TODO LIST");
+        expect(JSON.stringify(providerOptions)).toContain("Your response will be sent to @User.");
     });
 
     it("builds delta context for session-stateful providers", async () => {
@@ -170,7 +192,7 @@ describe("MessageCompiler", () => {
 
         sessionManager.saveSession("session-1", "event-1", 1);
 
-        const compiler = new MessageCompiler("claude-code", sessionManager, conversationStore);
+        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
         const { messages, mode } = await compiler.compile({
             agent,
             project,
@@ -220,7 +242,7 @@ describe("MessageCompiler", () => {
 
         sessionManager.saveSession("session-1", "event-1", 99);
 
-        const compiler = new MessageCompiler("claude-code", sessionManager, conversationStore);
+        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
         const { mode } = await compiler.compile({
             agent,
             project,
@@ -242,6 +264,71 @@ describe("MessageCompiler", () => {
         expect(buildSystemPromptMessages).toHaveBeenCalledTimes(1);
     });
 
+    it("applies persisted compression segments through contextCompression in full mode", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "first user",
+            messageType: "text",
+            eventId: "evt-1",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+        conversationStore.addMessage({
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "first agent",
+            messageType: "text",
+            eventId: "evt-2",
+        });
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "latest user",
+            messageType: "text",
+            eventId: "evt-3",
+        });
+        conversationStore.addMessage({
+            pubkey: agentPubkey,
+            ral: ralNumber,
+            content: "latest agent",
+            messageType: "text",
+            eventId: "evt-4",
+        });
+
+        await conversationStore.appendCompressionSegments(conversationId, [{
+            fromEventId: "evt-1",
+            toEventId: "evt-2",
+            compressed: "compressed summary",
+            createdAt: Date.now(),
+            model: "test-model",
+        }]);
+
+        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
+        const { messages, mode } = await compiler.compile({
+            agent,
+            project,
+            conversation: conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory,
+            currentBranch: "main",
+            availableAgents: [agent],
+            agentLessons: new Map(),
+            mcpManager: undefined,
+            nudgeContent: "",
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+            ralNumber,
+        });
+
+        const contents = messages.map((message) =>
+            typeof message.content === "string" ? message.content : JSON.stringify(message.content)
+        );
+
+        expect(mode).toBe("full");
+        expect(contents.join(" ")).toContain("[Compressed history]\ncompressed summary");
+        expect(contents.join(" ")).toContain("latest user");
+        expect(contents.join(" ")).toContain("latest agent");
+    });
+
     it("advances the delta cursor between compiles", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
@@ -258,7 +345,7 @@ describe("MessageCompiler", () => {
 
         sessionManager.saveSession("session-1", "event-1", 0);
 
-        const compiler = new MessageCompiler("claude-code", sessionManager, conversationStore);
+        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
         const first = await compiler.compile({
             agent,
             project,
@@ -324,7 +411,7 @@ describe("MessageCompiler", () => {
             ral: ralNumber,
         });
 
-        const compiler = new MessageCompiler("claude-code", sessionManager, conversationStore);
+        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
         await compiler.compile({
             agent,
             project,
@@ -345,6 +432,56 @@ describe("MessageCompiler", () => {
 
         const restartedSessionManager = new SessionManager(agent, conversationId, workingDirectory);
         expect(restartedSessionManager.getSession().lastSentMessageIndex).toBe(1);
+    });
+
+    it("keeps session cursors in raw conversation space when stored segments exist", async () => {
+        const ralNumber = conversationStore.createRal(agentPubkey);
+
+        for (let i = 1; i <= 6; i++) {
+            conversationStore.addMessage({
+                pubkey: i % 2 === 0 ? agentPubkey : userPubkey,
+                ral: i % 2 === 0 ? ralNumber : undefined,
+                content: `message-${i}`,
+                messageType: "text",
+                eventId: `evt-${i}`,
+            });
+        }
+
+        await conversationStore.appendCompressionSegments(conversationId, [{
+            fromEventId: "evt-1",
+            toEventId: "evt-5",
+            compressed: "older context",
+            createdAt: Date.now(),
+            model: "test-model",
+        }]);
+
+        sessionManager.saveSession("session-1", "event-1", 4);
+
+        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
+        const { messages, mode } = await compiler.compile({
+            agent,
+            project,
+            conversation: conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory,
+            currentBranch: "main",
+            availableAgents: [agent],
+            agentLessons: new Map(),
+            mcpManager: undefined,
+            nudgeContent: "",
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+            ralNumber,
+        });
+
+        const contents = messages.map((message) =>
+            typeof message.content === "string" ? message.content : JSON.stringify(message.content)
+        );
+
+        expect(mode).toBe("delta");
+        expect(contents.join(" ")).toContain("message-6");
+        expect(contents.join(" ")).not.toContain("older context");
     });
 
     it("does not advance cursor for stateless providers", () => {

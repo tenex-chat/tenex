@@ -15,6 +15,7 @@ import {
     streamText,
     wrapLanguageModel,
 } from "ai";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
@@ -23,7 +24,9 @@ import { ChunkHandler, type ChunkHandlerState } from "./ChunkHandler";
 import { createFinishHandler, type FinishHandlerConfig, type FinishHandlerState } from "./FinishHandler";
 import { extractLastUserMessage, extractSystemContent, prepareMessagesForRequest } from "./MessageProcessor";
 import { createMessageSanitizerMiddleware } from "./middleware/message-sanitizer";
+import { createTenexSystemRemindersMiddleware } from "./middleware/system-reminders";
 import { PROVIDER_IDS } from "./providers/provider-ids";
+import { mergeProviderOptions } from "./provider-options";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
@@ -265,6 +268,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         // Must be first so it sanitizes before anything else processes messages
         middlewares.push(createMessageSanitizerMiddleware());
 
+        // System reminders — apply request-scoped reminder tags to the latest user message
+        middlewares.push(createTenexSystemRemindersMiddleware() as LanguageModelMiddleware);
+
         // Extract reasoning from thinking tags
         middlewares.push(
             extractReasoningMiddleware({
@@ -285,13 +291,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
+            providerOptions?: ProviderOptions;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined>
-                | { model?: LanguageModel; messages?: ModelMessage[] }
+                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined>
+                | { model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions }
                 | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
@@ -376,13 +383,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         tools: Record<string, AISdkTool>,
         options: {
             abortSignal?: AbortSignal;
+            providerOptions?: ProviderOptions;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined>
-                | { model?: LanguageModel; messages?: ModelMessage[] }
+                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined>
+                | { model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions }
                 | undefined;
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
         } | undefined,
@@ -477,13 +485,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
             experimental_telemetry: this.getTelemetryConfig(),
 
-            providerOptions: {
-                openrouter: {
-                    usage: { include: true },
-                    user: getTraceCorrelationId(),
-                    metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+            providerOptions: mergeProviderOptions(
+                {
+                    openrouter: {
+                        usage: { include: true },
+                        user: getTraceCorrelationId(),
+                        metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                    },
                 },
-            },
+                options?.providerOptions
+            ),
 
             onChunk: (event) => this.chunkHandler.handleChunk(event),
             onFinish: createFinishHandler(this, finishConfig, finishState),
@@ -712,7 +723,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         languageModel: LanguageModel,
         messages: ModelMessage[],
         schema: z.ZodSchema<T>,
-        tools: Record<string, AISdkTool> | undefined
+        tools: Record<string, AISdkTool> | undefined,
+        providerOptions?: ProviderOptions
     ): Promise<{ object: T; usage: LanguageModelUsage }> {
         return await generateObject({
             model: languageModel,
@@ -725,13 +737,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getTelemetryConfig(),
 
-            providerOptions: {
-                openrouter: {
-                    usage: { include: true },
-                    user: getTraceCorrelationId(),
-                    metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+            providerOptions: mergeProviderOptions(
+                {
+                    openrouter: {
+                        usage: { include: true },
+                        user: getTraceCorrelationId(),
+                        metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                    },
                 },
-            },
+                providerOptions
+            ),
         });
     }
 
@@ -741,7 +756,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     async generateObject<T>(
         messages: ModelMessage[],
         schema: z.ZodSchema<T>,
-        tools?: Record<string, AISdkTool>
+        tools?: Record<string, AISdkTool>,
+        options?: { providerOptions?: ProviderOptions }
     ): Promise<{ object: T; usage: LanguageModelUsageWithCostUsd }> {
         const startTime = Date.now();
 
@@ -754,7 +770,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 });
 
                 const result = await this.withKeyRotationRetry(
-                    (languageModel) => this.executeObjectGeneration(languageModel, messages, schema, tools)
+                    (languageModel) =>
+                        this.executeObjectGeneration(
+                            languageModel,
+                            messages,
+                            schema,
+                            tools,
+                            options?.providerOptions
+                        )
                 );
 
                 const duration = Date.now() - startTime;
@@ -780,7 +803,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
      * Unlike generateObject, this returns unstructured text directly from the model.
      */
     async generateText(
-        messages: ModelMessage[]
+        messages: ModelMessage[],
+        options?: { providerOptions?: ProviderOptions }
     ): Promise<{ text: string; usage: LanguageModelUsageWithCostUsd }> {
         const startTime = Date.now();
 
@@ -801,13 +825,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
                         experimental_telemetry: this.getTelemetryConfig(),
 
-                        providerOptions: {
-                            openrouter: {
-                                usage: { include: true },
-                                user: getTraceCorrelationId(),
-                                metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                        providerOptions: mergeProviderOptions(
+                            {
+                                openrouter: {
+                                    usage: { include: true },
+                                    user: getTraceCorrelationId(),
+                                    metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                                },
                             },
-                        },
+                            options?.providerOptions
+                        ),
                     })
                 );
 

@@ -87,16 +87,17 @@ describe("agentsMdGuidanceFragment", () => {
             });
 
             expect(result).toContain("### Writing AGENTS.md Files");
-            expect(result).toContain("executable commands");
+            expect(result).toContain("Maximum 50 lines");
+            expect(result).toContain("No code examples");
         });
 
-        it("should include format example", () => {
+        it("should explain typed reminder injection", () => {
             const result = agentsMdGuidanceFragment.template({
                 hasRootAgentsMd: true,
             });
 
-            expect(result).toContain("### AGENTS.md Format");
-            expect(result).toContain("```markdown");
+            expect(result).toContain('<system-reminder type="agents-md">');
+            expect(result).toContain("fs_read");
         });
 
         it("should explain hierarchy", () => {
