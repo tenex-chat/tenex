@@ -165,11 +165,20 @@ export class LLMServiceFactory {
             );
         }
 
-        // For standard providers, use the AI SDK registry
-        const registry = providerRegistry.getAiSdkRegistry();
+        // For standard providers, pass a live accessor so LLMService always
+        // gets the current registry (which may be rebuilt after key rotation)
+        const standardProviderAccessor = (): { registry: ProviderRegistryProvider; activeApiKey: string | undefined } => ({
+            registry: providerRegistry.getAiSdkRegistry(),
+            activeApiKey: providerRegistry.getActiveApiKey(actualProvider),
+        });
+
+        // Key rotation handler delegates to the registry's reinitializeProvider
+        const keyRotationHandler = async (providerId: string, failedKey: string): Promise<boolean> => {
+            return providerRegistry.reinitializeProvider(providerId, failedKey);
+        };
 
         return new LLMService(
-            registry,
+            standardProviderAccessor,
             actualProvider,
             config.model,
             capabilities,
@@ -179,7 +188,8 @@ export class LLMServiceFactory {
             undefined,
             context?.sessionId,
             agentSlug,
-            context?.conversationId
+            context?.conversationId,
+            keyRotationHandler
         );
     }
 

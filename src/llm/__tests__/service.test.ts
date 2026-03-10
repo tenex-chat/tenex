@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, beforeAll, afterAll, mock } from "b
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 import { createFinishHandler } from "../FinishHandler";
 import { addCacheControl } from "../MessageProcessor";
-import { LLMService } from "../service";
+import { LLMService, type StandardProviderAccessor, type KeyRotationHandler } from "../service";
 import type { ProviderCapabilities } from "../providers/types";
 
 /**
@@ -42,14 +42,24 @@ const mockStreamText = mock(() => ({
     })(),
 }));
 
+const mockGenerateObject = mock(() =>
+    Promise.resolve({
+        object: { result: "test" },
+        usage: { inputTokens: 5, outputTokens: 10 },
+    })
+);
+
+const mockGenerateText = mock(() =>
+    Promise.resolve({
+        text: "mock text",
+        usage: { inputTokens: 5, outputTokens: 10 },
+    })
+);
+
 mock.module("ai", () => ({
     streamText: mockStreamText,
-    generateObject: mock(() =>
-        Promise.resolve({
-            object: { result: "test" },
-            usage: { inputTokens: 5, outputTokens: 10 },
-        })
-    ),
+    generateObject: mockGenerateObject,
+    generateText: mockGenerateText,
     smoothStream: mock(() => ({})),
     wrapLanguageModel: mock((config: { model: LanguageModel }) => config.model),
     extractReasoningMiddleware: mock(() => ({})),
@@ -122,6 +132,7 @@ mock.module("@/utils/logger", () => ({
         error: mock(() => {}),
         warn: mock(() => {}),
         debug: mock(() => {}),
+        writeToWarnLog: mock(() => {}),
     },
 }));
 
@@ -194,6 +205,14 @@ function createMockClaudeCodeProvider() {
     })) as unknown as (model: string) => LanguageModel;
 }
 
+/**
+ * Create a standard provider accessor wrapping a mock registry.
+ * Optionally includes an active API key for key rotation tests.
+ */
+function createMockAccessor(registry: ProviderRegistryProvider, activeApiKey?: string): StandardProviderAccessor {
+    return () => ({ registry, activeApiKey });
+}
+
 describe("LLMService", () => {
     let mockRegistry: ProviderRegistryProvider;
 
@@ -203,14 +222,14 @@ describe("LLMService", () => {
     });
 
     describe("constructor", () => {
-        test("throws if no registry and no Claude Code provider", () => {
+        test("throws if no accessor and no Claude Code provider", () => {
             expect(() => {
                 new LLMService(null, "openrouter", "gpt-4", mockCapabilities);
-            }).toThrow("LLMService requires either a registry or Claude Code provider function");
+            }).toThrow("LLMService requires either a provider accessor or Claude Code provider function");
         });
 
-        test("accepts a registry", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        test("accepts a standard provider accessor", () => {
+            const service = new LLMService(createMockAccessor(mockRegistry), "openrouter", "gpt-4", mockCapabilities);
             expect(service.provider).toBe("openrouter");
             expect(service.model).toBe("gpt-4");
         });
@@ -230,7 +249,7 @@ describe("LLMService", () => {
         });
 
         test("stores temperature and maxTokens", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities, 0.7, 1000);
+            const service = new LLMService(createMockAccessor(mockRegistry), "openrouter", "gpt-4", mockCapabilities, 0.7, 1000);
             // These are private, but instantiation should succeed.
             expect(service).toBeDefined();
         });
@@ -238,7 +257,7 @@ describe("LLMService", () => {
 
     describe("getModel()", () => {
         test("returns a language model from registry", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
             const model = service.getModel();
             expect(model).toBeDefined();
         });
@@ -261,7 +280,7 @@ describe("LLMService", () => {
 
     describe("cache control", () => {
         test("adds cache control for Anthropic with large system messages", async () => {
-            const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"anthropic", "claude-3", mockCapabilities);
 
             // Create a large system message (> 4096 chars = 1024 tokens * 4 chars/token)
             const largeSystemContent = "x".repeat(5000);
@@ -283,7 +302,7 @@ describe("LLMService", () => {
         });
 
         test("does not add cache control for small system messages", async () => {
-            const service = new LLMService(mockRegistry, "anthropic", "claude-3", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"anthropic", "claude-3", mockCapabilities);
 
             const messages: ModelMessage[] = [
                 { role: "system", content: "Short system prompt" },
@@ -299,7 +318,7 @@ describe("LLMService", () => {
         });
 
         test("does not add cache control for non-Anthropic providers", async () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const largeSystemContent = "x".repeat(5000);
             const messages: ModelMessage[] = [
@@ -320,7 +339,7 @@ describe("LLMService", () => {
     describe("generateObject()", () => {
         test("generates a structured object", async () => {
             const { z } = await import("zod");
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const schema = z.object({
                 result: z.string(),
@@ -347,7 +366,7 @@ describe("LLMService private methods (via behavior)", () => {
 
     describe("tool result error detection", () => {
         test("flags error results via tool-did-execute event", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -397,7 +416,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleTextDelta", () => {
         test("emits content event for streaming providers", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const contentSpy = mock(() => {});
             service.on("content", contentSpy);
@@ -412,7 +431,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleReasoningDelta", () => {
         test("emits reasoning event", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
@@ -427,7 +446,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("ignores [REDACTED] reasoning", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const reasoningSpy = mock(() => {});
             service.on("reasoning", reasoningSpy);
@@ -443,7 +462,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleToolCall", () => {
         test("emits tool-will-execute event", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const toolWillExecuteSpy = mock(() => {});
             service.on("tool-will-execute", toolWillExecuteSpy);
@@ -469,7 +488,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleToolResult", () => {
         test("emits tool-did-execute event for successful result", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -494,7 +513,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("emits tool-did-execute event with error: true for error result", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const toolDidExecuteSpy = mock(() => {});
             service.on("tool-did-execute", toolDidExecuteSpy);
@@ -521,7 +540,7 @@ describe("LLMService chunk handling", () => {
 
     describe("handleChunk", () => {
         test("emits chunk-type-change when chunk type changes", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const chunkTypeChangeSpy = mock(() => {});
             service.on("chunk-type-change", chunkTypeChangeSpy);
@@ -548,7 +567,7 @@ describe("LLMService chunk handling", () => {
         });
 
         test("handles error chunks", () => {
-            const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
             const streamErrorSpy = mock(() => {});
             service.on("stream-error", streamErrorSpy);
@@ -567,7 +586,7 @@ describe("LLMService telemetry configuration", () => {
     test("generates correct telemetry config", () => {
         const mockRegistry = createMockRegistry();
         const service = new LLMService(
-            mockRegistry,
+            createMockAccessor(mockRegistry),
             "openrouter",
             "gpt-4",
             mockCapabilities,
@@ -593,7 +612,7 @@ describe("LLMService telemetry configuration", () => {
 
     test("uses 'unknown' for missing agent slug", () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
         const config = getTelemetryConfig();
@@ -634,7 +653,7 @@ describe("LLMService stream()", () => {
     });
 
     test("calls streamText with correct parameters", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities, 0.7, 2000);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities, 0.7, 2000);
 
         const messages: ModelMessage[] = [
             { role: "user", content: [{ type: "text", text: "Hello" }] },
@@ -675,7 +694,7 @@ describe("LLMService stream()", () => {
     });
 
     test("emits complete event via onFinish callback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -703,7 +722,7 @@ describe("LLMService stream()", () => {
     });
 
     test("extracts OpenRouter usage metadata including token counts", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -748,7 +767,7 @@ describe("LLMService stream()", () => {
     });
 
     test("falls back to AI SDK totalUsage when OpenRouter token counts unavailable", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -833,7 +852,7 @@ describe("LLMService stream()", () => {
     });
 
     test("respects custom onStopCheck callback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         let capturedStopWhen: ((args: { steps: any[] }) => Promise<boolean>) | undefined;
 
@@ -867,7 +886,7 @@ describe("LLMService stream()", () => {
     });
 
     test("passes abort signal to streamText", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
         const abortController = new AbortController();
 
         const messages: ModelMessage[] = [
@@ -881,7 +900,7 @@ describe("LLMService stream()", () => {
     });
 
     test("passes prepareStep to streamText", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
         const prepareStep = mock(() => ({ messages: [] }));
 
         const messages: ModelMessage[] = [
@@ -905,7 +924,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("uses cached content for non-streaming providers", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         let cachedContent = "Cached response text";
 
@@ -942,7 +961,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("clears cached content after use", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         let cachedContent = "Some cached content";
 
@@ -975,7 +994,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("detects invalid tool calls and logs error", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const finishHandler = createFinishHandler(
             service,
@@ -1017,7 +1036,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("emits e.text when cachedContent is empty and e.text is non-empty", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -1050,7 +1069,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("emits error fallback when both cachedContent and e.text are empty", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -1085,7 +1104,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("emits error fallback when cachedContent is empty and e.text is undefined", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const completeSpy = mock(() => {});
         service.on("complete", completeSpy);
@@ -1120,7 +1139,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("telemetry flags match emitted message for cached content", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         service.on("complete", mock(() => {}));
 
@@ -1159,7 +1178,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("telemetry flags match emitted message for e.text fallback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         service.on("complete", mock(() => {}));
 
@@ -1198,7 +1217,7 @@ describe("LLMService createFinishHandler", () => {
     });
 
     test("telemetry flags match emitted message for error fallback", async () => {
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         service.on("complete", mock(() => {}));
 
@@ -1240,7 +1259,7 @@ describe("LLMService createFinishHandler", () => {
 describe("LLMService handleStreamError", () => {
     test("logs stream errors with duration", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const handleStreamError = (service as any).handleStreamError.bind(service);
 
@@ -1250,7 +1269,7 @@ describe("LLMService handleStreamError", () => {
 
     test("handles non-Error objects", async () => {
         const mockRegistry = createMockRegistry();
-        const service = new LLMService(mockRegistry, "openrouter", "gpt-4", mockCapabilities);
+        const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const handleStreamError = (service as any).handleStreamError.bind(service);
 
@@ -1283,5 +1302,348 @@ describe("LLMService addCacheControl edge cases", () => {
         const result = addCacheControl(messages, "anthropic");
 
         expect(result[0].providerOptions).toBeUndefined();
+    });
+});
+
+// ============================================================================
+// Key Rotation Retry Tests
+// ============================================================================
+
+describe("LLMService key rotation retry", () => {
+    let mockRegistry: ProviderRegistryProvider;
+    let mockRotationHandler: ReturnType<typeof mock>;
+
+    beforeEach(() => {
+        mockRegistry = createMockRegistry();
+        mockRotationHandler = mock(() => Promise.resolve(true));
+        mockStreamText.mockClear();
+    });
+
+    function createServiceWithRotation(activeApiKey = "test-key-1"): LLMService {
+        return new LLMService(
+            createMockAccessor(mockRegistry, activeApiKey),
+            "openrouter",
+            "gpt-4",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            mockRotationHandler as KeyRotationHandler
+        );
+    }
+
+    describe("stream() retry", () => {
+        test("retries once when first attempt fails before any chunks with retryable key error", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            throw Object.assign(new Error("Unauthorized"), { status: 401 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", textDelta: "Hello" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
+
+            const service = createServiceWithRotation();
+            const streamErrorSpy = mock(() => {});
+            service.on("stream-error", streamErrorSpy);
+
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {}
+            );
+
+            expect(callCount).toBe(2);
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(streamErrorSpy).not.toHaveBeenCalled();
+        });
+
+        test("does not retry after chunks have been emitted", async () => {
+            mockStreamText.mockImplementation(() => ({
+                fullStream: (async function* () {
+                    yield { type: "text-delta", textDelta: "Hello" };
+                    throw Object.assign(new Error("Rate limited"), { status: 429 });
+                })(),
+            }));
+
+            const service = createServiceWithRotation();
+            const streamErrorSpy = mock(() => {});
+            service.on("stream-error", streamErrorSpy);
+
+            await expect(
+                service.stream(
+                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                    {}
+                )
+            ).rejects.toThrow("Rate limited");
+
+            expect(mockRotationHandler).not.toHaveBeenCalled();
+            expect(streamErrorSpy).toHaveBeenCalledTimes(1);
+        });
+
+        test("does not emit stream-error on suppressed first attempt", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            throw Object.assign(new Error("Forbidden"), { status: 403 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", textDelta: "OK" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
+
+            const service = createServiceWithRotation();
+            const streamErrorEvents: unknown[] = [];
+            service.on("stream-error", (e) => streamErrorEvents.push(e));
+
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {}
+            );
+
+            expect(streamErrorEvents).toHaveLength(0);
+        });
+
+        test("does not write an error log when the retry succeeds", async () => {
+            let callCount = 0;
+            mockStreamText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    return {
+                        fullStream: (async function* () {
+                            throw Object.assign(new Error("Forbidden"), { status: 403 });
+                        })(),
+                    };
+                }
+                return {
+                    fullStream: (async function* () {
+                        yield { type: "text-delta", textDelta: "Recovered" };
+                        yield { type: "finish", finishReason: "stop" };
+                    })(),
+                };
+            });
+
+            const { logger } = await import("@/utils/logger");
+            const warnLogMock = logger.writeToWarnLog as ReturnType<typeof mock>;
+            warnLogMock.mockClear();
+
+            const service = createServiceWithRotation();
+
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {}
+            );
+
+            expect(warnLogMock).not.toHaveBeenCalled();
+        });
+
+        test("propagates error and rotates when retry also fails", async () => {
+            mockStreamText.mockImplementation(() => ({
+                fullStream: (async function* () {
+                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+                })(),
+            }));
+
+            const service = createServiceWithRotation();
+
+            await expect(
+                service.stream(
+                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                    {}
+                )
+            ).rejects.toThrow("Unauthorized");
+
+            // Both attempts failed — rotation was attempted once (before retry)
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            // streamText was called twice (first attempt + retry)
+            expect(mockStreamText).toHaveBeenCalledTimes(2);
+        });
+
+        test("does not retry for non-retryable errors", async () => {
+            mockStreamText.mockImplementation(() => ({
+                fullStream: (async function* () {
+                    throw Object.assign(new Error("Server error"), { status: 500 });
+                })(),
+            }));
+
+            const service = createServiceWithRotation();
+
+            await expect(
+                service.stream(
+                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                    {}
+                )
+            ).rejects.toThrow("Server error");
+
+            expect(mockRotationHandler).not.toHaveBeenCalled();
+        });
+
+        test("does not retry when no key rotation handler is configured", async () => {
+            mockStreamText.mockImplementation(() => ({
+                fullStream: (async function* () {
+                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+                })(),
+            }));
+
+            // Service without rotation handler
+            const service = new LLMService(
+                createMockAccessor(mockRegistry, "test-key"),
+                "openrouter", "gpt-4", mockCapabilities
+            );
+
+            await expect(
+                service.stream(
+                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                    {}
+                )
+            ).rejects.toThrow("Unauthorized");
+        });
+
+        test("does not retry when rotation fails", async () => {
+            mockStreamText.mockImplementation(() => ({
+                fullStream: (async function* () {
+                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
+                })(),
+            }));
+
+            mockRotationHandler.mockImplementation(() => Promise.resolve(false));
+
+            const service = createServiceWithRotation();
+
+            await expect(
+                service.stream(
+                    [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                    {}
+                )
+            ).rejects.toThrow("Unauthorized");
+
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe("generateText() retry", () => {
+        test("retries once after rotation on retryable key error", async () => {
+            let callCount = 0;
+            mockGenerateText.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    throw Object.assign(new Error("Rate limited"), { status: 429 });
+                }
+                return Promise.resolve({
+                    text: "Success after rotation",
+                    usage: { inputTokens: 10, outputTokens: 5 },
+                });
+            });
+
+            const service = createServiceWithRotation();
+            const result = await service.generateText([
+                { role: "user", content: [{ type: "text", text: "Hello" }] },
+            ]);
+
+            expect(result.text).toBe("Success after rotation");
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(callCount).toBe(2);
+
+            // Restore default mock
+            mockGenerateText.mockImplementation(() =>
+                Promise.resolve({ text: "mock text", usage: { inputTokens: 5, outputTokens: 10 } })
+            );
+        });
+
+        test("does not retry on non-retryable errors", async () => {
+            mockGenerateText.mockImplementation(() => {
+                throw Object.assign(new Error("Bad request"), { status: 422 });
+            });
+
+            const service = createServiceWithRotation();
+
+            await expect(
+                service.generateText([
+                    { role: "user", content: [{ type: "text", text: "Hello" }] },
+                ])
+            ).rejects.toThrow("Bad request");
+
+            expect(mockRotationHandler).not.toHaveBeenCalled();
+
+            // Restore default mock
+            mockGenerateText.mockImplementation(() =>
+                Promise.resolve({ text: "mock text", usage: { inputTokens: 5, outputTokens: 10 } })
+            );
+        });
+    });
+
+    describe("generateObject() retry", () => {
+        test("retries once after rotation on retryable key error", async () => {
+            let callCount = 0;
+            mockGenerateObject.mockImplementation(() => {
+                callCount++;
+                if (callCount === 1) {
+                    throw Object.assign(new Error("Forbidden"), { status: 403 });
+                }
+                return Promise.resolve({
+                    object: { result: "rotated" },
+                    usage: { inputTokens: 10, outputTokens: 5 },
+                });
+            });
+
+            const { z } = await import("zod");
+            const service = createServiceWithRotation();
+            const result = await service.generateObject(
+                [{ role: "user", content: [{ type: "text", text: "Generate" }] }],
+                z.object({ result: z.string() })
+            );
+
+            expect(result.object).toEqual({ result: "rotated" });
+            expect(mockRotationHandler).toHaveBeenCalledTimes(1);
+            expect(callCount).toBe(2);
+
+            // Restore default mock
+            mockGenerateObject.mockImplementation(() =>
+                Promise.resolve({ object: { result: "test" }, usage: { inputTokens: 5, outputTokens: 10 } })
+            );
+        });
+
+        test("does not retry when generateObject receives tools", async () => {
+            mockGenerateObject.mockImplementation(() => {
+                throw Object.assign(new Error("Forbidden"), { status: 403 });
+            });
+
+            const { z } = await import("zod");
+            const service = createServiceWithRotation();
+
+            await expect(
+                service.generateObject(
+                    [{ role: "user", content: [{ type: "text", text: "Generate" }] }],
+                    z.object({ result: z.string() }),
+                    { lookup: {} as any }
+                )
+            ).rejects.toThrow("Forbidden");
+
+            expect(mockRotationHandler).not.toHaveBeenCalled();
+
+            mockGenerateObject.mockImplementation(() =>
+                Promise.resolve({ object: { result: "test" }, usage: { inputTokens: 5, outputTokens: 10 } })
+            );
+        });
     });
 });

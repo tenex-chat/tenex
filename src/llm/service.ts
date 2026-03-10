@@ -27,8 +27,24 @@ import { PROVIDER_IDS } from "./providers/provider-ids";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
+import { isRetryableKeyError } from "./retryable-key-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
 import { calculateCumulativeUsage } from "./utils/usage";
+
+/**
+ * Accessor for live provider state. Called per-request so LLMService
+ * always gets the current registry (after potential key rotation).
+ */
+export type StandardProviderAccessor = () => {
+    registry: ProviderRegistryProvider;
+    activeApiKey?: string;
+};
+
+/**
+ * Handler for rotating to a different API key after a failure.
+ * Returns true if rotation succeeded and a retry is worthwhile.
+ */
+export type KeyRotationHandler = (providerId: string, failedKey: string) => Promise<boolean>;
 
 /**
  * LLM Service for runtime execution with AI SDK providers
@@ -56,9 +72,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private lastUserMessage?: string;
     /** Chunk handler instance */
     private chunkHandler: ChunkHandler;
+    /** Live accessor for current provider registry + active key (standard providers only) */
+    private readonly standardProviderAccessor?: StandardProviderAccessor | null;
+    /** Handler for rotating to a different API key on failure */
+    private readonly keyRotationHandler?: KeyRotationHandler;
 
     constructor(
-        private readonly registry: ProviderRegistryProvider | null,
+        standardProviderAccessor: StandardProviderAccessor | null,
         provider: string,
         model: string,
         capabilities: ProviderCapabilities,
@@ -68,9 +88,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         claudeCodeBaseSettings?: ClaudeCodeSettings,
         sessionId?: string,
         agentSlug?: string,
-        conversationId?: string
+        conversationId?: string,
+        keyRotationHandler?: KeyRotationHandler
     ) {
         super();
+        this.standardProviderAccessor = standardProviderAccessor;
         this.provider = provider;
         this.model = model;
         this.capabilities = capabilities;
@@ -81,10 +103,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
         this.conversationId = conversationId;
+        this.keyRotationHandler = keyRotationHandler;
 
-        if (!registry && !claudeCodeProviderFunction) {
+        if (!standardProviderAccessor && !claudeCodeProviderFunction) {
             throw new Error(
-                "LLMService requires either a registry or Claude Code provider function"
+                "LLMService requires either a provider accessor or Claude Code provider function"
             );
         }
 
@@ -153,19 +176,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     }
 
     /**
-     * Get a language model instance.
-     * For Claude Code: Creates model with system prompt from messages.
-     * For standard providers: Gets model from registry.
-     * Wraps all models with extract-reasoning-middleware.
+     * Extract system content and record it on the active span for provider-agnostic telemetry.
      */
-    private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
-        let baseModel: LanguageModel;
-
-        // Extract system content for ALL providers (provider-agnostic telemetry)
+    private captureSystemPromptTelemetry(messages?: ModelMessage[]): string | null {
         const systemContent = messages ? extractSystemContent(messages) : null;
 
-        // Capture system prompt as event for ALL providers when system content exists
-        // Using event instead of attribute avoids OTel issues with unbounded/high-cardinality data
         if (systemContent) {
             const maxLength = 10000;
             const truncated = systemContent.length > maxLength;
@@ -176,6 +191,20 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 "system_prompt.provider": this.provider,
             });
         }
+
+        return systemContent;
+    }
+
+    /**
+     * Get a language model instance.
+     * For Claude Code: Creates model with system prompt from messages.
+     * For standard providers: Gets model from registry.
+     * Wraps all models with extract-reasoning-middleware.
+     */
+    private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
+        let baseModel: LanguageModel;
+
+        const systemContent = this.captureSystemPromptTelemetry(messages);
 
         if (this.claudeCodeProviderFunction) {
             // Claude Code or Codex CLI provider
@@ -189,14 +218,39 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             }
 
             baseModel = this.claudeCodeProviderFunction(this.model, options);
-        } else if (this.registry) {
-            // Standard providers use registry
-            baseModel = this.registry.languageModel(`${this.provider}:${this.model}`);
+        } else if (this.standardProviderAccessor) {
+            // Standard providers use live accessor to get current registry
+            const { registry } = this.standardProviderAccessor();
+            baseModel = registry.languageModel(`${this.provider}:${this.model}`);
         } else {
             throw new Error("No provider available for model creation");
         }
 
         return this.wrapWithMiddleware(baseModel);
+    }
+
+    /**
+     * Build an attempt-scoped context for standard provider calls.
+     * Captures both the registry and the active key from a single accessor call
+     * so retry logic uses the correct key even under concurrent requests.
+     */
+    private createStandardAttemptContext(messages?: ModelMessage[]): {
+        model: LanguageModel;
+        failedKey?: string;
+    } {
+        if (!this.standardProviderAccessor) {
+            return {
+                model: this.getLanguageModel(messages),
+            };
+        }
+
+        const { registry, activeApiKey } = this.standardProviderAccessor();
+        this.captureSystemPromptTelemetry(messages);
+
+        return {
+            model: this.wrapWithMiddleware(registry.languageModel(`${this.provider}:${this.model}`)),
+            failedKey: activeApiKey,
+        };
     }
 
     /**
@@ -243,7 +297,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
         }
     ): Promise<void> {
-        const model = this.getLanguageModel(messages);
+        const { model, failedKey: attemptKey } = this.createStandardAttemptContext(messages);
 
         const processedMessages = prepareMessagesForRequest(messages, this.provider);
 
@@ -252,6 +306,77 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         const startTime = Date.now();
 
+        // First attempt: suppress stream-error to allow retry
+        const firstResult = await this.runStreamAttempt(
+            model, processedMessages, tools, options, startTime,
+            { emitStreamError: false }
+        );
+
+        if (firstResult.success) return;
+
+        // Check if retry is possible
+        if (
+            firstResult.chunkCount !== 0 ||
+            !attemptKey ||
+            !this.keyRotationHandler ||
+            !isRetryableKeyError(firstResult.error)
+        ) {
+            // No retry possible — emit the suppressed stream-error and throw
+            this.emit("stream-error", { error: firstResult.error });
+            await this.handleStreamError(firstResult.error, startTime);
+            throw firstResult.error;
+        }
+
+        // Attempt key rotation
+        const rotated = await this.keyRotationHandler(this.provider, attemptKey);
+        if (!rotated) {
+            this.emit("stream-error", { error: firstResult.error });
+            await this.handleStreamError(firstResult.error, startTime);
+            throw firstResult.error;
+        }
+
+        logger.info("[LLMService] Retrying stream after key rotation", {
+            provider: this.provider,
+            model: this.model,
+        });
+
+        // Retry with fresh model from rotated provider
+        const { model: retryModel } = this.createStandardAttemptContext(messages);
+        const retryResult = await this.runStreamAttempt(
+            retryModel, processedMessages, tools, options, startTime,
+            { emitStreamError: true }
+        );
+
+        if (!retryResult.success) {
+            await this.handleStreamError(retryResult.error, startTime);
+            throw retryResult.error;
+        }
+    }
+
+    /**
+     * Run a single stream attempt. Returns success/failure with error and chunk count.
+     * When emitStreamError is false, the onError callback suppresses stream-error emission
+     * so the caller can decide whether to retry or emit.
+     */
+    private async runStreamAttempt(
+        model: LanguageModel,
+        processedMessages: ModelMessage[],
+        tools: Record<string, AISdkTool>,
+        options: {
+            abortSignal?: AbortSignal;
+            prepareStep?: (step: {
+                messages: ModelMessage[];
+                stepNumber: number;
+                steps: StepResult<Record<string, AISdkTool>>[];
+            }) =>
+                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined>
+                | { model?: LanguageModel; messages?: ModelMessage[] }
+                | undefined;
+            onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
+        } | undefined,
+        startTime: number,
+        { emitStreamError }: { emitStreamError: boolean }
+    ): Promise<{ success: true } | { success: false; error: unknown; chunkCount: number }> {
         // ProgressMonitor is only used for providers without built-in tools
         let progressMonitor: ProgressMonitor | undefined;
         if (!this.capabilities.builtInTools) {
@@ -262,15 +387,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         const stopWhen = async ({
             steps,
         }: { steps: StepResult<Record<string, AISdkTool>>[] }): Promise<boolean> => {
-            // First check custom stop condition
             if (options?.onStopCheck) {
                 const shouldStop = await options.onStopCheck(steps);
-                if (shouldStop) {
-                    return true;
-                }
+                if (shouldStop) return true;
             }
-
-            // Then check default progress monitor (only for standard providers)
             if (progressMonitor) {
                 const toolNames: string[] = [];
                 for (const step of steps) {
@@ -283,7 +403,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 const shouldContinue = await progressMonitor.check(toolNames);
                 return !shouldContinue;
             }
-
             return false;
         };
 
@@ -304,7 +423,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             },
         };
 
-        // DIAGNOSTIC: Track state before streamText call
         const activeSpan = trace.getActiveSpan();
         activeSpan?.addEvent("llm.streamText_preparing", {
             "stream.messages_count": processedMessages.length,
@@ -329,13 +447,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         // DIAGNOSTIC: Track inter-chunk timing for concurrent streaming bottleneck analysis
         let maxInterChunkDelayMs = 0;
         let totalInterChunkDelayMs = 0;
-        const interChunkDelays: number[] = []; // For percentile analysis
-        const SLOW_CHUNK_THRESHOLD_MS = 500; // Log chunks taking >500ms
+        const interChunkDelays: number[] = [];
+        const SLOW_CHUNK_THRESHOLD_MS = 500;
 
         const { fullStream } = streamText({
             model,
             messages: processedMessages,
-            // Don't pass tools for providers with built-in tools
             ...(!this.capabilities.builtInTools && { tools }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
@@ -343,7 +460,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             prepareStep: options?.prepareStep,
             abortSignal: options?.abortSignal,
 
-            // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getTelemetryConfig(),
 
             providerOptions: {
@@ -357,18 +473,18 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             onChunk: (event) => this.chunkHandler.handleChunk(event),
             onFinish: createFinishHandler(this, finishConfig, finishState),
             onError: ({ error }) => {
-                // Emit stream-error event for the executor to handle and publish to user
                 activeSpan?.addEvent("llm.onError_called", {
                     "error.message": error instanceof Error ? error.message : String(error),
                     "error.type": error instanceof Error ? error.constructor.name : typeof error,
                     "stream.chunk_count_at_error": chunkCount,
                     "stream.last_chunk_type": lastChunkType ?? "none",
                 });
-                this.emit("stream-error", { error });
+                if (emitStreamError) {
+                    this.emit("stream-error", { error });
+                }
             },
         });
 
-        // Consume the stream (this is what triggers everything!)
         try {
             for await (const part of fullStream) {
                 const chunkReceivedTime = Date.now();
@@ -377,15 +493,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 chunkCount++;
                 lastChunkType = part.type;
 
-                // DIAGNOSTIC: Track inter-chunk timing
-                if (chunkCount > 1) { // Skip first chunk (no previous to compare)
+                if (chunkCount > 1) {
                     totalInterChunkDelayMs += interChunkDelay;
                     interChunkDelays.push(interChunkDelay);
                     if (interChunkDelay > maxInterChunkDelayMs) {
                         maxInterChunkDelayMs = interChunkDelay;
                     }
-
-                    // Log slow chunks that might indicate blocking
                     if (interChunkDelay > SLOW_CHUNK_THRESHOLD_MS) {
                         activeSpan?.addEvent("llm.slow_chunk_detected", {
                             "chunk.number": chunkCount,
@@ -401,7 +514,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
                 lastChunkTime = chunkReceivedTime;
 
-                // Track specific part types for diagnostics
                 switch (part.type) {
                     case "tool-input-start":
                         toolInputStartCount++;
@@ -433,14 +545,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                         break;
                 }
 
-                // Handle events that don't come through onChunk callback.
-                // AI SDK's onChunk only fires for: text-delta, reasoning-delta, source,
-                // tool-call, tool-input-start, tool-input-delta, tool-result, raw.
-                // Events like "finish" and "tool-error" must be forwarded explicitly.
                 if (part.type === "finish") {
-                    // Emit raw-chunk directly for low-level listeners.
-                    // WITHOUT going through ChunkHandler which would trigger chunk-type-change
-                    // and cause AgentExecutor to publish a duplicate kind:1 event.
                     this.emit("raw-chunk", { chunk: part as TextStreamPart<Record<string, AISdkTool>> });
                 } else if (part.type === "tool-error") {
                     this.chunkHandler.handleChunk({ chunk: part as TextStreamPart<Record<string, AISdkTool>> });
@@ -452,7 +557,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             const loopDuration = loopCompleteTime - startTime;
             const timeSinceLastChunk = loopCompleteTime - lastChunkTime;
 
-            // Calculate inter-chunk timing percentiles for bottleneck analysis
             const sortedDelays = [...interChunkDelays].sort((a, b) => a - b);
             const p50Delay = sortedDelays.length > 0
                 ? sortedDelays[Math.floor(sortedDelays.length * 0.5)]
@@ -481,7 +585,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 "stream.tool_result_count": toolResultCount,
                 "stream.text_delta_count": textDeltaCount,
                 "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
-                // DIAGNOSTIC: Inter-chunk timing metrics for bottleneck analysis
                 "stream.inter_chunk_max_delay_ms": maxInterChunkDelayMs,
                 "stream.inter_chunk_avg_delay_ms": Math.round(avgInterChunkDelay * 100) / 100,
                 "stream.inter_chunk_p50_delay_ms": p50Delay,
@@ -490,7 +593,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 "stream.slow_chunks_count": interChunkDelays.filter(d => d > SLOW_CHUNK_THRESHOLD_MS).length,
             });
 
-            // CRITICAL DIAGNOSTIC: If loop completed but no finish part was seen, something is very wrong
             if (!finishPartSeen && chunkCount > 0) {
                 activeSpan?.addEvent("llm.stream_incomplete_warning", {
                     "warning.message": "Stream loop completed without seeing finish part",
@@ -510,34 +612,40 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     model: this.model,
                 });
             }
+
+            return { success: true };
         } catch (error) {
-            // DIAGNOSTIC: Track error with stream state
-            activeSpan?.addEvent("llm.stream_loop_error", {
+            const errorEventAttributes = {
                 "error.message": error instanceof Error ? error.message : String(error),
                 "error.type": error instanceof Error ? error.constructor.name : typeof error,
                 "stream.chunk_count_at_error": chunkCount,
                 "stream.last_chunk_type": lastChunkType ?? "none",
                 "stream.finish_part_seen": finishPartSeen,
                 "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
-            });
-            logger.writeToWarnLog({
-                timestamp: new Date().toISOString(),
-                level: "error",
-                component: "LLMService",
-                message: "LLM stream loop error",
-                context: {
-                    provider: this.provider,
-                    model: this.model,
-                    chunkCount,
-                    lastChunkType: lastChunkType ?? "none",
-                    finishPartSeen,
-                    abortSignalAborted: options?.abortSignal?.aborted ?? false,
-                },
-                error: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined,
-            });
-            await this.handleStreamError(error, startTime);
-            throw error;
+            };
+
+            if (emitStreamError) {
+                activeSpan?.addEvent("llm.stream_loop_error", errorEventAttributes);
+                logger.writeToWarnLog({
+                    timestamp: new Date().toISOString(),
+                    level: "error",
+                    component: "LLMService",
+                    message: "LLM stream loop error",
+                    context: {
+                        provider: this.provider,
+                        model: this.model,
+                        chunkCount,
+                        lastChunkType: lastChunkType ?? "none",
+                        finishPartSeen,
+                        abortSignalAborted: options?.abortSignal?.aborted ?? false,
+                    },
+                    error: error instanceof Error ? error.message : String(error),
+                    stack: error instanceof Error ? error.stack : undefined,
+                });
+            } else {
+                activeSpan?.addEvent("llm.stream_loop_retry_candidate", errorEventAttributes);
+            }
+            return { success: false, error, chunkCount };
         }
     }
 
@@ -630,12 +738,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "messages.count": messages.length,
                 });
 
-                const languageModel = this.getLanguageModel();
-                const result = await this.executeObjectGeneration(
-                    languageModel,
-                    messages,
-                    schema,
-                    tools
+                const result = await this.withKeyRotationRetry(
+                    (languageModel) => this.executeObjectGeneration(languageModel, messages, schema, tools),
+                    { retryAllowed: !tools || Object.keys(tools).length === 0 }
                 );
 
                 const duration = Date.now() - startTime;
@@ -673,24 +778,24 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "messages.count": messages.length,
                 });
 
-                const languageModel = this.getLanguageModel();
-                const result = await generateText({
-                    model: languageModel,
-                    messages,
-                    temperature: this.temperature,
-                    maxOutputTokens: this.maxTokens,
+                const result = await this.withKeyRotationRetry(
+                    (languageModel) => generateText({
+                        model: languageModel,
+                        messages,
+                        temperature: this.temperature,
+                        maxOutputTokens: this.maxTokens,
 
-                    // ✨ Enable full AI SDK telemetry
-                    experimental_telemetry: this.getTelemetryConfig(),
+                        experimental_telemetry: this.getTelemetryConfig(),
 
-                    providerOptions: {
-                        openrouter: {
-                            usage: { include: true },
-                            user: getTraceCorrelationId(),
-                            metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                        providerOptions: {
+                            openrouter: {
+                                usage: { include: true },
+                                user: getTraceCorrelationId(),
+                                metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                            },
                         },
-                    },
-                });
+                    })
+                );
 
                 const duration = Date.now() - startTime;
 
@@ -709,6 +814,39 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             "Generate text",
             startTime
         );
+    }
+
+    /**
+     * Run an LLM operation with one-shot key rotation retry.
+     * Builds attempt context, runs once, and on retryable key error
+     * rotates the key and retries with a fresh model.
+     */
+    private async withKeyRotationRetry<T>(
+        operation: (languageModel: LanguageModel) => Promise<T>,
+        options?: { retryAllowed?: boolean }
+    ): Promise<T> {
+        const { model, failedKey } = this.createStandardAttemptContext();
+        try {
+            return await operation(model);
+        } catch (error) {
+            if (
+                options?.retryAllowed !== false &&
+                failedKey &&
+                this.keyRotationHandler &&
+                isRetryableKeyError(error)
+            ) {
+                const rotated = await this.keyRotationHandler(this.provider, failedKey);
+                if (rotated) {
+                    logger.info("[LLMService] Retrying after key rotation", {
+                        provider: this.provider,
+                        model: this.model,
+                    });
+                    const { model: retryModel } = this.createStandardAttemptContext();
+                    return await operation(retryModel);
+                }
+            }
+            throw error;
+        }
     }
 
     /**
