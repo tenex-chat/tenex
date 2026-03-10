@@ -1,6 +1,6 @@
 import { agentStorage, createStoredAgent, type StoredAgent } from "@/agents/AgentStorage";
 import { AgentNotFoundError, AgentValidationError } from "@/agents/errors";
-import { isValidCategory, type AgentCategory } from "@/agents/role-categories";
+import { resolveCategory, type AgentCategory } from "@/agents/role-categories";
 import { installAgentScripts } from "@/agents/script-installer";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import { getNDK } from "@/nostr";
@@ -99,7 +99,7 @@ function parseAgentEvent(event: NDKEvent, slug: string): ParsedAgentEvent {
     const description = agentDef.description || "";
     const role = agentDef.role || "assistant";
     const rawCategory = agentDef.category || undefined;
-    const category = rawCategory && isValidCategory(rawCategory) ? rawCategory : undefined;
+    const category = resolveCategory(rawCategory);
     const instructions = agentDef.instructions || "";
     const useCriteria = agentDef.useCriteria || "";
 

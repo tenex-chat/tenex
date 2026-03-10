@@ -1,7 +1,7 @@
 import type { StoredAgent } from "@/agents/AgentStorage";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
-import { isValidCategory } from "@/agents/role-categories";
+import { resolveCategory } from "@/agents/role-categories";
 import { logger } from "@/utils/logger";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
@@ -547,7 +547,7 @@ export class AgentDefinitionMonitor {
         }
 
         const rawCategory = agentDef.category || undefined;
-        const newCategory = rawCategory && isValidCategory(rawCategory) ? rawCategory : undefined;
+        const newCategory = rawCategory ? resolveCategory(rawCategory) : undefined;
         if (newCategory !== storedAgent.category) {
             storedAgent.category = newCategory;
             changedFields.push("category");

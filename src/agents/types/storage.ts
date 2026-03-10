@@ -64,7 +64,8 @@ export interface StoredAgentData {
     role: string;
     /**
      * Agent category for semantic classification.
-     * Valid values: "principal", "orchestrator", "executor", "expert", "advisor", "creator", "assistant".
+     * Valid values: "principal", "orchestrator", "worker", "reviewer", "domain-expert", "generalist".
+     * Legacy values ("executor", "expert", "advisor", "creator", "assistant") are auto-migrated.
      * When missing or unrecognized, remains undefined.
      */
     category?: AgentCategory;
