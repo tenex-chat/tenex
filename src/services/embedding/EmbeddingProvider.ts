@@ -1,4 +1,7 @@
-import { type FeatureExtractionPipeline, type Tensor, pipeline } from "@huggingface/transformers";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
+import { type FeatureExtractionPipeline, type Tensor, env, pipeline } from "@huggingface/transformers";
+import { logger } from "@/utils/logger";
 
 export interface EmbeddingProvider {
     /**
@@ -42,18 +45,38 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
      */
     private async initialize(): Promise<void> {
         try {
-            const pipe = await this.ensurePipeline();
-            const output = await pipe("test", { pooling: "mean", normalize: true });
-            const embedding = this.tensorToFloat32Array(output);
-            this.dimensions = embedding.length;
+            await this.tryInitializePipeline();
         } catch (error) {
-            throw new Error(
-                `Failed to initialize embedding provider: ${
-                    error instanceof Error ? error.message : String(error)
-                }`,
-                { cause: error }
-            );
+            const message = error instanceof Error ? error.message : String(error);
+            // Corrupted cached model — clear cache and retry once
+            if (message.includes("Protobuf parsing failed") || message.includes("Load model from")) {
+                const cacheDir = join(env.cacheDir as string, ...this.modelId.split("/"));
+                logger.warn(`Corrupted model cache detected at ${cacheDir}, clearing and retrying`);
+                try {
+                    rmSync(cacheDir, { recursive: true, force: true });
+                } catch {
+                    // Ignore cache-clearing errors
+                }
+                this.extractorPipeline = null;
+                try {
+                    await this.tryInitializePipeline();
+                    return;
+                } catch (retryError) {
+                    const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
+                    throw new Error(`Failed to initialize embedding provider after cache clear: ${retryMessage}`, {
+                        cause: retryError,
+                    });
+                }
+            }
+            throw new Error(`Failed to initialize embedding provider: ${message}`, { cause: error });
         }
+    }
+
+    private async tryInitializePipeline(): Promise<void> {
+        const pipe = await this.ensurePipeline();
+        const output = await pipe("test", { pooling: "mean", normalize: true });
+        const embedding = this.tensorToFloat32Array(output);
+        this.dimensions = embedding.length;
     }
 
     private tensorToFloat32Array(tensor: Tensor): Float32Array {
