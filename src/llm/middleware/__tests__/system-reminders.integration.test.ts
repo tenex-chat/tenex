@@ -15,6 +15,7 @@ const todoTemplate = mock(async () => "## Current Todos\n- [ ] Task 1\n- [x] Tas
 const getName = mock(async (pubkey: string) => {
     const names: Record<string, string> = {
         "user-pubkey": "User",
+        "delegated-pubkey": "DelegatedAgent",
     };
     return names[pubkey] ?? "Unknown";
 });
@@ -58,9 +59,15 @@ mock.module("@/llm/providers", () => ({
 }));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import { SessionManager } from "@/agents/execution/SessionManager";
+import {
+    initializeReminderProviders,
+    updateReminderData,
+    resetSystemReminders,
+} from "@/agents/execution/system-reminders";
 import { createTenexSystemRemindersMiddleware } from "../system-reminders";
 
 function toProviderPrompt(messages: Array<{ role: string; content: unknown }>): LanguageModelV3Message[] {
@@ -119,22 +126,34 @@ describe("TENEX system reminder middleware integration", () => {
 
         sessionManager = new SessionManager(agent, conversationId, workingDirectory);
         project = {} as NDKProject;
+        resetSystemReminders();
+        initializeReminderProviders();
     });
 
     afterEach(() => {
         if (testDir) {
             rmSync(testDir, { recursive: true, force: true });
         }
+        resetSystemReminders();
         mock.restore();
     });
 
-    it("applies compiled full-mode reminder provider options to the latest user message", async () => {
+    it("applies separate computed and current-cycle queued reminders to the latest user message", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
             messageType: "text",
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
+
+        const ctx = getSystemReminderContext();
+
+        // Queue an ephemeral heuristic reminder
+        ctx.queue({
+            type: "heuristic",
+            content: "Update your todo list before using more tools.",
+        });
+
         const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
         const compiled = await compiler.compile({
             agent,
@@ -148,19 +167,41 @@ describe("TENEX system reminder middleware integration", () => {
             mcpManager: undefined,
             nudgeContent: "",
             respondingToPubkey: userPubkey,
-            pendingDelegations: [],
+            pendingDelegations: [
+                {
+                    delegationConversationId: "delegation-1",
+                    recipientPubkey: "delegated-pubkey",
+                    senderPubkey: agentPubkey,
+                    prompt: "Do a task",
+                    ralNumber,
+                },
+            ],
             completedDelegations: [],
             ralNumber,
-            ephemeralMessages: [
-                { role: "system", content: "Heuristic warning: Check your todos!" },
-            ],
         });
 
+        // Set reminder data (providers run lazily at collect time)
+        updateReminderData({
+            agent,
+            conversation: conversationStore,
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [
+                {
+                    delegationConversationId: "delegation-1",
+                    recipientPubkey: "delegated-pubkey",
+                    senderPubkey: agentPubkey,
+                    prompt: "Do a task",
+                    ralNumber,
+                },
+            ],
+            completedDelegations: [],
+        });
+
+        // The middleware collects from context automatically via transformParams
         const middleware = createTenexSystemRemindersMiddleware();
         const result = await middleware.transformParams?.({
             params: {
                 prompt: toProviderPrompt(compiled.messages as Array<{ role: string; content: unknown }>),
-                providerOptions: compiled.providerOptions,
             } as any,
             type: "generate-text" as any,
             model: { provider: "test", modelId: "model" } as any,
@@ -170,13 +211,13 @@ describe("TENEX system reminder middleware integration", () => {
         const textPart = userPrompt?.content[0];
         expect(textPart?.type).toBe("text");
         expect(textPart?.text).toContain("Hello, can you help me?");
-        expect(textPart?.text).toContain('<system-reminder type="dynamic-context">');
-        expect(textPart?.text).toContain('<system-reminder type="ephemeral">');
-        expect(textPart?.text).toContain("Current Todos");
-        expect(textPart?.text).toContain("Heuristic warning: Check your todos!");
+        expect(textPart?.text).toContain('<system-reminder type="todo-list">');
+        expect(textPart?.text).toContain('<system-reminder type="response-routing">');
+        expect(textPart?.text).toContain('<system-reminder type="delegations">');
+        expect(textPart?.text).toContain('<system-reminder type="heuristic">');
     });
 
-    it("applies compiled delta-mode reminder provider options when only new messages are sent", async () => {
+    it("delivers deferred reminders after advance() while still injecting fresh persistent reminders", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -194,6 +235,15 @@ describe("TENEX system reminder middleware integration", () => {
             content: "Follow-up question",
             messageType: "text",
         });
+
+        const ctx = getSystemReminderContext();
+
+        // Queue a supervision message (available at the next collect() call)
+        ctx.queue({
+            type: "supervision-message",
+            content: "Task Tracking Suggestion: create a todo before continuing.",
+        });
+
         sessionManager.saveSession("session-1", "event-1", 1);
 
         const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
@@ -214,11 +264,19 @@ describe("TENEX system reminder middleware integration", () => {
             ralNumber,
         });
 
+        // Set reminder data (providers run lazily at collect time)
+        updateReminderData({
+            agent,
+            conversation: conversationStore,
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+        });
+
         const middleware = createTenexSystemRemindersMiddleware();
         const result = await middleware.transformParams?.({
             params: {
                 prompt: toProviderPrompt(compiled.messages as Array<{ role: string; content: unknown }>),
-                providerOptions: compiled.providerOptions,
             } as any,
             type: "generate-text" as any,
             model: { provider: "test", modelId: "model" } as any,
@@ -226,9 +284,11 @@ describe("TENEX system reminder middleware integration", () => {
 
         const userPrompt = result?.prompt.find((message) => message.role === "user");
         const textPart = userPrompt?.content[0];
+        expect(compiled.mode).toBe("delta");
         expect(textPart?.type).toBe("text");
         expect(textPart?.text).toContain("Follow-up question");
-        expect(textPart?.text).toContain('<system-reminder type="dynamic-context">');
-        expect(textPart?.text).toContain("Current Todos");
+        expect(textPart?.text).toContain('<system-reminder type="todo-list">');
+        expect(textPart?.text).toContain('<system-reminder type="response-routing">');
+        expect(textPart?.text).toContain('<system-reminder type="supervision-message">');
     });
 });

@@ -20,6 +20,7 @@ import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
@@ -225,15 +226,11 @@ export async function checkPostCompletion(
                 supervisorOrchestrator.markHeuristicEnforced(executionId, supervisionResult.heuristicId);
             }
 
-            // Inject correction message as ephemeral user message
             if (supervisionResult.correctionAction.message) {
-                ralRegistry.queueUserMessage(
-                    agent.pubkey,
-                    context.conversationId,
-                    ralNumber,
-                    supervisionResult.correctionAction.message,
-                    { ephemeral: true }
-                );
+                getSystemReminderContext().queue({
+                    type: "supervision-correction",
+                    content: supervisionResult.correctionAction.message,
+                });
             }
 
             return {
@@ -243,18 +240,10 @@ export async function checkPostCompletion(
             };
         } else if (supervisionResult.correctionAction.type === "inject-message" &&
             supervisionResult.correctionAction.message) {
-            // Store message for agent's NEXT turn (not current RAL).
-            // Using deferredInjections instead of ralRegistry.queueSystemMessage() ensures
-            // this does NOT count as "outstanding work" and allows the agent to complete()
-            // properly. The message will be picked up at the start of the agent's next turn.
-            conversationStore.addDeferredInjection({
-                targetPubkey: agent.pubkey,
-                role: "system",
+            getSystemReminderContext().queue({
+                type: "supervision-message",
                 content: supervisionResult.correctionAction.message,
-                queuedAt: Date.now(),
-                source: `supervision:${supervisionResult.heuristicId || "unknown"}`,
             });
-            await conversationStore.save();
 
             trace.getActiveSpan()?.addEvent("executor.supervision_deferred_injection", {
                 "ral.number": ralNumber,

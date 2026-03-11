@@ -63,6 +63,12 @@ import type { FullRuntimeContext } from "../types";
 import type { AgentInstance } from "@/agents/types/runtime";
 import type { CompleteEvent } from "@/llm/types";
 import { createMockNDKEvent } from "@/test-utils/mock-factories";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import {
+    initializeReminderProviders,
+    updateReminderData,
+    resetSystemReminders,
+} from "../system-reminders";
 
 describe("PostCompletionChecker - True Integration Test", () => {
     const TEST_DIR = "/tmp/tenex-post-completion-integration-test";
@@ -85,12 +91,15 @@ describe("PostCompletionChecker - True Integration Test", () => {
         conversationStore.load(PROJECT_ID, CONVERSATION_ID);
         registry = RALRegistry.getInstance();
         registry.clear(AGENT_PUBKEY, CONVERSATION_ID);
+        resetSystemReminders();
+        initializeReminderProviders();
     });
 
     afterEach(async () => {
         registry.clear(AGENT_PUBKEY, CONVERSATION_ID);
         supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:1`);
         supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:2`);
+        resetSystemReminders();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
@@ -338,17 +347,13 @@ describe("PostCompletionChecker - True Integration Test", () => {
         });
 
         /**
-         * Validates that inject-message with reEngage=false uses deferred injections
+         * Validates that inject-message with reEngage=false queues a system reminder
          * instead of blocking the completion.
          *
-         * BUG FIX TEST: When ConsecutiveToolsWithoutTodoHeuristic fires with reEngage=false,
-         * it should store the nudge as a deferred injection (for the next turn) rather than
-         * queueing it in RALRegistry (which would block the current completion).
-         *
-         * Before fix: ralRegistry.queueSystemMessage() → hasOutstandingWork() = true → conversation()
-         * After fix: conversationStore.addDeferredInjection() → hasOutstandingWork() = false → complete()
+         * The nudge is queued (not deferred) so it's available at the very next
+         * collect() call without requiring advance().
          */
-        it("should use deferred injection for inject-message with reEngage=false (not block completion)", async () => {
+        it("should use a next-cycle reminder for inject-message with reEngage=false (not block completion)", async () => {
             const ralNumber = registry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
             conversationStore.ensureRalActive(AGENT_PUBKEY, ralNumber);
 
@@ -410,11 +415,23 @@ describe("PostCompletionChecker - True Integration Test", () => {
             expect(outstandingAfter.hasWork).toBe(false);
             expect(outstandingAfter.details.queuedInjections).toBe(0);
 
-            // 4. The deferred injection should be in ConversationStore
-            const deferredInjections = conversationStore.getPendingDeferredInjections(AGENT_PUBKEY);
-            expect(deferredInjections).toHaveLength(1);
-            expect(deferredInjections[0].content).toContain("Task Tracking Suggestion");
-            expect(deferredInjections[0].source).toBe("supervision:consecutive-tools-without-todo");
+            // 4. The queued reminder should be available immediately (no advance() needed)
+            const ctx = getSystemReminderContext();
+
+            updateReminderData({
+                agent: config.agent,
+                conversation: conversationStore,
+                respondingToPubkey: config.context.triggeringEvent.pubkey,
+                pendingDelegations: [],
+                completedDelegations: [],
+            });
+
+            const reminders = await ctx.collect();
+
+            expect(reminders.some((r) => r.type === "supervision-message")).toBe(true);
+            expect(
+                reminders.find((r) => r.type === "supervision-message")?.content
+            ).toContain("Task Tracking Suggestion");
         });
 
         /**
