@@ -21,13 +21,14 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 ### Agents Runtime (`src/agents`)
 - **Registry & Storage**: `AgentRegistry`, `AgentStorage`, and `constants` describe built-in agent definitions, dynamic injection, and on-disk metadata.
 - **Execution (`execution/*`)**: `AgentExecutor` and related utilities orchestrate prompt construction, tool execution, tracking, and session lifecycle. They depend on `llm/`, `prompts/`, `tools/registry`, `conversations/ConversationStore`, `nostr/AgentPublisher`, and `services/ral` for delegation state.
-  - `MessageCompiler` assembles provider-aware `messages[]` payloads (full vs delta) and appends dynamic execution context (todos, response routing).
+  - `MessageCompiler` now coordinates two separate context-reduction phases: `HistorySummaryService` persists reusable history summaries from canonical `ConversationRecord`s, while `PromptPruningService` trims the exact `PromptMessage[]` sent on each model request (full or delta) and tracks `priorContextTokens` for resumed sessions.
 - **Utilities & Types**: Provide normalization, context building, shared typings, and shared tool-name parsing/categorization (see `src/agents/tool-names.ts`) for consumers such as `event-handler`.
 - **Guideline**: Agents should never import `commands/*`. For configuration, import `{ config }` from `@/services` and use `config.getConfigPath(subdir)` for paths or `config.loadConfig()` for configuration data; pass loaded config through constructors when needed.
 
 ### Conversations (`src/conversations`)
-- **Persistence & Stores**: `ConversationStore` persists conversation state and tool messages to the filesystem; `persistence/ToolMessageStorage` manages tool-call/result storage.
+- **Persistence & Stores**: `ConversationStore` persists canonical `ConversationRecord`s plus persisted `SummarySpan`s to the filesystem; `persistence/ToolMessageStorage` manages tool-call/result storage.
 - **Services**: `ConversationResolver`, `ConversationSummarizer`, and `MetadataDebounceManager` coordinate resolution, summarization, and metadata updates.
+- **Prompt Projection**: `PromptBuilder.ts` exposes the canonical prompt-building API for turning `ConversationRecord[]` into provider-facing `PromptMessage[]`, while `MessageBuilder.ts` remains the compatibility implementation module underneath.
 - **Formatting**: `formatters/*` and `formatters/utils/*` produce human-readable outputs for UI/debug tooling.
 - **Responsibility**: This is the single source of truth for conversation context; other modules must request data via these services rather than reading persistence files directly.
 
@@ -44,8 +45,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 ### LLM Layer (`src/llm`)
 - **Services & Factories**: `LLMServiceFactory`, `service.ts`, and `LLMConfigEditor` manage provider initialization, request pipelines, and CLI editing tasks.
 - **Selection & Middleware**: `utils/ModelSelector` and `chunk-validators` coordinate model choice and response validation. `middleware/message-sanitizer` is a `transformParams` middleware that sanitizes message arrays before every API call (strips trailing assistant messages, empty-content messages) to prevent provider rejections.
-- **Providers**: `providers/base`, `providers/standard`, `providers/agent`, and `providers/registry` house adapters for Claude, OpenRouter, Ollama, Codex CLI, Gemini CLI, and mock providers. Agent providers (Claude Code, Codex App Server) use specialized adapters:
-  - **`ClaudeCodeToolsAdapter.ts`**: Converts TENEX tools to SDK MCP format for Claude Code (in-process, via `createSdkMcpServer`).
+- **Providers**: `providers/base`, `providers/standard`, `providers/agent`, and `providers/registry` house adapters for Claude, OpenRouter, Ollama, Codex App Server, and mock providers. Agent providers use specialized adapters:
   - **`CodexAppServerToolsAdapter.ts`**: Converts TENEX tools to SDK MCP format for Codex App Server (in-process, via `createSdkMcpServer`).
 - **Guideline**: Agents and services never talk to provider SDKs directly—use this module to ensure credentials, retries, and middleware are consistent.
 
@@ -53,7 +53,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`core/` + `fragments/` + `utils/`**: Compose reusable prompt pieces, compile structured system prompts, and host helper utilities. Execution modules should only import builders from here, never inline long prompt strings.
 
 ### Tools System (`src/tools`)
-- **Implementations**: `implementations/*.ts` are the concrete actions agents can call (delegation, RAG management, scheduling, file access, shell, etc.). They should delegate to `services/*` when stateful operations are required.
+- **Implementations**: `implementations/*.ts` are the concrete actions agents can call (delegation, RAG management, scheduling, file access, shell, etc.). They should delegate to `services/*` when stateful operations are required. The `fs_*` tools are thin TENEX adapters over the external `ai-sdk-fs-tools` package, with TENEX-only hooks for agent-home access, report protection, tool-result loading, and LLM-backed file analysis.
 - **Registry & Runtime**: `registry.ts`, `utils.ts`, and executor/tests coordinate tool metadata, zod schemas, result marshalling, and permission enforcement.
 - **Dynamic Tools**: User-defined tool factories are loaded by `services/DynamicToolService` from `~/.tenex/tools` and surfaced through the tool registry. Tests live under `tools/__tests__`.
 - **Guideline**: Keep external I/O localized; when a tool needs long-lived resources (RAG DB, scheduler), call the relevant service rather than re-implementing logic.
@@ -81,9 +81,10 @@ Use this section to understand each service’s scope and dependencies:
 | `ReportService` | `src/services/reports/` | Creates, lists, updates task reports; used by reporting tools. |
 | `SchedulerService` | `src/services/scheduling/` | Cron-like scheduling for follow-ups/nudges/tasks with persistence via `services/status`. |
 | `PromptCompilerService` | `src/services/prompt-compiler/` | Compiles agent lessons with user comments into Effective Agent Instructions (TIN-10). Takes Base Agent Instructions (from `agent.instructions` in Kind 4199 event) and synthesizes them with Lessons + NIP-22 comments to produce the final instructions the agent uses. Disk caching at `~/.tenex/agents/prompts/`. One instance per agent, registered during `ProjectRuntime.start()`. Handles subscription to kind 1111 comment events filtered by `#K: [4129]`. |
+| `HistorySummaryService` | `src/services/history-summary/HistorySummaryService.ts` | Generates and persists reusable `SummarySpan`s from canonical `ConversationRecord[]` via the `ai-sdk-context-management` package. Owns the attributed transcript builder, fallback summary creation, and storage wiring through `ConversationStore.loadSummarySpans()` / `appendSummarySpans()`. |
+| `PromptPruningService` | `src/services/prompt-pruning/PromptPruningService.ts` | Shrinks one outgoing `PromptMessage[]` request to fit budget, including tool trimming and optional application of persisted `SummarySpan`s. Used by `MessageCompiler` in both full and delta mode; never persists new summaries. |
 | `InterventionService` | `src/services/intervention/InterventionService.ts` | Monitors agent work completions and triggers human-replica review if user doesn't respond within timeout. Uses lazy agent resolution (deferred until ProjectContext is available), serialized atomic state writes, and retry/backoff for failed publishes. State is project-scoped (`~/.tenex/intervention_state_<dTag>.json`, with legacy coordinate-path fallback on load). |
 | `APNsService` + `APNsClient` | `src/services/apns/` | Apple Push Notification service integration. `APNsService` subscribes to kind 25000 config-update events (NIP-44 encrypted), manages an in-memory device-token store (`Map<pubkey, Set<token>>`), and exposes `notifyIfNeeded()` for the ask tool to push alerts when the user is offline. `APNsClient` handles HTTP/2 delivery to Apple's APNs API with ES256 JWT authentication and automatic token refresh. Decryption is delegated to `nostr/encryption` to respect the "NDK only for types" rule. |
-| System Reminder Utils | `src/services/system-reminder/` | Utilities for `<system-reminder>` XML tag creation and manipulation. Provides `wrapInSystemReminder()`, `combineSystemReminders()`, `extractSystemReminderContent()`, and `hasSystemReminder()` functions. Used by `MessageCompiler` to inject behavioral nudges (heuristic violations, deferred injections, todo state, response context) into user messages. Does NOT handle AGENTS.md injections (those remain tool-bound). |
 | Event Context Utils | `src/services/event-context/` | Factory functions for creating `EventContext` instances for Nostr event encoding. Provides `createEventContext(context, options?: CreateEventContextOptions | string)` (creates context with pre-resolved completion recipient) and `resolveCompletionRecipient(conversationStore: ConversationStore | undefined)` (resolves immediate delegator from conversation's delegation chain). Used by `AgentExecutor` to support proper routing of delegation completions back to immediate delegators. |
 
 **Guideline**: Place orchestrators that maintain state or integrate external infrastructure here. Pure helper logic should live in `src/lib` or inside the domain folder that uses it.

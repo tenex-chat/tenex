@@ -8,16 +8,18 @@ export interface SessionData {
     sessionId?: string;
     lastSentEventId?: string;
     lastSentMessageIndex?: number;
+    priorContextTokens?: number;
 }
 
 /**
  * Manages session state for agent execution, including session resumption
- * and event filtering for providers that support it (like Claude Code)
+ * and event filtering for providers that support it.
  */
 export class SessionManager {
     private sessionId?: string;
     private lastSentEventId?: string;
     private lastSentMessageIndex?: number;
+    private priorContextTokens?: number;
     private storedWorkingDirectory?: string;
 
     constructor(
@@ -39,6 +41,7 @@ export class SessionManager {
         this.storedWorkingDirectory = metadataStore.get<string>("workingDirectory");
         this.lastSentEventId = metadataStore.get<string>("lastSentEventId");
         this.lastSentMessageIndex = metadataStore.get<number>("lastSentMessageIndex");
+        this.priorContextTokens = metadataStore.get<number>("priorContextTokens");
 
         // Only resume session if workingDirectory matches
         if (storedSessionId && this.storedWorkingDirectory === this.workingDirectory) {
@@ -49,6 +52,7 @@ export class SessionManager {
                 conversationId: this.conversationId.substring(0, 8),
                 lastSentEventId: this.lastSentEventId || "NONE",
                 lastSentMessageIndex: this.lastSentMessageIndex ?? "NONE",
+                priorContextTokens: this.priorContextTokens ?? "NONE",
                 workingDirectory: this.workingDirectory,
             });
         } else if (storedSessionId) {
@@ -61,6 +65,9 @@ export class SessionManager {
                 conversationId: this.conversationId.substring(0, 8),
             });
             this.lastSentMessageIndex = undefined;
+            this.priorContextTokens = undefined;
+            metadataStore.set("lastSentMessageIndex", undefined);
+            metadataStore.set("priorContextTokens", undefined);
         }
     }
 
@@ -72,6 +79,7 @@ export class SessionManager {
             sessionId: this.sessionId,
             lastSentEventId: this.lastSentEventId,
             lastSentMessageIndex: this.lastSentMessageIndex,
+            priorContextTokens: this.priorContextTokens,
         };
     }
 
@@ -86,6 +94,9 @@ export class SessionManager {
             metadataStore.set("lastSentMessageIndex", lastSentMessageIndex);
         }
         metadataStore.set("workingDirectory", this.workingDirectory);
+        if (this.priorContextTokens !== undefined) {
+            metadataStore.set("priorContextTokens", this.priorContextTokens);
+        }
 
         // Update local state
         this.sessionId = sessionId;
@@ -98,6 +109,7 @@ export class SessionManager {
             sessionId,
             lastSentEventId: lastSentEventId.substring(0, 8),
             lastSentMessageIndex: lastSentMessageIndex ?? "NONE",
+            priorContextTokens: this.priorContextTokens ?? "NONE",
             agent: this.agent.name,
             conversationId: this.conversationId.substring(0, 8),
             workingDirectory: this.workingDirectory,
@@ -131,6 +143,19 @@ export class SessionManager {
 
         logger.info("[SessionManager] 📝 Stored lastSentMessageIndex", {
             lastSentMessageIndex,
+            agent: this.agent.name,
+            conversationId: this.conversationId.substring(0, 8),
+        });
+    }
+
+    savePriorContextTokens(priorContextTokens: number | undefined): void {
+        const metadataStore = this.agent.createMetadataStore(this.conversationId);
+        metadataStore.set("priorContextTokens", priorContextTokens);
+
+        this.priorContextTokens = priorContextTokens;
+
+        logger.info("[SessionManager] 📝 Stored priorContextTokens", {
+            priorContextTokens: priorContextTokens ?? "NONE",
             agent: this.agent.name,
             conversationId: this.conversationId.substring(0, 8),
         });

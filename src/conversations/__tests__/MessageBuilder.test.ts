@@ -33,6 +33,7 @@ describe("MessageBuilder", () => {
             // Expected order: [tool-call, tool-result, user-message]
             const entries: ConversationEntry[] = [
                 {
+                    id: "record:tool-call-1",
                     pubkey: viewingAgentPubkey,
                     ral: 1,
                     content: "",
@@ -45,11 +46,13 @@ describe("MessageBuilder", () => {
                     }],
                 },
                 {
+                    id: "record:user-1",
                     pubkey: userPubkey,
                     content: "Hey, what are you doing?",
                     messageType: "text",
                 },
                 {
+                    id: "record:tool-result-1",
                     pubkey: viewingAgentPubkey,
                     ral: 1,
                     content: "",
@@ -80,6 +83,26 @@ describe("MessageBuilder", () => {
             // Third: deferred user message
             expect(messages[2].role).toBe("user");
             expect(messages[2].content).toBe("Hey, what are you doing?");
+        });
+
+        test("emits sourceRecordId when message ids are requested", async () => {
+            const entries: ConversationEntry[] = [
+                {
+                    id: "record:user-1",
+                    pubkey: userPubkey,
+                    content: "Need a quick summary",
+                    messageType: "text",
+                },
+            ];
+
+            const messages = await buildMessagesFromEntries(entries, createContext({
+                includeMessageIds: true,
+            }));
+
+            expect(messages[0]).toMatchObject({
+                id: "record:user-1",
+                sourceRecordId: "record:user-1",
+            });
         });
 
         test("defers multiple user messages between tool-call and tool-result", async () => {

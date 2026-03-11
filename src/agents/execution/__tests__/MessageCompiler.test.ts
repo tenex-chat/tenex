@@ -293,12 +293,18 @@ describe("MessageCompiler", () => {
             eventId: "evt-4",
         });
 
-        await conversationStore.appendCompressionSegments(conversationId, [{
-            fromEventId: "evt-1",
-            toEventId: "evt-2",
-            compressed: "compressed summary",
+        await conversationStore.appendSummarySpans(conversationId, [{
+            startRecordId: "record:evt-1",
+            endRecordId: "record:evt-2",
+            summary: "compressed summary",
             createdAt: Date.now(),
-            model: "test-model",
+            metadata: {
+                model: "test-model",
+                legacyEventRange: {
+                    fromEventId: "evt-1",
+                    toEventId: "evt-2",
+                },
+            },
         }]);
 
         const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
@@ -447,12 +453,18 @@ describe("MessageCompiler", () => {
             });
         }
 
-        await conversationStore.appendCompressionSegments(conversationId, [{
-            fromEventId: "evt-1",
-            toEventId: "evt-5",
-            compressed: "older context",
+        await conversationStore.appendSummarySpans(conversationId, [{
+            startRecordId: "record:evt-1",
+            endRecordId: "record:evt-5",
+            summary: "older context",
             createdAt: Date.now(),
-            model: "test-model",
+            metadata: {
+                model: "test-model",
+                legacyEventRange: {
+                    fromEventId: "evt-1",
+                    toEventId: "evt-5",
+                },
+            },
         }]);
 
         sessionManager.saveSession("session-1", "event-1", 4);

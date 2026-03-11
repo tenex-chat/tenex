@@ -50,8 +50,6 @@ export interface StreamSetupResult {
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
-    /** Optional dedicated LLM service for compression operations */
-    compressionLlmService?: LLMService;
 }
 
 /**
@@ -163,8 +161,8 @@ export async function setupStreamExecution(
         throw new Error(`Conversation ${context.conversationId} not found`);
     }
 
-    // Build MCP config from project's running MCP servers
-    // This allows Claude Code-based agents to spawn their own instances of external MCP servers
+    // Build MCP config from project's running MCP servers so agent providers can
+    // spawn their own instances of external MCP servers when supported.
     const projectMcpServers = projectContext.mcpManager?.getServerConfigs() ?? {};
     const mcpConfig = Object.keys(projectMcpServers).length > 0
         ? { enabled: true, servers: projectMcpServers }
@@ -208,7 +206,7 @@ export async function setupStreamExecution(
                 resolution.strippedMessage !== firstUserMessage?.content &&
                 firstUserMessage
             ) {
-                conversationStore.updateMessageContent(firstUserMessage.id, resolution.strippedMessage);
+                conversationStore.updateMessageContent(firstUserMessage.index, resolution.strippedMessage);
             }
 
             trace.getActiveSpan()?.addEvent("executor.meta_model_resolved", {
@@ -321,6 +319,5 @@ export async function setupStreamExecution(
         abortSignal,
         metaModelSystemPrompt,
         variantSystemPrompt,
-        compressionLlmService,
     };
 }

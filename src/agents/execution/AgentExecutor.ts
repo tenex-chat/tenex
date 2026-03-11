@@ -544,6 +544,7 @@ export class AgentExecutor {
             });
 
             result.messageCompiler.advanceCursor();
+            result.messageCompiler.maybeSummarizeAsync();
         }
 
         return responseEvent;
@@ -583,7 +584,6 @@ export class AgentExecutor {
             abortSignal: setup.abortSignal,
             metaModelSystemPrompt: setup.metaModelSystemPrompt,
             variantSystemPrompt: setup.variantSystemPrompt,
-            compressionLlmService: setup.compressionLlmService,
         });
 
         return handler.execute(setup.messages);

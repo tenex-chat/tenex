@@ -27,7 +27,7 @@ export interface DelegationMarker {
     abortReason?: string;
 }
 
-export interface ConversationEntry {
+interface ConversationRecordFields {
     pubkey: string;
     ral?: number; // Only for agent messages
     content: string; // Text content (for text messages) or empty for tool messages
@@ -61,6 +61,22 @@ export interface ConversationEntry {
      */
     delegationMarker?: DelegationMarker;
 }
+
+export interface ConversationRecord extends ConversationRecordFields {
+    /** Canonical record identity used by summary spans and prompt lineage. */
+    id: string;
+}
+
+/**
+ * Transitional input shape accepted by write paths while legacy callers migrate to
+ * explicit ConversationRecord creation.
+ */
+export interface ConversationRecordInput extends ConversationRecordFields {
+    id?: string;
+}
+
+/** @deprecated Use ConversationRecord for canonical stored records. */
+export type ConversationEntry = ConversationRecordInput;
 
 export interface Injection {
     targetRal: { pubkey: string; ral: number };
@@ -143,7 +159,7 @@ export interface ConversationState {
     activeRal: Record<string, RalTracker[]>;
     nextRalNumber: Record<string, number>;
     injections: Injection[];
-    messages: ConversationEntry[];
+    messages: ConversationRecord[];
     metadata: ConversationMetadata;
     agentTodos: Record<string, TodoItem[]>;
     todoNudgedAgents: string[]; // Agents who have been nudged about todo usage

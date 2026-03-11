@@ -14,13 +14,17 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import { join } from "path";
+import type { SummarySpan } from "ai-sdk-context-management";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
-import { buildMessagesFromEntries } from "./MessageBuilder";
+import { buildPromptMessagesFromRecords } from "./PromptBuilder";
+import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
 import type {
     ConversationEntry,
+    ConversationRecord,
+    ConversationRecordInput,
     ConversationMetadata,
     ConversationState,
     DeferredInjection,
@@ -28,8 +32,7 @@ import type {
     ExecutionTime,
     Injection,
 } from "./types";
-import type { CompressionSegment, CompressionLog } from "@/services/compression/compression-types.js";
-import { applySegmentsToEntries } from "@/services/compression/compression-utils.js";
+import { applySummarySpansToRecords } from "@/services/history-summary/summary-utils.js";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
 
@@ -47,10 +50,40 @@ export type ConversationIdInput = string | FullEventId;
 // Re-export types for convenience
 export type {
     ConversationEntry,
+    ConversationRecord,
+    ConversationRecordInput,
     ConversationMetadata,
     DeferredInjection,
     Injection,
 } from "./types";
+
+interface SummarySpanLog {
+    conversationId: string;
+    summarySpans: SummarySpan[];
+    updatedAt: number;
+}
+
+interface LegacySummarySpanRecord {
+    startRecordId?: string;
+    endRecordId?: string;
+    fromEventId?: string;
+    toEventId?: string;
+    fromId?: string;
+    toId?: string;
+    compressed?: string;
+    summary?: string;
+    createdAt?: number;
+    model?: string;
+    metadata?: Record<string, unknown>;
+}
+
+function toRecordIdFromEventId(eventId: string): string {
+    return `record:${eventId}`;
+}
+
+function normalizeLoadedMessages(messages: ConversationRecordInput[]): ConversationRecord[] {
+    return messages.map((message, index) => ensureConversationRecord(message, index));
+}
 
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
@@ -243,11 +276,12 @@ export class ConversationStore {
         if (existsSync(filePath)) {
             const content = readFileSync(filePath, "utf-8");
             const loaded = JSON.parse(content);
+            const messages = normalizeLoadedMessages((loaded.messages ?? []) as ConversationRecordInput[]);
             this.state = {
                 activeRal: loaded.activeRal ?? {},
                 nextRalNumber: loaded.nextRalNumber ?? {},
                 injections: loaded.injections ?? [],
-                messages: loaded.messages ?? [],
+                messages,
                 metadata: loaded.metadata ?? {},
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
@@ -380,12 +414,12 @@ export class ConversationStore {
 
     // Message Operations
 
-    addMessage(entry: ConversationEntry): number {
+    addMessage(entry: ConversationRecordInput): number {
         if (entry.eventId && this.eventIdSet.has(entry.eventId)) {
             return -1;
         }
         const index = this.state.messages.length;
-        this.state.messages.push(entry);
+        this.state.messages.push(ensureConversationRecord(entry, index));
         if (entry.eventId) {
             this.eventIdSet.add(entry.eventId);
         }
@@ -402,7 +436,7 @@ export class ConversationStore {
         return true;
     }
 
-    getAllMessages(): ConversationEntry[] {
+    getAllMessages(): ConversationRecord[] {
         return this.state.messages;
     }
 
@@ -417,11 +451,11 @@ export class ConversationStore {
         return this.eventIdSet.has(eventId);
     }
 
-    getFirstUserMessage(): (ConversationEntry & { id: number }) | undefined {
+    getFirstUserMessage(): (ConversationRecord & { index: number }) | undefined {
         for (let i = 0; i < this.state.messages.length; i++) {
             const msg = this.state.messages[i];
             if (msg.messageType === "text" && !ConversationStore.agentPubkeys.has(msg.pubkey)) {
-                return { ...msg, id: i };
+                return { ...msg, index: i };
             }
         }
         return undefined;
@@ -643,11 +677,11 @@ export class ConversationStore {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
 
         const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
-        const segments = shouldApplyPersistedCompression && this.conversationId
-            ? this.loadCompressionLog(this.conversationId)
+        const summarySpans = shouldApplyPersistedCompression && this.conversationId
+            ? this.loadSummarySpans(this.conversationId)
             : [];
-        const entries = shouldApplyPersistedCompression && segments.length > 0
-            ? applySegmentsToEntries(this.state.messages, segments)
+        const entries = shouldApplyPersistedCompression && summarySpans.length > 0
+            ? applySummarySpansToRecords(this.state.messages, summarySpans)
             : this.state.messages;
 
         // Callback to get delegation messages for marker expansion
@@ -656,7 +690,7 @@ export class ConversationStore {
             return store?.getAllMessages();
         };
 
-        return buildMessagesFromEntries(entries, {
+        return buildPromptMessagesFromRecords(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
@@ -684,11 +718,11 @@ export class ConversationStore {
         const startIndex = Math.max(afterIndex + 1, 0);
 
         const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
-        const segments = shouldApplyPersistedCompression && this.conversationId
-            ? this.loadCompressionLog(this.conversationId)
+        const summarySpans = shouldApplyPersistedCompression && this.conversationId
+            ? this.loadSummarySpans(this.conversationId)
             : [];
-        const allEntries = shouldApplyPersistedCompression && segments.length > 0
-            ? applySegmentsToEntries(this.state.messages, segments)
+        const allEntries = shouldApplyPersistedCompression && summarySpans.length > 0
+            ? applySummarySpansToRecords(this.state.messages, summarySpans)
             : this.state.messages;
 
         if (startIndex >= allEntries.length) return [];
@@ -700,7 +734,7 @@ export class ConversationStore {
             return store?.getAllMessages();
         };
 
-        return buildMessagesFromEntries(entries, {
+        return buildPromptMessagesFromRecords(entries, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
@@ -805,46 +839,108 @@ export class ConversationStore {
         }
     }
 
-    // Compression Operations
-
-    /**
-     * Load compression log for a conversation.
-     * Returns empty array if no compression log exists.
-     */
-    loadCompressionLog(conversationId: string): CompressionSegment[] {
+    private resolveSummarySpansPath(conversationId: string): string | undefined {
         if (!this.projectId) {
-            return [];
+            return undefined;
         }
 
         const conversationsDir = join(this.basePath, this.projectId, "conversations");
         const compressionsDir = join(conversationsDir, "compressions");
         if (!existsSync(compressionsDir)) {
-            return [];
+            return undefined;
         }
 
-        const compressionPath = join(compressionsDir, `${conversationId}.json`);
-        if (!existsSync(compressionPath)) {
+        return join(compressionsDir, `${conversationId}.json`);
+    }
+
+    private normalizeSummarySpan(record: LegacySummarySpanRecord): SummarySpan | undefined {
+        const startRecordId = typeof record.startRecordId === "string"
+            ? record.startRecordId
+            : typeof record.fromEventId === "string"
+                ? toRecordIdFromEventId(record.fromEventId)
+                : typeof record.fromId === "string"
+                    ? record.fromId
+                    : undefined;
+        const endRecordId = typeof record.endRecordId === "string"
+            ? record.endRecordId
+            : typeof record.toEventId === "string"
+                ? toRecordIdFromEventId(record.toEventId)
+                : typeof record.toId === "string"
+                    ? record.toId
+                    : undefined;
+        const summary = typeof record.summary === "string"
+            ? record.summary
+            : typeof record.compressed === "string"
+                ? record.compressed
+                : undefined;
+
+        if (!startRecordId || !endRecordId || !summary) {
+            return undefined;
+        }
+
+        const metadata: Record<string, unknown> = {
+            ...(record.metadata ?? {}),
+        };
+
+        if (typeof record.model === "string" && record.model.length > 0) {
+            metadata.model = record.model;
+        }
+
+        if (typeof record.fromEventId === "string" || typeof record.toEventId === "string") {
+            metadata.legacyEventRange = {
+                fromEventId: record.fromEventId,
+                toEventId: record.toEventId,
+            };
+        }
+
+        return {
+            startRecordId,
+            endRecordId,
+            summary,
+            createdAt: record.createdAt,
+            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+        };
+    }
+
+    /**
+     * Load persisted summary spans for a conversation.
+     * Reads both the new summary-span shape and legacy compression-segment logs.
+     */
+    loadSummarySpans(conversationId: string): SummarySpan[] {
+        const summaryPath = this.resolveSummarySpansPath(conversationId);
+        if (!summaryPath || !existsSync(summaryPath)) {
             return [];
         }
 
         try {
-            const data = readFileSync(compressionPath, "utf-8");
-            const log = JSON.parse(data) as CompressionLog;
-            return log.segments || [];
+            const data = readFileSync(summaryPath, "utf-8");
+            const parsed = JSON.parse(data) as {
+                conversationId?: string;
+                segments?: LegacySummarySpanRecord[];
+                summarySpans?: LegacySummarySpanRecord[];
+            };
+            const rawSummarySpans: LegacySummarySpanRecord[] = Array.isArray(parsed.summarySpans)
+                ? parsed.summarySpans
+                : Array.isArray(parsed.segments)
+                    ? parsed.segments
+                    : [];
+
+            return rawSummarySpans
+                .map((rawSummarySpan: LegacySummarySpanRecord) => this.normalizeSummarySpan(rawSummarySpan))
+                .filter((summarySpan: SummarySpan | undefined): summarySpan is SummarySpan => summarySpan !== undefined);
         } catch (error) {
-            // CRITICAL: Use imported logger, not this.logger (which doesn't exist)
-            logger.warn(`Failed to load compression log for ${conversationId}:`, error);
+            logger.warn(`Failed to load summary spans for ${conversationId}:`, error);
             return [];
         }
     }
 
     /**
-     * Append new compression segments to the log.
-     * Creates the compressions directory if needed.
+     * Append new summary spans to the log.
+     * Persists only the new summary-span shape.
      */
-    async appendCompressionSegments(
+    async appendSummarySpans(
         conversationId: string,
-        segments: CompressionSegment[]
+        summarySpans: SummarySpan[]
     ): Promise<void> {
         if (!this.projectId) {
             throw new Error("Conversations directory not initialized");
@@ -856,20 +952,17 @@ export class ConversationStore {
             mkdirSync(compressionsDir, { recursive: true });
         }
 
-        const compressionPath = join(compressionsDir, `${conversationId}.json`);
-
-        // Load existing segments
-        const existingSegments = this.loadCompressionLog(conversationId);
-
-        // Append new segments
-        const log: CompressionLog = {
+        const summaryPath = join(compressionsDir, `${conversationId}.json`);
+        const existingSummarySpans = this.loadSummarySpans(conversationId);
+        const log: SummarySpanLog = {
             conversationId,
-            segments: [...existingSegments, ...segments],
+            summarySpans: [...existingSummarySpans, ...summarySpans],
             updatedAt: Date.now(),
         };
 
-        await writeFile(compressionPath, JSON.stringify(log, null, 2), "utf-8");
+        await writeFile(summaryPath, JSON.stringify(log, null, 2), "utf-8");
     }
+
 }
 
 // Register store class with registry to avoid circular imports.

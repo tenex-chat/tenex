@@ -11,7 +11,8 @@
  */
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
-import type { ConversationEntry, DelegationMarker } from "./types";
+import { buildConversationRecordId } from "./record-id";
+import type { ConversationRecord, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
@@ -24,6 +25,7 @@ import { extractImageUrls } from "./utils/image-url-utils";
 
 export type AddressableModelMessage = ModelMessage & {
     id: string;
+    sourceRecordId?: string;
     eventId?: string;
 };
 
@@ -61,60 +63,20 @@ export interface MessageBuilderContext {
      * Used for lazy expansion of delegation markers.
      * Returns the messages array or undefined if conversation not found.
      */
-    getDelegationMessages?: (delegationConversationId: string) => ConversationEntry[] | undefined;
+    getDelegationMessages?: (delegationConversationId: string) => ConversationRecord[] | undefined;
     /**
      * Include stable ids on emitted messages for explicit context preprocessing.
      */
     includeMessageIds?: boolean;
 }
 
-function hashString(value: string): string {
-    let hash = 5381;
-
-    for (let i = 0; i < value.length; i++) {
-        hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0;
-    }
-
-    return (hash >>> 0).toString(36);
-}
-
-function buildEntryMessageId(entry: ConversationEntry, absoluteIndex: number): string {
-    if (entry.eventId) {
-        return entry.eventId;
-    }
-
-    if (entry.messageType === "tool-call" || entry.messageType === "tool-result") {
-        const toolCallIds = (entry.toolData ?? [])
-            .flatMap((part) => "toolCallId" in part && typeof part.toolCallId === "string" ? [part.toolCallId] : []);
-
-        if (toolCallIds.length > 0) {
-            return `${entry.messageType}:${toolCallIds.join(",")}:${absoluteIndex}`;
-        }
-    }
-
-    if (entry.messageType === "delegation-marker" && entry.delegationMarker) {
-        return `delegation:${entry.delegationMarker.delegationConversationId}:${entry.delegationMarker.status}:${absoluteIndex}`;
-    }
-
-    const stablePayload = JSON.stringify({
-        pubkey: entry.pubkey,
-        ral: entry.ral,
-        messageType: entry.messageType,
-        content: entry.content,
-        toolData: entry.toolData,
-        targetedPubkeys: entry.targetedPubkeys,
-        senderPubkey: entry.senderPubkey,
-        role: entry.role,
-        humanReadable: entry.humanReadable,
-        transcriptToolAttributes: entry.transcriptToolAttributes,
-    });
-
-    return `${entry.messageType}:${absoluteIndex}:${hashString(stablePayload)}`;
+function buildEntryMessageId(entry: ConversationRecord, absoluteIndex: number): string {
+    return entry.id || buildConversationRecordId(entry, absoluteIndex);
 }
 
 function withMessageIdentity(
     message: ModelMessage,
-    entry: ConversationEntry,
+    entry: ConversationRecord,
     absoluteIndex: number,
     includeMessageIds: boolean
 ): ModelMessage {
@@ -125,6 +87,7 @@ function withMessageIdentity(
     return {
         ...(message as object),
         id: buildEntryMessageId(entry, absoluteIndex),
+        sourceRecordId: entry.id,
         ...(entry.eventId ? { eventId: entry.eventId } : {}),
     } as AddressableModelMessage;
 }
@@ -157,7 +120,7 @@ function createSyntheticMessageWithId(
  * between the agent's own messages and messages from others.
  */
 function deriveRole(
-    entry: ConversationEntry,
+    entry: ConversationRecord,
     viewingAgentPubkey: string
 ): "user" | "assistant" | "tool" | "system" {
     // Explicit role override for synthetic entries (e.g., compressed summaries)
@@ -217,7 +180,7 @@ async function resolveDisplayName(pubkey: string): Promise<string> {
  * @returns The prefix string to prepend, or empty string for no prefix
  */
 export function computeAttributionPrefix(
-    entry: ConversationEntry,
+    entry: ConversationRecord,
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
     resolveDisplayName?: (pubkey: string) => string
@@ -268,7 +231,7 @@ export function computeAttributionPrefix(
  *
  */
 async function entryToMessage(
-    entry: ConversationEntry,
+    entry: ConversationRecord,
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
@@ -285,7 +248,7 @@ async function entryToMessage(
         const imageProcessingResult = processToolResultWithImageTracking(
             entry.toolData as ToolResultPart[],
             imageTracker,
-            entry.eventId
+            entry.eventId ?? entry.id
         );
         const toolData = imageProcessingResult.processedParts;
 
@@ -342,7 +305,7 @@ async function entryToMessage(
  */
 async function expandDelegationMarker(
     marker: DelegationMarker,
-    delegationMessages: ConversationEntry[] | undefined
+    delegationMessages: ConversationRecord[] | undefined
 ): Promise<ModelMessage> {
     // Handle pending delegations - show that work is in progress
     if (marker.status === "pending") {
@@ -451,7 +414,7 @@ async function formatNestedDelegationMarker(
  * that validation passes even when messages arrive out of order.
  */
 export async function buildMessagesFromEntries(
-    entries: ConversationEntry[],
+    entries: ConversationRecord[],
     ctx: MessageBuilderContext
 ): Promise<ModelMessage[]> {
     const {
@@ -472,7 +435,7 @@ export async function buildMessagesFromEntries(
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
-    const getDelegationCompletionRal = (entry: ConversationEntry): number | undefined => {
+    const getDelegationCompletionRal = (entry: ConversationRecord): number | undefined => {
         if (entry.messageType !== "text") return undefined;
         if (typeof entry.ral !== "number") return undefined;
         if (!entry.content.trimStart().startsWith(delegationCompletionPrefix)) return undefined;
@@ -549,7 +512,7 @@ export async function buildMessagesFromEntries(
 
     // Messages deferred because they arrived while tool-calls were pending
     const deferredMessages: Array<{
-        entry: ConversationEntry;
+        entry: ConversationRecord;
         enableMultimodal: boolean;
         absoluteIndex: number;
     }> = [];
@@ -687,6 +650,7 @@ export async function buildMessagesFromEntries(
                     // (self-delegation), deriveRole() would incorrectly produce "assistant" role.
                     deferredMessages.push({
                         entry: {
+                            id: entry.id,
                             pubkey: marker.recipientPubkey,
                             role: "user",
                             content: expandedMessage.content as string,
@@ -719,6 +683,7 @@ export async function buildMessagesFromEntries(
                 if (pendingToolCalls.size > 0) {
                     deferredMessages.push({
                         entry: {
+                            id: entry.id,
                             pubkey: marker.recipientPubkey,
                             role: "user",
                             content: nestedMarkerMessage.content as string,

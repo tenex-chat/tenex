@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdir, rm, readFile } from "fs/promises";
+import { mkdir, rm, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import {
@@ -109,6 +109,84 @@ describe("ConversationStore", () => {
             const messages = store2.getAllMessages();
             expect(messages).toHaveLength(1);
             expect(messages[0].pubkey).toBe(USER_PUBKEY);
+        });
+
+        it("backfills canonical record ids for legacy stored messages", async () => {
+            const conversationsDir = join(TEST_DIR, PROJECT_ID, "conversations");
+            await mkdir(conversationsDir, { recursive: true });
+            await writeFile(
+                join(conversationsDir, `${CONVERSATION_ID}.json`),
+                JSON.stringify({
+                    activeRal: {},
+                    nextRalNumber: {},
+                    injections: [],
+                    messages: [
+                        {
+                            pubkey: USER_PUBKEY,
+                            content: "hello",
+                            messageType: "text",
+                            eventId: "evt-1",
+                        },
+                    ],
+                    metadata: {},
+                    agentTodos: {},
+                    todoNudgedAgents: [],
+                    blockedAgents: [],
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
+                }, null, 2)
+            );
+
+            store.load(PROJECT_ID, CONVERSATION_ID);
+
+            expect(store.getAllMessages()[0].id).toBe("record:evt-1");
+        });
+
+        it("reads legacy compression logs as summary spans", async () => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                content: "hello",
+                messageType: "text",
+                eventId: "evt-1",
+            });
+            store.addMessage({
+                pubkey: AGENT1_PUBKEY,
+                ral: 1,
+                content: "hi",
+                messageType: "text",
+                eventId: "evt-2",
+            });
+
+            const compressionsDir = join(TEST_DIR, PROJECT_ID, "conversations", "compressions");
+            await mkdir(compressionsDir, { recursive: true });
+            await writeFile(
+                join(compressionsDir, `${CONVERSATION_ID}.json`),
+                JSON.stringify({
+                    conversationId: CONVERSATION_ID,
+                    segments: [{
+                        fromEventId: "evt-1",
+                        toEventId: "evt-2",
+                        compressed: "legacy summary",
+                        createdAt: 123,
+                        model: "legacy-model",
+                    }],
+                    updatedAt: 123,
+                }, null, 2)
+            );
+
+            expect(store.loadSummarySpans(CONVERSATION_ID)).toEqual([{
+                startRecordId: "record:evt-1",
+                endRecordId: "record:evt-2",
+                summary: "legacy summary",
+                createdAt: 123,
+                metadata: {
+                    model: "legacy-model",
+                    legacyEventRange: {
+                        fromEventId: "evt-1",
+                        toEventId: "evt-2",
+                    },
+                },
+            }]);
         });
 
         it("should return empty state for new conversation", () => {

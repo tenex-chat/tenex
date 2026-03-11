@@ -13,7 +13,7 @@ import type { NudgeToolPermissions, NudgeData, WhitelistItem } from "@/services/
 import type { LessonComment } from "@/services/prompt-compiler";
 import type { SkillData } from "@/services/skill";
 import { config } from "@/services/ConfigService";
-import type { AddressableModelMessage } from "@/conversations/MessageBuilder";
+import type { PromptMessage } from "@/conversations/PromptBuilder";
 import { createTenexSystemReminderProviderOptions } from "@/llm/middleware/system-reminders";
 import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -21,8 +21,8 @@ import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
 import type { LLMService } from "@/llm/service";
-import { createCompressionService } from "@/services/compression/CompressionService.js";
-import { applyTenexContextCompression } from "@/services/compression/context-compression";
+import { HistorySummaryService } from "@/services/history-summary/HistorySummaryService";
+import { PromptPruningService } from "@/services/prompt-pruning/PromptPruningService";
 import { logger } from "@/utils/logger";
 
 const tracer = trace.getTracer("tenex.message-compiler");
@@ -101,16 +101,27 @@ export interface CompiledMessages {
 export class MessageCompiler {
     private readonly plan: MessageCompilationPlan;
     private currentCursor: number;
+    private readonly historySummaryService: HistorySummaryService;
+    private readonly promptPruningService: PromptPruningService;
 
     constructor(
         private providerId: string,
         private sessionManager: SessionManager,
         private conversationStore: ConversationStore,
-        private llmService?: LLMService,
-        private compressionLlmService?: LLMService
+        llmService?: LLMService,
+        compressionLlmService?: LLMService
     ) {
         this.plan = this.buildPlan();
         this.currentCursor = this.plan.cursor ?? -1;
+        this.historySummaryService = new HistorySummaryService(
+            conversationStore,
+            llmService,
+            compressionLlmService
+        );
+        this.promptPruningService = new PromptPruningService(
+            conversationStore,
+            conversationStore.getId()
+        );
     }
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
@@ -156,19 +167,26 @@ export class MessageCompiler {
                 }
 
                 const cursor = this.currentCursor;
+                const session = this.sessionManager.getSession();
+                const compressionConfig = this.getCompressionConfig();
+                const preservedTailCount = this.mapPreservedTailCount(compressionConfig.slidingWindowSize);
                 const messages: ModelMessage[] = [];
                 let providerOptions: ProviderOptions | undefined;
                 let systemPromptCount = 0;
                 const dynamicContextCount = 0;
+                let finalPromptTokenEstimate: number | undefined;
 
                 if (this.plan.mode === "full") {
-                    const compressionConfig = this.getCompressionConfig();
+                    if (compressionConfig.enabled) {
+                        await this.historySummaryService.ensureUnderLimit(context.conversation.id, {
+                            tokenThreshold: compressionConfig.tokenThreshold,
+                            tokenBudget: compressionConfig.tokenBudget,
+                            preservedTailCount,
+                        });
+                    }
 
                     // Build system prompt messages (sub-span removed - parent compile span is sufficient)
                     const systemPromptMessages = await buildSystemPromptMessages(context);
-
-                    // Apply compression: load existing segments and apply to conversation history
-                    await this.applyCompression(context);
 
                     // Build raw conversation history; compression is applied explicitly below.
                     const conversationMessages = await this.conversationStore.buildMessagesForRal(
@@ -178,7 +196,7 @@ export class MessageCompiler {
                             applyPersistedCompression: false,
                             includeMessageIds: true,
                         }
-                    ) as AddressableModelMessage[];
+                    ) as PromptMessage[];
 
                     // Build dynamic context content (todo state, response context)
                     const dynamicContextContent = await this.buildDynamicContextContent(context);
@@ -186,7 +204,7 @@ export class MessageCompiler {
                     const systemMessages = systemPromptMessages.map((sm, index) => ({
                         ...sm.message,
                         id: `system:${index}`,
-                    })) as AddressableModelMessage[];
+                    })) as PromptMessage[];
 
                     // Inject meta model system prompts if present
                     // These describe available model variants and variant-specific instructions
@@ -195,7 +213,7 @@ export class MessageCompiler {
                             id: "system:meta-model",
                             role: "system",
                             content: context.metaModelSystemPrompt,
-                        } as AddressableModelMessage);
+                        } as PromptMessage);
                         systemPromptCount++;
                     }
                     if (context.variantSystemPrompt) {
@@ -203,21 +221,27 @@ export class MessageCompiler {
                             id: "system:variant",
                             role: "system",
                             content: context.variantSystemPrompt,
-                        } as AddressableModelMessage);
+                        } as PromptMessage);
                         systemPromptCount++;
                     }
 
-                    const preprocessedMessages = compressionConfig.enabled
-                        ? await applyTenexContextCompression({
+                    const preprocessedPrompt = compressionConfig.enabled
+                        ? await this.promptPruningService.prune({
                             messages: [...systemMessages, ...conversationMessages],
-                            conversationStore: this.conversationStore,
-                            conversationId: context.conversation.id,
                             maxTokens: compressionConfig.tokenBudget,
-                            slidingWindowSize: compressionConfig.slidingWindowSize,
+                            preservedTailCount,
+                            applyStoredSummarySpans: true,
                         })
-                        : [...systemMessages, ...conversationMessages];
+                        : undefined;
 
-                    messages.push(...preprocessedMessages);
+                    messages.push(
+                        ...(
+                            compressionConfig.enabled
+                                ? preprocessedPrompt!.messages
+                                : [...systemMessages, ...conversationMessages]
+                        )
+                    );
+                    finalPromptTokenEstimate = preprocessedPrompt?.stats.finalTokenEstimate;
 
                     providerOptions = this.buildSystemReminderProviderOptions(
                         dynamicContextContent,
@@ -240,8 +264,20 @@ export class MessageCompiler {
                             applyPersistedCompression: false,
                             includeMessageIds: true,
                         }
-                    );
-                    messages.push(...conversationMessages);
+                    ) as PromptMessage[];
+
+                    const deltaPrompt = compressionConfig.enabled
+                        ? await this.promptPruningService.prune({
+                            messages: conversationMessages,
+                            maxTokens: compressionConfig.tokenBudget,
+                            preservedTailCount,
+                            priorContextTokens: session.priorContextTokens,
+                            applyStoredSummarySpans: false,
+                        })
+                        : undefined;
+
+                    messages.push(...(compressionConfig.enabled ? deltaPrompt!.messages : conversationMessages));
+                    finalPromptTokenEstimate = deltaPrompt?.stats.finalTokenEstimate;
 
                     // Build dynamic context for delta mode (todo state, response context)
                     const dynamicContextContent = await this.buildDynamicContextContent(context);
@@ -251,6 +287,8 @@ export class MessageCompiler {
                         context.ephemeralMessages
                     );
                 }
+
+                this.updatePriorContextTokens(finalPromptTokenEstimate, session.priorContextTokens);
 
                 const conversationCount = this.plan.mode === "full"
                     ? messages.length - systemPromptCount - dynamicContextCount
@@ -298,6 +336,19 @@ export class MessageCompiler {
         const messageCount = this.conversationStore.getMessageCount();
         const cursorToSave = messageCount - 1;
         this.sessionManager.saveLastSentMessageIndex(cursorToSave);
+    }
+
+    maybeSummarizeAsync(): void {
+        const compressionConfig = this.getCompressionConfig();
+        if (!compressionConfig.enabled) {
+            return;
+        }
+
+        this.historySummaryService.maybeSummarizeAsync(this.conversationStore.getId(), {
+            tokenThreshold: compressionConfig.tokenThreshold,
+            tokenBudget: compressionConfig.tokenBudget,
+            preservedTailCount: this.mapPreservedTailCount(compressionConfig.slidingWindowSize),
+        });
     }
 
     private buildPlan(): MessageCompilationPlan {
@@ -402,44 +453,6 @@ export class MessageCompiler {
         });
     }
 
-    /**
-     * Apply reactive compression if needed.
-     * This ensures conversation history fits within the token budget.
-     */
-    private async applyCompression(context: MessageCompilerContext): Promise<void> {
-        // Skip compression if LLMService not available
-        const llmService = this.llmService;
-        if (!llmService) {
-            return;
-        }
-
-        const compressionService = createCompressionService(
-            this.conversationStore,
-            llmService,
-            this.compressionLlmService
-        );
-        const compressionConfig = this.getCompressionConfig();
-        if (!compressionConfig.enabled) {
-            return;
-        }
-
-        // Apply reactive compression (sub-span removed - CompressionService has its own span when work is done)
-        try {
-            const tokenBudget = compressionConfig.tokenBudget;
-            await compressionService.ensureUnderLimit(
-                context.conversation.id,
-                tokenBudget
-            );
-        } catch (error) {
-            // Non-critical - log and continue without compression
-            logger.warn("Reactive compression failed", {
-                conversationId: context.conversation.id,
-                ralNumber: context.ralNumber,
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }
-
     private getCompressionConfig(): {
         enabled: boolean;
         tokenThreshold: number;
@@ -460,5 +473,29 @@ export class MessageCompiler {
             tokenBudget: cfg?.compression?.tokenBudget ?? 40000,
             slidingWindowSize: cfg?.compression?.slidingWindowSize ?? 50,
         };
+    }
+
+    private mapPreservedTailCount(slidingWindowSize: number): number {
+        return Math.max(4, Math.min(12, slidingWindowSize));
+    }
+
+    private updatePriorContextTokens(
+        finalPromptTokenEstimate: number | undefined,
+        previousPriorContextTokens: number | undefined
+    ): void {
+        const sessionCapabilities = this.getProviderCapabilities();
+        const isStateful = sessionCapabilities?.sessionResumption === true;
+
+        if (!isStateful || finalPromptTokenEstimate === undefined) {
+            return;
+        }
+
+        if (this.plan.mode === "full") {
+            this.sessionManager.savePriorContextTokens(finalPromptTokenEstimate);
+            return;
+        }
+
+        const nextPriorContextTokens = (previousPriorContextTokens ?? 0) + finalPromptTokenEstimate;
+        this.sessionManager.savePriorContextTokens(nextPriorContextTokens);
     }
 }
