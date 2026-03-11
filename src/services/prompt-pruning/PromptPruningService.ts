@@ -1,6 +1,7 @@
 import { defaultToolPolicy, prunePrompt } from "ai-sdk-context-management";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
+import { beforeToolCompression } from "./before-tool-compression";
 
 export interface PromptPruningConfig {
     messages: PromptMessage[];
@@ -40,6 +41,7 @@ export class PromptPruningService {
                     load: (key) => this.conversationStore.loadSummarySpans(key),
                 },
             promptToolPolicy: defaultToolPolicy,
+            beforeToolCompression,
             retrievalToolName: "fs_read",
             retrievalToolArgName: "tool",
         });
