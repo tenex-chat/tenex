@@ -1,84 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
-import { isAbsolute, relative, resolve, normalize } from "node:path";
+import { createFsTools, type FsToolName, type FsToolSet } from "ai-sdk-fs-tools";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { ExecutionEnvironment } from "@/tools/types";
-const actualAgentHome = await import("@/lib/agent-home");
 
-// Mock the agent home directory functions BEFORE importing the tool
-// Uses cross-platform path.relative approach matching the real implementation
 const TEST_HOME_BASE = "/tmp/tenex/home";
 const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
 
-// Helper for path normalization (matches the real implementation using path.relative)
-const normalizePath = (inputPath: string) => normalize(resolve(inputPath));
-const isPathWithin = (checkPath: string, directory: string) => {
-    const normalizedPath = normalizePath(checkPath);
-    const normalizedDir = normalizePath(directory);
-    const relativePath = relative(normalizedDir, normalizedPath);
-    return !relativePath.startsWith("..") && !isAbsolute(relativePath);
-};
-
-mock.module("@/lib/agent-home", () => ({
-    ...actualAgentHome,
-    getAgentHomeDirectory: getTestAgentHomeDir,
-    isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
-        const homeDir = getTestAgentHomeDir(agentPubkey);
-        return isPathWithin(inputPath, homeDir);
-    },
-    isPathWithinDirectory: isPathWithin,
-    normalizePath,
-    ensureAgentHomeDirectory: () => true,
-}));
-
-// Create a mock LocalReportStore that uses current env at check time
-class MockLocalReportStore {
-    getReportsDir(): string {
-        const basePath = process.env.TENEX_BASE_DIR || "/tmp/tenex-default";
-        return path.join(basePath, "reports");
-    }
-
-    isPathInReportsDir(inputPath: string): boolean {
-        const normalizedPath = inputPath.replace(/\\/g, "/");
-        const normalizedReportsDir = this.getReportsDir().replace(/\\/g, "/");
-        return normalizedPath.startsWith(normalizedReportsDir + "/") ||
-               normalizedPath === normalizedReportsDir;
-    }
+function createTestFsTools(workingDirectory: string, agentPubkey: string, reportsDir?: string): FsToolSet {
+    return createFsTools({
+        workingDirectory,
+        allowedRoots: [getTestAgentHomeDir(agentPubkey)],
+        agentsMd: false,
+        formatOutsideRootsError: (p, wd) =>
+            `Path "${p}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
+        beforeExecute: reportsDir
+            ? (toolName: FsToolName, input: Record<string, unknown>) => {
+                const p = input.path as string | undefined;
+                if (p && (toolName === "fs_write" || toolName === "fs_edit")) {
+                    if (p.startsWith(reportsDir + "/") || p === reportsDir) {
+                        throw new Error(
+                            `Cannot write to reports directory directly. Path "${p}" is within the protected reports directory. Use the report_write tool instead.`
+                        );
+                    }
+                }
+            }
+            : undefined,
+    });
 }
-
-const mockStoreInstance = new MockLocalReportStore();
-
-mock.module("@/services/reports", () => ({
-    getLocalReportStore: () => mockStoreInstance,
-    LocalReportStore: MockLocalReportStore,
-    InvalidSlugError: class InvalidSlugError extends Error {
-        constructor(slug: string, reason: string) {
-            super(`Invalid report slug "${slug}": ${reason}`);
-            this.name = "InvalidSlugError";
-        }
-    },
-}));
-
-// Dynamic import after mock setup
-const { createFsWriteTool } = await import("../fs_write");
 
 describe("fs_write tool", () => {
     let testDir: string;
-    let context: ExecutionEnvironment;
-    let writeTool: ReturnType<typeof createFsWriteTool>;
+    const agentPubkey = "pubkey123";
+    let tools: FsToolSet;
 
     beforeEach(async () => {
         testDir = await createTempDir();
-
-        context = {
-            workingDirectory: testDir,
-            conversationId: "test-conv-123",
-            phase: "EXECUTE",
-            agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-        } as ExecutionEnvironment;
-
-        writeTool = createFsWriteTool(context);
+        tools = createTestFsTools(testDir, agentPubkey);
     });
 
     afterEach(async () => {
@@ -87,20 +45,25 @@ describe("fs_write tool", () => {
 
     describe("absolute path requirement", () => {
         it("should reject relative paths", async () => {
-            await expect(
-                writeTool.execute({
-                    path: "test.txt",
-                    content: "content",
-                })
-            ).rejects.toThrow("Path must be absolute");
+            const result = await tools.fs_write.execute({
+                path: "test.txt",
+                content: "content",
+                description: "test write",
+            });
+
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("Path must be absolute"),
+            });
         });
 
         it("should accept absolute paths", async () => {
             const filePath = path.join(testDir, "test.txt");
 
-            const result = await writeTool.execute({
+            const result = await tools.fs_write.execute({
                 path: filePath,
                 content: "new content",
+                description: "test write",
             });
 
             expect(result).toContain("Successfully wrote");
@@ -114,13 +77,16 @@ describe("fs_write tool", () => {
             const outsideFile = path.join(outsideDir, "outside.txt");
 
             try {
-                const result = await writeTool.execute({
+                const result = await tools.fs_write.execute({
                     path: outsideFile,
                     content: "malicious content",
+                    description: "test write",
                 });
 
-                expect(result).toContain("outside your working directory");
-                expect(result).toContain("allowOutsideWorkingDirectory: true");
+                expect(result).toEqual({
+                    type: "error-text",
+                    text: expect.stringContaining("outside your working directory"),
+                });
             } finally {
                 await cleanupTempDir(outsideDir);
             }
@@ -131,10 +97,11 @@ describe("fs_write tool", () => {
             const outsideFile = path.join(outsideDir, "outside.txt");
 
             try {
-                const result = await writeTool.execute({
+                const result = await tools.fs_write.execute({
                     path: outsideFile,
                     content: "allowed content",
                     allowOutsideWorkingDirectory: true,
+                    description: "test write",
                 });
 
                 expect(result).toContain("Successfully wrote");
@@ -147,9 +114,10 @@ describe("fs_write tool", () => {
         it("should allow writing within working directory without flag", async () => {
             const filePath = path.join(testDir, "inside.txt");
 
-            const result = await writeTool.execute({
+            const result = await tools.fs_write.execute({
                 path: filePath,
                 content: "inside content",
+                description: "test write",
             });
 
             expect(result).toContain("Successfully wrote");
@@ -162,28 +130,31 @@ describe("fs_write tool", () => {
             const outsideFile = path.join(similarDir, "sneaky.txt");
 
             try {
-                const result = await writeTool.execute({
+                const result = await tools.fs_write.execute({
                     path: outsideFile,
                     content: "sneaky content",
+                    description: "test write",
                 });
 
-                expect(result).toContain("outside your working directory");
+                expect(result).toEqual({
+                    type: "error-text",
+                    text: expect.stringContaining("outside your working directory"),
+                });
             } finally {
                 await cleanupTempDir(similarDir);
             }
         });
 
         it("should allow writing inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
-            // Use the shared getTestAgentHomeDir function for consistent path derivation
-            const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
+            const agentHomeDir = getTestAgentHomeDir(agentPubkey);
             mkdirSync(agentHomeDir, { recursive: true });
             const homeFile = path.join(agentHomeDir, "notes.txt");
 
             try {
-                const result = await writeTool.execute({
+                const result = await tools.fs_write.execute({
                     path: homeFile,
                     content: "my private notes",
-                    // NOTE: No allowOutsideWorkingDirectory flag!
+                    description: "test write",
                 });
 
                 expect(result).toContain("Successfully wrote");
@@ -198,9 +169,10 @@ describe("fs_write tool", () => {
         it("should create parent directories automatically", async () => {
             const filePath = path.join(testDir, "a", "b", "c", "deep.txt");
 
-            const result = await writeTool.execute({
+            const result = await tools.fs_write.execute({
                 path: filePath,
                 content: "deep content",
+                description: "test write",
             });
 
             expect(result).toContain("Successfully wrote");
@@ -211,9 +183,10 @@ describe("fs_write tool", () => {
             const filePath = path.join(testDir, "existing.txt");
             writeFileSync(filePath, "old content");
 
-            const result = await writeTool.execute({
+            const result = await tools.fs_write.execute({
                 path: filePath,
                 content: "new content",
+                description: "test write",
             });
 
             expect(result).toContain("Successfully wrote");
@@ -223,9 +196,10 @@ describe("fs_write tool", () => {
         it("should handle unicode content", async () => {
             const filePath = path.join(testDir, "unicode.txt");
 
-            const result = await writeTool.execute({
+            const result = await tools.fs_write.execute({
                 path: filePath,
                 content: "Hello 世界 🌍",
+                description: "test write",
             });
 
             expect(result).toContain("Successfully wrote");
@@ -235,24 +209,22 @@ describe("fs_write tool", () => {
 
     describe("error handling", () => {
         it("should return error-text for permission denied errors", async () => {
-            // Create a read-only directory
             const readOnlyDir = path.join(testDir, "readonly");
-            mkdirSync(readOnlyDir, { mode: 0o555 }); // r-xr-xr-x
+            mkdirSync(readOnlyDir, { mode: 0o555 });
 
             try {
                 const filePath = path.join(readOnlyDir, "test.txt");
-                const result = await writeTool.execute({
+                const result = await tools.fs_write.execute({
                     path: filePath,
                     content: "test content",
+                    description: "test write",
                 });
 
-                // Should return error-text object, not throw
                 expect(result).toEqual({
                     type: "error-text",
                     text: expect.stringMatching(/Permission denied|Access denied/),
                 });
             } finally {
-                // Restore permissions for cleanup
                 const fs = await import("node:fs");
                 fs.chmodSync(readOnlyDir, 0o755);
             }
@@ -261,74 +233,60 @@ describe("fs_write tool", () => {
 
     describe("reports directory protection", () => {
         it("should block writes to the reports directory", async () => {
-            // Mock the TENEX_BASE_DIR to control the reports directory location
-            const originalEnv = process.env.TENEX_BASE_DIR;
-            process.env.TENEX_BASE_DIR = testDir;
+            const reportsDir = path.join(testDir, "reports");
+            mkdirSync(reportsDir, { recursive: true });
+            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
+            const reportsFile = path.join(reportsDir, "my-report.md");
 
-            try {
-                const reportsFile = path.join(testDir, "reports", "my-report.md");
+            const result = await protectedTools.fs_write.execute({
+                path: reportsFile,
+                content: "Trying to bypass report_write",
+                allowOutsideWorkingDirectory: true,
+                description: "test write",
+            });
 
-                await expect(
-                    writeTool.execute({
-                        path: reportsFile,
-                        content: "Trying to bypass report_write",
-                        allowOutsideWorkingDirectory: true,
-                    })
-                ).rejects.toThrow("Cannot write to reports directory directly");
-            } finally {
-                // Restore original env
-                if (originalEnv !== undefined) {
-                    process.env.TENEX_BASE_DIR = originalEnv;
-                } else {
-                    delete process.env.TENEX_BASE_DIR;
-                }
-            }
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("Cannot write to reports directory directly"),
+            });
         });
 
         it("should block writes to subdirectories within reports", async () => {
-            const originalEnv = process.env.TENEX_BASE_DIR;
-            process.env.TENEX_BASE_DIR = testDir;
+            const reportsDir = path.join(testDir, "reports");
+            mkdirSync(reportsDir, { recursive: true });
+            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
+            const nestedReportsFile = path.join(reportsDir, "subdir", "deep-report.md");
 
-            try {
-                const nestedReportsFile = path.join(testDir, "reports", "subdir", "deep-report.md");
+            const result = await protectedTools.fs_write.execute({
+                path: nestedReportsFile,
+                content: "Nested bypass attempt",
+                allowOutsideWorkingDirectory: true,
+                description: "test write",
+            });
 
-                await expect(
-                    writeTool.execute({
-                        path: nestedReportsFile,
-                        content: "Nested bypass attempt",
-                        allowOutsideWorkingDirectory: true,
-                    })
-                ).rejects.toThrow("Cannot write to reports directory directly");
-            } finally {
-                if (originalEnv !== undefined) {
-                    process.env.TENEX_BASE_DIR = originalEnv;
-                } else {
-                    delete process.env.TENEX_BASE_DIR;
-                }
-            }
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("Cannot write to reports directory directly"),
+            });
         });
 
         it("should include helpful error message pointing to report_write", async () => {
-            const originalEnv = process.env.TENEX_BASE_DIR;
-            process.env.TENEX_BASE_DIR = testDir;
+            const reportsDir = path.join(testDir, "reports");
+            mkdirSync(reportsDir, { recursive: true });
+            const protectedTools = createTestFsTools(testDir, agentPubkey, reportsDir);
+            const reportsFile = path.join(reportsDir, "test.md");
 
-            try {
-                const reportsFile = path.join(testDir, "reports", "test.md");
+            const result = await protectedTools.fs_write.execute({
+                path: reportsFile,
+                content: "test",
+                allowOutsideWorkingDirectory: true,
+                description: "test write",
+            });
 
-                await expect(
-                    writeTool.execute({
-                        path: reportsFile,
-                        content: "test",
-                        allowOutsideWorkingDirectory: true,
-                    })
-                ).rejects.toThrow("report_write");
-            } finally {
-                if (originalEnv !== undefined) {
-                    process.env.TENEX_BASE_DIR = originalEnv;
-                } else {
-                    delete process.env.TENEX_BASE_DIR;
-                }
-            }
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("report_write"),
+            });
         });
     });
 });

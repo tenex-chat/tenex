@@ -2,55 +2,30 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { isAbsolute, relative, resolve, normalize } from "node:path";
+import { createFsTools, type FsToolSet } from "ai-sdk-fs-tools";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { ExecutionEnvironment } from "@/tools/types";
-const actualAgentHome = await import("@/lib/agent-home");
 
-// Mock the agent home directory functions BEFORE importing the tool
-// Uses cross-platform path.relative approach matching the real implementation
 const TEST_HOME_BASE = "/tmp/tenex/home";
 const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
 
-// Helper for path normalization (matches the real implementation using path.relative)
-const normalizePath = (inputPath: string) => normalize(resolve(inputPath));
-const isPathWithin = (checkPath: string, directory: string) => {
-    const normalizedPath = normalizePath(checkPath);
-    const normalizedDir = normalizePath(directory);
-    const relativePath = relative(normalizedDir, normalizedPath);
-    return !relativePath.startsWith("..") && !isAbsolute(relativePath);
-};
-
-mock.module("@/lib/agent-home", () => ({
-    ...actualAgentHome,
-    getAgentHomeDirectory: getTestAgentHomeDir,
-    isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
-        const homeDir = getTestAgentHomeDir(agentPubkey);
-        return isPathWithin(inputPath, homeDir);
-    },
-    isPathWithinDirectory: isPathWithin,
-    normalizePath,
-    ensureAgentHomeDirectory: () => true,
-}));
-
-// Dynamic import after mock setup
-const { createFsReadTool } = await import("../fs_read");
+function createTestFsTools(workingDirectory: string, agentPubkey: string): FsToolSet {
+    return createFsTools({
+        workingDirectory,
+        allowedRoots: [getTestAgentHomeDir(agentPubkey)],
+        agentsMd: false,
+        formatOutsideRootsError: (p, wd) =>
+            `Path "${p}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
+    });
+}
 
 describe("fs_read tool", () => {
     let testDir: string;
-    let context: ExecutionEnvironment;
-    let readTool: ReturnType<typeof createFsReadTool>;
+    const agentPubkey = "pubkey123";
+    let tools: FsToolSet;
 
     beforeEach(async () => {
         testDir = await createTempDir();
-
-        context = {
-            workingDirectory: testDir,
-            conversationId: "test-conv-123",
-            phase: "EXECUTE",
-            agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-        } as ExecutionEnvironment;
-
-        readTool = createFsReadTool(context);
+        tools = createTestFsTools(testDir, agentPubkey);
     });
 
     afterEach(async () => {
@@ -61,19 +36,22 @@ describe("fs_read tool", () => {
         it("should reject relative paths", async () => {
             writeFileSync(path.join(testDir, "test.txt"), "content");
 
-            await expect(
-                readTool.execute({
-                    path: "test.txt",
-                    description: "test read",
-                })
-            ).rejects.toThrow("Path must be absolute");
+            const result = await tools.fs_read.execute({
+                path: "test.txt",
+                description: "test read",
+            });
+
+            expect(result).toEqual({
+                type: "error-text",
+                text: expect.stringContaining("Path must be absolute"),
+            });
         });
 
         it("should accept absolute paths", async () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "file content here");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: filePath,
                 description: "test read",
             });
@@ -89,13 +67,15 @@ describe("fs_read tool", () => {
             writeFileSync(outsideFile, "secret content");
 
             try {
-                const result = await readTool.execute({
+                const result = await tools.fs_read.execute({
                     path: outsideFile,
                     description: "test read",
                 });
 
-                expect(result).toContain("outside your working directory");
-                expect(result).toContain("allowOutsideWorkingDirectory: true");
+                expect(result).toEqual({
+                    type: "error-text",
+                    text: expect.stringContaining("outside your working directory"),
+                });
             } finally {
                 await cleanupTempDir(outsideDir);
             }
@@ -107,7 +87,7 @@ describe("fs_read tool", () => {
             writeFileSync(outsideFile, "allowed content");
 
             try {
-                const result = await readTool.execute({
+                const result = await tools.fs_read.execute({
                     path: outsideFile,
                     description: "test read",
                     allowOutsideWorkingDirectory: true,
@@ -123,7 +103,7 @@ describe("fs_read tool", () => {
             const filePath = path.join(testDir, "inside.txt");
             writeFileSync(filePath, "inside content");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: filePath,
                 description: "test read",
             });
@@ -138,33 +118,33 @@ describe("fs_read tool", () => {
             writeFileSync(outsideFile, "sneaky content");
 
             try {
-                const result = await readTool.execute({
+                const result = await tools.fs_read.execute({
                     path: outsideFile,
                     description: "test read",
                 });
 
-                expect(result).toContain("outside your working directory");
+                expect(result).toEqual({
+                    type: "error-text",
+                    text: expect.stringContaining("outside your working directory"),
+                });
             } finally {
                 await cleanupTempDir(similarDir);
             }
         });
 
         it("should allow reading inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
-            // Use the shared getTestAgentHomeDir function for consistent path derivation
-            const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
+            const agentHomeDir = getTestAgentHomeDir(agentPubkey);
             mkdirSync(agentHomeDir, { recursive: true });
             const homeFile = path.join(agentHomeDir, "notes.txt");
             writeFileSync(homeFile, "my private notes");
 
             try {
-                const result = await readTool.execute({
+                const result = await tools.fs_read.execute({
                     path: homeFile,
                     description: "reading notes",
-                    // NOTE: No allowOutsideWorkingDirectory flag!
                 });
 
                 expect(result).toContain("my private notes");
-                expect(result).not.toContain("outside your working directory");
             } finally {
                 await cleanupTempDir(agentHomeDir);
             }
@@ -176,7 +156,7 @@ describe("fs_read tool", () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "line 1\nline 2\nline 3");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: filePath,
                 description: "test read",
             });
@@ -190,7 +170,7 @@ describe("fs_read tool", () => {
             writeFileSync(path.join(testDir, "file1.txt"), "content");
             writeFileSync(path.join(testDir, "file2.txt"), "content");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: testDir,
                 description: "list dir",
             });
@@ -204,7 +184,7 @@ describe("fs_read tool", () => {
             const filePath = path.join(testDir, "test.txt");
             writeFileSync(filePath, "line 1\nline 2\nline 3\nline 4\nline 5");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: filePath,
                 description: "test read",
                 offset: 2,
@@ -222,32 +202,26 @@ describe("fs_read tool", () => {
         it("should return error-text object for non-existent file (ENOENT)", async () => {
             const nonExistentPath = path.join(testDir, "does-not-exist.txt");
 
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: nonExistentPath,
                 description: "test read non-existent",
             });
 
-            // Should return error-text object, not throw
             expect(result).toEqual({
                 type: "error-text",
                 text: expect.stringContaining("File or directory not found"),
             });
         });
 
-        it("should return error-text object for EISDIR when reading directory as file", async () => {
-            // This test verifies the pattern works - directories get handled specially
-            // but if there was an EISDIR error scenario, it would return error-text
+        it("should return directory listing for directory path", async () => {
             const dirPath = path.join(testDir, "subdir");
             mkdirSync(dirPath, { recursive: true });
 
-            // fs_read handles directories specially, listing them instead of throwing
-            // This test verifies that case works (it's actually a success case)
-            const result = await readTool.execute({
+            const result = await tools.fs_read.execute({
                 path: dirPath,
                 description: "test read directory",
             });
 
-            // Should return directory listing, not an error
             expect(result).toContain("Directory listing");
         });
     });

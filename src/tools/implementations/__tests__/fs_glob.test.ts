@@ -1,56 +1,34 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
-import { isAbsolute, relative, resolve, normalize } from "node:path";
+import { createFsTools, type FsToolSet } from "ai-sdk-fs-tools";
 import { cleanupTempDir, createTempDir } from "@/test-utils";
-import type { ExecutionEnvironment } from "@/tools/types";
-const actualAgentHome = await import("@/lib/agent-home");
 
-// Mock the agent home directory functions BEFORE importing the tool
-// Uses cross-platform path.relative approach matching the real implementation
 const TEST_HOME_BASE = "/tmp/tenex/home";
 const getTestAgentHomeDir = (pubkey: string) => `${TEST_HOME_BASE}/${pubkey.slice(0, 8)}`;
 
-// Helper for path normalization (matches the real implementation using path.relative)
-const normalizePath = (inputPath: string) => normalize(resolve(inputPath));
-const isPathWithin = (checkPath: string, directory: string) => {
-    const normalizedPath = normalizePath(checkPath);
-    const normalizedDir = normalizePath(directory);
-    const relativePath = relative(normalizedDir, normalizedPath);
-    return !relativePath.startsWith("..") && !isAbsolute(relativePath);
-};
+function createTestFsTools(workingDirectory: string, agentPubkey: string): FsToolSet {
+    return createFsTools({
+        workingDirectory,
+        allowedRoots: [getTestAgentHomeDir(agentPubkey)],
+        agentsMd: false,
+        formatOutsideRootsError: (p, wd) =>
+            `Path "${p}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
+    });
+}
 
-mock.module("@/lib/agent-home", () => ({
-    ...actualAgentHome,
-    getAgentHomeDirectory: getTestAgentHomeDir,
-    isWithinAgentHome: (inputPath: string, agentPubkey: string) => {
-        const homeDir = getTestAgentHomeDir(agentPubkey);
-        return isPathWithin(inputPath, homeDir);
-    },
-    isPathWithinDirectory: isPathWithin,
-    normalizePath,
-    ensureAgentHomeDirectory: () => true,
-}));
-
-// Dynamic import after mock setup
-const { createFsGlobTool } = await import("../fs_glob");
+function unwrapResult(result: string | { type: string; text: string }): string {
+    return typeof result === "string" ? result : result.text;
+}
 
 describe("fs_glob tool", () => {
     let testDir: string;
-    let context: ExecutionEnvironment;
-    let globTool: ReturnType<typeof createFsGlobTool>;
+    const agentPubkey = "pubkey123";
+    let tools: FsToolSet;
 
     beforeEach(async () => {
         testDir = await createTempDir();
-
-        context = {
-            workingDirectory: testDir,
-            conversationId: "test-conv-123",
-            phase: "EXECUTE",
-            agent: { name: "TestAgent", slug: "test-agent", pubkey: "pubkey123" },
-        } as ExecutionEnvironment;
-
-        globTool = createFsGlobTool(context);
+        tools = createTestFsTools(testDir, agentPubkey);
     });
 
     afterEach(async () => {
@@ -61,25 +39,25 @@ describe("fs_glob tool", () => {
         it("should reject relative paths", async () => {
             writeFileSync(path.join(testDir, "test.txt"), "content");
 
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "*.txt",
                 description: "Test relative path rejection",
                 path: "subdir",
             });
 
-            expect(result).toContain("Path must be absolute");
+            expect(unwrapResult(result)).toContain("Path must be absolute");
         });
 
         it("should accept absolute paths", async () => {
             writeFileSync(path.join(testDir, "test.txt"), "content");
 
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "*.txt",
                 description: "Test absolute path acceptance",
                 path: testDir,
             });
 
-            expect(result).toContain("test.txt");
+            expect(unwrapResult(result)).toContain("test.txt");
         });
     });
 
@@ -89,14 +67,15 @@ describe("fs_glob tool", () => {
             writeFileSync(path.join(outsideDir, "outside.txt"), "content");
 
             try {
-                const result = await globTool.execute({
+                const result = await tools.fs_glob.execute({
                     pattern: "*.txt",
                     description: "Test outside directory blocking",
                     path: outsideDir,
                 });
 
-                expect(result).toContain("outside your working directory");
-                expect(result).toContain("allowOutsideWorkingDirectory: true");
+                const text = unwrapResult(result);
+                expect(text).toContain("outside your working directory");
+                expect(text).toContain("allowOutsideWorkingDirectory: true");
             } finally {
                 await cleanupTempDir(outsideDir);
             }
@@ -107,14 +86,14 @@ describe("fs_glob tool", () => {
             writeFileSync(path.join(outsideDir, "outside.txt"), "content");
 
             try {
-                const result = await globTool.execute({
+                const result = await tools.fs_glob.execute({
                     pattern: "*.txt",
                     description: "Test outside directory with flag",
                     path: outsideDir,
                     allowOutsideWorkingDirectory: true,
                 });
 
-                expect(result).toContain("outside.txt");
+                expect(unwrapResult(result)).toContain("outside.txt");
             } finally {
                 await cleanupTempDir(outsideDir);
             }
@@ -123,13 +102,13 @@ describe("fs_glob tool", () => {
         it("should allow globbing within working directory without flag", async () => {
             writeFileSync(path.join(testDir, "inside.txt"), "content");
 
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "*.txt",
                 description: "Test inside directory without flag",
                 path: testDir,
             });
 
-            expect(result).toContain("inside.txt");
+            expect(unwrapResult(result)).toContain("inside.txt");
         });
 
         it("should block paths that look similar but are outside", async () => {
@@ -138,67 +117,58 @@ describe("fs_glob tool", () => {
             writeFileSync(path.join(similarDir, "sneaky.txt"), "content");
 
             try {
-                const result = await globTool.execute({
+                const result = await tools.fs_glob.execute({
                     pattern: "*.txt",
                     description: "Test similar path blocking",
                     path: similarDir,
                 });
 
-                expect(result).toContain("outside your working directory");
+                expect(unwrapResult(result)).toContain("outside your working directory");
             } finally {
                 await cleanupTempDir(similarDir);
             }
         });
 
         it("should allow globbing inside agent home directory without allowOutsideWorkingDirectory flag", async () => {
-            // Use the shared getTestAgentHomeDir function for consistent path derivation
-            const agentHomeDir = getTestAgentHomeDir(context.agent.pubkey);
+            const agentHomeDir = getTestAgentHomeDir(agentPubkey);
             mkdirSync(agentHomeDir, { recursive: true });
             writeFileSync(path.join(agentHomeDir, "notes.txt"), "my notes");
             writeFileSync(path.join(agentHomeDir, "script.sh"), "echo hello");
 
             try {
-                const result = await globTool.execute({
+                const result = await tools.fs_glob.execute({
                     pattern: "*.txt",
                     description: "Test agent home directory access",
                     path: agentHomeDir,
-                    // NOTE: No allowOutsideWorkingDirectory flag!
                 });
 
-                expect(result).toContain("notes.txt");
-                expect(result).not.toContain("outside your working directory");
+                const text = unwrapResult(result);
+                expect(text).toContain("notes.txt");
+                expect(text).not.toContain("outside your working directory");
             } finally {
                 await cleanupTempDir(agentHomeDir);
             }
         });
 
         it("should block path traversal via glob pattern with ../*", async () => {
-            // Create a directory structure where traversal could escape
             const parentDir = path.dirname(testDir);
             const escapedFile = path.join(parentDir, "escaped-secret.txt");
             writeFileSync(escapedFile, "escaped content");
-
-            // Create a file inside the working dir for reference
             writeFileSync(path.join(testDir, "inside.txt"), "inside content");
 
             try {
-                const result = await globTool.execute({
+                const result = await tools.fs_glob.execute({
                     pattern: "../*",
                     description: "Test path traversal blocking",
                     path: testDir,
                 });
 
-                // The pattern should NOT match files outside the allowed directory
-                // Either it returns "No files found" or filters out the escaped files
-                expect(result).not.toContain("escaped-secret.txt");
+                expect(unwrapResult(result)).not.toContain("escaped-secret.txt");
             } finally {
-                // Cleanup - the escaped file is in a temp parent directory
                 try {
                     const fs = await import("node:fs");
                     fs.unlinkSync(escapedFile);
-                } catch {
-                    // Ignore cleanup errors
-                }
+                } catch {}
             }
         });
     });
@@ -209,25 +179,26 @@ describe("fs_glob tool", () => {
             writeFileSync(path.join(testDir, "file2.txt"), "content");
             writeFileSync(path.join(testDir, "file3.js"), "content");
 
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "*.txt",
                 description: "Find text files",
                 path: testDir,
             });
 
-            expect(result).toContain("file1.txt");
-            expect(result).toContain("file2.txt");
-            expect(result).not.toContain("file3.js");
+            const text = unwrapResult(result);
+            expect(text).toContain("file1.txt");
+            expect(text).toContain("file2.txt");
+            expect(text).not.toContain("file3.js");
         });
 
         it("should return no files message when nothing found", async () => {
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "*.nonexistent",
                 description: "Test no files found",
                 path: testDir,
             });
 
-            expect(result).toContain("No files found");
+            expect(unwrapResult(result)).toContain("No files found");
         });
 
         it("should support recursive patterns", async () => {
@@ -235,13 +206,13 @@ describe("fs_glob tool", () => {
             mkdirSync(subDir, { recursive: true });
             writeFileSync(path.join(subDir, "nested.txt"), "content");
 
-            const result = await globTool.execute({
+            const result = await tools.fs_glob.execute({
                 pattern: "**/*.txt",
                 description: "Find nested text files",
                 path: testDir,
             });
 
-            expect(result).toContain("nested.txt");
+            expect(unwrapResult(result)).toContain("nested.txt");
         });
     });
 });

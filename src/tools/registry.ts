@@ -37,11 +37,11 @@ import { createConversationSearchTool } from "./implementations/conversation_sea
 import { createDelegateTool } from "./implementations/delegate";
 import { createDelegateCrossProjectTool } from "./implementations/delegate_crossproject";
 import { createDelegateFollowupTool } from "./implementations/delegate_followup";
-import { createFsEditTool } from "./implementations/fs_edit";
-import { createFsGlobTool } from "./implementations/fs_glob";
-import { createFsGrepTool } from "./implementations/fs_grep";
-import { createFsReadTool } from "./implementations/fs_read";
-import { createFsWriteTool } from "./implementations/fs_write";
+import { createFsTools, type FsToolName } from "ai-sdk-fs-tools";
+import { getAgentHomeDirectory } from "@/lib/agent-home";
+import { getLocalReportStore } from "@/services/reports";
+import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
+import { synthesizeContent, executeReadToolResult } from "./implementations/fs-hooks";
 import { createKillTool } from "./implementations/kill";
 import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
@@ -98,6 +98,47 @@ import {
     createHomeFsReadTool,
     createHomeFsWriteTool,
 } from "./implementations/home_fs";
+
+const tenexFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
+
+function getOrCreateTenexFsTools(context: ToolExecutionContext) {
+    let tools = tenexFsToolsCache.get(context);
+    if (!tools) {
+        tools = createTenexFsToolsUncached(context);
+        tenexFsToolsCache.set(context, tools);
+    }
+    return tools;
+}
+
+function createTenexFsToolsUncached(context: ToolExecutionContext) {
+    const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
+        .filter((p): p is string => typeof p === "string" && p.trim() !== "");
+
+    const tools = createFsTools({
+        workingDirectory: context.workingDirectory,
+        allowedRoots,
+        agentsMd: { projectRoot: context.projectBasePath ?? context.workingDirectory },
+        formatOutsideRootsError: (path, wd) =>
+            `Path "${path}" is outside your working directory "${wd}". If this was intentional, retry with allowOutsideWorkingDirectory: true`,
+        beforeExecute: (toolName: FsToolName, input: Record<string, unknown>) => {
+            const path = input.path as string | undefined;
+            if (path && (toolName === "fs_write" || toolName === "fs_edit")) {
+                if (getLocalReportStore().isPathInReportsDir(path)) {
+                    throw new Error(
+                        `Cannot write to reports directory directly. Path "${path}" is within the protected reports directory. Use the report_write tool instead to create or update reports.`
+                    );
+                }
+            }
+        },
+        analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
+        loadToolResult: executeReadToolResult,
+    });
+
+    attachTranscriptArgs(tools.fs_read as AISdkTool, [{ key: "path", attribute: "file_path" }]);
+    attachTranscriptArgs(tools.fs_write as AISdkTool, [{ key: "path", attribute: "file_path" }]);
+
+    return tools;
+}
 
 /**
  * Metadata about tools that doesn't require instantiation.
@@ -164,8 +205,8 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     ask: createAskTool,
 
     // File search tools
-    fs_glob: createFsGlobTool,
-    fs_grep: createFsGrepTool,
+    fs_glob: (ctx) => getOrCreateTenexFsTools(ctx).fs_glob as AISdkTool,
+    fs_grep: (ctx) => getOrCreateTenexFsTools(ctx).fs_grep as AISdkTool,
 
     // Conversation tools
     conversation_get: createConversationGetTool,
@@ -185,9 +226,9 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     lesson_learn: createLessonLearnTool,
     lessons_list: createLessonsListTool,
 
-    fs_read: createFsReadTool,
-    fs_write: createFsWriteTool,
-    fs_edit: createFsEditTool,
+    fs_read: (ctx) => getOrCreateTenexFsTools(ctx).fs_read as AISdkTool,
+    fs_write: (ctx) => getOrCreateTenexFsTools(ctx).fs_write as AISdkTool,
+    fs_edit: (ctx) => getOrCreateTenexFsTools(ctx).fs_edit as AISdkTool,
 
     // Report tools
     report_delete: createReportDeleteTool,

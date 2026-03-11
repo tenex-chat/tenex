@@ -1,25 +1,10 @@
-import {
-    createFsReadTool as createPortableFsReadTool,
-    type FsReadInput,
-} from "ai-sdk-fs-tools";
-import type { AISdkTool, ToolExecutionContext } from "@/tools/types";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import { llmServiceFactory } from "@/llm";
 import { config } from "@/services/ConfigService";
-import { attachTranscriptArgs } from "@/tools/utils/transcript-args";
 import { logger } from "@/utils/logger";
 import { z } from "zod";
-import {
-    adaptOutsideWorkingDirectoryResult,
-    assertAbsolutePath,
-    createTenexFsToolsOptions,
-    withDescription,
-} from "./fs-tool-adapter";
 
-/**
- * Fetch and format a tool execution result by event ID
- */
-async function executeReadToolResult(eventId: string): Promise<string> {
+export async function executeReadToolResult(eventId: string): Promise<string> {
     const messages = await toolMessageStorage.load(eventId);
 
     if (!messages) {
@@ -62,10 +47,7 @@ async function executeReadToolResult(eventId: string): Promise<string> {
     return `Tool: ${toolName}\nEvent ID: ${eventId}\n\n--- Input ---\n${inputStr}\n\n--- Output ---\n${outputValue}`;
 }
 
-/**
- * Synthesize content using an LLM based on a prompt
- */
-async function synthesizeContent(content: string, prompt: string, source: string): Promise<string> {
+export async function synthesizeContent(content: string, prompt: string, source: string): Promise<string> {
     const { llms } = await config.loadConfig();
     const configName = llms.summarization || llms.default;
 
@@ -117,61 +99,11 @@ ${content}`,
         })
     );
 
-    logger.info("✅ Content synthesized with prompt", {
+    logger.info("Content synthesized with prompt", {
         source,
         promptLength: prompt.length,
         contentLength: content.length,
     });
 
     return result.explanation;
-}
-
-/**
- * Create an AI SDK tool for reading paths
- */
-export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
-    const portableTool = createPortableFsReadTool(
-        createTenexFsToolsOptions(context, {
-            agentsMd: true,
-            analyzeContent: ({ content, prompt, source }) => synthesizeContent(content, prompt, source),
-            loadToolResult: executeReadToolResult,
-        })
-    );
-    const executeBase = portableTool.execute.bind(portableTool);
-    const toolInstance = portableTool as unknown as AISdkTool<FsReadInput>;
-
-    Object.defineProperty(toolInstance, "execute", {
-        value: async (input: FsReadInput) => {
-            const normalizedInput = withDescription(input);
-
-            logger.info("Reading file or tool result", {
-                path: normalizedInput.path || undefined,
-                description: normalizedInput.description,
-                tool: normalizedInput.tool || undefined,
-                hasPrompt: !!normalizedInput.prompt,
-            });
-
-            if (normalizedInput.path) {
-                assertAbsolutePath(normalizedInput.path);
-            }
-
-            const result = await executeBase(normalizedInput);
-
-            if (normalizedInput.path) {
-                return adaptOutsideWorkingDirectoryResult(
-                    result,
-                    normalizedInput.path,
-                    context.workingDirectory
-                );
-            }
-
-            return result;
-        },
-        enumerable: true,
-        configurable: true,
-        writable: true,
-    });
-
-    attachTranscriptArgs(toolInstance as AISdkTool, [{ key: "path", attribute: "file_path" }]);
-    return toolInstance as AISdkTool;
 }
