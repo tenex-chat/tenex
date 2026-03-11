@@ -612,40 +612,5 @@ export function createKillTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ target }: KillInput) => {
-            // Use the same detection logic as resolveTargetId for consistent classification
-            const trimmed = target.trim().toLowerCase();
-
-            // Check ID format to determine type
-            // Shell task IDs are 7-char alphanumeric
-            if (isShellTaskId(trimmed)) {
-                return `Killing background task ${target}`;
-            }
-
-            // Full event IDs (64-char hex) or short prefixes (12-char hex)
-            // are conversation/agent targets
-            if (isFullEventId(trimmed) || isShortEventId(trimmed)) {
-                return `Killing agent in conversation ${trimmed.substring(0, 12)} (with cascade)`;
-            }
-
-            // NIP-19 formats (nevent, note) are also agent targets
-            const normalized = normalizeNostrIdentifier(target);
-            if (normalized && (normalized.startsWith("nevent1") || normalized.startsWith("note1"))) {
-                return `Killing agent from ${target.substring(0, 20)}... (with cascade)`;
-            }
-
-            // UUID format is shell task (legacy)
-            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(trimmed)) {
-                return `Killing background task ${target}`;
-            }
-
-            // Unknown format - let executeKill determine and error appropriately
-            return `Killing target ${target.substring(0, 12)}...`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

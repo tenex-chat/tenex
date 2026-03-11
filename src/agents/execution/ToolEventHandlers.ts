@@ -177,9 +177,7 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             event.args
         );
 
-        // Generate human-readable summary from the tool's own formatter
         const toolDef = toolsObject[event.toolName];
-        const humanReadable = toolDef?.getHumanReadableContent?.(event.args ?? {});
         const transcriptToolAttributes = buildTranscriptToolAttributes(
             event.toolName,
             event.args,
@@ -199,7 +197,6 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
                     input: event.args ?? {},
                 },
             ] as ToolCallPart[],
-            ...(humanReadable ? { humanReadable } : {}),
             ...(transcriptToolAttributes ? { transcriptToolAttributes } : {}),
         });
 
@@ -207,7 +204,6 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             args: event.args,
-            toolsObject,
             agentPublisher,
             eventContext,
             usage: event.usage,

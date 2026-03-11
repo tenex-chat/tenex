@@ -238,13 +238,5 @@ export function createWebSearchTool(_context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ query, max_results }: WebSearchInput) => {
-            return `Searching web for "${query}" (max ${max_results || 10} results)`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

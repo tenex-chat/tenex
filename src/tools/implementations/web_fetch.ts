@@ -141,13 +141,5 @@ export function createWebFetchTool(_context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ url }: WebFetchInput) => {
-            return `Fetching ${url}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

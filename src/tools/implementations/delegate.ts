@@ -299,29 +299,5 @@ Nudge support: Pass nudge event IDs in the \`nudges\` array to apply behavioral 
     },
   });
 
-  Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: (args: unknown) => {
-      if (!args || typeof args !== "object" || !("delegations" in args)) {
-        return "Delegating to agent(s)";
-      }
-
-      const { delegations } = args as DelegateInput;
-
-      if (!delegations || !Array.isArray(delegations)) {
-        return "Delegating to agent(s)";
-      }
-
-      if (delegations.length === 1) {
-        const d = delegations[0];
-        return `Delegating to ${d.recipient}`;
-      }
-
-      const recipients = delegations.map((d) => d.recipient).join(", ");
-      return `Delegating ${delegations.length} tasks to: ${recipients}`;
-    },
-    enumerable: false,
-    configurable: true,
-  });
-
   return aiTool as AISdkTool;
 }

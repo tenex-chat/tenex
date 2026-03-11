@@ -458,18 +458,6 @@ Use for: git operations, npm/build tools, docker, system commands where speciali
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ command, description, run_in_background }: ShellInput) => {
-            const prefix = run_in_background ? "Running in background: " : "Executing: ";
-            if (description) {
-                return `${prefix}${description} (${command})`;
-            }
-            return `${prefix}${command}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }
 

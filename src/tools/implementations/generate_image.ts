@@ -238,22 +238,5 @@ export function createGenerateImageTool(context: ToolExecutionContext): AISdkToo
         },
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ prompt, aspect_ratio, image_size, model }: GenerateImageInput) => {
-            const parts: string[] = [];
-            if (aspect_ratio) parts.push(aspect_ratio);
-            if (image_size) parts.push(image_size);
-            if (model) {
-                const modelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === model);
-                parts.push(modelInfo?.name || model);
-            }
-            const optionsStr = parts.length > 0 ? ` (${parts.join(", ")})` : "";
-            const promptPreview = prompt.length > 60 ? prompt.slice(0, 60) + "..." : prompt;
-            return `Generating image${optionsStr}: "${promptPreview}"`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

@@ -218,16 +218,6 @@ describe("fs_read tool", () => {
         });
     });
 
-    describe("getHumanReadableContent", () => {
-        it("should return human-readable description", () => {
-            const readable = readTool.getHumanReadableContent?.({
-                path: "/test/file.txt",
-                description: "checking config",
-            });
-            expect(readable).toBe("Reading /test/file.txt (checking config)");
-        });
-    });
-
     describe("expected error handling", () => {
         it("should return error-text object for non-existent file (ENOENT)", async () => {
             const nonExistentPath = path.join(testDir, "does-not-exist.txt");

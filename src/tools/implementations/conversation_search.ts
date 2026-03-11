@@ -346,25 +346,5 @@ export function createConversationSearchTool(context: ToolExecutionContext): AIS
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ query, mode, filters, limit }: ConversationSearchInput) => {
-            const parts = [`Searching conversations for "${query}"`];
-            const modeStr = mode || "keyword";
-            parts.push(`mode=${modeStr}`);
-            if (filters?.agents?.length) {
-                parts.push(`agents: ${filters.agents.join(", ")}`);
-            }
-            if (filters?.since || filters?.after) {
-                parts.push(`since: ${filters.since || filters.after}`);
-            }
-            if (limit && limit !== 20) {
-                parts.push(`limit: ${limit}`);
-            }
-            return parts.join(", ");
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

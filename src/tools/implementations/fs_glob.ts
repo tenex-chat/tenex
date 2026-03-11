@@ -31,14 +31,5 @@ export function createFsGlobTool(context: ToolExecutionContext): AISdkTool {
         writable: true,
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: (input: FsGlobInput) => {
-            const pathInfo = input.path ? ` in ${input.path}` : "";
-            return `Finding files matching '${input.pattern}'${pathInfo} (${input.description ?? "no description"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

@@ -187,23 +187,5 @@ When using this tool, provide context to the recipient, introduce yourself and e
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: unknown) => {
-            if (!args || typeof args !== "object") {
-                return "Delegating to cross-project agent";
-            }
-
-            const { projectId, agentSlug } = args as Partial<DelegateCrossProjectInput>;
-
-            if (!projectId || !agentSlug) {
-                return "Delegating to cross-project agent";
-            }
-
-            return `Delegating to agent '${agentSlug}' in project '${projectId}'`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

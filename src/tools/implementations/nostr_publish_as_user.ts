@@ -336,18 +336,5 @@ export function createNostrPublishAsUserTool(context: ToolExecutionContext): AIS
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ description, event }: NostrPublishAsUserInput) => {
-            try {
-                const parsed = typeof event === "string" ? JSON.parse(event) : event;
-                return `Requesting user to sign kind:${parsed.kind} event — ${description}`;
-            } catch {
-                return `Requesting user to sign event — ${description}`;
-            }
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

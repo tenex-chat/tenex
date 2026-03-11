@@ -89,16 +89,5 @@ export function createScheduleTaskTool(context: ToolExecutionContext): AISdkTool
         },
     });
 
-    // Attach getHumanReadableContent as non-enumerable property
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: { title?: string; prompt: string; schedule: string; targetAgent?: string }) => {
-            const target = args.targetAgent ? ` for ${args.targetAgent}` : "";
-            const titlePart = args.title ? `'${args.title}' ` : "";
-            return `Scheduling task ${titlePart}with cron '${args.schedule}'${target}: ${args.prompt}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

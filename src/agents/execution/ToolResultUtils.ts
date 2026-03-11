@@ -1,6 +1,3 @@
-import { formatMcpToolName } from "@/agents/tool-names";
-import type { AISdkTool } from "@/tools/types";
-
 /**
  * Error details extracted from tool results
  */
@@ -58,40 +55,4 @@ export function extractErrorDetails(result: unknown): ExtractedErrorDetails | nu
     }
 
     return null;
-}
-
-/**
- * Generate human-readable content for a tool execution
- *
- * This method attempts to generate a user-friendly description of what the tool
- * is doing by:
- * 1. Checking if the tool has a custom getHumanReadableContent method
- * 2. For MCP tools, formatting the tool name in a readable way
- * 3. Falling back to a generic "Executing <toolname>" message
- *
- * @param toolName - Name of the tool being executed
- * @param args - Arguments passed to the tool
- * @param toolsObject - Available tools that may have custom formatters
- * @returns Human-readable description of the tool execution
- */
-export function getHumanReadableContent(
-    toolName: string,
-    args: unknown,
-    toolsObject: Record<string, AISdkTool>
-): string {
-    // Check if the tool has a custom human-readable content generator
-    const tool = toolsObject[toolName];
-    const customContent = tool?.getHumanReadableContent?.(args);
-
-    if (customContent) {
-        return customContent;
-    }
-
-    // Special formatting for MCP tools
-    if (toolName.startsWith("mcp__")) {
-        return `Executing ${formatMcpToolName(toolName)}`;
-    }
-
-    // Default format
-    return `Executing ${toolName}`;
 }

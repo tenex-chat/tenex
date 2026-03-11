@@ -10,16 +10,15 @@
  * - Persistence: Stores tool messages for conversation history
  */
 
-import { isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
+import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
 import type { EventContext } from "@/nostr/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
-import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
-import { extractErrorDetails, getHumanReadableContent } from "./ToolResultUtils";
+import { extractErrorDetails } from "./ToolResultUtils";
 
 /**
  * Tools that publish addressable events and need delayed tool use event publishing.
@@ -77,8 +76,6 @@ export interface TrackExecutionOptions {
     toolName: string;
     /** Arguments passed to the tool */
     args: unknown;
-    /** Available tools for human-readable content generation */
-    toolsObject: Record<string, AISdkTool>;
     /** Publisher for Nostr events */
     agentPublisher: AgentPublisher;
     /** Context for event publishing */
@@ -128,7 +125,7 @@ export class ToolExecutionTracker {
      * @throws Will throw if Nostr event publishing fails
      */
     async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent | null> {
-        const { toolCallId, toolName, args, toolsObject, agentPublisher, eventContext, usage } = options;
+        const { toolCallId, toolName, args, agentPublisher, eventContext, usage } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {
             toolName,
@@ -152,7 +149,9 @@ export class ToolExecutionTracker {
         }
 
         // Generate human-readable content for the tool execution
-        const humanContent = getHumanReadableContent(toolName, args, toolsObject);
+        const humanContent = toolName.startsWith("mcp__")
+            ? `Executing ${formatMcpToolName(toolName)}`
+            : `Executing ${toolName}`;
 
         // Store the execution state BEFORE async operations to prevent race conditions
         const execution: TrackedExecution = {

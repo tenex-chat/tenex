@@ -172,18 +172,6 @@ export function createFsReadTool(context: ToolExecutionContext): AISdkTool {
         writable: true,
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description, tool: toolEventId, prompt }: FsReadInput) => {
-            const action = prompt ? "Analyzing" : "Reading";
-            if (toolEventId) {
-                return `${action} tool result ${toolEventId.substring(0, 16)}... (${description ?? "no description"})`;
-            }
-            return `${action} ${path} (${description ?? "no description"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     attachTranscriptArgs(toolInstance as AISdkTool, [{ key: "path", attribute: "file_path" }]);
     return toolInstance as AISdkTool;
 }

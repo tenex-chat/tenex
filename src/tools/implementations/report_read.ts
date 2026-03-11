@@ -148,13 +148,5 @@ export function createReportReadTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ identifier }: ReportReadInput) => {
-            return `Reading report: ${identifier}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

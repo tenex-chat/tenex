@@ -350,28 +350,5 @@ export function createConversationListTool(context: ToolExecutionContext): AISdk
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (input: ConversationListInput) => {
-            const { projectId, limit, fromTime, toTime } = input;
-            const withParam = input.with;
-            const parts: string[] = [];
-            if (projectId?.toLowerCase() === "all") {
-                parts.push("all projects");
-            } else if (projectId) {
-                parts.push(`project=${projectId}`);
-            }
-            if (withParam) parts.push(`with=${withParam}`);
-            if (limit) parts.push(`limit=${limit}`);
-            if (fromTime) parts.push(`from=${new Date(fromTime * 1000).toISOString()}`);
-            if (toTime) parts.push(`to=${new Date(toTime * 1000).toISOString()}`);
-
-            return parts.length > 0
-                ? `Listing conversations (${parts.join(", ")})`
-                : "Listing conversations";
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

@@ -383,23 +383,6 @@ describe("todo_write tool", () => {
         });
     });
 
-    describe("getHumanReadableContent", () => {
-        it("should return appropriate message for empty list", () => {
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: { todos: unknown[] }) => string }).getHumanReadableContent;
-            expect(getHumanReadable?.({ todos: [] })).toBe("Clearing todo list");
-        });
-
-        it("should return appropriate message for single item", () => {
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: { todos: { title: string }[] }) => string }).getHumanReadableContent;
-            expect(getHumanReadable?.({ todos: [{ title: "My Task" }] })).toBe('Writing todo list with 1 item: "My Task"');
-        });
-
-        it("should return appropriate message for multiple items", () => {
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: { todos: unknown[] }) => string }).getHumanReadableContent;
-            expect(getHumanReadable?.({ todos: [{}, {}, {}] })).toBe("Writing todo list with 3 items");
-        });
-    });
-
     describe("auto-generated id and optional description", () => {
         it("should auto-generate id from title when not provided", async () => {
             const result = await tool.execute({

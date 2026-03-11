@@ -49,14 +49,5 @@ export function createCancelScheduledTaskTool(_context: ToolExecutionContext): A
         },
     });
 
-    // Attach getHumanReadableContent as non-enumerable property
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: { taskId: string }) => {
-            return `Canceling scheduled task ${args.taskId}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

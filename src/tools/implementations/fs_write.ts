@@ -39,14 +39,6 @@ export function createFsWriteTool(context: ToolExecutionContext): AISdkTool {
         writable: true,
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description }: FsWriteInput) => {
-            return `Writing ${path} (${description ?? "no description"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     attachTranscriptArgs(toolInstance as AISdkTool, [{ key: "path", attribute: "file_path" }]);
     return toolInstance as AISdkTool;
 }

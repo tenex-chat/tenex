@@ -152,13 +152,5 @@ export function createLessonDeleteTool(context: ToolExecutionContext): AISdkTool
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ eventId }: LessonDeleteInput) => {
-            return `Deleting lesson: ${eventId}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

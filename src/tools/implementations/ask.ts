@@ -398,14 +398,5 @@ Tips:
     },
   });
 
-  Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: ({ title, questions }: AskInput) => {
-      const questionSummary = questions.map(q => q.title).join(", ");
-      return `Asking: "${title}" [${questionSummary}]`;
-    },
-    enumerable: false,
-    configurable: true,
-  });
-
   return aiTool as AISdkTool;
 }

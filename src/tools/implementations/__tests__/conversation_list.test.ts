@@ -966,45 +966,4 @@ describe("conversation_list Tool", () => {
         });
     });
 
-    describe("getHumanReadableContent", () => {
-        it("should return descriptive content for empty params", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({});
-            expect(content).toBe("Listing conversations");
-        });
-
-        it("should include limit in human readable content", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({ limit: 10 });
-            expect(content).toContain("limit=10");
-        });
-
-        it("should include date range in human readable content", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({
-                fromTime: 1700000000,
-                toTime: 1700005000,
-            });
-            expect(content).toContain("from=");
-            expect(content).toContain("to=");
-        });
-
-        it("should include projectId in human readable content", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({ projectId: "other-project" });
-            expect(content).toContain("project=other-project");
-        });
-
-        it("should show 'all projects' for projectId='all'", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({ projectId: "all" });
-            expect(content).toContain("all projects");
-        });
-
-        it("should include 'with' in human readable content", () => {
-            const tool = createConversationListTool(mockContext);
-            const content = (tool as any).getHumanReadableContent({ with: "agent-1" });
-            expect(content).toContain("with=agent-1");
-        });
-    });
 });

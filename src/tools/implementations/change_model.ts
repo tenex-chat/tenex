@@ -122,14 +122,6 @@ export function createChangeModelTool(context: ConversationToolContext): AISdkTo
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ variant }: ChangeModelInput) => {
-            return `Switching to model variant: ${variant}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     // Mark as having side effects (changes conversation state)
     Object.defineProperty(aiTool, "hasSideEffects", {
         value: true,

@@ -66,14 +66,5 @@ export function createListScheduledTasksTool(_context: ToolExecutionContext): AI
         },
     });
 
-    // Attach getHumanReadableContent as non-enumerable property
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: () => {
-            return "Listing scheduled tasks for current project";
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

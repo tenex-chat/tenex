@@ -403,19 +403,5 @@ export function createConversationGetTool(context: ToolExecutionContext): AISdkT
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ conversationId, untilId, prompt }: ConversationGetInput) => {
-            const target = conversationId
-                ? `conversation: ${conversationId}`
-                : "conversation (missing id)";
-            const upTo = untilId ? ` up to message ${untilId}` : "";
-            return prompt
-                ? `Analyzing ${target}${upTo} with prompt`
-                : `Retrieving ${target}${upTo}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

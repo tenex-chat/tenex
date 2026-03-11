@@ -161,18 +161,6 @@ describe("home_fs tools", () => {
             expect(result).not.toContain("Line 20");
         });
 
-        it("should have correct human-readable content", () => {
-            const tool = createHomeFsReadTool(createMockContext());
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: unknown) => string })
-                .getHumanReadableContent;
-            expect(getHumanReadable).toBeDefined();
-
-            const humanContent = getHumanReadable!({
-                path: "notes.txt",
-                description: "checking notes",
-            });
-            expect(humanContent).toBe("Reading notes.txt (checking notes)");
-        });
     });
 
     describe("home_fs_write", () => {
@@ -252,15 +240,6 @@ describe("home_fs tools", () => {
             expect(written).toBe("Updated content");
         });
 
-        it("should have correct human-readable content", () => {
-            const tool = createHomeFsWriteTool(createMockContext());
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: unknown) => string })
-                .getHumanReadableContent;
-            expect(getHumanReadable).toBeDefined();
-
-            const humanContent = getHumanReadable!({ path: "notes.txt", content: "stuff", description: "saving notes" });
-            expect(humanContent).toBe("Writing notes.txt (saving notes)");
-        });
     });
 
     describe("home_fs_grep", () => {
@@ -359,19 +338,6 @@ describe("home_fs tools", () => {
             // Should be truncated
             expect(result).toContain("Truncated");
             expect(result).toContain("showing 5");
-        });
-
-        it("should have correct human-readable content", () => {
-            const tool = createHomeFsGrepTool(createMockContext());
-            const getHumanReadable = (tool as { getHumanReadableContent?: (args: unknown) => string })
-                .getHumanReadableContent;
-            expect(getHumanReadable).toBeDefined();
-
-            const humanContent = getHumanReadable!({ pattern: "TODO", path: "notes", description: "find pending items" });
-            expect(humanContent).toBe("Searching for 'TODO' in notes (find pending items)");
-
-            const humanContentNoPath = getHumanReadable!({ pattern: "TODO", description: "find pending items" });
-            expect(humanContentNoPath).toBe("Searching for 'TODO' in home (find pending items)");
         });
 
         it("should safely handle patterns with shell metacharacters", async () => {

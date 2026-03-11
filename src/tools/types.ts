@@ -73,10 +73,9 @@ export type ToolName =
     | "generate_image";
 
 /**
- * AI SDK tool with optional human-readable formatter and side effect declaration.
+ * AI SDK tool with optional transcript arg declaration and side effect declaration.
  */
 export type AISdkTool<TInput = unknown, TOutput = unknown> = CoreTool<TInput, TOutput> & {
-    getHumanReadableContent?: (args: TInput) => string;
     /**
      * Optional list of input argument keys to expose in conversation transcript XML.
      * Keys are read from tool input args at execution time and serialized as XML attributes.

@@ -56,13 +56,5 @@ export function createFsEditTool(context: ToolExecutionContext): AISdkTool {
         writable: true,
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description }: FsEditInput) => {
-            return `Editing ${path} (${description ?? "no description"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

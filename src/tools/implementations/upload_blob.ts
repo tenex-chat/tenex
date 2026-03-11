@@ -356,26 +356,5 @@ export function createUploadBlobTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    // Add human-readable content generation
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: UploadBlobInput | undefined) => {
-            if (!args || !args.input) {
-                return "Uploading blob data";
-            }
-            const { input, description } = args;
-
-            if (isURL(input)) {
-                const url = new URL(input);
-                return `Downloading and uploading from ${url.hostname}${description ? ` - ${description}` : ""}`;
-            }
-            if (!input.startsWith("data:") && !input.includes(",")) {
-                return `Uploading file: ${path.basename(input)}${description ? ` - ${description}` : ""}`;
-            }
-            return `Uploading blob data${description ? ` - ${description}` : ""}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

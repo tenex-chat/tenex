@@ -93,13 +93,5 @@ export function createLessonGetTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ eventId }: LessonGetInput) => {
-            return `Reading lesson: ${eventId}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

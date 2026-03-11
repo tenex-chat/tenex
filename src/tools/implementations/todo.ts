@@ -242,19 +242,5 @@ export function createTodoWriteTool(context: ConversationToolContext): AISdkTool
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ todos }: TodoWriteInput) => {
-            if (todos.length === 0) {
-                return "Clearing todo list";
-            }
-            if (todos.length === 1) {
-                return `Writing todo list with 1 item: "${todos[0].title}"`;
-            }
-            return `Writing todo list with ${todos.length} items`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

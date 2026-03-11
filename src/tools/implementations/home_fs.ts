@@ -159,14 +159,6 @@ export function createHomeFsReadTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description }: { path: string; description: string }) => {
-            return `Reading ${path} (${description})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }
 
@@ -237,14 +229,6 @@ export function createHomeFsWriteTool(context: ToolExecutionContext): AISdkTool 
                 });
             }
         },
-    });
-
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ path, description }: { path: string; description: string }) => {
-            return `Writing ${path} (${description})`;
-        },
-        enumerable: false,
-        configurable: true,
     });
 
     return toolInstance as AISdkTool;
@@ -500,15 +484,6 @@ export function createHomeFsGrepTool(context: ToolExecutionContext): AISdkTool {
                 return `Search error: ${message}`;
             }
         },
-    });
-
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: (input: HomeGrepInput) => {
-            const pathInfo = input.path ? ` in ${input.path}` : " in home";
-            return `Searching for '${input.pattern}'${pathInfo} (${input.description})`;
-        },
-        enumerable: false,
-        configurable: true,
     });
 
     return toolInstance as AISdkTool;

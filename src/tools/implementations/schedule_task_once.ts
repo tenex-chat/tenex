@@ -107,22 +107,5 @@ export function createScheduleTaskOnceTool(context: ToolExecutionContext): AISdk
         },
     });
 
-    // Attach getHumanReadableContent as non-enumerable property
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: (args: {
-            title?: string;
-            prompt: string;
-            delay: string;
-            targetAgent?: string | null;
-        }) => {
-            // Handle both undefined and null for targetAgent
-            const target = args.targetAgent ? ` for ${args.targetAgent}` : "";
-            const titlePart = args.title ? `'${args.title}' ` : "";
-            return `Scheduling one-off task ${titlePart}in ${formatDelay(args.delay)}${target}: ${args.prompt}`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return aiTool as AISdkTool;
 }

@@ -233,13 +233,6 @@ describe("fs_write tool", () => {
         });
     });
 
-    describe("getHumanReadableContent", () => {
-        it("should return human-readable description", () => {
-            const readable = writeTool.getHumanReadableContent?.({ path: "/test/file.txt", description: "save config file" });
-            expect(readable).toBe("Writing /test/file.txt (save config file)");
-        });
-    });
-
     describe("error handling", () => {
         it("should return error-text for permission denied errors", async () => {
             // Create a read-only directory

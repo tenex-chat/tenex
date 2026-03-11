@@ -144,18 +144,6 @@ export function createRAGSearchTool(context: ToolExecutionContext): AISdkTool {
         },
     });
 
-    Object.defineProperty(aiTool, "getHumanReadableContent", {
-        value: ({ query, prompt, limit, collections }: RAGSearchInput) => {
-            const parts = [`Searching project knowledge for "${query}"`];
-            if (prompt) parts.push(`prompt: "${prompt.substring(0, 40)}..."`);
-            if (collections?.length) parts.push(`in: ${collections.join(", ")}`);
-            if (limit && limit !== 10) parts.push(`limit: ${limit}`);
-            return parts.join(", ");
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     Object.defineProperty(aiTool, "hasSideEffects", {
         value: false,
         enumerable: false,

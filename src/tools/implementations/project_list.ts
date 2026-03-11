@@ -138,9 +138,5 @@ export function createProjectListTool(context: ToolExecutionContext): AISdkTool 
         },
     }) as AISdkTool;
 
-    coreTool.getHumanReadableContent = () => {
-        return "Listing all known projects and their agents";
-    };
-
     return coreTool;
 }

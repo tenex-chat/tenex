@@ -5,17 +5,15 @@
  * - Tool execution lifecycle (start → complete)
  * - Error handling and edge cases
  * - State management and queries
- * - Human-readable content generation
  * - Memory management (clearing)
  * - Concurrent execution tracking
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { EventContext } from "@/nostr/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { Tool as CoreTool } from "ai";
 import { ToolExecutionTracker } from "../ToolExecutionTracker";
 
 // Mock the toolMessageStorage
@@ -42,7 +40,6 @@ describe("ToolExecutionTracker", () => {
     let tracker: ToolExecutionTracker;
     let mockAgentPublisher: AgentPublisher;
     let mockEventContext: EventContext;
-    let mockToolsObject: Record<string, CoreTool>;
 
     beforeEach(() => {
         tracker = new ToolExecutionTracker();
@@ -66,21 +63,9 @@ describe("ToolExecutionTracker", () => {
             model: "test:test-model",
         };
 
-        // Create mock tools object
-        mockToolsObject = {
-            rag_search: {
-                getHumanReadableContent: mock(() => 'Searching for "test query"'),
-            } as any,
-            calculator: {} as any, // Tool without getHumanReadableContent
-            mcp__github__create_issue: {} as any, // MCP tool
-        };
-
         // Clear all mocks
         mockStore.mockClear();
         mockAgentPublisher.toolUse.mockClear();
-        if (mockToolsObject.rag_search?.getHumanReadableContent) {
-            mockToolsObject.rag_search.getHumanReadableContent.mockClear();
-        }
     });
 
     afterEach(() => {
@@ -94,7 +79,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-123",
                 toolName: "rag_search",
                 args: { query: "test query" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -102,7 +86,7 @@ describe("ToolExecutionTracker", () => {
             expect(mockAgentPublisher.toolUse).toHaveBeenCalledWith(
                 {
                     toolName: "rag_search",
-                    content: 'Searching for "test query"',
+                    content: "Executing rag_search",
                     args: { query: "test query" },
                 },
                 mockEventContext
@@ -120,12 +104,11 @@ describe("ToolExecutionTracker", () => {
             });
         });
 
-        it("should use default human-readable content for tools without custom formatter", async () => {
+        it("should use default human-readable content for regular tools", async () => {
             await tracker.trackExecution({
                 toolCallId: "call-456",
                 toolName: "calculator",
                 args: { operation: "add", a: 1, b: 2 },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -143,7 +126,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-789",
                 toolName: "mcp__github__create_issue",
                 args: { title: "Test issue" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -161,7 +143,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-return-event",
                 toolName: "rag_search",
                 args: { query: "test" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -176,7 +157,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-1",
                 toolName: "tool1",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -185,7 +165,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-2",
                 toolName: "tool2",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -207,7 +186,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-123",
                 toolName: "rag_search",
                 args: { query: "test" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -304,7 +282,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-1",
                 toolName: "tool1",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -313,7 +290,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-2",
                 toolName: "tool2",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -322,7 +298,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-3",
                 toolName: "tool3",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -372,7 +347,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "pending-1",
                 toolName: "pendingTool",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -381,7 +355,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "completed-1",
                 toolName: "completedTool",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -410,7 +383,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-1",
                 toolName: "tool1",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -431,7 +403,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-1",
                 toolName: "tool1",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -440,7 +411,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "call-2",
                 toolName: "tool2",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -461,7 +431,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "delegate-call",
                 toolName: "delegate",
                 args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -485,7 +454,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "ask-call",
                 toolName: "ask",
                 args: { content: "What should I do?" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -499,7 +467,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "followup-call",
                 toolName: "delegate_followup",
                 args: { message: "Continue with this" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -513,7 +480,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "crossproject-call",
                 toolName: "delegate_crossproject",
                 args: { content: "Cross-project task", projectId: "test-project", agentSlug: "target-agent" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -528,7 +494,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "delegate-complete",
                 toolName: "delegate",
                 args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -572,7 +537,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "multi-delegate",
                 toolName: "delegate",
                 args: { delegations: [{ recipient: "agent1" }, { recipient: "agent2" }] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -611,7 +575,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "no-pending",
                 toolName: "delegate",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -637,7 +600,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "normal-tool",
                 toolName: "rag_search",
                 args: { query: "test" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -659,7 +621,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-delegate-call",
                 toolName: "mcp__tenex__delegate",
                 args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -683,7 +644,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-ask-call",
                 toolName: "mcp__tenex__ask",
                 args: { content: "Question?" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -697,7 +657,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-followup-call",
                 toolName: "mcp__tenex__delegate_followup",
                 args: { message: "Continue" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -711,7 +670,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-crossproject-call",
                 toolName: "mcp__tenex__delegate_crossproject",
                 args: { content: "Cross-project", projectId: "proj", agentSlug: "agent" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -726,7 +684,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-delegate-complete",
                 toolName: "mcp__tenex__delegate",
                 args: { delegations: [{ recipient: "agent1", prompt: "Do X" }] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -766,7 +723,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-ask-complete",
                 toolName: "mcp__tenex__ask",
                 args: { title: "Question", context: "Context", questions: [] },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -805,7 +761,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "other-mcp-tool",
                 toolName: "mcp__github__create_issue",
                 args: { title: "Test" },
-                toolsObject: mockToolsObject,
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -825,7 +780,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "report-write-call",
                 toolName: "report_write",
                 args: { slug: "test-report", title: "Test Report", summary: "Summary", content: "Content" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -850,7 +804,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "report-write-complete",
                 toolName: "report_write",
                 args: { slug: "test-report", title: "Test Report", summary: "Summary", content: "Content" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -897,7 +850,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "report-no-refs",
                 toolName: "report_write",
                 args: { slug: "test" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -923,7 +875,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "report-no-event-refs",
                 toolName: "report_write",
                 args: { slug: "test" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -961,7 +912,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-report-write-call",
                 toolName: "mcp__tenex__report_write",
                 args: { slug: "test-report", title: "Test", summary: "Summary", content: "Content" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -981,7 +931,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-report-complete",
                 toolName: "mcp__tenex__report_write",
                 args: { slug: "test", title: "Test", summary: "Summary", content: "Content" },
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -1017,7 +966,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "mcp-edge",
                 toolName: "mcp__invalid", // Invalid MCP format (only 2 parts)
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -1052,7 +1000,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "large-args",
                 toolName: "bigTool",
                 args: largeArgs,
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });
@@ -1070,7 +1017,6 @@ describe("ToolExecutionTracker", () => {
                         toolCallId: `rapid-${i}`,
                         toolName: `tool${i}`,
                         args: { index: i },
-                        toolsObject: {},
                         agentPublisher: mockAgentPublisher,
                         eventContext: mockEventContext,
                     })
@@ -1109,7 +1055,6 @@ describe("ToolExecutionTracker", () => {
                     toolCallId: "will-fail",
                     toolName: "failTool",
                     args: {},
-                    toolsObject: {},
                     agentPublisher: failingPublisher,
                     eventContext: mockEventContext,
                 })
@@ -1128,7 +1073,6 @@ describe("ToolExecutionTracker", () => {
                 toolCallId: "storage-fail",
                 toolName: "tool",
                 args: {},
-                toolsObject: {},
                 agentPublisher: mockAgentPublisher,
                 eventContext: mockEventContext,
             });

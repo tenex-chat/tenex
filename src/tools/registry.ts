@@ -561,7 +561,6 @@ export function getToolsObject(
     for (const name of regularTools) {
         const tool = getTool(name, context as ToolExecutionContext);
         if (tool) {
-            // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
             tools[name] = tool;
         }
     }
@@ -597,7 +596,6 @@ export function getAllToolsObject(
     for (const name of toolNames) {
         const tool = getTool(name, context);
         if (tool) {
-            // Tools are now CoreTool instances with getHumanReadableContent as non-enumerable property
             tools[name] = tool;
         }
     }

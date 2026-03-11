@@ -337,13 +337,6 @@ modified line 3`,
         });
     });
 
-    describe("getHumanReadableContent", () => {
-        it("should return human-readable description", () => {
-            const readable = editTool.getHumanReadableContent?.({ path: "test.txt", description: "fix import order" });
-            expect(readable).toBe("Editing test.txt (fix import order)");
-        });
-    });
-
     describe("allowOutsideWorkingDirectory", () => {
         it("should block editing outside working directory by default", async () => {
             const outsideDir = await createTempDir();

@@ -33,14 +33,5 @@ export function createFsGrepTool(context: ToolExecutionContext): AISdkTool {
         writable: true,
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ pattern, path, description }: FsGrepInput) => {
-            const location = path ? ` in ${path}` : "";
-            return `Searching for "${pattern}"${location} (${description ?? "no description"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

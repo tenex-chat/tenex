@@ -137,13 +137,5 @@ export function createNostrFetchTool(_context: ToolExecutionContext): AISdkTool 
         },
     });
 
-    Object.defineProperty(toolInstance, "getHumanReadableContent", {
-        value: ({ eventId, format }: NostrFetchInput) => {
-            return `Fetching nostr event ${eventId} (format: ${format || "display"})`;
-        },
-        enumerable: false,
-        configurable: true,
-    });
-
     return toolInstance as AISdkTool;
 }

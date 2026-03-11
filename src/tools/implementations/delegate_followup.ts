@@ -290,11 +290,5 @@ export function createDelegateFollowupTool(context: ToolExecutionContext): AISdk
     },
   });
 
-  Object.defineProperty(aiTool, "getHumanReadableContent", {
-    value: () => "Sending follow-up question",
-    enumerable: false,
-    configurable: true,
-  });
-
   return aiTool as AISdkTool;
 }
