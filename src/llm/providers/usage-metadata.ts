@@ -8,7 +8,6 @@ import type { LanguageModelUsage } from "ai";
 import type { LanguageModelUsageWithCostUsd } from "../types";
 import { PROVIDER_IDS } from "./provider-ids";
 import { OpenRouterProvider } from "./standard/OpenRouterProvider";
-import { ClaudeCodeProvider } from "./agent/ClaudeCodeProvider";
 import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
 
 /**
@@ -59,8 +58,6 @@ export function extractUsageMetadata(
     switch (provider) {
         case PROVIDER_IDS.OPENROUTER:
             return OpenRouterProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
-        case PROVIDER_IDS.CLAUDE_CODE:
-            return ClaudeCodeProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
         case PROVIDER_IDS.CODEX_APP_SERVER:
             return CodexAppServerProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
         default:

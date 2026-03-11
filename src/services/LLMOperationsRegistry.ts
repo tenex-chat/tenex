@@ -22,7 +22,7 @@ export interface LLMOperation {
     agentPubkey: string; // Agent doing the work
     conversationId: string; // Root event ID for conversation
     registeredAt: number; // Timestamp
-    /** MessageInjector for Claude Code streams (set via onStreamStart callback) */
+    /** Message injector for providers that support mid-stream injection */
     messageInjector?: MessageInjector;
     /** Current RAL state for this operation */
     ralState?: RALState;
@@ -231,7 +231,7 @@ export class LLMOperationsRegistry {
     }
 
     /**
-     * Set the message injector for a streaming Claude Code operation.
+     * Set the message injector for a streaming operation.
      * Called from onStreamStart callback when the stream starts.
      *
      * @param agentPubkey - The agent's public key
@@ -259,7 +259,7 @@ export class LLMOperationsRegistry {
     }
 
     /**
-     * Get the message injector for a streaming Claude Code operation.
+     * Get the message injector for a streaming operation.
      * Returns undefined if no active operation exists or no injector is set.
      *
      * @param agentPubkey - The agent's public key

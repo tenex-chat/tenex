@@ -22,9 +22,13 @@ import type { LLMService } from "@/llm/service";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MessageCompiler } from "./MessageCompiler";
 import { SessionManager } from "./SessionManager";
+import {
+    collectTenexSystemReminderProviderOptions,
+    createTenexSystemReminderCycleId,
+} from "./system-reminders";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
-import type { FullRuntimeContext } from "./types";
+import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
 
 /**
@@ -35,9 +39,7 @@ export interface StreamSetupResult {
     sessionManager: SessionManager;
     llmService: LLMService;
     messageCompiler: MessageCompiler;
-    messages: ModelMessage[];
-    providerOptions?: ProviderOptions;
-    ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
+    request: LLMModelRequest;
     nudgeContent: string;
     /** Individual nudge data for system prompt rendering */
     nudges: NudgeData[];
@@ -113,45 +115,35 @@ export async function setupStreamExecution(
     );
 
     // Collect ephemeral messages to pass to MessageCompiler
-    const ephemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
-
     if (initialInjections.length > 0) {
         // Best-effort profile warming (non-blocking)
         injectionProcessor.warmSenderPubkeys(initialInjections);
 
         for (const injection of initialInjections) {
-            if (injection.ephemeral) {
-                ephemeralMessages.push({
-                    role: injection.role,
-                    content: injection.content,
-                });
-            } else {
-                const relocated = injection.eventId
-                    ? conversationStore.relocateToEnd(injection.eventId, {
-                          ral: ralNumber,
-                          senderPubkey: injection.senderPubkey,
-                          targetedPubkeys: [context.agent.pubkey],
-                      })
-                    : false;
+            const relocated = injection.eventId
+                ? conversationStore.relocateToEnd(injection.eventId, {
+                      ral: ralNumber,
+                      senderPubkey: injection.senderPubkey,
+                      targetedPubkeys: [context.agent.pubkey],
+                  })
+                : false;
 
-                if (!relocated) {
-                    conversationStore.addMessage({
-                        pubkey: context.triggeringEvent.pubkey,
-                        ral: ralNumber,
-                        content: injection.content,
-                        messageType: "text",
-                        targetedPubkeys: [context.agent.pubkey],
-                        senderPubkey: injection.senderPubkey,
-                        eventId: injection.eventId,
-                    });
-                }
+            if (!relocated) {
+                conversationStore.addMessage({
+                    pubkey: context.triggeringEvent.pubkey,
+                    ral: ralNumber,
+                    content: injection.content,
+                    messageType: "text",
+                    targetedPubkeys: [context.agent.pubkey],
+                    senderPubkey: injection.senderPubkey,
+                    eventId: injection.eventId,
+                });
             }
         }
 
         trace.getActiveSpan()?.addEvent("executor.initial_injections_consumed", {
             "ral.number": ralNumber,
             "injection.count": initialInjections.length,
-            "injection.ephemeral_count": ephemeralMessages.length,
         });
     }
 
@@ -268,7 +260,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    const { messages, providerOptions, counts, mode } = await messageCompiler.compile({
+    const { messages, counts, mode } = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -290,9 +282,27 @@ export async function setupStreamExecution(
         ralNumber,
         metaModelSystemPrompt,
         variantSystemPrompt,
-        ephemeralMessages,
         availableNudges: NudgeSkillWhitelistService.getInstance().getWhitelistedNudges(),
         availableSkills: NudgeSkillWhitelistService.getInstance().getWhitelistedSkills(),
+    });
+
+    const providerOptions = await collectTenexSystemReminderProviderOptions({
+        scope: {
+            agentPubkey: context.agent.pubkey,
+            conversationId: context.conversationId,
+        },
+        context: {
+            agent: context.agent,
+            conversation,
+            respondingToPubkey: context.triggeringEvent.pubkey,
+            pendingDelegations,
+            completedDelegations,
+        },
+        cycleId: createTenexSystemReminderCycleId(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        ),
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
@@ -308,9 +318,10 @@ export async function setupStreamExecution(
         sessionManager,
         llmService,
         messageCompiler,
-        messages,
-        providerOptions,
-        ephemeralMessages,
+        request: {
+            messages,
+            providerOptions,
+        },
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,

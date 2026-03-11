@@ -15,7 +15,6 @@ import {
     type SessionCapturedEvent,
     type StreamErrorEvent,
 } from "@/llm/types";
-import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
@@ -26,7 +25,6 @@ import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { LanguageModel, ModelMessage } from "ai";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
@@ -35,9 +33,13 @@ import type { SessionManager } from "./SessionManager";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { createPrepareStep } from "./StreamCallbacks";
 import { setupToolEventHandlers } from "./ToolEventHandlers";
-import type { FullRuntimeContext, RALExecutionContext, StreamExecutionResult } from "./types";
+import type {
+    FullRuntimeContext,
+    LLMModelRequest,
+    RALExecutionContext,
+    StreamExecutionResult,
+} from "./types";
 import { extractLastUserMessage } from "./utils";
-import { CompressionService } from "@/services/compression/CompressionService.js";
 
 /**
  * Configuration for stream execution
@@ -50,18 +52,15 @@ export interface StreamExecutionConfig {
     sessionManager: SessionManager;
     llmService: LLMService;
     messageCompiler: MessageCompiler;
-    providerOptions?: ProviderOptions;
+    request: LLMModelRequest;
     nudgeContent: string;
     /** Concatenated skill content */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
     skills: SkillData[];
-    ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     abortSignal: AbortSignal;
     metaModelSystemPrompt?: string;
     variantSystemPrompt?: string;
-    /** Optional dedicated LLM service for compression operations */
-    compressionLlmService?: LLMService;
 }
 
 /**
@@ -93,11 +92,13 @@ export class StreamExecutionHandler {
     /**
      * Execute the stream and return the result
      */
-    async execute(messages: ModelMessage[]): Promise<StreamExecutionResult> {
+    async execute(): Promise<StreamExecutionResult> {
         const { context, llmService, toolsObject, abortSignal } = this.config;
         const ralRegistry = RALRegistry.getInstance();
         const conversationStore = context.conversationStore;
         const ralNumber = this.config.ralNumber;
+        const request = this.config.request;
+        const messages = request.messages;
 
         // Initialize execution context
         this.execContext.accumulatedMessages = messages;
@@ -146,7 +147,6 @@ export class StreamExecutionHandler {
                 context,
                 llmService,
                 messageCompiler: this.config.messageCompiler,
-                ephemeralMessages: this.config.ephemeralMessages,
                 nudgeContent: this.config.nudgeContent,
                 skillContent: this.config.skillContent,
                 skills: this.config.skills,
@@ -173,7 +173,7 @@ export class StreamExecutionHandler {
 
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
-                providerOptions: this.config.providerOptions,
+                providerOptions: request.providerOptions,
                 prepareStep,
             });
 
@@ -220,15 +220,7 @@ export class StreamExecutionHandler {
             await this.flushReasoningBuffer();
         }
 
-        // Handle session persistence for Claude Code
-        const { sessionManager, llmService: svc } = this.config;
-        if (
-            !sessionManager.getSession().sessionId &&
-            svc.provider === PROVIDER_IDS.CLAUDE_CODE &&
-            this.result?.kind === "complete"
-        ) {
-            sessionManager.saveLastSentEventId(context.triggeringEvent.id);
-        }
+        const { llmService: svc } = this.config;
 
         // Capture accumulated runtime for caller
         const accumulatedRuntime = ralRegistry.getAccumulatedRuntime(
@@ -353,10 +345,6 @@ export class StreamExecutionHandler {
                     "ral.number": ralNumber,
                 });
             }
-
-            // Trigger proactive background compression after LLM response
-            // Non-blocking - fires and forgets
-            this.triggerProactiveCompression();
         });
 
         llmService.on("stream-error", async (event: StreamErrorEvent) => {
@@ -548,34 +536,6 @@ export class StreamExecutionHandler {
             }
         }
         throw streamError;
-    }
-
-    /**
-     * Trigger proactive background compression after LLM response.
-     * Non-blocking - runs async without blocking the completion flow.
-     */
-    private triggerProactiveCompression(): void {
-        const { context, llmService, compressionLlmService } = this.config;
-
-        try {
-            const compressionService = new CompressionService(
-                context.conversationStore,
-                llmService,
-                compressionLlmService
-            );
-
-            // Fire and forget - non-blocking
-            compressionService.maybeCompressAsync(context.conversationId);
-
-            this.executionSpan?.addEvent("compression.proactive_triggered", {
-                "conversation.id": shortenConversationId(context.conversationId),
-            });
-        } catch (error) {
-            // Non-blocking - just log if compression setup fails
-            logger.warn("[StreamExecutionHandler] Failed to trigger proactive compression", {
-                error: error instanceof Error ? error.message : String(error),
-            });
-        }
     }
 
     /**

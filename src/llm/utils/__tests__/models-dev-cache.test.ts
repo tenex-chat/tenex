@@ -96,7 +96,6 @@ describe("models-dev-cache", () => {
             await ensureCacheLoaded();
 
             expect(getModelLimits("ollama", "llama3.2")).toBeUndefined();
-            expect(getModelLimits("claude-code", "claude-sonnet")).toBeUndefined();
         });
 
         test("returns undefined for unknown models", async () => {

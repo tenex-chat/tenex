@@ -192,13 +192,13 @@ function createMockRegistry(): ProviderRegistryProvider {
 }
 
 /**
- * Create a mock Claude Code provider function
+ * Create a mock agent provider function.
  */
-function createMockClaudeCodeProvider() {
+function createMockAgentProvider(provider = "codex-app-server") {
     return mock(() => ({
         specificationVersion: "v2",
-        provider: "claude-code",
-        modelId: "claude-code-model",
+        provider,
+        modelId: `${provider}-model`,
         supportsUrl: () => false,
         doGenerate: mock(() => Promise.resolve({})),
         doStream: mock(() => Promise.resolve({ stream: new ReadableStream() })),
@@ -222,10 +222,10 @@ describe("LLMService", () => {
     });
 
     describe("constructor", () => {
-        test("throws if no accessor and no Claude Code provider", () => {
+        test("throws if no accessor and no agent provider", () => {
             expect(() => {
                 new LLMService(null, "openrouter", "gpt-4", mockCapabilities);
-            }).toThrow("LLMService requires either a provider accessor or Claude Code provider function");
+            }).toThrow("LLMService requires either a provider accessor or an agent provider function");
         });
 
         test("accepts a standard provider accessor", () => {
@@ -234,18 +234,18 @@ describe("LLMService", () => {
             expect(service.model).toBe("gpt-4");
         });
 
-        test("accepts a Claude Code provider function", () => {
-            const claudeCodeProvider = createMockClaudeCodeProvider();
+        test("accepts an agent provider function", () => {
+            const agentProvider = createMockAgentProvider();
             const service = new LLMService(
                 null,
-                "claude-code",
-                "claude-3",
+                "codex-app-server",
+                "gpt-5-codex",
                 mockAgentCapabilities,
                 undefined,
                 undefined,
-                claudeCodeProvider
+                agentProvider
             );
-            expect(service.provider).toBe("claude-code");
+            expect(service.provider).toBe("codex-app-server");
         });
 
         test("stores temperature and maxTokens", () => {
@@ -262,16 +262,16 @@ describe("LLMService", () => {
             expect(model).toBeDefined();
         });
 
-        test("returns a language model from Claude Code provider", () => {
-            const claudeCodeProvider = createMockClaudeCodeProvider();
+        test("returns a language model from an agent provider", () => {
+            const agentProvider = createMockAgentProvider();
             const service = new LLMService(
                 null,
-                "claude-code",
-                "claude-3",
+                "codex-app-server",
+                "gpt-5-codex",
                 mockAgentCapabilities,
                 undefined,
                 undefined,
-                claudeCodeProvider
+                agentProvider
             );
             const model = service.getModel();
             expect(model).toBeDefined();
@@ -671,15 +671,15 @@ describe("LLMService stream()", () => {
     });
 
     test("does not pass tools for providers with builtInTools capability", async () => {
-        const claudeCodeProvider = createMockClaudeCodeProvider();
+        const agentProvider = createMockAgentProvider();
         const service = new LLMService(
             null,
-            "claude-code",
-            "claude-3",
+            "codex-app-server",
+            "gpt-5-codex",
             mockAgentCapabilities,
             undefined,
             undefined,
-            claudeCodeProvider
+            agentProvider
         );
 
         const messages: ModelMessage[] = [
@@ -805,16 +805,16 @@ describe("LLMService stream()", () => {
         expect(completeEvent.usage.totalTokens).toBe(300); // Calculated fallback
     });
 
-    test("extracts costUsd from claude-code provider metadata", async () => {
-        const claudeCodeProvider = createMockClaudeCodeProvider();
+    test("extracts costUsd from codex-app-server provider metadata", async () => {
+        const agentProvider = createMockAgentProvider();
         const service = new LLMService(
             null,
-            "claude-code",
-            "claude-3",
+            "codex-app-server",
+            "gpt-5-codex",
             mockAgentCapabilities,
             undefined,
             undefined,
-            claudeCodeProvider
+            agentProvider
         );
 
         const completeSpy = mock(() => {});
@@ -833,10 +833,9 @@ describe("LLMService stream()", () => {
                 totalUsage: { inputTokens: 55865, outputTokens: 324 },
                 finishReason: "stop",
                 providerMetadata: {
-                    "claude-code": {
+                    "codex-app-server": {
                         sessionId: "stream-session-456",
                         costUsd: 0.16652625,
-                        durationMs: 11580,
                     },
                 },
             });
@@ -844,7 +843,7 @@ describe("LLMService stream()", () => {
 
         expect(completeSpy).toHaveBeenCalled();
         const completeEvent = completeSpy.mock.calls[0][0];
-        // costUsd should come from claude-code provider metadata
+        // costUsd should come from provider metadata
         expect(completeEvent.usage.costUsd).toBe(0.16652625);
         // Token counts should come from AI SDK totalUsage (fallback)
         expect(completeEvent.usage.inputTokens).toBe(55865);

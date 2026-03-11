@@ -22,7 +22,7 @@ export interface ProviderCapabilities {
     streaming: boolean;
     /** Whether the provider supports tool/function calling */
     toolCalling: boolean;
-    /** Whether the provider has built-in tools (like claude-code) */
+    /** Whether the provider has built-in tools */
     builtInTools: boolean;
     /** Whether the provider supports session resumption */
     sessionResumption: boolean;
@@ -110,7 +110,7 @@ export interface ProviderRuntimeContext {
     mcpConfig?: MCPConfig;
     /** Reasoning effort level (for codex-app-server) */
     reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
-    /** Callback invoked when Claude Code stream starts, providing the message injector */
+    /** Callback invoked when an agent stream exposes a message injector */
     onStreamStart?: OnStreamStartCallback;
 }
 
@@ -120,7 +120,7 @@ export interface ProviderRuntimeContext {
 export interface ProviderModelResult {
     /** The language model instance */
     model: LanguageModel;
-    /** Provider function for agent providers (claude-code, codex-app-server) */
+    /** Provider function for agent providers */
     providerFunction?: (model: string, options?: unknown) => LanguageModel;
     /** Whether this provider bypasses the standard registry */
     bypassRegistry: boolean;
@@ -134,7 +134,7 @@ export interface ProviderModelResult {
  * Providers implement this interface to be registered in the provider registry.
  * There are two types:
  * - Standard providers: Use AI SDK's createProviderRegistry
- * - Agent providers: Have their own provider functions (claude-code, codex-app-server)
+ * - Agent providers: Have their own provider functions
  */
 export interface ILLMProvider {
     /** Provider metadata */

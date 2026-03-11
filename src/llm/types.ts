@@ -1,4 +1,3 @@
-import type { MessageInjector as ClaudeMessageInjector } from "ai-sdk-provider-claude-code";
 import type { DefaultEventMap } from "tseep";
 
 // Export AI SDK types directly
@@ -20,8 +19,6 @@ import type { LanguageModelUsage } from "ai";
 import { PROVIDER_IDS } from "./providers/provider-ids";
 export type { ExecutionContext };
 
-export type MessageInjector = ClaudeMessageInjector;
-
 /**
  * AI SDK supported providers
  * Derived from PROVIDER_IDS to prevent magic string duplication
@@ -31,7 +28,6 @@ export const AI_SDK_PROVIDERS = [
     PROVIDER_IDS.ANTHROPIC,
     PROVIDER_IDS.OPENAI,
     PROVIDER_IDS.OLLAMA,
-    PROVIDER_IDS.CLAUDE_CODE,
     PROVIDER_IDS.CODEX_APP_SERVER,
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
@@ -52,6 +48,13 @@ export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
  * @param delivered - true if the message was successfully delivered to the stream
  */
 export type MessageInjectionCallback = (delivered: boolean) => void;
+
+/**
+ * Interface for providers that support mid-stream message injection.
+ */
+export interface MessageInjector {
+    inject(message: string, callback: MessageInjectionCallback): void;
+}
 
 /**
  * Callback invoked when a stream starts, providing the message injector.

@@ -481,14 +481,14 @@ export class ConfigService {
         context?: {
             tools?: Record<string, unknown>;
             agentName?: string;
-            /** Working directory path for Claude Code execution */
+            /** Working directory path for agent execution */
             workingDirectory?: string;
             sessionId?: string;
             /** Agent-specific MCP configuration to merge with project/global config */
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
-            /** Callback invoked when Claude Code stream starts, providing the message injector */
+            /** Callback invoked when an agent stream exposes a message injector */
             onStreamStart?: OnStreamStartCallback;
         }
     ): LLMService {

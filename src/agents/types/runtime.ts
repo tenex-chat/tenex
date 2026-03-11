@@ -74,7 +74,7 @@ export interface AgentInstance {
          * If provided, uses this config instead of the agent's llmConfig.
          */
         resolvedConfigName?: string;
-        /** Callback invoked when Claude Code stream starts, providing the message injector */
+        /** Callback invoked when an agent stream exposes a message injector */
         onStreamStart?: OnStreamStartCallback;
     }): LLMService;
     sign(event: NDKEvent): Promise<void>;

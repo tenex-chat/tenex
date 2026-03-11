@@ -3,7 +3,6 @@ import { OpenRouterProvider } from "../standard/OpenRouterProvider";
 import { AnthropicProvider } from "../standard/AnthropicProvider";
 import { OpenAIProvider } from "../standard/OpenAIProvider";
 import { OllamaProvider } from "../standard/OllamaProvider";
-import { ClaudeCodeProvider } from "../agent/ClaudeCodeProvider";
 import { CodexAppServerProvider } from "../agent/CodexAppServerProvider";
 
 describe("Provider Metadata", () => {
@@ -35,15 +34,14 @@ describe("Provider Metadata", () => {
     });
 
     describe("agent providers", () => {
-        it("ClaudeCodeProvider has correct static METADATA with kebab-case id", () => {
-            expect(ClaudeCodeProvider.METADATA.id).toBe("claude-code");
-            expect(ClaudeCodeProvider.METADATA.category).toBe("agent");
-            expect(ClaudeCodeProvider.METADATA.capabilities.builtInTools).toBe(true);
-            expect(ClaudeCodeProvider.METADATA.capabilities.sessionResumption).toBe(false);
-            expect(ClaudeCodeProvider.METADATA.capabilities.mcpSupport).toBe(true);
-            expect(ClaudeCodeProvider.METADATA.capabilities.requiresApiKey).toBe(false);
+        it("CodexAppServerProvider has correct static METADATA with kebab-case id", () => {
+            expect(CodexAppServerProvider.METADATA.id).toBe("codex-app-server");
+            expect(CodexAppServerProvider.METADATA.category).toBe("agent");
+            expect(CodexAppServerProvider.METADATA.capabilities.builtInTools).toBe(true);
+            expect(CodexAppServerProvider.METADATA.capabilities.sessionResumption).toBe(true);
+            expect(CodexAppServerProvider.METADATA.capabilities.mcpSupport).toBe(true);
+            expect(CodexAppServerProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });
-
     });
 
     describe("instance metadata matches static", () => {
@@ -54,8 +52,8 @@ describe("Provider Metadata", () => {
             const anthropic = new AnthropicProvider();
             expect(anthropic.metadata).toBe(AnthropicProvider.METADATA);
 
-            const claudeCode = new ClaudeCodeProvider();
-            expect(claudeCode.metadata).toBe(ClaudeCodeProvider.METADATA);
+            const codexAppServer = new CodexAppServerProvider();
+            expect(codexAppServer.metadata).toBe(CodexAppServerProvider.METADATA);
         });
     });
 });
@@ -67,7 +65,7 @@ describe("Provider ID conventions", () => {
             AnthropicProvider.METADATA,
             OpenAIProvider.METADATA,
             OllamaProvider.METADATA,
-            ClaudeCodeProvider.METADATA,
+            CodexAppServerProvider.METADATA,
         ];
 
         for (const metadata of allMetadata) {
@@ -98,7 +96,6 @@ describe("Provider Registration Array", () => {
         expect(ids).toContain("anthropic");
         expect(ids).toContain("openai");
         expect(ids).toContain("ollama");
-        expect(ids).toContain("claude-code");
         expect(ids).toContain("codex-app-server");
     });
 });

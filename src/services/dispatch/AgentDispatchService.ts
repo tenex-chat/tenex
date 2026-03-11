@@ -10,8 +10,7 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config } from "@/services/ConfigService";
-import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
-import { llmOpsRegistry, INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
+import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getProjectContext, type ProjectContext } from "@/services/projects";
 import { CooldownRegistry } from "@/services/CooldownRegistry";
 import { RALRegistry } from "@/services/ral";
@@ -897,109 +896,26 @@ export class AgentDispatchService {
         );
 
         if (activeRal.isStreaming) {
-            // Check if this is a Claude Code agent
             const llmConfig = config.getLLMConfig(agent.llmConfig);
-            const isClaudeCodeProvider = llmConfig.provider === PROVIDER_IDS.CLAUDE_CODE;
-
-            if (isClaudeCodeProvider) {
-                // Try to use message injection if available
-                const injector = llmOpsRegistry.getMessageInjector(agent.pubkey, conversationId);
-
-                if (injector) {
-                    // Message injector available - use it instead of abort-restart
-                    injector.inject(message, (delivered) => {
-                        if (delivered) {
-                            // Clear queued injections since MessageInjector delivered the message directly.
-                            // This prevents hasOutstandingWork() from incorrectly reporting pending work.
-                            // See: naddr1qvzqqqr4gupzqkmm302xww6uyne99rnhl5kjj53wthjypm2qaem9uz9fdf3hzcf0qyghwumn8ghj7ar9dejhstnrdpshgtcq9p382emxd9uz6en0d3kx7am4wqkkjmn2v43hg6t0dckhzat9w4jj6cmvv4shy6twvullqw7x
-                            ralRegistry.clearQueuedInjections(agent.pubkey, conversationId);
-
-                            logger.info("[dispatch] Message injected via Claude Code MessageInjector", {
-                                agent: agent.slug,
-                                ralNumber: activeRal.ralNumber,
-                                messageLength,
-                            });
-                        } else {
-                            // Injection failed - the message is already queued in RALRegistry,
-                            // so the next execution will pick it up
-                            logger.warn("[dispatch] Message injection delivery failed (message already queued)", {
-                                agent: agent.slug,
-                                ralNumber: activeRal.ralNumber,
-                                messageLength,
-                            });
-                        }
-                    });
-
-                    getSafeActiveSpan()?.addEvent("reply.message_injected_via_injector", {
-                        "agent.slug": agent.slug,
-                        "ral.number": activeRal.ralNumber,
-                        "message.length": messageLength,
-                    });
-                    agentSpan.addEvent("dispatch.injection_via_message_injector", {
-                        "message.length": messageLength,
-                    });
-
-                    // Skip spawning new execution - the active execution will pick up the injected message
-                    return true;
-                }
-
-                // No injector available - fall back to abort-restart
-                const aborted = llmOpsRegistry.stopByAgentAndConversation(
-                    agent.pubkey,
-                    conversationId,
-                    INJECTION_ABORT_REASON
-                );
-
-                if (aborted) {
-                    getSafeActiveSpan()?.addEvent("reply.aborted_for_injection", {
-                        "agent.slug": agent.slug,
-                        "ral.number": activeRal.ralNumber,
-                        "message.length": messageLength,
-                    });
-                    logger.info("[reply] Aborted Claude Code execution for injection (no injector)", {
-                        agent: agent.slug,
-                        ralNumber: activeRal.ralNumber,
-                        injectionLength: messageLength,
-                    });
-                    agentSpan.addEvent("dispatch.injection_stream_abort_fallback", {
-                        "message.length": messageLength,
-                    });
-                } else {
-                    getSafeActiveSpan()?.addEvent("reply.message_queued_during_streaming", {
-                        "agent.slug": agent.slug,
-                        "ral.number": activeRal.ralNumber,
-                        "message.length": messageLength,
-                    });
-                    agentSpan.addEvent("dispatch.injection_stream_queue_only", {
-                        "message.length": messageLength,
-                    });
-                }
-                // Spawn new execution (aborted or will pick up on restart)
-                return false;
-            } else {
-                // Non-Claude-Code provider: just queue the message, don't abort.
-                // The active execution will pick it up on its next prepareStep.
-                // IMPORTANT: Skip spawning a new execution to avoid duplicate completions.
-                // See report: "injection-race-condition-hybrid-fix" for known limitations.
-                getSafeActiveSpan()?.addEvent("reply.message_injected_no_abort", {
-                    "agent.slug": agent.slug,
-                    "ral.number": activeRal.ralNumber,
-                    "message.length": messageLength,
-                    "provider": llmConfig.provider,
-                });
-                logger.info("[reply] Queued message for non-Claude-Code provider (no abort, skipping execution)", {
-                    agent: agent.slug,
-                    ralNumber: activeRal.ralNumber,
-                    injectionLength: messageLength,
-                    provider: llmConfig.provider,
-                });
-                agentSpan.addEvent("dispatch.injection_stream_no_abort_skip_execution", {
-                    "message.length": messageLength,
-                    "provider": llmConfig.provider,
-                });
-                // Non-Claude: skip execution, trust active execution to pick up injection
-                return true;
-            }
+            // While a stream is active, queue the message and let prepareStep pick it up.
+            // Skip spawning a new execution to avoid duplicate completions.
+            getSafeActiveSpan()?.addEvent("reply.message_injected_no_abort", {
+                "agent.slug": agent.slug,
+                "ral.number": activeRal.ralNumber,
+                "message.length": messageLength,
+                "provider": llmConfig.provider,
+            });
+            logger.info("[reply] Queued message for streaming provider (no abort, skipping execution)", {
+                agent: agent.slug,
+                ralNumber: activeRal.ralNumber,
+                injectionLength: messageLength,
+                provider: llmConfig.provider,
+            });
+            agentSpan.addEvent("dispatch.injection_stream_no_abort_skip_execution", {
+                "message.length": messageLength,
+                "provider": llmConfig.provider,
+            });
+            return true;
         }
 
         // Not streaming (waiting for delegations) - need new execution to wake up

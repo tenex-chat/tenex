@@ -17,7 +17,6 @@ import {
 } from "ai";
 import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
-import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { ChunkHandler, type ChunkHandlerState } from "./ChunkHandler";
@@ -25,7 +24,6 @@ import { createFinishHandler, type FinishHandlerConfig, type FinishHandlerState 
 import { extractLastUserMessage, extractSystemContent, prepareMessagesForRequest } from "./MessageProcessor";
 import { createMessageSanitizerMiddleware } from "./middleware/message-sanitizer";
 import { createTenexSystemRemindersMiddleware } from "./middleware/system-reminders";
-import { PROVIDER_IDS } from "./providers/provider-ids";
 import { mergeProviderOptions } from "./provider-options";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
@@ -60,11 +58,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private readonly temperature?: number;
     private readonly maxTokens?: number;
     private previousChunkType?: string;
-    private readonly claudeCodeProviderFunction?: (
+    private readonly agentProviderFunction?: (
         model: string,
-        options?: ClaudeCodeSettings
+        options?: Record<string, unknown>
     ) => LanguageModel;
-    private readonly claudeCodeBaseSettings?: ClaudeCodeSettings;
+    private readonly agentBaseSettings?: Record<string, unknown>;
     private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private readonly conversationId?: string;
@@ -87,8 +85,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         capabilities: ProviderCapabilities,
         temperature?: number,
         maxTokens?: number,
-        claudeCodeProviderFunction?: (model: string, options?: ClaudeCodeSettings) => LanguageModel,
-        claudeCodeBaseSettings?: ClaudeCodeSettings,
+        agentProviderFunction?: (model: string, options?: Record<string, unknown>) => LanguageModel,
+        agentBaseSettings?: Record<string, unknown>,
         sessionId?: string,
         agentSlug?: string,
         conversationId?: string,
@@ -101,16 +99,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         this.capabilities = capabilities;
         this.temperature = temperature;
         this.maxTokens = maxTokens;
-        this.claudeCodeProviderFunction = claudeCodeProviderFunction;
-        this.claudeCodeBaseSettings = claudeCodeBaseSettings;
+        this.agentProviderFunction = agentProviderFunction;
+        this.agentBaseSettings = agentBaseSettings;
         this.sessionId = sessionId;
         this.agentSlug = agentSlug;
         this.conversationId = conversationId;
         this.keyRotationHandler = keyRotationHandler;
 
-        if (!standardProviderAccessor && !claudeCodeProviderFunction) {
+        if (!standardProviderAccessor && !agentProviderFunction) {
             throw new Error(
-                "LLMService requires either a provider accessor or Claude Code provider function"
+                "LLMService requires either a provider accessor or an agent provider function"
             );
         }
 
@@ -200,27 +198,18 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
     /**
      * Get a language model instance.
-     * For Claude Code: Creates model with system prompt from messages.
-     * For standard providers: Gets model from registry.
+     * For agent providers: creates the model from the provider function.
+     * For standard providers: gets the model from the registry.
      * Wraps all models with extract-reasoning-middleware.
      */
     private getLanguageModel(messages?: ModelMessage[]): LanguageModel {
         let baseModel: LanguageModel;
 
-        const systemContent = this.captureSystemPromptTelemetry(messages);
+        this.captureSystemPromptTelemetry(messages);
 
-        if (this.claudeCodeProviderFunction) {
-            // Claude Code or Codex CLI provider
-            // Start with base settings (cwd, env, mcpServers, etc.) from createAgentSettings
-            const options: ClaudeCodeSettings = { ...this.claudeCodeBaseSettings };
-
-            // Pass system prompt to Claude Code provider (Claude Code-specific requirement)
-            // Using plain string (not preset+append) gives full control over agent identity
-            if (systemContent && this.provider === PROVIDER_IDS.CLAUDE_CODE) {
-                options.systemPrompt = systemContent;
-            }
-
-            baseModel = this.claudeCodeProviderFunction(this.model, options);
+        if (this.agentProviderFunction) {
+            const options = { ...this.agentBaseSettings };
+            baseModel = this.agentProviderFunction(this.model, options);
         } else if (this.standardProviderAccessor) {
             // Standard providers use live accessor to get current registry
             const { registry } = this.standardProviderAccessor();

@@ -12,7 +12,6 @@ import type { LLMConfiguration } from "@/services/config/types";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import type { LanguageModel, ProviderRegistryProvider } from "ai";
-import type { ClaudeCodeSettings } from "ai-sdk-provider-claude-code";
 
 import { LLMService } from "./service";
 import {
@@ -63,7 +62,7 @@ export class LLMServiceFactory {
 
         // Also ensure agent providers are initialized (they don't need API keys).
         // Add them with empty configs if not already present.
-        const agentProviders = [PROVIDER_IDS.CLAUDE_CODE, PROVIDER_IDS.CODEX_APP_SERVER];
+        const agentProviders = [PROVIDER_IDS.CODEX_APP_SERVER];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {
                 configs[providerId] = {};
@@ -104,7 +103,7 @@ export class LLMServiceFactory {
             mcpConfig?: MCPConfig;
             /** Conversation ID for OpenRouter correlation */
             conversationId?: string;
-            /** Callback invoked when Claude Code stream starts, providing the message injector */
+            /** Callback invoked when an agent stream exposes a message injector */
             onStreamStart?: OnStreamStartCallback;
         }
     ): LLMService {
@@ -148,7 +147,7 @@ export class LLMServiceFactory {
         // Get capabilities from provider metadata
         const capabilities = provider.metadata.capabilities;
 
-        // For agent providers (claude-code, codex-app-server), use their provider function
+        // Agent providers bypass the standard AI SDK registry and provide their own model factory.
         if (modelResult.bypassRegistry && modelResult.providerFunction) {
             return new LLMService(
                 null,
@@ -157,8 +156,8 @@ export class LLMServiceFactory {
                 capabilities,
                 config.temperature,
                 config.maxTokens,
-                modelResult.providerFunction as (model: string, options?: ClaudeCodeSettings) => LanguageModel,
-                modelResult.agentSettings as ClaudeCodeSettings,
+                modelResult.providerFunction as (model: string, options?: Record<string, unknown>) => LanguageModel,
+                modelResult.agentSettings as Record<string, unknown>,
                 context?.sessionId,
                 agentSlug,
                 context?.conversationId

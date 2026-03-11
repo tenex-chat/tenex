@@ -7,7 +7,7 @@ import { z, type ZodRawShape } from "zod";
  * Converts TENEX tools to Codex App Server SDK MCP server format.
  *
  * This adapter uses createSdkMcpServer which handles HTTP server lifecycle
- * automatically - the user API is identical to Claude Code's createSdkMcpServer.
+ * automatically for in-process MCP servers.
  */
 export class CodexAppServerToolsAdapter {
     /**

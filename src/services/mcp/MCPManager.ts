@@ -351,7 +351,7 @@ export class MCPManager {
 
     /**
      * Get configuration for all running MCP servers.
-     * Used to pass server configs to LLM providers (like Claude Code)
+     * Used to pass server configs to LLM providers with MCP support
      * that need to spawn their own instances of these servers.
      *
      * @returns Record of server name to server configuration

@@ -11,7 +11,7 @@
  *   Examples: OpenRouter, Anthropic, OpenAI, Ollama
  *
  * - **Agent Providers**: Have built-in tools and session management
- *   Examples: Claude Code, Codex CLI
+ *   Examples: Codex App Server
  *
  * ## Adding a New Provider
  *
@@ -47,7 +47,7 @@ export {
 } from "./standard";
 
 // Export agent providers
-export { ClaudeCodeProvider, CodexAppServerProvider } from "./agent";
+export { CodexAppServerProvider } from "./agent";
 
 // Import for registration
 import type { ProviderRegistration } from "./types";
@@ -55,7 +55,6 @@ import { OpenRouterProvider } from "./standard/OpenRouterProvider";
 import { AnthropicProvider } from "./standard/AnthropicProvider";
 import { OpenAIProvider } from "./standard/OpenAIProvider";
 import { OllamaProvider } from "./standard/OllamaProvider";
-import { ClaudeCodeProvider } from "./agent/ClaudeCodeProvider";
 import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
 import { providerRegistry } from "./registry";
 
@@ -84,10 +83,6 @@ export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
         metadata: OllamaProvider.METADATA,
     },
     // Agent providers
-    {
-        Provider: ClaudeCodeProvider,
-        metadata: ClaudeCodeProvider.METADATA,
-    },
     {
         Provider: CodexAppServerProvider,
         metadata: CodexAppServerProvider.METADATA,

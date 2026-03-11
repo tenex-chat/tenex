@@ -6,7 +6,6 @@
  */
 
 export const PROVIDER_IDS = {
-    CLAUDE_CODE: "claude-code",
     CODEX_APP_SERVER: "codex-app-server",
     OPENROUTER: "openrouter",
     ANTHROPIC: "anthropic",

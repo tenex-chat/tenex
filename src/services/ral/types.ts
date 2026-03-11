@@ -116,8 +116,6 @@ export interface QueuedInjection {
   role: InjectionRole;
   content: string;
   queuedAt: number;
-  /** If true, message is included in LLM context but NOT persisted to ConversationStore */
-  ephemeral?: boolean;
   /** Original sender pubkey (for message attribution when sender differs from expected) */
   senderPubkey?: string;
   /** Original Nostr event ID (for deduplication - prevents double-insertion via both addEvent and injection paths) */
@@ -215,7 +213,7 @@ function isDirectStopExecutionSignal(value: unknown): value is StopExecutionSign
 /**
  * Try to extract a StopExecutionSignal from an MCP-wrapped response.
  *
- * Claude Code SDK wraps tool results in MCP format:
+ * Some agent SDKs wrap tool results in MCP format:
  * - Array format: [{ type: "text", text: '{"__stopExecution":true,...}' }]
  * - Object format: { content: [{ type: "text", text: "..." }] }
  *
@@ -257,7 +255,7 @@ function extractFromMCPWrapped(value: unknown): StopExecutionSignal | null {
  *
  * Handles both:
  * 1. Direct StopExecutionSignal objects (from standard AI SDK providers)
- * 2. MCP-wrapped responses (from Claude Code SDK where tool results get
+ * 2. MCP-wrapped responses (from agent SDKs where tool results get
  *    wrapped in [{ type: "text", text: "..." }] format)
  */
 export function isStopExecutionSignal(value: unknown): value is StopExecutionSignal {
@@ -266,7 +264,7 @@ export function isStopExecutionSignal(value: unknown): value is StopExecutionSig
     return true;
   }
 
-  // Check MCP-wrapped format (Claude Code SDK)
+  // Check MCP-wrapped format from agent SDKs
   return extractFromMCPWrapped(value) !== null;
 }
 

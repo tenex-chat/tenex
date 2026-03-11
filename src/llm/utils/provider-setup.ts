@@ -3,7 +3,6 @@ import input from "@inquirer/input";
 import chalk from "chalk";
 import { AI_SDK_PROVIDERS } from "@/llm/types";
 import type { ProviderCredentials, TenexProviders } from "@/services/config/types";
-import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import providerSelectPrompt, {
     getKeys,
     isOllama,
@@ -26,7 +25,7 @@ export async function runProviderSetup(
     existingProviders: TenexProviders,
     options: ProviderSetupOptions = {},
 ): Promise<TenexProviders> {
-    const providerIds = AI_SDK_PROVIDERS.filter((p) => p !== PROVIDER_IDS.CLAUDE_CODE);
+    const providerIds = [...AI_SDK_PROVIDERS];
     const { providerHints } = options;
 
     let resumeState: PromptState | undefined;

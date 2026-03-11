@@ -37,14 +37,7 @@ export function addCacheControl(messages: ModelMessage[], provider: string): Mod
  * Handles provider-specific transformations.
  */
 export function prepareMessagesForRequest(messages: ModelMessage[], provider: string): ModelMessage[] {
-    let processedMessages = messages;
-
-    // For Claude Code, filter out system messages since they're passed via systemPrompt
-    if (provider === PROVIDER_IDS.CLAUDE_CODE) {
-        processedMessages = messages.filter((m) => m.role !== "system");
-    }
-
-    return addCacheControl(processedMessages, provider);
+    return addCacheControl(messages, provider);
 }
 
 /**
@@ -80,7 +73,7 @@ export function extractLastUserMessage(messages: ModelMessage[]): string | undef
 
 /**
  * Extract system messages from a message array and combine them.
- * Used for providers like Claude Code that take system prompt separately.
+ * Used for telemetry and provider-agnostic prompt inspection.
  */
 export function extractSystemContent(messages: ModelMessage[]): string {
     return messages
