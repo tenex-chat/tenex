@@ -21,7 +21,6 @@ describe("MessageBuilder", () => {
             viewingAgentPubkey,
             ralNumber: 1,
             activeRals: new Set([1]),
-            totalMessages: 10,
             indexOffset: 0,
             ...overrides,
         };
@@ -64,7 +63,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Should have 3 messages
@@ -121,7 +120,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             expect(messages).toHaveLength(4);
@@ -196,7 +195,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Expected order: [call-1, result-1, user, call-2, result-2]
@@ -260,7 +259,6 @@ describe("MessageBuilder", () => {
             ];
 
             const ctx = createContext({
-                totalMessages: entries.length,
                 conversationId,
                 getDelegationMessages: (convId) => {
                     if (convId === delegationConversationId) {
@@ -354,7 +352,6 @@ describe("MessageBuilder", () => {
             ];
 
             const ctx = createContext({
-                totalMessages: entries.length,
                 conversationId: currentConversationId,
             });
             const messages = await buildMessagesFromEntries(entries, ctx);
@@ -427,7 +424,6 @@ describe("MessageBuilder", () => {
             ];
 
             const ctx = createContext({
-                totalMessages: entries.length,
                 conversationId,
                 getDelegationMessages: () => [
                     {
@@ -473,7 +469,7 @@ describe("MessageBuilder", () => {
                 // No tool-result for orphan-call-1
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Should have 2 messages: tool-call + synthetic result
@@ -517,7 +513,7 @@ describe("MessageBuilder", () => {
                 // No results for either call
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Should have tool-call + 2 synthetic results
@@ -576,7 +572,7 @@ describe("MessageBuilder", () => {
                 // No result for orphan-call
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Should have: call-1, result-1, call-2, synthetic-result-2
@@ -594,7 +590,7 @@ describe("MessageBuilder", () => {
 
     describe("Edge Cases", () => {
         test("handles empty entries array", async () => {
-            const ctx = createContext({ totalMessages: 0 });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries([], ctx);
             expect(messages).toHaveLength(0);
         });
@@ -614,7 +610,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             expect(messages).toHaveLength(2);
@@ -645,7 +641,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Should have: tool-call, synthetic-result, deferred-user-message
@@ -668,7 +664,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             expect(messages[0].role).toBe("assistant");
@@ -684,7 +680,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             expect(messages[0].role).toBe("user");
@@ -699,7 +695,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             expect(messages[0].role).toBe("user");
@@ -740,7 +736,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Tool result should preserve full image URL on first appearance
@@ -824,7 +820,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // First tool result should have full URL
@@ -877,7 +873,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             const toolResult = messages[1];
@@ -954,7 +950,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // Second tool result should have mixed content
@@ -1003,7 +999,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             const toolResult = messages[1];
@@ -1054,7 +1050,7 @@ describe("MessageBuilder", () => {
                 },
             ];
 
-            const ctx = createContext({ totalMessages: entries.length });
+            const ctx = createContext({});
             const messages = await buildMessagesFromEntries(entries, ctx);
 
             // User message with image is converted to multimodal format

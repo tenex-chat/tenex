@@ -68,7 +68,7 @@ export function unwrapErrorTextResult(result: string | ErrorTextResult): string 
     return isErrorTextResult(result) ? result.text : result;
 }
 
-export function buildLegacyOutsideWorkingDirectoryMessage(
+export function buildOutsideWorkingDirectoryMessage(
     path: string,
     workingDirectory: string
 ): string {
@@ -81,7 +81,7 @@ export function adaptOutsideWorkingDirectoryText(
     workingDirectory: string
 ): string {
     return result.includes("outside the configured roots")
-        ? buildLegacyOutsideWorkingDirectoryMessage(path, workingDirectory)
+        ? buildOutsideWorkingDirectoryMessage(path, workingDirectory)
         : result;
 }
 
@@ -90,14 +90,15 @@ export function adaptOutsideWorkingDirectoryResult(
     path: string,
     workingDirectory: string
 ): string | ErrorTextResult {
-    if (
-        isErrorTextResult(result) &&
-        result.text.includes("outside the configured roots")
-    ) {
-        return buildLegacyOutsideWorkingDirectoryMessage(path, workingDirectory);
+    if (isErrorTextResult(result)) {
+        return result.text.includes("outside the configured roots")
+            ? buildOutsideWorkingDirectoryMessage(path, workingDirectory)
+            : result;
     }
 
-    return result;
+    return typeof result === "string" && result.includes("outside the configured roots")
+        ? buildOutsideWorkingDirectoryMessage(path, workingDirectory)
+        : result;
 }
 
 export function assertAbsolutePath(path: string): void {

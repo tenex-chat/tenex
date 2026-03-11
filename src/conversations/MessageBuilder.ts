@@ -15,7 +15,6 @@ import type { ConversationEntry, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
-import type { TruncationContext } from "./utils/tool-result-truncator";
 import {
     createImageTracker,
     processToolResultWithImageTracking,
@@ -45,10 +44,6 @@ export interface MessageBuilderContext {
      * Index offset when processing a slice of messages (default 0)
      */
     indexOffset?: number;
-    /**
-     * Total message count for truncation context
-     */
-    totalMessages: number;
     /**
      * Set of pubkeys that belong to agents (non-whitelisted).
      * Used by computeAttributionPrefix to distinguish agent messages from user messages.
@@ -275,7 +270,6 @@ export function computeAttributionPrefix(
 async function entryToMessage(
     entry: ConversationEntry,
     viewingAgentPubkey: string,
-    _truncationContext: TruncationContext | undefined,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
     enableMultimodal: boolean = true
@@ -465,7 +459,6 @@ export async function buildMessagesFromEntries(
         ralNumber,
         activeRals,
         indexOffset = 0,
-        totalMessages,
         agentPubkeys = new Set<string>(),
         includeMessageIds = false,
     } = ctx;
@@ -557,7 +550,6 @@ export async function buildMessagesFromEntries(
     // Messages deferred because they arrived while tool-calls were pending
     const deferredMessages: Array<{
         entry: ConversationEntry;
-        truncationContext: TruncationContext;
         enableMultimodal: boolean;
         absoluteIndex: number;
     }> = [];
@@ -575,12 +567,6 @@ export async function buildMessagesFromEntries(
             }
         }
 
-        // Create truncation context for tool result processing
-        const truncationContext: TruncationContext = {
-            currentIndex: indexOffset + i,
-            totalMessages,
-            eventId: entry.eventId,
-        };
         const absoluteIndex = indexOffset + i;
 
         // Helper to check if entry should be included based on RAL visibility
@@ -605,7 +591,7 @@ export async function buildMessagesFromEntries(
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
             result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker),
+                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
                 entry,
                 absoluteIndex,
                 includeMessageIds
@@ -636,7 +622,7 @@ export async function buildMessagesFromEntries(
             }
 
             result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, truncationContext, agentPubkeys, imageTracker),
+                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
                 entry,
                 absoluteIndex,
                 includeMessageIds
@@ -653,7 +639,6 @@ export async function buildMessagesFromEntries(
                         await entryToMessage(
                             deferred.entry,
                             viewingAgentPubkey,
-                            deferred.truncationContext,
                             agentPubkeys,
                             imageTracker,
                             deferred.enableMultimodal
@@ -710,7 +695,6 @@ export async function buildMessagesFromEntries(
                             eventId: entry.eventId,
                             ral: entry.ral,
                         },
-                        truncationContext,
                         enableMultimodal: false,
                         absoluteIndex,
                     });
@@ -742,7 +726,6 @@ export async function buildMessagesFromEntries(
                             eventId: entry.eventId,
                             ral: entry.ral,
                         },
-                        truncationContext,
                         enableMultimodal: false,
                         absoluteIndex,
                     });
@@ -767,13 +750,12 @@ export async function buildMessagesFromEntries(
         const enableMultimodal = i === lastUserImageEntryIndex;
         // If tool-calls are pending, defer this message
         if (pendingToolCalls.size > 0) {
-            deferredMessages.push({ entry, truncationContext, enableMultimodal, absoluteIndex });
+            deferredMessages.push({ entry, enableMultimodal, absoluteIndex });
         } else {
             result.push(withMessageIdentity(
                 await entryToMessage(
                     entry,
                     viewingAgentPubkey,
-                    truncationContext,
                     agentPubkeys,
                     imageTracker,
                     enableMultimodal
@@ -837,7 +819,6 @@ export async function buildMessagesFromEntries(
             await entryToMessage(
                 deferred.entry,
                 viewingAgentPubkey,
-                deferred.truncationContext,
                 agentPubkeys,
                 imageTracker,
                 deferred.enableMultimodal

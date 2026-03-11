@@ -20,8 +20,11 @@ export async function applyTenexContextCompression(options: {
     slidingWindowSize: number;
 }): Promise<AddressableModelMessage[]> {
     const result = await contextCompression({
+        // Both types share {id, role, content} but come from different packages — structurally compatible.
         messages: options.messages as unknown as ContextCompressionMessage[],
         maxTokens: options.maxTokens,
+        // Always compress fully: the caller (MessageCompiler.getCompressionConfig) already
+        // gates whether compression runs at all via its own tokenThreshold check.
         compressionThreshold: 1,
         protectedTailCount: mapProtectedTailCount(options.slidingWindowSize),
         conversationKey: options.conversationId,
@@ -41,5 +44,6 @@ export async function applyTenexContextCompression(options: {
         retrievalToolArgName: "tool",
     });
 
+    // Round-trip cast: the package preserves the message shape including extra fields like eventId.
     return result.messages as unknown as AddressableModelMessage[];
 }

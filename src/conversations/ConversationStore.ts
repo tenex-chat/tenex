@@ -307,28 +307,6 @@ export class ConversationStore {
         return this.state.messages.length;
     }
 
-    /**
-     * Get the message count after applying compression segments.
-     * This is the count in "compressed space" used for delta-mode cursors.
-     *
-     * CRITICAL: Delta-mode cursors must reference compressed space, not raw space.
-     * If cursor is in raw space, it can exceed compressed array length after compression,
-     * causing buildMessagesForRalAfterIndex to silently drop new messages.
-     */
-    getCompressedMessageCount(): number {
-        if (!this.conversationId) {
-            return this.state.messages.length;
-        }
-
-        const segments = this.loadCompressionLog(this.conversationId);
-        if (segments.length === 0) {
-            return this.state.messages.length;
-        }
-
-        const compressed = applySegmentsToEntries(this.state.messages, segments);
-        return compressed.length;
-    }
-
     getLastActivityTime(): number {
         const lastMessage = this.state.messages[this.state.messages.length - 1];
         return lastMessage?.timestamp || 0;
@@ -682,7 +660,7 @@ export class ConversationStore {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
-            totalMessages: entries.length,
+
             agentPubkeys: ConversationStore.agentPubkeys,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
@@ -727,7 +705,7 @@ export class ConversationStore {
             ralNumber,
             activeRals,
             indexOffset: startIndex,
-            totalMessages: allEntries.length,
+
             agentPubkeys: ConversationStore.agentPubkeys,
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,

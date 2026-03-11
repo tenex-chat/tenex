@@ -276,7 +276,6 @@ describe("Multi-agent attribution integration", () => {
             viewingAgentPubkey,
             ralNumber: 1,
             activeRals: new Set([1]),
-            totalMessages: 10,
             indexOffset: 0,
             agentPubkeys,
             ...overrides,
@@ -322,7 +321,7 @@ describe("Multi-agent attribution integration", () => {
             },
         ];
 
-        const ctx = createContext({ totalMessages: entries.length });
+        const ctx = createContext({});
         const messages = await buildMessagesFromEntries(entries, ctx);
 
         expect(messages).toHaveLength(5);
@@ -376,7 +375,7 @@ describe("Multi-agent attribution integration", () => {
             },
         ];
 
-        const ctx = createContext({ totalMessages: entries.length });
+        const ctx = createContext({});
         const messages = await buildMessagesFromEntries(entries, ctx);
 
         // User message: no prefix
@@ -406,7 +405,7 @@ describe("Multi-agent attribution integration", () => {
             },
         ];
 
-        const ctx = createContext({ totalMessages: entries.length });
+        const ctx = createContext({});
         const messages = await buildMessagesFromEntries(entries, ctx);
 
         expect(messages[0].role).toBe("user");
@@ -426,7 +425,6 @@ describe("Multi-agent attribution integration", () => {
         ];
 
         const ctx = createContext({
-            totalMessages: entries.length,
             agentPubkeys: new Set<string>(), // No known agents
         });
         const messages = await buildMessagesFromEntries(entries, ctx);
