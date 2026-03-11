@@ -1,4 +1,4 @@
-import { createAgentsMdResolver } from "ai-sdk-fs-tools";
+import { getRootAgentsMdContent, hasRootAgentsMd as hasProjectRootAgentsMd } from "ai-sdk-fs-tools";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
@@ -31,7 +31,6 @@ import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
  * when the same agent pubkey is active in multiple concurrent projects.
  */
 const promptCompilerCache = new Map<string, PromptCompilerService>();
-const rootAgentsMdResolver = createAgentsMdResolver();
 
 /**
  * In-flight promise cache to prevent race conditions when multiple concurrent
@@ -718,9 +717,9 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // When no AGENTS.md exists, the fragment explicitly states so
     if (projectBasePath) {
         try {
-            const hasRootAgentsMd = await rootAgentsMdResolver.hasRootAgentsMd(projectBasePath);
+            const hasRootAgentsMd = await hasProjectRootAgentsMd(projectBasePath);
             const rootContent = hasRootAgentsMd
-                ? await rootAgentsMdResolver.getRootAgentsMdContent(projectBasePath)
+                ? await getRootAgentsMdContent(projectBasePath)
                 : null;
             systemPromptBuilder.add("agents-md-guidance", {
                 hasRootAgentsMd,
