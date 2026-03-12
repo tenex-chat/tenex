@@ -1,15 +1,18 @@
 import os from "node:os";
+import { getRelayUrls } from "@/nostr/relays";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Process metrics fragment.
- * Provides agents with runtime metadata about the backend process:
- * PID, process uptime, CPU/memory usage, and system uptime.
+ * Environment context fragment.
+ * Provides agents with runtime metadata about the backend process
+ * and the Nostr relay configuration currently in use.
  */
-export const processMetricsFragment: PromptFragment<Record<string, never>> = {
-    id: "process-metrics",
-    priority: 4, // Alongside relay-configuration, environment metadata
+export const environmentContextFragment: PromptFragment<Record<string, never>> = {
+    id: "environment-context",
+    priority: 4, // Runtime and connectivity metadata
     template: () => {
+        const relays = getRelayUrls();
+        const relaySummary = relays.join(", ");
         const pid = process.pid;
         const uptimeSeconds = process.uptime();
 
@@ -49,7 +52,8 @@ export const processMetricsFragment: PromptFragment<Record<string, never>> = {
                   : `${sysUptimeMinutes}m`;
 
         const lines = [
-            "## Process Metrics",
+            "## Environment Context",
+            `- Nostr Relay in Use: ${relaySummary}`,
             `- PID: ${pid}`,
             `- Process uptime: ${processUptimeStr}`,
             `- CPU usage: ${cpuPercentStr}`,

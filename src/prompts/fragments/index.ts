@@ -11,7 +11,6 @@ import { globalSystemPromptFragment } from "./00-global-system-prompt";
 import { agentIdentityFragment } from "./01-agent-identity";
 import { agentHomeDirectoryFragment } from "./02-agent-home-directory";
 import { systemRemindersExplanationFragment } from "./03-system-reminders-explanation";
-import { relayConfigurationFragment } from "./04-relay-configuration";
 import { delegationChainFragment } from "./05-delegation-chain";
 import { agentTodosFragment } from "./06-agent-todos";
 import { metaProjectContextFragment } from "./07-meta-project-context";
@@ -22,7 +21,7 @@ import { todoUsageGuidanceFragment } from "./06-todo-usage-guidance";
 import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
-import { todoBeforeDelegationFragment } from "./17-todo-before-delegation";
+import { TodoUsageFragment } from "./17-todo-before-delegation";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { nudgesFragment } from "./11-nudges";
@@ -37,7 +36,7 @@ import { agentDirectedMonitoringFragment } from "./28-agent-directed-monitoring"
 import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
-import { processMetricsFragment } from "./32-process-metrics";
+import { environmentContextFragment } from "./32-environment-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
 
@@ -53,7 +52,6 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(agentIdentityFragment);
     fragmentRegistry.register(agentHomeDirectoryFragment);
     fragmentRegistry.register(systemRemindersExplanationFragment);
-    fragmentRegistry.register(relayConfigurationFragment);
     fragmentRegistry.register(delegationChainFragment);
     fragmentRegistry.register(agentTodosFragment);
     fragmentRegistry.register(todoUsageGuidanceFragment);
@@ -66,7 +64,7 @@ export function registerAllFragments(): void {
     // Agent collaboration
     fragmentRegistry.register(availableAgentsFragment);
     fragmentRegistry.register(stayInYourLaneFragment);
-    fragmentRegistry.register(todoBeforeDelegationFragment);
+    fragmentRegistry.register(TodoUsageFragment);
 
     // Behavioral guidance
     // voice-mode and referenced-article are registered via side effects
@@ -86,7 +84,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(ragCollectionsFragment);
     fragmentRegistry.register(worktreeContextFragment);
     fragmentRegistry.register(agentsMdGuidanceFragment);
-    fragmentRegistry.register(processMetricsFragment);
+    fragmentRegistry.register(environmentContextFragment);
 }
 
 // Auto-register all fragments on import
