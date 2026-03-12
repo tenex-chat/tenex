@@ -1,5 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
+import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 import { listWorktrees, loadWorktreeMetadata, type WorktreeMetadata } from "@/utils/git/worktree";
@@ -75,8 +76,8 @@ export const worktreeContextFragment: PromptFragment<WorktreeContextArgs> = {
         parts.push(`  - Path: ${wt.path}`);
 
         if (meta) {
-          parts.push(`  - Created by: ${meta.createdBy.substring(0, 8)}...`);
-          parts.push(`  - Conversation: ${meta.conversationId.substring(0, 8)}...`);
+          parts.push(`  - Created by: ${meta.createdBy.substring(0, SHORT_EVENT_ID_LENGTH)}`);
+          parts.push(`  - Conversation: ${meta.conversationId.substring(0, SHORT_EVENT_ID_LENGTH)}`);
           parts.push(`  - Parent branch: ${meta.parentBranch}`);
         }
       }

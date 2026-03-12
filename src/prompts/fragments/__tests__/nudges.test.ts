@@ -25,50 +25,63 @@ describe("nudgesFragment", () => {
     });
 
     describe("new mode (nudges array)", () => {
-        it("should render single nudge without title", () => {
+        it("should render single nudge with id", () => {
             const nudges: NudgeData[] = [
-                { content: "This is the nudge content" },
+                { id: "abc123456789", content: "This is the nudge content" },
             ];
 
             const result = nudgesFragment.template({ nudges });
 
-            expect(result).toContain("<nudge>");
+            expect(result).toContain('<nudge id="abc123456789">');
             expect(result).toContain("This is the nudge content");
             expect(result).toContain("</nudge>");
             expect(result).not.toContain("title=");
         });
 
-        it("should render single nudge with title", () => {
+        it("should render single nudge with id and title", () => {
             const nudges: NudgeData[] = [
-                { content: "This is the nudge content", title: "My Nudge" },
+                { id: "abc123456789", content: "This is the nudge content", title: "My Nudge" },
             ];
 
             const result = nudgesFragment.template({ nudges });
 
-            expect(result).toContain('<nudge title="My Nudge">');
+            expect(result).toContain('<nudge id="abc123456789" title="My Nudge">');
             expect(result).toContain("This is the nudge content");
             expect(result).toContain("</nudge>");
         });
 
-        it("should render multiple nudges", () => {
+        it("should wrap nudges in <nudges> container", () => {
             const nudges: NudgeData[] = [
-                { content: "First nudge content", title: "First" },
-                { content: "Second nudge content", title: "Second" },
+                { id: "abc123456789", content: "Nudge content" },
             ];
 
             const result = nudgesFragment.template({ nudges });
 
-            expect(result).toContain('<nudge title="First">');
+            expect(result).toContain("<nudges>");
+            expect(result).toContain("</nudges>");
+        });
+
+        it("should render multiple nudges inside container", () => {
+            const nudges: NudgeData[] = [
+                { id: "aaa111111111", content: "First nudge content", title: "First" },
+                { id: "bbb222222222", content: "Second nudge content", title: "Second" },
+            ];
+
+            const result = nudgesFragment.template({ nudges });
+
+            expect(result).toContain('<nudge id="aaa111111111" title="First">');
             expect(result).toContain("First nudge content");
-            expect(result).toContain('<nudge title="Second">');
+            expect(result).toContain('<nudge id="bbb222222222" title="Second">');
             expect(result).toContain("Second nudge content");
+            expect(result).toContain("<nudges>");
+            expect(result).toContain("</nudges>");
         });
     });
 
-    describe("title escaping", () => {
+    describe("attribute escaping", () => {
         it("should escape quotes in title attribute", () => {
             const nudges: NudgeData[] = [
-                { content: "Test content", title: 'Title with "quotes"' },
+                { id: "abc123456789", content: "Test content", title: 'Title with "quotes"' },
             ];
 
             const result = nudgesFragment.template({ nudges });
@@ -79,7 +92,7 @@ describe("nudgesFragment", () => {
 
         it("should escape angle brackets in title attribute", () => {
             const nudges: NudgeData[] = [
-                { content: "Test content", title: "Title with <tags>" },
+                { id: "abc123456789", content: "Test content", title: "Title with <tags>" },
             ];
 
             const result = nudgesFragment.template({ nudges });
@@ -89,12 +102,22 @@ describe("nudgesFragment", () => {
 
         it("should escape ampersands in title attribute", () => {
             const nudges: NudgeData[] = [
-                { content: "Test content", title: "Title & more" },
+                { id: "abc123456789", content: "Test content", title: "Title & more" },
             ];
 
             const result = nudgesFragment.template({ nudges });
 
             expect(result).toContain('title="Title &amp; more"');
+        });
+
+        it("should escape id attribute values", () => {
+            const nudges: NudgeData[] = [
+                { id: 'id"with<special>&chars', content: "Test content" },
+            ];
+
+            const result = nudgesFragment.template({ nudges });
+
+            expect(result).toContain('id="id&quot;with&lt;special&gt;&amp;chars"');
         });
     });
 
@@ -102,7 +125,7 @@ describe("nudgesFragment", () => {
         describe("only-tool mode", () => {
             it("should show restricted tools in separate header block", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something", title: "Test Nudge" },
+                    { id: "abc123456789", content: "Do something", title: "Test Nudge" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     onlyTools: ["fs_read", "fs_write"],
@@ -120,7 +143,7 @@ describe("nudgesFragment", () => {
         describe("allow/deny mode", () => {
             it("should show enabled tools in header", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something" },
+                    { id: "abc123456789", content: "Do something" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     allowTools: ["shell", "delegate"],
@@ -135,7 +158,7 @@ describe("nudgesFragment", () => {
 
             it("should show disabled tools in header", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something" },
+                    { id: "abc123456789", content: "Do something" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     denyTools: ["fs_write", "shell"],
@@ -150,7 +173,7 @@ describe("nudgesFragment", () => {
 
             it("should show both enabled and disabled tools in header", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something" },
+                    { id: "abc123456789", content: "Do something" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     allowTools: ["delegate"],
@@ -169,7 +192,7 @@ describe("nudgesFragment", () => {
         describe("no tool permissions", () => {
             it("should not render permissions header when no permissions", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something" },
+                    { id: "abc123456789", content: "Do something" },
                 ];
 
                 const result = nudgesFragment.template({ nudges });
@@ -180,7 +203,7 @@ describe("nudgesFragment", () => {
 
             it("should not render permissions header when permissions are empty", () => {
                 const nudges: NudgeData[] = [
-                    { content: "Do something" },
+                    { id: "abc123456789", content: "Do something" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {};
 
@@ -194,8 +217,8 @@ describe("nudgesFragment", () => {
         describe("multiple nudges with permissions", () => {
             it("should render permissions BEFORE nudges as a header block", () => {
                 const nudges: NudgeData[] = [
-                    { content: "First nudge", title: "First" },
-                    { content: "Second nudge", title: "Second" },
+                    { id: "aaa111111111", content: "First nudge", title: "First" },
+                    { id: "bbb222222222", content: "Second nudge", title: "Second" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     onlyTools: ["fs_read"],
@@ -209,8 +232,8 @@ describe("nudgesFragment", () => {
 
                 // Verify it appears BEFORE all nudges
                 const permIndex = result.indexOf("<nudge-tool-permissions>");
-                const firstNudgeIndex = result.indexOf('<nudge title="First">');
-                const secondNudgeIndex = result.indexOf('<nudge title="Second">');
+                const firstNudgeIndex = result.indexOf('<nudge id="aaa111111111"');
+                const secondNudgeIndex = result.indexOf('<nudge id="bbb222222222"');
 
                 expect(permIndex).toBeLessThan(firstNudgeIndex);
                 expect(permIndex).toBeLessThan(secondNudgeIndex);
@@ -218,8 +241,8 @@ describe("nudgesFragment", () => {
 
             it("should not embed permissions inside individual nudges", () => {
                 const nudges: NudgeData[] = [
-                    { content: "First nudge", title: "First" },
-                    { content: "Second nudge", title: "Second" },
+                    { id: "aaa111111111", content: "First nudge", title: "First" },
+                    { id: "bbb222222222", content: "Second nudge", title: "Second" },
                 ];
                 const nudgeToolPermissions: NudgeToolPermissions = {
                     allowTools: ["shell"],
@@ -228,7 +251,7 @@ describe("nudgesFragment", () => {
                 const result = nudgesFragment.template({ nudges, nudgeToolPermissions });
 
                 // Get the content of just the first nudge
-                const firstNudgeStart = result.indexOf('<nudge title="First">');
+                const firstNudgeStart = result.indexOf('<nudge id="aaa111111111"');
                 const firstNudgeEnd = result.indexOf('</nudge>', firstNudgeStart) + '</nudge>'.length;
                 const firstNudgeContent = result.substring(firstNudgeStart, firstNudgeEnd);
 
@@ -244,21 +267,21 @@ describe("nudgesFragment", () => {
             expect(nudgesFragment.validateArgs({ nudgeContent: "test" })).toBe(true);
         });
 
-        it("should validate nudges array", () => {
+        it("should validate nudges array with id", () => {
             expect(nudgesFragment.validateArgs({ nudges: [] })).toBe(true);
-            expect(nudgesFragment.validateArgs({ nudges: [{ content: "test" }] })).toBe(true);
+            expect(nudgesFragment.validateArgs({ nudges: [{ id: "abc123456789", content: "test" }] })).toBe(true);
         });
 
         it("should validate nudge with optional title", () => {
             expect(nudgesFragment.validateArgs({
-                nudges: [{ content: "test", title: "My Title" }],
+                nudges: [{ id: "abc123456789", content: "test", title: "My Title" }],
             })).toBe(true);
         });
 
         it("should validate combined args", () => {
             expect(nudgesFragment.validateArgs({
                 nudgeContent: "test",
-                nudges: [{ content: "test" }],
+                nudges: [{ id: "abc123456789", content: "test" }],
                 nudgeToolPermissions: { onlyTools: ["fs_read"] },
             })).toBe(true);
         });
@@ -281,21 +304,33 @@ describe("nudgesFragment", () => {
             expect(nudgesFragment.validateArgs({ nudges: {} })).toBe(false);
         });
 
+        it("should reject nudge without id field", () => {
+            expect(nudgesFragment.validateArgs({
+                nudges: [{ content: "test" }],
+            })).toBe(false);
+        });
+
         it("should reject nudge without content field", () => {
             expect(nudgesFragment.validateArgs({
-                nudges: [{ title: "no content" }],
+                nudges: [{ id: "abc123456789", title: "no content" }],
             })).toBe(false);
         });
 
         it("should reject nudge with non-string content", () => {
             expect(nudgesFragment.validateArgs({
-                nudges: [{ content: 123 }],
+                nudges: [{ id: "abc123456789", content: 123 }],
             })).toBe(false);
         });
 
         it("should reject nudge with non-string title", () => {
             expect(nudgesFragment.validateArgs({
-                nudges: [{ content: "test", title: 123 }],
+                nudges: [{ id: "abc123456789", content: "test", title: 123 }],
+            })).toBe(false);
+        });
+
+        it("should reject nudge with non-string id", () => {
+            expect(nudgesFragment.validateArgs({
+                nudges: [{ id: 123, content: "test" }],
             })).toBe(false);
         });
     });

@@ -63,9 +63,10 @@ ${lines.join("\n")}
  * Title is escaped to prevent XML injection.
  */
 function renderNudge(nudge: NudgeData): string {
+    const idAttr = ` id="${escapeAttrValue(nudge.id)}"`;
     const titleAttr = nudge.title ? ` title="${escapeAttrValue(nudge.title)}"` : "";
 
-    return `<nudge${titleAttr}>
+    return `<nudge${idAttr}${titleAttr}>
 ${nudge.content}
 </nudge>`;
 }
@@ -97,7 +98,7 @@ export const nudgesFragment: PromptFragment<NudgesArgs> = {
 
             // Render each nudge individually (without embedding permissions in each)
             const renderedNudges = nudges.map((nudge) => renderNudge(nudge));
-            parts.push(...renderedNudges);
+            parts.push(`<nudges>\n${renderedNudges.join("\n")}\n</nudges>`);
 
             return parts.join("\n\n");
         }
@@ -121,7 +122,8 @@ ${nudgeContent}
             for (const nudge of a.nudges) {
                 if (typeof nudge !== "object" || nudge === null) return false;
                 const n = nudge as Record<string, unknown>;
-                // content is required, title is optional
+                // id and content are required, title is optional
+                if (typeof n.id !== "string") return false;
                 if (typeof n.content !== "string") return false;
                 if (n.title !== undefined && typeof n.title !== "string") return false;
             }

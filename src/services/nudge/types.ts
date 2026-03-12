@@ -42,6 +42,8 @@ export interface NudgeToolPermissions {
  * Individual nudge data with content and title
  */
 export interface NudgeData {
+    /** Short event ID (first 8 chars) for identification */
+    id: string;
     /** The nudge content/prompt */
     content: string;
     /** The nudge title (from "title" tag) */

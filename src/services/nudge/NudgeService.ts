@@ -3,6 +3,7 @@ import { TagExtractor } from "@/nostr/TagExtractor";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import { createFullEventId, shortenEventId } from "@/types/event-ids";
 import type { NudgeResult, NudgeToolPermissions, NudgeData } from "./types";
 
 const tracer = trace.getTracer("tenex.nudge-service");
@@ -134,6 +135,7 @@ export class NudgeService {
                 // Build nudge data array
                 const nudgeDataArray: NudgeData[] = nudges
                     .map((nudge) => ({
+                        id: shortenEventId(createFullEventId(nudge.id)),
                         content: nudge.content.trim(),
                         title: nudge.tagValue("title") || undefined,
                     }))
