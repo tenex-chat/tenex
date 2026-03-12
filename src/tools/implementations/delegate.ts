@@ -71,18 +71,12 @@ interface DelegateOutput {
 }
 
 /**
- * Check if the agent has created a todo list.
- * Returns { hasTodos: boolean, hasConversation: boolean } to distinguish
- * between "no todos" and "no conversation context" cases.
+ * Check if the agent has any todos in the current conversation.
  */
-function checkTodoState(context: ToolExecutionContext): { hasTodos: boolean; hasConversation: boolean } {
+function hasTodos(context: ToolExecutionContext): boolean {
   const conversation = context.getConversation();
-  if (!conversation) {
-    // No conversation context available - skip enforcement
-    return { hasTodos: true, hasConversation: false };
-  }
-  const todos = conversation.getTodos(context.agent.pubkey);
-  return { hasTodos: todos.length > 0, hasConversation: true };
+  if (!conversation) return true; // No conversation context - assume OK
+  return conversation.getTodos(context.agent.pubkey).length > 0;
 }
 
 async function executeDelegate(
@@ -90,16 +84,6 @@ async function executeDelegate(
   context: ToolExecutionContext
 ): Promise<DelegateOutput> {
   const { delegations } = input;
-
-  // ENFORCEMENT: Delegation requires a todo list
-  // Skip enforcement if no conversation context (e.g., MCP-only mode)
-  const todoState = checkTodoState(context);
-  if (todoState.hasConversation && !todoState.hasTodos) {
-    throw new Error(
-      "Delegation requires a todo list. Please use `todo_write()` to create a todo list before delegating tasks. " +
-      "This helps track work progress and ensures delegated tasks are properly documented."
-    );
-  }
 
   if (!Array.isArray(delegations) || delegations.length === 0) {
     throw new Error("At least one delegation is required");
@@ -264,6 +248,10 @@ async function executeDelegate(
   if (unforcedWarnings.length > 0) {
     const skipped = unforcedWarnings.map(w => w.recipient).join(", ");
     message += ` Note: Skipped circular delegation(s) to: ${skipped}.`;
+  }
+
+  if (!hasTodos(context)) {
+    message += `\n\n<system-reminder type="delegation-todo-nudge">\nYou just delegated task(s) but don't have a todo list yet. Use \`todo_write()\` to set up a todo list tracking your delegated work and overall workflow.\n</system-reminder>`;
   }
 
   return {

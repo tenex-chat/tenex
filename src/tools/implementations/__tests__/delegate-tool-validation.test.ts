@@ -140,7 +140,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             }
         });
 
-        it("should block delegation when no todos exist", async () => {
+        it("should succeed but include reminder when no todos exist", async () => {
             const context = {
                 ...createMockContext(1, false), // No todos
                 agentPublisher: {
@@ -155,17 +155,14 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Should throw error requiring todos
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Delegation requires a todo list");
-                expect(error.message).toContain("todo_write()");
-            }
+            const result = await delegateTool.execute(input);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationIds).toHaveLength(1);
+            expect(result.message).toContain("delegation-todo-nudge");
+            expect(result.message).toContain("todo_write()");
         });
 
-        it("should skip enforcement and allow delegation when no conversation context (MCP-only mode)", async () => {
+        it("should not include reminder when no conversation context (MCP-only mode)", async () => {
             const agentPubkey = "agent-pubkey-123";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
@@ -184,11 +181,12 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            // Should succeed despite no todos - enforcement is skipped when no conversation context
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
+            // No reminder since there's no conversation context to check
+            expect(result.message).not.toContain("delegation-todo-nudge");
         });
 
         it("should allow self in multiple recipients", async () => {

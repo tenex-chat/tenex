@@ -45,7 +45,7 @@ mock.module("@/nostr", () => ({
 
 // Mock getDaemon before importing delegate_crossproject
 const mockGetKnownProjects = mock(() => new Map([
-    ["31933:project-pubkey:target-project", {
+    ["target-project", {
         pubkey: "project-pubkey",
         title: "Target Project",
         agents: [],
@@ -53,7 +53,7 @@ const mockGetKnownProjects = mock(() => new Map([
 ]));
 
 const mockGetActiveRuntimes = mock(() => new Map([
-    ["31933:project-pubkey:target-project", {
+    ["target-project", {
         getContext: () => ({
             agentRegistry: {
                 getAllAgentsMap: () => new Map([
@@ -190,7 +190,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     });
 
     describe("Todo enforcement skip path", () => {
-        test("should skip enforcement and allow delegation when no conversation context (MCP-only mode)", async () => {
+        test("should not include reminder when no conversation context (MCP-only mode)", async () => {
             const agentPubkey = "sender-agent-pubkey-123456789012345678901234567890123456789012345678";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
@@ -204,14 +204,15 @@ describe("delegate_crossproject - Todo enforcement", () => {
                 agentSlug: "target-agent",
             };
 
-            // Should succeed despite no todos - enforcement is skipped when no conversation context
             const result = await delegateTool.execute(input);
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationId).toBeDefined();
+            // No reminder since there's no conversation context to check
+            expect(result.message).not.toContain("delegation-todo-nudge");
         });
 
-        test("should block delegation when conversation exists but has no todos", async () => {
+        test("should succeed but include reminder when conversation exists but has no todos", async () => {
             const agentPubkey = "sender-agent-pubkey-123456789012345678901234567890123456789012345678";
             const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 
@@ -225,14 +226,11 @@ describe("delegate_crossproject - Todo enforcement", () => {
                 agentSlug: "target-agent",
             };
 
-            // Should throw error requiring todos
-            try {
-                await delegateTool.execute(input);
-                expect(true).toBe(false); // Should not reach here
-            } catch (error: any) {
-                expect(error.message).toContain("Delegation requires a todo list");
-                expect(error.message).toContain("todo_write()");
-            }
+            const result = await delegateTool.execute(input);
+            expect(result.success).toBe(true);
+            expect(result.delegationConversationId).toBeDefined();
+            expect(result.message).toContain("delegation-todo-nudge");
+            expect(result.message).toContain("todo_write()");
         });
 
         test("should allow delegation when todos exist", async () => {
