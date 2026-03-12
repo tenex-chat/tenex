@@ -22,6 +22,8 @@ export type ToolName =
     | "fs_grep"
     | "home_fs_read"
     | "home_fs_write"
+    | "home_fs_edit"
+    | "home_fs_glob"
     | "home_fs_grep"
     | "conversation_get"
     | "conversation_list"

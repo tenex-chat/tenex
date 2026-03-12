@@ -92,16 +92,12 @@ import { createGenerateImageTool } from "./implementations/generate_image";
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
-// Home-scoped filesystem tools
-import {
-    createHomeFsGrepTool,
-    createHomeFsReadTool,
-    createHomeFsWriteTool,
-} from "./implementations/home_fs";
+// Home-scoped filesystem tools - provided by ai-sdk-fs-tools with home_fs prefix
+import { ensureAgentHomeDirectory } from "@/lib/agent-home";
 
 const tenexFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
 
-function getOrCreateTenexFsTools(context: ToolExecutionContext) {
+function getOrCreateTenexFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
     let tools = tenexFsToolsCache.get(context);
     if (!tools) {
         tools = createTenexFsToolsUncached(context);
@@ -110,7 +106,7 @@ function getOrCreateTenexFsTools(context: ToolExecutionContext) {
     return tools;
 }
 
-function createTenexFsToolsUncached(context: ToolExecutionContext) {
+function createTenexFsToolsUncached(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
     const allowedRoots = [context.projectBasePath, getAgentHomeDirectory(context.agent.pubkey)]
         .filter((p): p is string => typeof p === "string" && p.trim() !== "");
 
@@ -140,41 +136,32 @@ function createTenexFsToolsUncached(context: ToolExecutionContext) {
     return tools;
 }
 
-/**
- * Metadata about tools that doesn't require instantiation.
- * Tools declare hasSideEffects: false if they are read-only operations.
- * Default (not listed) = true (has side effects).
- */
-const toolMetadata: Partial<Record<ToolName, { hasSideEffects: boolean }>> = {
-    // Read-only tools - these don't modify any state
-    fs_read: { hasSideEffects: false },
-    fs_glob: { hasSideEffects: false },
-    fs_grep: { hasSideEffects: false },
-    home_fs_read: { hasSideEffects: false },
-    home_fs_grep: { hasSideEffects: false },
-    conversation_get: { hasSideEffects: false },
-    conversation_list: { hasSideEffects: false },
-    conversation_search: { hasSideEffects: false },
-    lesson_get: { hasSideEffects: false },
-    lessons_list: { hasSideEffects: false },
-    agents_list: { hasSideEffects: false },
-    agents_read: { hasSideEffects: false },
-    agents_discover: { hasSideEffects: false },
-    project_list: { hasSideEffects: false },
-    reports_list: { hasSideEffects: false },
-    report_read: { hasSideEffects: false },
-    schedule_tasks_list: { hasSideEffects: false },
-    rag_list_collections: { hasSideEffects: false },
+const homeFsToolsCache = new WeakMap<ToolExecutionContext, ReturnType<typeof createFsTools>>();
 
-    rag_subscription_list: { hasSideEffects: false },
-    rag_subscription_get: { hasSideEffects: false },
-    mcp_resource_read: { hasSideEffects: false },
-    // mcp_subscribe and mcp_subscription_stop have side effects (not listed = true by default)
-    web_fetch: { hasSideEffects: false },
-    web_search: { hasSideEffects: false },
-    nostr_fetch: { hasSideEffects: false },
-    rag_search: { hasSideEffects: false },
-};
+function getOrCreateHomeFsTools(context: ToolExecutionContext): ReturnType<typeof createFsTools> {
+    let tools = homeFsToolsCache.get(context);
+    if (!tools) {
+        const homeDir = getAgentHomeDirectory(context.agent.pubkey);
+        ensureAgentHomeDirectory(context.agent.pubkey);
+        tools = createFsTools({
+            workingDirectory: homeDir,
+            namePrefix: "home_fs",
+            strictContainment: true,
+            agentsMd: false,
+            descriptions: {
+                read: "Read a file or directory listing from your home directory. Returns contents with line numbers. Use offset/limit to paginate large files.",
+                write: "Write content to a file in your home directory. Creates parent directories automatically. Overwrites existing files.",
+                edit: "Edit a file in your home directory by replacing a specific string with a new string.",
+                glob: "Find files by glob pattern within your home directory.",
+                grep: "Search for patterns in files within your home directory. Uses ripgrep. Supports regex patterns.",
+            },
+            formatOutsideRootsError: (path) =>
+                `Path "${path}" is outside your home directory. You can only access files within your home directory.`,
+        });
+        homeFsToolsCache.set(context, tools);
+    }
+    return tools;
+}
 
 /**
  * Tools that require conversation context to function.
@@ -289,9 +276,11 @@ const toolFactories: Record<ToolName, ToolFactory> = {
     change_model: createChangeModelTool as ToolFactory,
 
     // Home-scoped filesystem tools (for agents without fs_* tools)
-    home_fs_read: createHomeFsReadTool,
-    home_fs_write: createHomeFsWriteTool,
-    home_fs_grep: createHomeFsGrepTool,
+    home_fs_read: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_read as AISdkTool,
+    home_fs_write: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_write as AISdkTool,
+    home_fs_edit: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_edit as AISdkTool,
+    home_fs_glob: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_glob as AISdkTool,
+    home_fs_grep: (ctx) => getOrCreateHomeFsTools(ctx).home_fs_grep as AISdkTool,
 };
 
 /**
@@ -350,17 +339,19 @@ const FILE_EDIT_TOOLS: ToolName[] = ["fs_edit"];
 /** File search tools - auto-injected when fs_read is available */
 const FILE_SEARCH_TOOLS: ToolName[] = ["fs_glob", "fs_grep"];
 
-/** Todo tools - for restricted agent execution (reminder mode) */
-const TODO_TOOLS: ToolName[] = ["todo_write"];
-
 /** Meta model tools - auto-injected when agent uses a meta model configuration */
 const META_MODEL_TOOLS: ToolName[] = ["change_model"];
 
-/** Home-scoped filesystem tools - auto-injected when agent lacks fs_* tools */
-const HOME_FS_TOOLS: ToolName[] = ["home_fs_read", "home_fs_write", "home_fs_grep"];
-
-/** Full filesystem tool names - used to check if agent has fs access */
-const FS_TOOL_NAMES: ToolName[] = ["fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep"];
+/**
+ * Mapping from fs_* capabilities to their home_fs_* fallbacks.
+ * When an agent lacks a given fs_* tool, the corresponding home_fs_* tools are injected.
+ */
+const HOME_FS_FALLBACKS: [ToolName, ToolName[]][] = [
+    ["fs_read", ["home_fs_read"]],
+    ["fs_write", ["home_fs_write", "home_fs_edit"]],
+    ["fs_glob", ["home_fs_glob"]],
+    ["fs_grep", ["home_fs_grep"]],
+];
 
 /**
  * Check if an agent has stoppable MCP subscriptions (ACTIVE or ERROR).
@@ -400,7 +391,7 @@ export function getToolsObject(
     // If the nudge author wants core tools, they must explicitly include them in onlyTools.
     // This ensures the nudge author has complete, unambiguous control over the tool set.
     if (nudgePermissions && isOnlyToolMode(nudgePermissions)) {
-        const onlyToolNames = nudgePermissions.onlyTools!;
+        const onlyToolNames = nudgePermissions.onlyTools ?? [];
         logger.debug("[ToolRegistry] Nudge only-tool mode: strict exclusive tool set", {
             originalTools: names.length,
             onlyTools: onlyToolNames,
@@ -477,12 +468,11 @@ export function getToolsObject(
         }
 
         // Remove denied tools
-        if (nudgePermissions.denyTools && nudgePermissions.denyTools.length > 0) {
-            modifiedNames = modifiedNames.filter(
-                (name) => !nudgePermissions.denyTools!.includes(name)
-            );
+        const deniedTools = nudgePermissions.denyTools;
+        if (deniedTools && deniedTools.length > 0) {
+            modifiedNames = modifiedNames.filter((name) => !deniedTools.includes(name));
             logger.debug("[ToolRegistry] Nudge deny-tool: removed tools", {
-                deniedTools: nudgePermissions.denyTools,
+                deniedTools,
             });
         }
 
@@ -553,13 +543,13 @@ export function getToolsObject(
         }
     }
 
-    // Auto-inject home_fs_* tools when agent lacks any fs_* tools
-    // This gives restricted agents filesystem access limited to their home directory
-    const hasAnyFsTool = FS_TOOL_NAMES.some((fsToolName) => regularTools.includes(fsToolName));
-    if (!hasAnyFsTool) {
-        for (const homeFsToolName of HOME_FS_TOOLS) {
-            if (!regularTools.includes(homeFsToolName)) {
-                regularTools.push(homeFsToolName);
+    // Auto-inject home_fs_* fallbacks per capability when agent lacks the fs_* equivalent
+    for (const [fsTool, homeFallbacks] of HOME_FS_FALLBACKS) {
+        if (!regularTools.includes(fsTool)) {
+            for (const fallback of homeFallbacks) {
+                if (!regularTools.includes(fallback)) {
+                    regularTools.push(fallback);
+                }
             }
         }
     }
@@ -580,18 +570,19 @@ export function getToolsObject(
     // === FINAL DENY-TOOL ENFORCEMENT ===
     // Apply deny-tool filtering AFTER all auto-injection (core tools, edit, meta-model)
     // This ensures deny-tool can block even core tools if explicitly denied
-    if (nudgePermissions?.denyTools && nudgePermissions.denyTools.length > 0) {
+    const deniedTools = nudgePermissions?.denyTools;
+    if (deniedTools && deniedTools.length > 0) {
         const beforeDenyCount = regularTools.length;
-        const deniedTools = regularTools.filter((name) => nudgePermissions.denyTools!.includes(name));
+        const deniedPresent = regularTools.filter((name) => deniedTools.includes(name));
 
-        if (deniedTools.length > 0) {
+        if (deniedPresent.length > 0) {
             // Remove denied tools (including auto-injected ones)
-            const filtered = regularTools.filter((name) => !nudgePermissions.denyTools!.includes(name));
+            const filtered = regularTools.filter((name) => !deniedTools.includes(name));
             regularTools.length = 0;
             regularTools.push(...filtered);
 
             logger.info("[ToolRegistry] Final deny-tool enforcement: blocked auto-injected tools", {
-                deniedTools,
+                deniedTools: deniedPresent,
                 beforeCount: beforeDenyCount,
                 afterCount: regularTools.length,
             });
@@ -624,85 +615,10 @@ export function getToolsObject(
 }
 
 /**
- * Get all tools as a keyed object
- * @param context - Tool execution context
- * @returns Object with all tools keyed by name (returns the underlying CoreTool)
- */
-export function getAllToolsObject(
-    context: ToolExecutionContext
-): Record<string, CoreTool<unknown, unknown>> {
-    const tools: Record<string, CoreTool<unknown, unknown>> = {};
-
-    const toolNames = Object.keys(toolFactories) as ToolName[];
-    for (const name of toolNames) {
-        const tool = getTool(name, context);
-        if (tool) {
-            tools[name] = tool;
-        }
-    }
-
-    return tools;
-}
-
-/**
  * Check if a tool name is valid
  * @param name - The tool name to check
  * @returns True if the tool name is valid
  */
 export function isValidToolName(name: string): boolean {
     return name in toolFactories;
-}
-
-/**
- * Get all available tool names
- * @returns Array of all tool names
- */
-export function getAllAvailableToolNames(): string[] {
-    return getAllToolNames();
-}
-
-/**
- * Check if a tool has side effects.
- * Returns true (has side effects) by default for unknown tools (safe default).
- * @param toolName - The tool name to check
- * @returns true if the tool has side effects, false if it's read-only
- */
-export function toolHasSideEffects(toolName: string): boolean {
-    if (toolName in toolMetadata) {
-        return toolMetadata[toolName as ToolName]?.hasSideEffects !== false;
-    }
-
-    // MCP tools are assumed to have side effects by default
-    // This is the safe default - assume side effects unless explicitly declared otherwise
-    return true;
-}
-
-/**
- * Get the list of todo tool names.
- * Used for restricted agent execution in reminder mode.
- * @returns Array of todo tool names
- */
-export function getTodoToolNames(): ToolName[] {
-    return [...TODO_TOOLS];
-}
-
-/**
- * Get todo tools as a keyed object.
- * Used for creating restricted tool sets for reminder mode.
- * @param context - Tool execution context
- * @returns Object with todo tools keyed by name
- */
-export function getTodoToolsObject(
-    context: ToolExecutionContext
-): Record<string, CoreTool<unknown, unknown>> {
-    const tools: Record<string, CoreTool<unknown, unknown>> = {};
-
-    for (const name of TODO_TOOLS) {
-        const tool = getTool(name, context);
-        if (tool) {
-            tools[name] = tool;
-        }
-    }
-
-    return tools;
 }

@@ -48,12 +48,6 @@ export const DELEGATE_TOOLS: ToolName[] = [
 
 
 /**
- * Tools auto-injected at runtime based on capability (not announced in 24010).
- * fs_read implies fs_glob + fs_grep; fs_write implies fs_edit.
- */
-export const AUTO_INJECTED_TOOLS: ToolName[] = ["fs_edit", "fs_glob", "fs_grep"];
-
-/**
  * Context-sensitive tools that are auto-injected based on runtime conditions.
  * These should NOT appear in TenexProjectStatus (24010) events since they're
  * not configurable per-agent - they're injected based on execution context.
