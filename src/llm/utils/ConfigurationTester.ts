@@ -56,13 +56,16 @@ export class ConfigurationTester {
                     reject(event.error);
                 });
             });
+            const timeoutPromise = new Promise<never>((_resolve, reject) =>
+                setTimeout(() => reject(new Error("timed out after 30s")), 30_000)
+            );
 
             await Promise.all([
                 service.stream(
                     [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
                     {}
                 ),
-                Promise.race([completePromise, errorPromise]),
+                Promise.race([completePromise, errorPromise, timeoutPromise]),
             ]);
 
             return { success: true };
