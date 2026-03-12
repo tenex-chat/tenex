@@ -133,15 +133,24 @@ class DaemonWrapper {
         console.log("[Wrapper] Spawning daemon...");
         this.spawnDaemon(args);
 
-        // Give it a moment to start
-        await this.sleep(1000);
+        // Wait for lockfile to appear (with timeout)
+        const maxWaitMs = 10000;
+        const startTime = Date.now();
+        let lockfileExists = false;
 
-        // Check if daemon is running via lockfile
-        const lockfileExists = await this.checkLockfileExists();
+        while (Date.now() - startTime < maxWaitMs) {
+            lockfileExists = await this.checkLockfileExists();
+            if (lockfileExists) {
+                break;
+            }
+            await this.sleep(100);
+        }
+
         if (lockfileExists) {
             console.log("[Wrapper] Daemon started successfully");
         } else {
-            console.error("[Wrapper] Warning: Daemon may not have started (no lockfile found)");
+            console.error("[Wrapper] Error: Daemon failed to start (no lockfile found after 10s)");
+            process.exit(1);
         }
 
         console.log("[Wrapper] Exiting");
