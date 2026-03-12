@@ -18,6 +18,7 @@ import {
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
 import { clearLLMSpanId } from "@/telemetry/LLMSpanRegistry";
@@ -25,7 +26,7 @@ import type { AISdkTool } from "@/tools/types";
 import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import type { LanguageModel, ModelMessage } from "ai";
+import type { LanguageModel } from "ai";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
 import type { MessageCompiler } from "./MessageCompiler";
@@ -54,6 +55,10 @@ export interface StreamExecutionConfig {
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
     nudgeContent: string;
+    /** Individual nudge data for system prompt rendering */
+    nudges: NudgeData[];
+    /** Tool permissions extracted from nudge events */
+    nudgeToolPermissions: NudgeToolPermissions;
     /** Concatenated skill content */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
@@ -148,6 +153,8 @@ export class StreamExecutionHandler {
                 llmService,
                 messageCompiler: this.config.messageCompiler,
                 nudgeContent: this.config.nudgeContent,
+                nudges: this.config.nudges,
+                nudgeToolPermissions: this.config.nudgeToolPermissions,
                 skillContent: this.config.skillContent,
                 skills: this.config.skills,
                 ralNumber,
@@ -173,7 +180,6 @@ export class StreamExecutionHandler {
 
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
-                providerOptions: request.providerOptions,
                 prepareStep,
             });
 
@@ -470,6 +476,15 @@ export class StreamExecutionHandler {
                 content: contentToFlush,
                 messageType: "text",
                 timestamp: Math.floor(Date.now() / 1000),
+            });
+
+            // DIAGNOSTIC: Track content buffer flushes to correlate with duplicate message bug
+            this.executionSpan?.addEvent("content_buffer.stored", {
+                "content.preview": contentToFlush.slice(0, 120),
+                "content.length": contentToFlush.length,
+                "store.index": messageIndex,
+                "ral.number": this.config.ralNumber,
+                "agent.slug": context.agent.slug,
             });
 
             // Clear buffer BEFORE async publish to prevent re-adding on retry

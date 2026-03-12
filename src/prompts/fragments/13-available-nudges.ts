@@ -1,26 +1,9 @@
+import { NudgeSkillWhitelistService } from "@/services/nudge";
 import type { WhitelistItem } from "@/services/nudge";
 import type { PromptFragment } from "../core/types";
 
 /**
- * Combined fragment for displaying available nudges AND skills to agents.
- *
- * Renders under a single "Available Nudges and Skills" heading so agents
- * recognise this section when asked about either nudges or skills.
- *
- * - Shows subsection headers (### Nudges / ### Skills) when BOTH types are present.
- * - Omits the subsection header when only one type exists.
- * - Returns empty string when neither nudges nor skills are available.
- */
-interface AvailableNudgesAndSkillsArgs {
-    /** Whitelisted nudges from the NudgeWhitelistService */
-    availableNudges?: WhitelistItem[];
-    /** Whitelisted skills from the NudgeSkillWhitelistService */
-    availableSkills?: WhitelistItem[];
-}
-
-/**
  * Escape text for safe inclusion in prompt output.
- * Prevents injection attacks by escaping special characters.
  */
 function escapePromptText(value: string): string {
     return value
@@ -33,9 +16,6 @@ function escapePromptText(value: string): string {
 /** Maximum description length for display in list items */
 const MAX_DESCRIPTION_LENGTH = 150;
 
-/**
- * Format a single WhitelistItem into a markdown bullet line.
- */
 function formatItem(item: WhitelistItem): string {
     const name = item.name || item.eventId.substring(0, 12);
     const description = item.description
@@ -44,12 +24,21 @@ function formatItem(item: WhitelistItem): string {
     return `  - **${escapePromptText(name)}** (${item.eventId.substring(0, 12)}): ${escapePromptText(description)}`;
 }
 
-export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAndSkillsArgs> = {
+/**
+ * Fragment for displaying available nudges and skills to agents.
+ * Reads directly from NudgeSkillWhitelistService — no args needed.
+ *
+ * - Shows subsection headers (### Nudges / ### Skills) when BOTH types are present.
+ * - Omits the subsection header when only one type exists.
+ * - Returns empty string when neither nudges nor skills are available.
+ */
+export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, never>> = {
     id: "available-nudges-and-skills",
     priority: 13, // Before available-agents (15)
-    template: ({ availableNudges, availableSkills }) => {
-        const nudges = availableNudges ?? [];
-        const skills = availableSkills ?? [];
+    template: () => {
+        const service = NudgeSkillWhitelistService.getInstance();
+        const nudges = service.getWhitelistedNudges();
+        const skills = service.getWhitelistedSkills();
         const hasNudges = nudges.length > 0;
         const hasSkills = skills.length > 0;
 
@@ -60,7 +49,6 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
         const hasBoth = hasNudges && hasSkills;
         const sections: string[] = [];
 
-        // --- Header ---
         sections.push("## Available Nudges and Skills");
         sections.push("");
         sections.push(
@@ -74,7 +62,6 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
             "Skills provide transient capabilities and context without modifying tool availability."
         );
 
-        // --- Nudges ---
         if (hasNudges) {
             sections.push("");
             if (hasBoth) {
@@ -84,7 +71,6 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
             sections.push(nudges.map(formatItem).join("\n"));
         }
 
-        // --- Skills ---
         if (hasSkills) {
             sections.push("");
             if (hasBoth) {
@@ -94,9 +80,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
             sections.push(skills.map(formatItem).join("\n"));
         }
 
-        // --- Example ---
-        const exampleId =
-            (hasNudges ? nudges[0] : skills[0]).eventId.substring(0, 12);
+        const exampleId = (hasNudges ? nudges[0] : skills[0]).eventId.substring(0, 12);
         sections.push("");
         sections.push("Example usage:");
         sections.push("```");
@@ -111,12 +95,4 @@ export const availableNudgesAndSkillsFragment: PromptFragment<AvailableNudgesAnd
 
         return sections.join("\n");
     },
-    validateArgs: (args: unknown): args is AvailableNudgesAndSkillsArgs => {
-        if (typeof args !== "object" || args === null) return false;
-        const a = args as Record<string, unknown>;
-        if (a.availableNudges !== undefined && !Array.isArray(a.availableNudges)) return false;
-        if (a.availableSkills !== undefined && !Array.isArray(a.availableSkills)) return false;
-        return true;
-    },
-    expectedArgs: "{ availableNudges?: WhitelistItem[], availableSkills?: WhitelistItem[] }",
 };

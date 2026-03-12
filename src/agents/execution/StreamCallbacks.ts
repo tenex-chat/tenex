@@ -9,18 +9,20 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
+import { createViolationsReminder } from "@/services/heuristics";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
-import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
+import { updateReminderData } from "./system-reminders";
 import type { FullRuntimeContext, RALExecutionContext } from "./types";
-import { getHeuristicEngine } from "@/services/heuristics";
 
 /**
  * Step data passed to prepareStep callback
@@ -59,8 +61,11 @@ export interface PrepareStepConfig {
         createLanguageModelFromRegistry: (provider: string, model: string, registry: ProviderRegistryProvider) => LanguageModel;
     };
     messageCompiler: MessageCompiler;
-    ephemeralMessages: Array<{ role: "user" | "system"; content: string }>;
     nudgeContent: string;
+    /** Individual nudge data for system prompt rendering */
+    nudges: NudgeData[];
+    /** Tool permissions extracted from nudge events */
+    nudgeToolPermissions: NudgeToolPermissions;
     /** Concatenated skill content */
     skillContent: string;
     /** Individual skill data for system prompt rendering */
@@ -81,13 +86,14 @@ export interface PrepareStepConfig {
  */
 export function createPrepareStep(
     config: PrepareStepConfig
-): (step: StepData) => Promise<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined> {
+): (step: StepData) => Promise<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined> {
     const {
         context,
         llmService,
         messageCompiler,
-        ephemeralMessages,
         nudgeContent,
+        nudges,
+        nudgeToolPermissions,
         skillContent,
         skills,
         ralNumber,
@@ -141,47 +147,36 @@ export function createPrepareStep(
                     ralNumber
                 );
 
-                const midStepEphemeralMessages: Array<{ role: "user" | "system"; content: string }> = [];
-
                 if (newInjections.length > 0) {
                     for (const injection of newInjections) {
-                        if (injection.ephemeral) {
-                            midStepEphemeralMessages.push({
-                                role: injection.role,
-                                content: injection.content,
-                            });
-                        } else {
-                            const relocated = injection.eventId
-                                ? conversationStore.relocateToEnd(injection.eventId, {
-                                      ral: ralNumber,
-                                      senderPubkey: injection.senderPubkey,
-                                      targetedPubkeys: [context.agent.pubkey],
-                                  })
-                                : false;
+                        const relocated = injection.eventId
+                            ? conversationStore.relocateToEnd(injection.eventId, {
+                                  ral: ralNumber,
+                                  senderPubkey: injection.senderPubkey,
+                                  targetedPubkeys: [context.agent.pubkey],
+                              })
+                            : false;
 
-                            if (!relocated) {
-                                conversationStore.addMessage({
-                                    pubkey: context.triggeringEvent.pubkey,
-                                    ral: ralNumber,
-                                    content: injection.content,
-                                    messageType: "text",
-                                    targetedPubkeys: [context.agent.pubkey],
-                                    senderPubkey: injection.senderPubkey,
-                                    eventId: injection.eventId,
-                                });
-                            }
+                        if (!relocated) {
+                            conversationStore.addMessage({
+                                pubkey: context.triggeringEvent.pubkey,
+                                ral: ralNumber,
+                                content: injection.content,
+                                messageType: "text",
+                                targetedPubkeys: [context.agent.pubkey],
+                                senderPubkey: injection.senderPubkey,
+                                eventId: injection.eventId,
+                            });
                         }
                     }
 
                     executionSpan?.addEvent("ral_injection.process", {
                         "injection.message_count": newInjections.length,
-                        "injection.ephemeral_count": midStepEphemeralMessages.length,
                         "ral.number": ralNumber,
                     });
                 }
 
                 // === HEURISTIC VIOLATIONS INJECTION ===
-                // Inject pending heuristic violations as ephemeral system messages
                 const heuristicViolations = ralRegistry.getAndConsumeHeuristicViolations(
                     context.agent.pubkey,
                     context.conversationId,
@@ -189,15 +184,10 @@ export function createPrepareStep(
                 );
 
                 if (heuristicViolations.length > 0) {
-                    const heuristicEngine = getHeuristicEngine();
-                    const warningMessage = heuristicEngine.formatForInjection(heuristicViolations);
+                    const reminder = createViolationsReminder(heuristicViolations);
 
-                    if (warningMessage) {
-                        // Add as ephemeral system message (not persisted, just for this LLM step)
-                        midStepEphemeralMessages.push({
-                            role: "system",
-                            content: warningMessage,
-                        });
+                    if (reminder) {
+                        getSystemReminderContext().queue(reminder);
 
                         executionSpan?.addEvent("heuristic.violations_injected", {
                             "ral.number": ralNumber,
@@ -225,7 +215,7 @@ export function createPrepareStep(
                 );
 
                 // Compile messages (sub-span removed - MessageCompiler.compile has its own span)
-                const { messages: rebuiltMessages, providerOptions, mode } = await messageCompiler.compile({
+                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
                     agent: context.agent,
                     project: projectContext.project,
                     conversation,
@@ -235,24 +225,31 @@ export function createPrepareStep(
                     availableAgents: Array.from(projectContext.agents.values()),
                     mcpManager: projectContext.mcpManager,
                     agentLessons: projectContext.agentLessons,
+                    agentComments: projectContext.agentComments,
                     nudgeContent,
+                    nudges,
+                    nudgeToolPermissions,
                     skillContent,
                     skills,
                     respondingToPubkey: context.triggeringEvent.pubkey,
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
-                    ephemeralMessages:
-                        [...ephemeralMessages, ...midStepEphemeralMessages].length > 0
-                            ? [...ephemeralMessages, ...midStepEphemeralMessages]
-                            : undefined,
+                });
+
+                updateReminderData({
+                    agent: context.agent,
+                    conversation,
+                    respondingToPubkey: context.triggeringEvent.pubkey,
+                    pendingDelegations,
+                    completedDelegations,
                 });
 
                 span.setAttribute("compilation.mode", mode);
                 span.setAttribute("compiled.message_count", rebuiltMessages.length);
 
                 // For delta mode with no new messages, keep original
-                if (mode === "delta" && rebuiltMessages.length === 0 && !providerOptions) {
+                if (mode === "delta" && rebuiltMessages.length === 0) {
                     logger.debug("[StreamCallbacks] prepareStep: delta mode with no new messages, keeping original");
                     return undefined;
                 }
@@ -324,8 +321,8 @@ export function createPrepareStep(
                 }
 
                 return modelState.currentModel
-                    ? { model: modelState.currentModel, messages: rebuiltMessages, providerOptions }
-                    : { messages: rebuiltMessages, providerOptions };
+                    ? { model: modelState.currentModel, messages: rebuiltMessages }
+                    : { messages: rebuiltMessages };
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });

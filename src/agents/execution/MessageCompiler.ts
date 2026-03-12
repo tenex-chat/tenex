@@ -4,18 +4,14 @@ import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { providerRegistry } from "@/llm/providers";
 import type { ProviderCapabilities } from "@/llm/providers/types";
 import { shortenConversationId } from "@/utils/conversation-id";
-import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
-import { getPubkeyService } from "@/services/PubkeyService";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData, WhitelistItem } from "@/services/nudge";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { LessonComment } from "@/services/prompt-compiler";
 import type { SkillData } from "@/services/skill";
 import { config } from "@/services/ConfigService";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
-import { createTenexSystemReminderProviderOptions } from "@/llm/middleware/system-reminders";
-import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
@@ -23,7 +19,6 @@ import type { SessionManager } from "./SessionManager";
 import type { LLMService } from "@/llm/service";
 import { HistorySummaryService } from "@/services/history-summary/HistorySummaryService";
 import { PromptPruningService } from "@/services/prompt-pruning/PromptPruningService";
-import { logger } from "@/utils/logger";
 
 const tracer = trace.getTracer("tenex.message-compiler");
 
@@ -32,12 +27,6 @@ type CompilationMode = "full" | "delta";
 interface MessageCompilationPlan {
     mode: CompilationMode;
     cursor?: number;
-}
-
-/** Ephemeral message to include in LLM context but NOT persist */
-export interface EphemeralMessage {
-    role: "user" | "system";
-    content: string;
 }
 
 /**
@@ -78,17 +67,10 @@ export interface MessageCompilerContext {
     metaModelSystemPrompt?: string;
     /** Variant-specific system prompt to inject when a meta model variant is active */
     variantSystemPrompt?: string;
-    /** Ephemeral messages to include in this compilation only (not persisted) */
-    ephemeralMessages?: EphemeralMessage[];
-    /** Available whitelisted nudges for delegation */
-    availableNudges?: WhitelistItem[];
-    /** Available whitelisted skills */
-    availableSkills?: WhitelistItem[];
 }
 
 export interface CompiledMessages {
     messages: ModelMessage[];
-    providerOptions?: ProviderOptions;
     mode: CompilationMode;
     counts: {
         systemPrompt: number;
@@ -140,38 +122,11 @@ export class MessageCompiler {
                 span.setAttribute("ral.number", context.ralNumber);
                 span.setAttribute("compilation.mode", this.plan.mode);
 
-                // Consume any deferred injections from previous turns (e.g., supervision nudges).
-                // These are added to ephemeral messages so they appear in context but aren't persisted.
-                const deferredInjections = this.conversationStore.consumeDeferredInjections(context.agent.pubkey);
-                if (deferredInjections.length > 0) {
-                    span.setAttribute("deferred_injections.count", deferredInjections.length);
-                    logger.debug("[MessageCompiler] Consuming deferred injections", {
-                        agent: context.agent.slug,
-                        count: deferredInjections.length,
-                        sources: deferredInjections.map(d => d.source).filter(Boolean),
-                    });
-
-                    // Initialize ephemeralMessages if not present
-                    if (!context.ephemeralMessages) {
-                        context.ephemeralMessages = [];
-                    }
-                    // Add deferred injections as ephemeral system messages
-                    for (const injection of deferredInjections) {
-                        context.ephemeralMessages.push({
-                            role: injection.role,
-                            content: injection.content,
-                        });
-                    }
-                    // Save the store to persist the consumption
-                    await this.conversationStore.save();
-                }
-
                 const cursor = this.currentCursor;
                 const session = this.sessionManager.getSession();
                 const compressionConfig = this.getCompressionConfig();
                 const preservedTailCount = this.mapPreservedTailCount(compressionConfig.slidingWindowSize);
                 const messages: ModelMessage[] = [];
-                let providerOptions: ProviderOptions | undefined;
                 let systemPromptCount = 0;
                 const dynamicContextCount = 0;
                 let finalPromptTokenEstimate: number | undefined;
@@ -197,9 +152,6 @@ export class MessageCompiler {
                             includeMessageIds: true,
                         }
                     ) as PromptMessage[];
-
-                    // Build dynamic context content (todo state, response context)
-                    const dynamicContextContent = await this.buildDynamicContextContent(context);
 
                     const systemMessages = systemPromptMessages.map((sm, index) => ({
                         ...sm.message,
@@ -243,19 +195,10 @@ export class MessageCompiler {
                     );
                     finalPromptTokenEstimate = preprocessedPrompt?.stats.finalTokenEstimate;
 
-                    providerOptions = this.buildSystemReminderProviderOptions(
-                        dynamicContextContent,
-                        context.ephemeralMessages
-                    );
-
                     systemPromptCount += systemPromptMessages.length;
-                    // NOTE: dynamicContextCount stays 0 because reminder content is applied later
-                    // by AI SDK middleware, not added as separate compile-time messages.
                 } else {
                     // In delta mode, only send new conversation messages.
                     // The session already has full context from initial compilation.
-                    // However, dynamic context (todos, response routing) must still be included
-                    // since it can change between turns in a stateful session.
                     const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
                         context.agent.pubkey,
                         context.ralNumber,
@@ -278,14 +221,6 @@ export class MessageCompiler {
 
                     messages.push(...(compressionConfig.enabled ? deltaPrompt!.messages : conversationMessages));
                     finalPromptTokenEstimate = deltaPrompt?.stats.finalTokenEstimate;
-
-                    // Build dynamic context for delta mode (todo state, response context)
-                    const dynamicContextContent = await this.buildDynamicContextContent(context);
-
-                    providerOptions = this.buildSystemReminderProviderOptions(
-                        dynamicContextContent,
-                        context.ephemeralMessages
-                    );
                 }
 
                 this.updatePriorContextTokens(finalPromptTokenEstimate, session.priorContextTokens);
@@ -311,7 +246,7 @@ export class MessageCompiler {
                 // This prevents resending the same raw conversation entries during streaming.
                 this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
 
-                return { messages, providerOptions, mode: this.plan.mode, counts };
+                return { messages, mode: this.plan.mode, counts };
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
@@ -386,71 +321,6 @@ export class MessageCompiler {
         const matches = registered.some((metadata) => metadata.id === normalized);
 
         return matches ? normalized : providerId;
-    }
-
-    /**
-     * Build dynamic context content for injection into the last user message.
-     * This includes todo state and response context.
-     *
-     * @returns Combined content string, or empty string if no content
-     */
-    private async buildDynamicContextContent(
-        context: MessageCompilerContext
-    ): Promise<string> {
-        const parts: string[] = [];
-
-        // Add todo content if present
-        const todoContent = await agentTodosFragment.template({
-            conversation: context.conversation,
-            agentPubkey: context.agent.pubkey,
-        });
-        if (todoContent) {
-            parts.push(todoContent);
-        }
-
-        // Always add response context
-        const responseContextContent = await this.buildResponseContext(context);
-        parts.push(responseContextContent);
-
-        return parts.join("\n\n");
-    }
-
-    private async buildResponseContext(context: MessageCompilerContext): Promise<string> {
-        const pubkeyService = getPubkeyService();
-        const respondingToName = await pubkeyService.getName(context.respondingToPubkey);
-        let responseContextContent = `Your response will be sent to @${respondingToName}.`;
-
-        const allDelegatedPubkeys = [
-            ...context.pendingDelegations.map((d) => d.recipientPubkey),
-            ...context.completedDelegations.map((d) => d.recipientPubkey),
-        ];
-
-        if (allDelegatedPubkeys.length > 0) {
-            const delegatedAgentNames = await Promise.all(
-                allDelegatedPubkeys.map((pk) => pubkeyService.getName(pk))
-            );
-            const uniqueNames = [...new Set(delegatedAgentNames)];
-            responseContextContent +=
-                `\nYou have delegations to: ${uniqueNames.map((n) => `@${n}`).join(", ")}.`;
-            responseContextContent +=
-                "\nIf you want to follow up with a delegated agent, use delegate_followup with the delegation ID. Do NOT address them directly in your response - they won't see it.";
-        }
-
-        return responseContextContent;
-    }
-
-    private buildSystemReminderProviderOptions(
-        dynamicContextContent: string,
-        ephemeralMessages?: EphemeralMessage[]
-    ): ProviderOptions | undefined {
-        const ephemeralContents = (ephemeralMessages ?? [])
-            .map((ephemeral) => ephemeral.content.trim())
-            .filter((content) => content.length > 0);
-
-        return createTenexSystemReminderProviderOptions({
-            dynamicContext: dynamicContextContent,
-            ephemeralContents,
-        });
     }
 
     private getCompressionConfig(): {

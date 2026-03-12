@@ -4,7 +4,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData, WhitelistItem } from "@/services/nudge";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
 import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
 import { getNDK } from "@/nostr";
@@ -112,10 +112,6 @@ export interface BuildSystemPromptOptions {
     skillContent?: string;
     /** Individual skill data for rendering with files */
     skills?: SkillData[];
-    /** Available whitelisted nudges for delegation */
-    availableNudges?: WhitelistItem[];
-    /** Available whitelisted skills */
-    availableSkills?: WhitelistItem[];
 }
 
 
@@ -346,17 +342,11 @@ function addAgentFragments(
     builder: PromptBuilder,
     agent: AgentInstance,
     availableAgents: AgentInstance[],
-    projectManagerPubkey?: string,
-    availableNudges?: WhitelistItem[],
-    availableSkills?: WhitelistItem[]
+    projectManagerPubkey?: string
 ): void {
     // Add available nudges and skills for delegation (priority 13, before available-agents)
-    if ((availableNudges && availableNudges.length > 0) || (availableSkills && availableSkills.length > 0)) {
-        builder.add("available-nudges-and-skills", {
-            availableNudges,
-            availableSkills,
-        });
-    }
+    // Fragment reads from NudgeSkillWhitelistService directly; returns "" when none available.
+    builder.add("available-nudges-and-skills", {});
 
     // Add available agents for delegations
     builder.add("available-agents", {
@@ -753,9 +743,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         systemPromptBuilder,
         agentForFragments,
         availableAgents,
-        options.projectManagerPubkey,
-        options.availableNudges,
-        options.availableSkills
+        options.projectManagerPubkey
     );
 
     // Build and return the complete prompt with all fragments

@@ -9,23 +9,19 @@
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { NudgeService, NudgeSkillWhitelistService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
+import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import { SkillService, type SkillData } from "@/services/skill";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
-import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
-import type { ModelMessage } from "ai";
 import { trace } from "@opentelemetry/api";
 import type { LLMService } from "@/llm/service";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MessageCompiler } from "./MessageCompiler";
 import { SessionManager } from "./SessionManager";
-import {
-    collectTenexSystemReminderProviderOptions,
-    createTenexSystemReminderCycleId,
-} from "./system-reminders";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import { initializeReminderProviders, updateReminderData } from "./system-reminders";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
@@ -282,27 +278,17 @@ export async function setupStreamExecution(
         ralNumber,
         metaModelSystemPrompt,
         variantSystemPrompt,
-        availableNudges: NudgeSkillWhitelistService.getInstance().getWhitelistedNudges(),
-        availableSkills: NudgeSkillWhitelistService.getInstance().getWhitelistedSkills(),
     });
 
-    const providerOptions = await collectTenexSystemReminderProviderOptions({
-        scope: {
-            agentPubkey: context.agent.pubkey,
-            conversationId: context.conversationId,
-        },
-        context: {
-            agent: context.agent,
-            conversation,
-            respondingToPubkey: context.triggeringEvent.pubkey,
-            pendingDelegations,
-            completedDelegations,
-        },
-        cycleId: createTenexSystemReminderCycleId(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        ),
+    // Initialize providers (idempotent) and set data for this execution
+    initializeReminderProviders();
+    getSystemReminderContext().advance();
+    updateReminderData({
+        agent: context.agent,
+        conversation,
+        respondingToPubkey: context.triggeringEvent.pubkey,
+        pendingDelegations,
+        completedDelegations,
     });
 
     trace.getActiveSpan()?.addEvent("executor.messages_built_from_store", {
@@ -320,7 +306,6 @@ export async function setupStreamExecution(
         messageCompiler,
         request: {
             messages,
-            providerOptions,
         },
         nudgeContent,
         nudges: nudgeResult.nudges,
