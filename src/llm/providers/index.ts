@@ -43,7 +43,6 @@ export {
     OpenRouterProvider,
     AnthropicProvider,
     OpenAIProvider,
-    OpenAICompatibleProvider,
     OllamaProvider,
 } from "./standard";
 
@@ -55,7 +54,6 @@ import type { ProviderRegistration } from "./types";
 import { OpenRouterProvider } from "./standard/OpenRouterProvider";
 import { AnthropicProvider } from "./standard/AnthropicProvider";
 import { OpenAIProvider } from "./standard/OpenAIProvider";
-import { OpenAICompatibleProvider } from "./standard/OpenAICompatibleProvider";
 import { OllamaProvider } from "./standard/OllamaProvider";
 import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
 import { providerRegistry } from "./registry";
@@ -79,10 +77,6 @@ export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
     {
         Provider: OpenAIProvider,
         metadata: OpenAIProvider.METADATA,
-    },
-    {
-        Provider: OpenAICompatibleProvider,
-        metadata: OpenAICompatibleProvider.METADATA,
     },
     {
         Provider: OllamaProvider,
