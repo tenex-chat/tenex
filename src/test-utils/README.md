@@ -78,7 +78,7 @@ The `mock-llm/` directory provides a comprehensive mock LLM service for determin
 
 ## NDK Test Helpers
 
-`ndk-test-helpers.ts` wraps `@nostr-dev-kit/ndk/test` utilities with TENEX-specific helpers.
+Use `@nostr-dev-kit/ndk/test` directly for relay, signer, and fixture helpers.
 
 ## Test Assertions
 

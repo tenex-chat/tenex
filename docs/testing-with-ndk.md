@@ -44,8 +44,7 @@ The NDK (Nostr Development Kit) provides comprehensive testing infrastructure th
 ## Migration Strategy
 
 ### Current State
-- TENEX wraps NDK helpers in `src/test-utils/ndk-test-helpers.ts`
-- `src/__tests__/verify-ndk-test-import.test.ts` validates the test import path
+- TENEX can use `@nostr-dev-kit/ndk/test` directly
 - Some tests still use local mocks; migrate gradually
 
 ### Recommended Approach
@@ -90,8 +89,6 @@ describe("Example Test", () => {
 });
 ```
 
-For TENEX-specific helpers (fixture, relay wrappers, and convenience builders), see `src/test-utils/ndk-test-helpers.ts`.
-
 ## Benefits
 
 1. **Consistency**: Uses the same infrastructure as NDK's own tests
@@ -99,11 +96,6 @@ For TENEX-specific helpers (fixture, relay wrappers, and convenience builders), 
 3. **Deterministic**: Test users and events are reproducible
 4. **Maintenance**: Less custom mock code to maintain
 5. **Feature-Complete**: Supports relay simulation, EOSE, subscriptions, etc.
-
-## Files Created for Reference
-
-1. `src/test-utils/ndk-test-helpers.ts` - TENEX-specific helper wrapper
-2. `src/__tests__/verify-ndk-test-import.test.ts` - Import validation
 
 ## Next Steps
 
