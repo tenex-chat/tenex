@@ -7,10 +7,15 @@ export interface OllamaModel {
     digest: string;
 }
 
+export type OllamaModelsResult =
+    | { status: "ok"; models: OllamaModel[] }
+    | { status: "not_found" }
+    | { status: "unreachable" };
+
 /**
  * Fetch available models from local Ollama instance
  */
-export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModel[]> {
+export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModelsResult> {
     try {
         baseUrl = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
         const response = await fetch(`${baseUrl}/api/tags`, {
@@ -20,9 +25,13 @@ export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModel[]
             },
         });
 
+        if (response.status === 404) {
+            return { status: "not_found" };
+        }
+
         if (!response.ok) {
             logger.warn(`Failed to fetch Ollama models: ${response.status}`);
-            return [];
+            return { status: "unreachable" };
         }
 
         interface OllamaResponse {
@@ -39,17 +48,20 @@ export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModel[]
 
         logger.debug(`Fetched ${models.length} Ollama models`);
 
-        return models.map((model) => ({
-            name: model.name,
-            size: formatSize(model.size),
-            modified: model.modified_at,
-            digest: model.digest,
-        }));
+        return {
+            status: "ok",
+            models: models.map((model) => ({
+                name: model.name,
+                size: formatSize(model.size),
+                modified: model.modified_at,
+                digest: model.digest,
+            })),
+        };
     } catch (error) {
         logger.warn("Failed to fetch Ollama models", {
             error: error instanceof Error ? error.message : String(error),
         });
-        return [];
+        return { status: "unreachable" };
     }
 }
 

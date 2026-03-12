@@ -17,13 +17,19 @@ export class ModelSelector {
      */
     static async selectOllamaModel(currentModel?: string, baseUrl?: string): Promise<string> {
         console.log(chalk.gray("Fetching available Ollama models..."));
-        const ollamaModels = await fetchOllamaModels(baseUrl);
+        const result = await fetchOllamaModels(baseUrl);
 
-        if (ollamaModels.length === 0) {
+        if (result.status === "unreachable") {
             console.log(amber("⚠️  Could not reach Ollama. Is Ollama running?"));
             throw new OllamaNotRunningError();
         }
 
+        if (result.status === "not_found") {
+            console.log(amber("⚠️  Ollama is running but model listing is unavailable (404)."));
+            return await ModelSelector.promptManualModel(currentModel || "");
+        }
+
+        const { models: ollamaModels } = result;
         console.log(chalk.green(`✓ Found ${ollamaModels.length} installed models`));
 
         const choices = ollamaModels.map((m) => ({
