@@ -15,9 +15,9 @@ import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
-import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import type { FullRuntimeContext } from "./types";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 
@@ -37,7 +37,6 @@ export function wrapToolsWithSupervision(
     context: FullRuntimeContext
 ): Record<string, CoreTool<unknown, unknown>> {
     const wrappedTools: Record<string, CoreTool<unknown, unknown>> = {};
-    const ralRegistry = RALRegistry.getInstance();
 
     for (const [toolName, tool] of Object.entries(toolsObject)) {
         // Skip tools without execute function
@@ -128,17 +127,14 @@ export function wrapToolsWithSupervision(
                             supervisorOrchestrator.markHeuristicEnforced(preToolExecutionId, supervisionResult.heuristicId);
                         }
 
-                        // Queue correction message if available (for both inject-message and block-tool)
                         if (
                             supervisionResult.correctionAction.message &&
                             supervisionResult.correctionAction.reEngage
                         ) {
-                            ralRegistry.queueUserMessage(
-                                context.agent.pubkey,
-                                context.conversationId,
-                                context.ralNumber,
-                                supervisionResult.correctionAction.message
-                            );
+                            getSystemReminderContext().queue({
+                                type: "supervision-correction",
+                                content: supervisionResult.correctionAction.message,
+                            });
                         }
 
                         // Return a blocked execution message

@@ -6,6 +6,7 @@
  */
 
 import { wrapInSystemReminder } from "ai-sdk-system-reminders";
+import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
 import type { HeuristicViolation } from "./types";
 
 /**
@@ -31,9 +32,11 @@ export function formatViolation(violation: HeuristicViolation): string {
  * @param violations - List of violations to format (max 3 recommended)
  * @returns Content wrapped in system-reminder tags, ready for injection
  */
-export function formatViolations(violations: HeuristicViolation[]): string {
+export function createViolationsReminder(
+  violations: HeuristicViolation[]
+): SystemReminderDescriptor | null {
   if (violations.length === 0) {
-    return "";
+    return null;
   }
 
   const formattedViolations = violations.map(formatViolation).join("\n\n---\n\n");
@@ -48,10 +51,20 @@ export function formatViolations(violations: HeuristicViolation[]): string {
     "Please address these before continuing.",
   ].join("\n");
 
-  return wrapInSystemReminder({
+  return {
     type: "heuristic",
     content,
-  });
+  };
+}
+
+export function formatViolations(violations: HeuristicViolation[]): string {
+  const reminder = createViolationsReminder(violations);
+
+  if (!reminder) {
+    return "";
+  }
+
+  return wrapInSystemReminder(reminder);
 }
 
 /**

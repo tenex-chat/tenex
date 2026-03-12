@@ -35,10 +35,12 @@ function createHandler(streamTextDeltaMock: ReturnType<typeof mock>): StreamExec
         sessionManager: {} as any,
         llmService: {} as any,
         messageCompiler: {} as any,
+        request: {
+            messages: [],
+        },
         nudgeContent: "",
         skillContent: "",
         skills: [],
-        ephemeralMessages: [],
         abortSignal: new AbortController().signal,
     });
 

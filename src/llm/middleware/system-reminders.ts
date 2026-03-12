@@ -1,76 +1,34 @@
-import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
-import {
-    createSystemReminderRegistry,
-    createSystemRemindersMiddleware,
-    createSystemRemindersProviderOptions,
-    type SystemRemindersMiddleware,
-} from "ai-sdk-system-reminders";
+import { applySystemReminders, combineSystemReminders } from "ai-sdk-system-reminders";
+import type { LanguageModelV3Middleware } from "@ai-sdk/provider";
+import { trace } from "@opentelemetry/api";
+import { getSystemReminderContext } from "../system-reminder-context";
 
-export const TENEX_SYSTEM_REMINDER_TAGS = {
-    dynamicContext: "dynamic-context",
-    ephemeral: "ephemeral",
-} as const;
+export function createTenexSystemRemindersMiddleware(): LanguageModelV3Middleware {
+    const ctx = getSystemReminderContext();
 
-interface TenexSystemReminderMetadata {
-    dynamicContext?: string;
-    ephemeralContents?: string[];
-}
+    return {
+        specificationVersion: "v3" as const,
 
-function getString(value: unknown): string | undefined {
-    return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
+        async transformParams({ params }) {
+            const reminders = await ctx.collect();
 
-function getStringArray(value: unknown): string[] | undefined {
-    if (!Array.isArray(value)) {
-        return undefined;
-    }
+            if (reminders.length === 0) return params;
 
-    const strings = value
-        .filter((entry): entry is string => typeof entry === "string")
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0);
+            const combinedXml = combineSystemReminders(reminders);
 
-    return strings.length > 0 ? strings : undefined;
-}
+            const span = trace.getActiveSpan();
+            if (span) {
+                span.addEvent("system-reminders.applied", {
+                    "reminders.count": reminders.length,
+                    "reminders.types": reminders.map((r) => r.type).join(","),
+                    "reminders.content": combinedXml,
+                });
+            }
 
-const tenexSystemReminderRegistry = createSystemReminderRegistry({
-    [TENEX_SYSTEM_REMINDER_TAGS.dynamicContext]: ({ metadata }) =>
-        getString((metadata as TenexSystemReminderMetadata | undefined)?.dynamicContext),
-    [TENEX_SYSTEM_REMINDER_TAGS.ephemeral]: ({ metadata }) =>
-        getStringArray((metadata as TenexSystemReminderMetadata | undefined)?.ephemeralContents),
-});
-
-export function createTenexSystemRemindersMiddleware(): SystemRemindersMiddleware {
-    return createSystemRemindersMiddleware({
-        registry: tenexSystemReminderRegistry,
-    });
-}
-
-export function createTenexSystemReminderProviderOptions(input: {
-    dynamicContext?: string;
-    ephemeralContents?: string[];
-}): ProviderOptions | undefined {
-    const dynamicContext = getString(input.dynamicContext);
-    const ephemeralContents = getStringArray(input.ephemeralContents);
-    const tags: string[] = [];
-
-    if (dynamicContext) {
-        tags.push(TENEX_SYSTEM_REMINDER_TAGS.dynamicContext);
-    }
-
-    if (ephemeralContents) {
-        tags.push(TENEX_SYSTEM_REMINDER_TAGS.ephemeral);
-    }
-
-    if (tags.length === 0) {
-        return undefined;
-    }
-
-    return createSystemRemindersProviderOptions({
-        tags,
-        metadata: {
-            ...(dynamicContext ? { dynamicContext } : {}),
-            ...(ephemeralContents ? { ephemeralContents } : {}),
+            return {
+                ...params,
+                prompt: applySystemReminders(params.prompt, reminders),
+            };
         },
-    }) as ProviderOptions;
+    };
 }

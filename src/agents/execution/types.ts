@@ -94,3 +94,7 @@ export interface LLMCompletionRequest {
     messages: ModelMessage[];
     tools?: Record<string, CoreTool>;
 }
+
+export interface LLMModelRequest {
+    messages: ModelMessage[];
+}

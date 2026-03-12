@@ -7,6 +7,11 @@
  */
 
 export { HeuristicEngine, getHeuristicEngine, resetHeuristicEngine } from "./HeuristicEngine";
-export { formatViolation, formatViolations, formatViolationForLog } from "./formatters";
+export {
+  createViolationsReminder,
+  formatViolation,
+  formatViolations,
+  formatViolationForLog,
+} from "./formatters";
 export * from "./types";
 export * from "./rules";

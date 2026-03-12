@@ -58,9 +58,11 @@ mock.module("@/llm/providers", () => ({
 }));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import { MessageCompiler } from "../MessageCompiler";
 import { SessionManager } from "../SessionManager";
+import { initializeReminderProviders, updateReminderData, resetSystemReminders } from "../system-reminders";
 
 describe("MessageCompiler", () => {
     const projectId = "project-1";
@@ -101,9 +103,12 @@ describe("MessageCompiler", () => {
         buildSystemPromptMessages.mockClear();
         todoTemplate.mockClear();
         getName.mockClear();
+        resetSystemReminders();
+        initializeReminderProviders();
     });
 
     afterEach(() => {
+        resetSystemReminders();
         if (testDir) {
             rmSync(testDir, { recursive: true, force: true });
         }
@@ -125,7 +130,7 @@ describe("MessageCompiler", () => {
 
         const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
 
-        const { messages, mode, providerOptions } = await compiler.compile({
+        const { messages, mode } = await compiler.compile({
             agent,
             project,
             conversation: conversationStore,
@@ -161,8 +166,27 @@ describe("MessageCompiler", () => {
         expect(contents[2]).toContain("hello");
         expect(contents[3]).toContain("hi");
         expect(messages).toHaveLength(4);
-        expect(JSON.stringify(providerOptions)).toContain("TODO LIST");
-        expect(JSON.stringify(providerOptions)).toContain("Your response will be sent to @User.");
+
+        // Verify reminders via the context singleton
+        updateReminderData({
+            agent,
+            conversation: conversationStore,
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [
+                {
+                    delegationConversationId: "delegation-1",
+                    recipientPubkey: "delegated-pubkey",
+                    senderPubkey: agentPubkey,
+                    prompt: "help",
+                    ralNumber,
+                },
+            ],
+            completedDelegations: [],
+        });
+        const reminders = await getSystemReminderContext().collect();
+        const reminderContent = JSON.stringify(reminders);
+        expect(reminderContent).toContain("TODO LIST");
+        expect(reminderContent).toContain("Your response will be sent to @User.");
     });
 
     it("builds delta context for session-stateful providers", async () => {

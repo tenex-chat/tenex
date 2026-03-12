@@ -1,13 +1,3 @@
-/**
- * Integration tests for MessageCompiler's system-reminder provider option output.
- *
- * These tests verify that:
- * 1. Dynamic reminder content is emitted as providerOptions instead of compile-time prompt mutation
- * 2. Full and delta modes still compute fresh dynamic context
- * 3. Ephemeral reminder content is preserved for middleware-time injection
- * 4. Message counts remain based on actual compiled messages
- */
-
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -30,6 +20,7 @@ const getName = mock(async (pubkey: string) => {
     const names: Record<string, string> = {
         "user-pubkey": "User",
         "delegated-pubkey": "DelegatedAgent",
+        "completed-pubkey": "CompletedAgent",
     };
     return names[pubkey] ?? "Unknown";
 });
@@ -73,28 +64,17 @@ mock.module("@/llm/providers", () => ({
 }));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import { MessageCompiler } from "../MessageCompiler";
 import { SessionManager } from "../SessionManager";
+import {
+    initializeReminderProviders,
+    updateReminderData,
+    resetSystemReminders,
+} from "../system-reminders";
 
-function extractSystemReminderRequest(providerOptions: unknown): {
-    tags: string[];
-    metadata?: Record<string, unknown>;
-} {
-    const request = (providerOptions as { systemReminders?: { tags?: string[]; metadata?: Record<string, unknown> } })
-        .systemReminders;
-
-    if (!request || !Array.isArray(request.tags)) {
-        throw new Error("Expected systemReminders provider options");
-    }
-
-    return {
-        tags: request.tags,
-        metadata: request.metadata,
-    };
-}
-
-describe("MessageCompiler System Reminder Provider Options", () => {
+describe("MessageCompiler and TENEX system reminders", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
     const workingDirectory = "/tmp/test-project";
@@ -134,16 +114,19 @@ describe("MessageCompiler System Reminder Provider Options", () => {
         todoTemplate.mockClear();
         getName.mockClear();
         todoTemplateCallCount = 0;
+        resetSystemReminders();
+        initializeReminderProviders();
     });
 
     afterEach(() => {
         if (testDir) {
             rmSync(testDir, { recursive: true, force: true });
         }
+        resetSystemReminders();
         mock.restore();
     });
 
-    it("emits dynamic context as provider options in full mode", async () => {
+    it("does not return provider options from compile in full mode", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -152,7 +135,7 @@ describe("MessageCompiler System Reminder Provider Options", () => {
         const ralNumber = conversationStore.createRal(agentPubkey);
 
         const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        const { messages, providerOptions, mode } = await compiler.compile({
+        const compiled = await compiler.compile({
             agent,
             project,
             conversation: conversationStore,
@@ -169,48 +152,18 @@ describe("MessageCompiler System Reminder Provider Options", () => {
             ralNumber,
         });
 
-        expect(mode).toBe("full");
-        expect(messages.find((message) => message.role === "user")?.content).toBe("Hello, can you help me?");
-
-        const request = extractSystemReminderRequest(providerOptions);
-        expect(request.tags).toEqual(["dynamic-context"]);
-        expect(request.metadata?.dynamicContext).toContain("Current Todos");
-        expect(request.metadata?.dynamicContext).toContain("Your response will be sent to @User");
+        expect("providerOptions" in compiled).toBe(false);
+        expect(compiled.mode).toBe("full");
+        expect(compiled.messages.find((message) => message.role === "user")?.content).toBe(
+            "Hello, can you help me?"
+        );
+        expect(compiled.counts.dynamicContext).toBe(0);
+        expect(compiled.counts.systemPrompt).toBe(1);
+        expect(compiled.counts.conversation).toBe(1);
+        expect(compiled.counts.total).toBe(2);
     });
 
-    it("does not add dynamic context as separate messages", async () => {
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "Test message",
-            messageType: "text",
-        });
-        const ralNumber = conversationStore.createRal(agentPubkey);
-
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        const { counts } = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
-        expect(counts.dynamicContext).toBe(0);
-        expect(counts.systemPrompt).toBe(1);
-        expect(counts.conversation).toBe(1);
-        expect(counts.total).toBe(2);
-    });
-
-    it("preserves ephemeral reminder content for middleware-time combination", async () => {
+    it("collects separate semantic reminders for todo list, routing, and delegations", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "User query",
@@ -218,37 +171,43 @@ describe("MessageCompiler System Reminder Provider Options", () => {
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
 
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        const { providerOptions } = await compiler.compile({
+        updateReminderData({
             agent,
-            project,
             conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
             respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-            ephemeralMessages: [
-                { role: "system", content: "Heuristic warning: Check your todos!" },
-                { role: "system", content: "<system-reminder>\nAlready wrapped content\n</system-reminder>" },
+            pendingDelegations: [
+                {
+                    delegationConversationId: "delegation-1",
+                    recipientPubkey: "delegated-pubkey",
+                    senderPubkey: agentPubkey,
+                    prompt: "Do a task",
+                    ralNumber,
+                },
+            ],
+            completedDelegations: [
+                {
+                    delegationConversationId: "delegation-2",
+                    recipientPubkey: "completed-pubkey",
+                    senderPubkey: agentPubkey,
+                    transcript: [],
+                    completedAt: Date.now(),
+                    ralNumber,
+                    status: "completed",
+                },
             ],
         });
 
-        const request = extractSystemReminderRequest(providerOptions);
-        expect(request.tags).toEqual(["dynamic-context", "ephemeral"]);
-        expect(request.metadata?.ephemeralContents).toEqual([
-            "Heuristic warning: Check your todos!",
-            "<system-reminder>\nAlready wrapped content\n</system-reminder>",
+        const reminders = await getSystemReminderContext().collect();
+        const types = reminders.map((r) => r.type);
+
+        expect(types).toEqual([
+            "todo-list",
+            "response-routing",
+            "delegations",
         ]);
     });
 
-    it("includes fresh dynamic context in delta mode", async () => {
+    it("keeps delta compilation separate from reminder collection and recomputes reminders on each refresh", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -276,7 +235,7 @@ describe("MessageCompiler System Reminder Provider Options", () => {
         sessionManager.saveSession("session-1", "event-1", 1);
 
         const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const { messages, providerOptions, mode } = await compiler.compile({
+        const compiled = await compiler.compile({
             agent,
             project,
             conversation: conversationStore,
@@ -293,75 +252,40 @@ describe("MessageCompiler System Reminder Provider Options", () => {
             ralNumber,
         });
 
-        expect(mode).toBe("delta");
-        expect(messages).toHaveLength(2);
-        expect(messages.find((message) => message.role === "user")?.content).toBe("Follow-up question");
+        expect(compiled.mode).toBe("delta");
+        expect(compiled.messages).toHaveLength(2);
+        expect(compiled.messages.find((message) => message.role === "user")?.content).toBe(
+            "Follow-up question"
+        );
 
-        const request = extractSystemReminderRequest(providerOptions);
-        expect(request.tags).toEqual(["dynamic-context"]);
-        expect(request.metadata?.dynamicContext).toContain("Current Todos");
-        expect(request.metadata?.dynamicContext).toContain("Your response will be sent to @User");
-    });
-
-    it("regenerates dynamic context on every compile", async () => {
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "First message",
-            messageType: "text",
-        });
-        const ralNumber = conversationStore.createRal(agentPubkey);
-        conversationStore.addMessage({
-            pubkey: agentPubkey,
-            ral: ralNumber,
-            content: "First response",
-            messageType: "text",
-        });
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "Second message",
-            messageType: "text",
-        });
-
-        sessionManager.saveSession("session-1", "event-1", 1);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-
-        await compiler.compile({
+        // First update + collect
+        updateReminderData({
             agent,
-            project,
             conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
             respondingToPubkey: userPubkey,
             pendingDelegations: [],
             completedDelegations: [],
-            ralNumber,
         });
+        await getSystemReminderContext().collect();
 
         const previousCallCount = todoTemplateCallCount;
 
-        await compiler.compile({
+        // Second update + collect should recompute (providers run each time)
+        updateReminderData({
             agent,
-            project,
             conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
             respondingToPubkey: userPubkey,
             pendingDelegations: [],
             completedDelegations: [],
-            ralNumber,
         });
 
+        const reminders = await getSystemReminderContext().collect();
+        const types = reminders.map((r) => r.type);
+
+        expect(types).toEqual([
+            "todo-list",
+            "response-routing",
+        ]);
         expect(todoTemplateCallCount).toBeGreaterThan(previousCallCount);
     });
 });
