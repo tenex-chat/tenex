@@ -10,6 +10,7 @@ export const PROVIDER_IDS = {
     OPENROUTER: "openrouter",
     ANTHROPIC: "anthropic",
     OPENAI: "openai",
+    OPENAI_COMPATIBLE: "openai-compatible",
     OLLAMA: "ollama",
     MOCK: "mock",
 } as const;
