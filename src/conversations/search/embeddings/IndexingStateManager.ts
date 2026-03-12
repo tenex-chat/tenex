@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { logger } from "@/utils/logger";
 import { readLightweightMetadata } from "@/conversations/ConversationDiskReader";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /**
  * State for a single conversation
@@ -171,7 +172,7 @@ export class IndexingStateManager {
     /**
      * Build a composite key for state lookup
      */
-    private buildKey(projectId: string, conversationId: string): string {
+    private buildKey(projectId: ProjectDTag, conversationId: string): string {
         return `${projectId}:${conversationId}`;
     }
 
@@ -182,7 +183,7 @@ export class IndexingStateManager {
      */
     private calculateMetadataHash(
         basePath: string,
-        projectId: string,
+        projectId: ProjectDTag,
         conversationId: string
     ): { hash: string; lastActivity: number } | null {
         try {
@@ -221,7 +222,7 @@ export class IndexingStateManager {
      */
     public needsIndexing(
         basePath: string,
-        projectId: string,
+        projectId: ProjectDTag,
         conversationId: string
     ): boolean {
         const key = this.buildKey(projectId, conversationId);
@@ -269,7 +270,7 @@ export class IndexingStateManager {
      */
     public markIndexed(
         basePath: string,
-        projectId: string,
+        projectId: ProjectDTag,
         conversationId: string,
         noContent = false
     ): void {
@@ -296,7 +297,7 @@ export class IndexingStateManager {
     /**
      * Clear a conversation's indexing state (forces re-index)
      */
-    public clearState(projectId: string, conversationId: string): void {
+    public clearState(projectId: ProjectDTag, conversationId: string): void {
         const key = this.buildKey(projectId, conversationId);
         this.states.delete(key);
         this.scheduleSave();

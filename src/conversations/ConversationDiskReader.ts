@@ -4,6 +4,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import type { ConversationEntry } from "./types";
 
@@ -12,7 +13,7 @@ import type { ConversationEntry } from "./types";
  */
 export function readLightweightMetadata(
     basePath: string,
-    projectId: string,
+    projectId: ProjectDTag,
     conversationId: string
 ): {
     id: string;
@@ -49,7 +50,7 @@ export function readLightweightMetadata(
  */
 export function readMessagesFromDisk(
     basePath: string,
-    projectId: string,
+    projectId: ProjectDTag,
     conversationId: string
 ): ConversationEntry[] | null {
     const filePath = join(basePath, projectId, "conversations", `${conversationId}.json`);
@@ -71,7 +72,7 @@ export function readConversationPreviewForProject(
     basePath: string,
     conversationId: string,
     agentPubkey: string,
-    projectId: string
+    projectId: ProjectDTag
 ): {
     id: string;
     lastActivity: number;
@@ -111,7 +112,7 @@ export function readConversationPreviewForProject(
 /**
  * List project IDs from disk.
  */
-export function listProjectIdsFromDisk(basePath: string): string[] {
+export function listProjectIdsFromDisk(basePath: string): ProjectDTag[] {
     try {
         if (!existsSync(basePath)) return [];
         const entries = readdirSync(basePath);
@@ -122,7 +123,7 @@ export function listProjectIdsFromDisk(basePath: string): string[] {
             } catch {
                 return false;
             }
-        });
+        }) as ProjectDTag[];
     } catch {
         return [];
     }
@@ -133,7 +134,7 @@ export function listProjectIdsFromDisk(basePath: string): string[] {
  */
 export function listConversationIdsFromDiskForProject(
     basePath: string,
-    projectId: string
+    projectId: ProjectDTag
 ): string[] {
     const conversationsDir = join(basePath, projectId, "conversations");
     try {

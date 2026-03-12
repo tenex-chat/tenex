@@ -69,18 +69,8 @@ async function executeDelegateCrossProject(
     const knownProjects = daemon.getKnownProjects();
     const activeRuntimes = daemon.getActiveRuntimes();
 
-    // Find project by id (dTag) - projectId in knownProjects is "31933:pubkey:dTag"
-    let project = null;
-    let fullProjectId = "";
-    for (const [pId, p] of knownProjects) {
-        const dTag = pId.split(":")[2];
-        if (dTag === projectId) {
-            project = p;
-            fullProjectId = pId;
-            break;
-        }
-    }
-
+    // Find project by d-tag — knownProjects is keyed by ProjectDTag
+    const project = knownProjects.get(projectId as import("@/types/project-ids").ProjectDTag);
     if (!project) {
         throw new Error(
             `Project '${projectId}' not found. Use project_list to see available projects.`
@@ -91,7 +81,7 @@ async function executeDelegateCrossProject(
     let agentPubkey: string | null = null;
 
     // Try runtime first (if project is running)
-    const runtime = activeRuntimes.get(fullProjectId);
+    const runtime = activeRuntimes.get(projectId as import("@/types/project-ids").ProjectDTag);
     if (runtime) {
         const runtimeContext = runtime.getContext();
         const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap();
@@ -153,7 +143,7 @@ async function executeDelegateCrossProject(
         recipientPubkey: agentPubkey,
         senderPubkey: context.agent.pubkey,
         prompt: content,
-        projectId: fullProjectId,
+        projectId,
         ralNumber: context.ralNumber,
     };
 

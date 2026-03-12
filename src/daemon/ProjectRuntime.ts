@@ -18,6 +18,7 @@ import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
 import { RALRegistry } from "@/services/ral";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys";
 import { cloneGitRepository, initializeGitRepository } from "@/utils/git";
@@ -32,7 +33,7 @@ import chalk from "chalk";
  * Manages its own lifecycle, status publishing, and event handling.
  */
 export class ProjectRuntime {
-    public readonly projectId: string;
+    public readonly projectId: ProjectDTag;
     /**
      * Project directory (normal git repository root).
      * Example: ~/tenex/{dTag}
@@ -41,7 +42,6 @@ export class ProjectRuntime {
      */
     public readonly projectBasePath: string;
     private readonly metadataPath: string; // TENEX metadata path
-    private readonly dTag: string;
 
     private project: NDKProject;
     private context: ProjectContext | null = null;
@@ -60,13 +60,11 @@ export class ProjectRuntime {
     constructor(project: NDKProject, projectsBase: string) {
         this.project = project;
 
-        // Build project ID: "31933:authorPubkey:dTag"
         const dTag = project.tagValue("d");
         if (!dTag) {
             throw new Error("Project missing required d tag");
         }
-        this.dTag = dTag;
-        this.projectId = `31933:${project.pubkey}:${dTag}`;
+        this.projectId = createProjectDTag(dTag);
 
         // Project directory: {projectsBase}/{dTag}
         // Normal git repo with default branch checked out.
@@ -268,7 +266,7 @@ export class ProjectRuntime {
         // Set project.dtag on active span for trace filtering
         const activeSpan = trace.getActiveSpan();
         if (activeSpan) {
-            activeSpan.setAttribute("project.dtag", this.dTag);
+            activeSpan.setAttribute("project.dtag", this.projectId);
         }
 
         // Run event handler with the project context

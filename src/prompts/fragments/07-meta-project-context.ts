@@ -6,6 +6,7 @@ import { RALRegistry } from "@/services/ral/RALRegistry";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /**
  * Meta-project context fragment - provides agents with awareness of
@@ -16,11 +17,11 @@ import type { PromptFragment } from "../core/types";
 
 interface MetaProjectContextArgs {
     agent: AgentInstance;
-    currentProjectId?: string;
+    currentProjectId?: ProjectDTag;
 }
 
 interface OtherProjectInfo {
-    projectId: string;  // Full project ID: "31933:pubkey:dTag"
+    projectId: ProjectDTag;
     dTag: string;       // Just the d-tag (human readable identifier)
     title: string;
     activeConversations: ActiveConversationSummary[];
@@ -79,7 +80,7 @@ function formatDuration(startTimestampMs: number): string {
  */
 async function loadOtherProjectsContext(
     agentPubkey: string,
-    currentProjectId?: string
+    currentProjectId?: ProjectDTag
 ): Promise<OtherProjectInfo[]> {
     try {
         // Get all project dTags where this agent is a member
@@ -103,15 +104,12 @@ async function loadOtherProjectsContext(
         const ralRegistry = RALRegistry.getInstance();
         const pubkeyService = getPubkeyService();
 
-        // Build map of dTag -> full project info
-        const dTagToProjectId = new Map<string, { projectId: string; title: string }>();
+        // Build map of dTag -> full project info (knownProjects is keyed by ProjectDTag)
+        const dTagToProjectId = new Map<string, { projectId: ProjectDTag; title: string }>();
         for (const [projectId, project] of knownProjects) {
-            // projectId format: "31933:pubkey:dTag"
-            const parts = projectId.split(":");
-            const dTag = parts[2];
-            if (dTag && agentProjectDTags.includes(dTag)) {
-                const title = project.tagValue("title") || dTag;
-                dTagToProjectId.set(dTag, { projectId, title });
+            if (agentProjectDTags.includes(projectId)) {
+                const title = project.tagValue("title") || projectId;
+                dTagToProjectId.set(projectId, { projectId, title });
             }
         }
 

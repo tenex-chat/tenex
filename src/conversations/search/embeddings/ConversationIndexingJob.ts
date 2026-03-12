@@ -24,6 +24,7 @@ import type { BuildDocumentResult } from "./ConversationEmbeddingService";
 import { IndexingStateManager } from "./IndexingStateManager";
 import { listProjectIdsFromDisk, listConversationIdsFromDiskForProject } from "@/conversations/ConversationDiskReader";
 import { RAGService, type RAGDocument } from "@/services/rag/RAGService";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /** Default interval: 5 minutes (in milliseconds) */
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -153,8 +154,8 @@ export class ConversationIndexingJob {
             const pendingDocuments: RAGDocument[] = [];
             // Track which conversations were successfully built (for marking indexed after flush)
             // Indices into pendingDocuments correspond 1:1 with pendingMarkIndexed
-            const pendingMarkIndexed: Array<{ projectId: string; conversationId: string }> = [];
-            const pendingMarkNoContent: Array<{ projectId: string; conversationId: string }> = [];
+            const pendingMarkIndexed: Array<{ projectId: ProjectDTag; conversationId: string }> = [];
+            const pendingMarkNoContent: Array<{ projectId: ProjectDTag; conversationId: string }> = [];
 
             // Get all projects directly from disk
             const projectIds = listProjectIdsFromDisk(this.projectsBasePath);

@@ -8,6 +8,7 @@ import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { resolveAgentSlug } from "@/services/agents/AgentResolution";
 import { parseNostrUser } from "@/utils/nostr-entity-parser";
+import { type ProjectDTag, createProjectDTag } from "@/types/project-ids";
 
 const conversationListSchema = z.object({
     projectId: z
@@ -134,11 +135,11 @@ function summarizeConversation(conversation: ConversationStore, projectId?: stri
 
 interface LoadedConversation {
     store: ConversationStore;
-    projectId: string;
+    projectId: ProjectDTag;
 }
 
 function loadConversationsForProject(
-    projectId: string,
+    projectId: ProjectDTag,
     isCurrentProject: boolean
 ): LoadedConversation[] {
     const conversations: LoadedConversation[] = [];
@@ -255,11 +256,13 @@ async function executeConversationList(
 
     const currentProjectId = ConversationStore.getProjectId();
 
-    // Normalize projectId: case-insensitive "all" check
-    const normalizedRequestedProjectId = requestedProjectId?.toLowerCase() === "all" ? "all" : requestedProjectId;
+    // Normalize projectId: case-insensitive "all" check, or cast user input to ProjectDTag
+    const normalizedRequestedProjectId: "all" | ProjectDTag | undefined =
+        requestedProjectId?.toLowerCase() === "all" ? "all" :
+        requestedProjectId ? createProjectDTag(requestedProjectId) : undefined;
 
     // Default to current project if not specified (NOT all projects)
-    const effectiveProjectId = normalizedRequestedProjectId ?? currentProjectId;
+    const effectiveProjectId: "all" | ProjectDTag | null = normalizedRequestedProjectId ?? currentProjectId;
 
     // Determine if we're querying all projects
     const isAllProjects = effectiveProjectId === "all";

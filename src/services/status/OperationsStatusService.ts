@@ -9,6 +9,7 @@ import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { RALRegistry } from "@/services/ral";
 import type { RALRegistryEntry } from "@/services/ral";
+import type { ProjectDTag } from "@/types/project-ids";
 import { config } from "@/services/ConfigService";
 
 /**
@@ -38,7 +39,7 @@ export class OperationsStatusService {
 
     constructor(
         private registry: RALRegistry,
-        private projectId: string,
+        private projectId: ProjectDTag,
         private projectContext: ProjectContext,
         private debounceMs = 1000
     ) {}

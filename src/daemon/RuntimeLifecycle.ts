@@ -2,6 +2,7 @@ import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { ProjectAlreadyRunningError } from "@/services/scheduling/errors";
+import type { ProjectDTag } from "@/types/project-ids";
 import { ProjectRuntime } from "./ProjectRuntime";
 
 /**
@@ -12,29 +13,29 @@ import { ProjectRuntime } from "./ProjectRuntime";
  * eliminating duplicate code and providing a focused responsibility.
  */
 export class RuntimeLifecycle {
-    private activeRuntimes = new Map<string, ProjectRuntime>();
-    private startingRuntimes = new Map<string, Promise<ProjectRuntime>>();
+    private activeRuntimes = new Map<ProjectDTag, ProjectRuntime>();
+    private startingRuntimes = new Map<ProjectDTag, Promise<ProjectRuntime>>();
 
     constructor(private projectsBase: string) {}
 
     /**
      * Get all active runtimes
      */
-    getActiveRuntimes(): Map<string, ProjectRuntime> {
+    getActiveRuntimes(): Map<ProjectDTag, ProjectRuntime> {
         return new Map(this.activeRuntimes);
     }
 
     /**
-     * Get a specific runtime by project ID
+     * Get a specific runtime by project d-tag
      */
-    getRuntime(projectId: string): ProjectRuntime | undefined {
+    getRuntime(projectId: ProjectDTag): ProjectRuntime | undefined {
         return this.activeRuntimes.get(projectId);
     }
 
     /**
      * Check if a runtime is active
      */
-    isRuntimeActive(projectId: string): boolean {
+    isRuntimeActive(projectId: ProjectDTag): boolean {
         return this.activeRuntimes.has(projectId);
     }
 
@@ -42,12 +43,12 @@ export class RuntimeLifecycle {
      * Start a new runtime for a project.
      * This is the single source of truth for runtime startup logic.
      *
-     * @param projectId - The project ID
+     * @param projectId - The project d-tag
      * @param project - The NDKProject instance
      * @returns Promise resolving to the started ProjectRuntime
      * @throws Error if startup fails
      */
-    async startRuntime(projectId: string, project: NDKProject): Promise<ProjectRuntime> {
+    async startRuntime(projectId: ProjectDTag, project: NDKProject): Promise<ProjectRuntime> {
         // Check if already running
         const existingRuntime = this.activeRuntimes.get(projectId);
         if (existingRuntime) {
@@ -112,10 +113,10 @@ export class RuntimeLifecycle {
 
     /**
      * Stop a runtime gracefully
-     * @param projectId - The project ID to stop
+     * @param projectId - The project d-tag to stop
      * @throws Error if the runtime is not found
      */
-    async stopRuntime(projectId: string): Promise<void> {
+    async stopRuntime(projectId: ProjectDTag): Promise<void> {
         const runtime = this.activeRuntimes.get(projectId);
         if (!runtime) {
             throw new Error(`Runtime not found: ${projectId}`);
@@ -143,11 +144,11 @@ export class RuntimeLifecycle {
 
     /**
      * Restart a runtime (stop and start again)
-     * @param projectId - The project ID to restart
+     * @param projectId - The project d-tag to restart
      * @param project - The NDKProject instance (needed for restart)
      * @throws Error if the runtime is not found or restart fails
      */
-    async restartRuntime(projectId: string, project: NDKProject): Promise<ProjectRuntime> {
+    async restartRuntime(projectId: ProjectDTag, project: NDKProject): Promise<ProjectRuntime> {
         const runtime = this.activeRuntimes.get(projectId);
         if (!runtime) {
             throw new Error(`Runtime not found: ${projectId}`);
@@ -174,10 +175,10 @@ export class RuntimeLifecycle {
 
     /**
      * Handle a crashed runtime by cleaning it up
-     * @param projectId - The project ID that crashed
+     * @param projectId - The project d-tag that crashed
      * @param runtime - The crashed runtime instance
      */
-    async handleRuntimeCrash(projectId: string, runtime: ProjectRuntime): Promise<void> {
+    async handleRuntimeCrash(projectId: ProjectDTag, runtime: ProjectRuntime): Promise<void> {
         logger.error(`Handling crashed runtime: ${projectId}`);
 
         // Remove from active runtimes
@@ -225,7 +226,7 @@ export class RuntimeLifecycle {
     getStats(): {
         activeCount: number;
         startingCount: number;
-        projectIds: string[];
+        projectIds: ProjectDTag[];
     } {
         return {
             activeCount: this.activeRuntimes.size,
@@ -259,10 +260,10 @@ export class RuntimeLifecycle {
     }
 
     /**
-     * Get list of currently active project IDs.
+     * Get list of currently active project d-tags.
      * Used by graceful restart to persist which projects to auto-boot after restart.
      */
-    getActiveProjectIds(): string[] {
+    getActiveProjectIds(): ProjectDTag[] {
         return Array.from(this.activeRuntimes.keys());
     }
 }

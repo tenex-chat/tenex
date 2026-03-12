@@ -16,6 +16,7 @@ import { formatLessonsWithReminder } from "@/utils/lessonFormatter";
 import { RAGService } from "@/services/rag/RAGService";
 import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ModelMessage } from "ai";
 
 // Import fragment registration manifest
@@ -562,7 +563,8 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     const agentInstance = context.getAgentByPubkey(agent.pubkey);
     // Use project's dTag for cache key scoping. Fall back to event ID if no dTag to avoid
     // cross-project collisions (using a generic "unknown" string would cause collisions).
-    const dTag = project.dTag || project.tagValue("d");
+    const rawDTag = project.dTag;
+    const dTag: ProjectDTag | undefined = rawDTag ? createProjectDTag(rawDTag) : undefined;
     let projectCacheKey: string;
     if (dTag) {
         projectCacheKey = dTag;
@@ -639,34 +641,29 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});
 
-    // Add relay configuration context
-    systemPromptBuilder.add("relay-configuration", {});
-
-    // Add process metrics (PID, uptime, CPU/memory usage)
-    systemPromptBuilder.add("process-metrics", {});
+    // Add environment context (relay, PID, uptime, CPU/memory usage)
+    systemPromptBuilder.add("environment-context", {});
 
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them
     systemPromptBuilder.add("meta-project-context", {
         agent: agentForFragments,
-        currentProjectId: project.tagId(),
+        currentProjectId: dTag,
     });
 
     // Add active conversations context (currently running agents in the project)
-    // NOTE: Use project.tagId() (NIP-33 address: "31933:<pubkey>:<d-tag>") for RALRegistry lookups
-    // RALRegistry stores entries using tagId(), so lookups must use the same format
     systemPromptBuilder.add("active-conversations", {
         agent: agentForFragments,
         currentConversationId: conversation.getId(),
-        projectId: project.tagId(),
+        projectId: dTag,
     });
 
     // Add recent conversations context (short-term memory)
-    // NOTE: Use project.tagId() for ConversationStore lookups (directory structure uses full tagId)
+    // NOTE: Use dTag (not tagId) — disk directories use the d-tag, not the NIP-33 address
     systemPromptBuilder.add("recent-conversations", {
         agent: agentForFragments,
         currentConversationId: conversation.getId(),
-        projectId: project.tagId(),
+        projectId: dTag,
     });
 
     // Add delegation chain if present (shows agent their position in multi-agent workflow)

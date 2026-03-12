@@ -4,6 +4,7 @@ import { formatRelativeTimeShort } from "@/lib/time";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /**
  * Recent conversations fragment - provides context about conversations
@@ -15,7 +16,7 @@ import type { PromptFragment } from "../core/types";
 interface RecentConversationsArgs {
     agent: AgentInstance;
     currentConversationId?: string;
-    projectId?: string;
+    projectId?: ProjectDTag;
 }
 
 interface RecentConversationEntry {
@@ -63,7 +64,7 @@ function sanitizeForPrompt(text: string, maxLength: number = MAX_SUMMARY_LENGTH)
 function loadRecentConversations(
     agentPubkey: string,
     currentConversationId?: string,
-    projectId?: string
+    projectId?: ProjectDTag
 ): RecentConversationEntry[] {
     const now = Math.floor(Date.now() / 1000);
     const cutoffTime = now - TWENTY_FOUR_HOURS_IN_SECONDS;

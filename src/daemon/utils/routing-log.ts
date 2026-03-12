@@ -1,6 +1,7 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { RoutingDecision } from "@/daemon/types";
+import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 
 /**
@@ -49,18 +50,18 @@ export function logDropped(
 export function logRouted(
     routingLogger: EventRoutingLogger,
     event: NDKEvent,
-    projectId: string,
+    projectId: ProjectDTag,
     method: "a_tag" | "p_tag_agent",
     matchedTags: string[]
 ): Promise<void> {
     logger.debug("Routing event to project", {
         eventId: event.id?.slice(0, 8),
-        projectId: projectId.slice(0, 16),
+        projectDTag: projectId,
         method,
     });
     const routingDecision: RoutingDecision = {
         type: "route_to_project",
-        projectId: projectId as import("@/daemon/types").ProjectId,
+        projectId,
         method,
         matchedTags,
     };

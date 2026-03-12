@@ -27,7 +27,6 @@ import type {
     ConversationRecordInput,
     ConversationMetadata,
     ConversationState,
-    DeferredInjection,
     DelegationMarker,
     ExecutionTime,
     Injection,
@@ -35,6 +34,7 @@ import type {
 import { applySummarySpansToRecords } from "@/services/history-summary/summary-utils.js";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
+import type { ProjectDTag } from "@/types/project-ids";
 
 interface BuildMessagesOptions {
     applyPersistedCompression?: boolean;
@@ -54,7 +54,6 @@ export type {
     ConversationRecord,
     ConversationRecordInput,
     ConversationMetadata,
-    DeferredInjection,
     Injection,
 } from "./types";
 
@@ -168,7 +167,7 @@ export class ConversationStore {
         return conversationRegistry.search(query);
     }
 
-    static getProjectId(): string | null {
+    static getProjectId(): ProjectDTag | null {
         return conversationRegistry.projectId;
     }
 
@@ -184,11 +183,11 @@ export class ConversationStore {
         return conversationRegistry.listConversationIdsFromDisk();
     }
 
-    static listProjectIdsFromDisk(): string[] {
+    static listProjectIdsFromDisk(): ProjectDTag[] {
         return conversationRegistry.listProjectIdsFromDisk();
     }
 
-    static listConversationIdsFromDiskForProject(projectId: string): string[] {
+    static listConversationIdsFromDiskForProject(projectId: ProjectDTag): string[] {
         return conversationRegistry.listConversationIdsFromDiskForProject(projectId);
     }
 
@@ -220,7 +219,7 @@ export class ConversationStore {
     static readConversationPreviewForProject(
         conversationId: string,
         agentPubkey: string,
-        projectId: string
+        projectId: ProjectDTag
     ): ReturnType<typeof conversationRegistry.readConversationPreviewForProject> {
         return conversationRegistry.readConversationPreviewForProject(conversationId, agentPubkey, projectId);
     }
@@ -232,7 +231,7 @@ export class ConversationStore {
     // ========== INSTANCE MEMBERS ==========
 
     private basePath: string;
-    private projectId: string | null = null;
+    private projectId: ProjectDTag | null = null;
     private conversationId: string | null = null;
     private state: ConversationState = {
         activeRal: {},
@@ -269,7 +268,7 @@ export class ConversationStore {
         }
     }
 
-    load(projectId: string, conversationId: string): void {
+    load(projectId: ProjectDTag, conversationId: string): void {
         this.projectId = projectId;
         this.conversationId = conversationId;
 
@@ -290,7 +289,6 @@ export class ConversationStore {
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
-                deferredInjections: loaded.deferredInjections ?? [],
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -322,7 +320,7 @@ export class ConversationStore {
         return this.getId();
     }
 
-    getProjectId(): string | null {
+    getProjectId(): ProjectDTag | null {
         return this.projectId;
     }
 
@@ -618,47 +616,6 @@ export class ConversationStore {
                 targetedPubkeys: injection.role === "user" ? [agentPubkey] : undefined,
             });
         }
-        return toConsume;
-    }
-
-    // Deferred Injection Operations (for next-turn messages)
-
-    /**
-     * Add a deferred injection for an agent's next turn.
-     *
-     * Unlike regular injections that target a specific RAL, deferred injections
-     * are consumed at the START of any future RAL for the target agent.
-     * This is used for supervision messages that should NOT block the current
-     * completion but should appear in the agent's next conversation turn.
-     */
-    addDeferredInjection(injection: DeferredInjection): void {
-        if (!this.state.deferredInjections) {
-            this.state.deferredInjections = [];
-        }
-        this.state.deferredInjections.push(injection);
-    }
-
-    /**
-     * Get pending deferred injections for an agent.
-     */
-    getPendingDeferredInjections(agentPubkey: string): DeferredInjection[] {
-        return (this.state.deferredInjections ?? []).filter(
-            (i) => i.targetPubkey === agentPubkey
-        );
-    }
-
-    /**
-     * Consume deferred injections for an agent, returning them and removing from queue.
-     *
-     * Unlike consumeInjections which adds messages to store, this just returns
-     * the injections for the caller to handle (typically as ephemeral messages
-     * in MessageCompiler).
-     */
-    consumeDeferredInjections(agentPubkey: string): DeferredInjection[] {
-        const toConsume = this.getPendingDeferredInjections(agentPubkey);
-        this.state.deferredInjections = (this.state.deferredInjections ?? []).filter(
-            (i) => i.targetPubkey !== agentPubkey
-        );
         return toConsume;
     }
 

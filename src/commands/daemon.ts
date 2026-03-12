@@ -172,15 +172,15 @@ daemonCommand
             schedulerService.setProjectCallbacks(
                 // Boot handler: called when a scheduled task needs to boot a project
                 async (projectId: string) => {
-                    await daemon.startRuntime(projectId);
+                    await daemon.startRuntime(projectId as import("@/types/project-ids").ProjectDTag);
                 },
                 // State resolver: called to check if a project is already running
                 (projectId: string) => {
-                    return daemon.getActiveRuntimes().has(projectId);
+                    return daemon.getActiveRuntimes().has(projectId as import("@/types/project-ids").ProjectDTag);
                 },
                 // Target resolver: called to resolve the target pubkey (may reroute to PM)
                 (projectId: string, originalTargetPubkey: string) => {
-                    const runtime = daemon.getActiveRuntimes().get(projectId);
+                    const runtime = daemon.getActiveRuntimes().get(projectId as import("@/types/project-ids").ProjectDTag);
                     if (!runtime) {
                         // Project not running, use original target
                         return originalTargetPubkey;

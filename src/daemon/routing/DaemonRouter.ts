@@ -1,4 +1,5 @@
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { tryExtractDTagFromAddress, type ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
@@ -8,7 +9,7 @@ import type { ProjectRuntime } from "../ProjectRuntime";
  * Result of routing decision for an event
  */
 export interface RoutingDecision {
-    projectId: string | null;
+    projectId: ProjectDTag | null;
     method: "a_tag" | "p_tag_agent" | "none";
     matchedTags: string[];
     reason: string;
@@ -34,7 +35,7 @@ export class DaemonRouter {
      * - Other events: Only trace if we have a runtime OR event can boot one
      *
      * @param event - The event to check
-     * @param knownProjects - Map of project IDs this daemon controls
+     * @param knownProjects - Map of project d-tags this daemon controls
      * @param knownAgentPubkeys - Set of agent pubkeys from project definitions
      * @param whitelistedPubkeys - Array of pubkeys that can create projects
      * @param activeRuntimes - Map of currently active project runtimes
@@ -42,10 +43,10 @@ export class DaemonRouter {
      */
     static shouldTraceEvent(
         event: NDKEvent,
-        knownProjects: Map<string, NDKProject>,
+        knownProjects: Map<ProjectDTag, NDKProject>,
         knownAgentPubkeys: Set<Hexpubkey>,
         whitelistedPubkeys: Hexpubkey[],
-        activeRuntimes: Map<string, ProjectRuntime>
+        activeRuntimes: Map<ProjectDTag, ProjectRuntime>
     ): boolean {
         // Never-route kinds don't need tracing at all
         if (AgentEventDecoder.isNeverRouteKind(event)) {
@@ -124,20 +125,24 @@ export class DaemonRouter {
         }
 
         // Check for a-tags to our projects (NIP-33 addressable event references)
+        // a-tag values are NIP-33 addresses ("31933:pubkey:dTag") — extract the d-tag for lookup
         const aTags = event.tags.filter((t) => t[0] === "a");
         for (const tag of aTags) {
             const aTagValue = tag[1];
-            if (aTagValue && knownProjects.has(aTagValue)) {
+            if (!aTagValue) continue;
+
+            const dTag = tryExtractDTagFromAddress(aTagValue);
+            if (dTag && knownProjects.has(dTag)) {
                 // Project is known - trace if:
                 // 1. We have an active runtime, OR
                 // 2. This event can boot projects (kind:1 or kind:24000)
                 // CRITICAL: kind:1 events with explicit A-tags MUST trace even without runtime
                 // to prevent cross-project routing bugs when agents exist in multiple projects
-                const hasRuntime = activeRuntimes.has(aTagValue);
+                const hasRuntime = activeRuntimes.has(dTag);
                 if (hasRuntime || canBootProject) {
                     logger.debug("shouldTraceEvent: accepting via A-tag", {
                         kind: event.kind,
-                        projectId: aTagValue.slice(0, 30),
+                        projectDTag: dTag,
                         hasRuntime,
                         canBootProject,
                     });
@@ -146,7 +151,7 @@ export class DaemonRouter {
                 // Known project but no active runtime and cannot boot - don't trace
                 logger.debug("shouldTraceEvent: rejecting - known project but no runtime", {
                     kind: event.kind,
-                    projectId: aTagValue.slice(0, 30),
+                    projectDTag: dTag,
                 });
             }
         }
@@ -186,16 +191,16 @@ export class DaemonRouter {
     /**
      * Determine which project an event should be routed to
      * @param event - The event to route
-     * @param knownProjects - Map of known project IDs to NDKProject instances
-     * @param agentPubkeyToProjects - Map of agent pubkeys to their project IDs
+     * @param knownProjects - Map of known project d-tags to NDKProject instances
+     * @param agentPubkeyToProjects - Map of agent pubkeys to their project d-tags
      * @param activeRuntimes - Map of active project runtimes (for agent lookup)
      * @returns Routing decision with target project or null if no match
      */
     static determineTargetProject(
         event: NDKEvent,
-        knownProjects: Map<string, NDKProject>,
-        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>,
-        activeRuntimes: Map<string, ProjectRuntime>
+        knownProjects: Map<ProjectDTag, NDKProject>,
+        agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectDTag>>,
+        activeRuntimes: Map<ProjectDTag, ProjectRuntime>
     ): RoutingDecision {
         // Skip routing for global identity kinds (NIP-01, NIP-02)
         // kind:0 (profile metadata) and kind:3 (contact list) are global user/agent identity
@@ -252,11 +257,12 @@ export class DaemonRouter {
     }
 
     /**
-     * Route event based on `a` tags (explicit project references)
+     * Route event based on `a` tags (explicit project references).
+     * A-tag values are NIP-33 addresses — we extract the d-tag for internal lookup.
      */
     private static routeByATag(
         event: NDKEvent,
-        knownProjects: Map<string, NDKProject>
+        knownProjects: Map<ProjectDTag, NDKProject>
     ): RoutingDecision | null {
         // NIP-33 addressable events use lowercase 'a' tags only
         const aTags = event.tags.filter((t) => t[0] === "a");
@@ -270,23 +276,24 @@ export class DaemonRouter {
 
         for (const tag of projectATags) {
             const aTagValue = tag[1];
-            if (aTagValue && knownProjects.has(aTagValue)) {
-                const project = knownProjects.get(aTagValue);
-                if (!project) {
-                    throw new Error(
-                        `Project ${aTagValue} not found in knownProjects despite has() check`
-                    );
-                }
+            if (!aTagValue) continue;
+
+            // Extract d-tag from NIP-33 address for internal lookup
+            const dTag = tryExtractDTagFromAddress(aTagValue);
+            if (!dTag) continue;
+
+            if (knownProjects.has(dTag)) {
+                const project = knownProjects.get(dTag)!;
 
                 logger.info("Routing event to project via a-tag", {
                     eventId: event.id.slice(0, 8),
                     eventKind: event.kind,
-                    projectId: aTagValue,
+                    projectDTag: dTag,
                     projectTitle: project.tagValue("title"),
                 });
 
                 return {
-                    projectId: aTagValue,
+                    projectId: dTag,
                     method: "a_tag",
                     matchedTags: [aTagValue],
                     reason: `Matched project a-tag: ${aTagValue}`,
@@ -316,9 +323,9 @@ export class DaemonRouter {
      */
     private static routeByPTag(
         event: NDKEvent,
-        knownProjects: Map<string, NDKProject>,
-        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>,
-        activeRuntimes: Map<string, ProjectRuntime>
+        knownProjects: Map<ProjectDTag, NDKProject>,
+        agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectDTag>>,
+        activeRuntimes: Map<ProjectDTag, ProjectRuntime>
     ): RoutingDecision | null {
         const pTags = event.tags.filter((t) => t[0] === "p");
 
@@ -342,7 +349,7 @@ export class DaemonRouter {
 
             // Find which of this agent's projects have active runtimes
             const activeProjectsForAgent: Array<{
-                projectId: string;
+                projectId: ProjectDTag;
                 project: NDKProject;
                 runtime: ProjectRuntime;
                 agent: { slug: string; pubkey: string };
@@ -357,7 +364,7 @@ export class DaemonRouter {
                 const project = knownProjects.get(projectId);
                 if (!project) {
                     logger.warn("routeByPTag: project in agentPubkeyToProjects but not in knownProjects", {
-                        projectId: projectId.slice(0, 20),
+                        projectDTag: projectId,
                         agentPubkey: pubkey.slice(0, 8),
                     });
                     continue;
@@ -366,7 +373,7 @@ export class DaemonRouter {
                 const context = runtime.getContext();
                 if (!context) {
                     logger.warn("routeByPTag: runtime has no context", {
-                        projectId: projectId.slice(0, 20),
+                        projectDTag: projectId,
                     });
                     continue;
                 }
@@ -375,7 +382,7 @@ export class DaemonRouter {
                 if (!agent) {
                     // Agent might have been removed from this project after mapping was created
                     logger.debug("routeByPTag: agent not found in project registry", {
-                        projectId: projectId.slice(0, 20),
+                        projectDTag: projectId,
                         agentPubkey: pubkey.slice(0, 8),
                     });
                     continue;
@@ -401,7 +408,7 @@ export class DaemonRouter {
                     eventId: event.id?.slice(0, 8),
                     agentPubkey: pubkey.slice(0, 8),
                     activeProjects: activeProjectsForAgent.map(p => ({
-                        projectId: p.projectId.slice(0, 20),
+                        projectDTag: p.projectId,
                         projectTitle: p.project.tagValue("title"),
                     })),
                 });
@@ -415,7 +422,7 @@ export class DaemonRouter {
             logger.info("Routing event to project via agent P-tag", {
                 eventId: event.id.slice(0, 8),
                 eventKind: event.kind,
-                projectId,
+                projectDTag: projectId,
                 projectTitle: project.tagValue("title"),
                 agentPubkey: pubkey.slice(0, 8),
                 agentSlug: agent.slug,
@@ -440,7 +447,7 @@ export class DaemonRouter {
      */
     static isAgentEvent(
         event: NDKEvent,
-        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>
+        agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectDTag>>
     ): boolean {
         return agentPubkeyToProjects.has(event.pubkey);
     }
@@ -455,7 +462,7 @@ export class DaemonRouter {
     static hasPTagsToSystemEntities(
         event: NDKEvent,
         whitelistedPubkeys: Hexpubkey[],
-        agentPubkeyToProjects: Map<Hexpubkey, Set<string>>
+        agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectDTag>>
     ): boolean {
         const pTags = event.tags.filter((t) => t[0] === "p");
 
@@ -480,12 +487,15 @@ export class DaemonRouter {
     }
 
     /**
-     * Build project ID from event
-     * Format: "31933:authorPubkey:dTag"
+     * Extract project d-tag from a project event.
      * @param event - Project event (kind 31933)
-     * @returns Project ID string
+     * @returns Project d-tag
      */
-    static buildProjectId(event: NDKEvent): string {
-        return event.tagId();
+    static buildProjectId(event: NDKEvent): ProjectDTag {
+        const dTag = event.tags.find(t => t[0] === "d")?.[1];
+        if (!dTag) {
+            throw new Error("Project event missing d tag");
+        }
+        return dTag as ProjectDTag;
     }
 }

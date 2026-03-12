@@ -26,9 +26,9 @@ import { logger } from "@/utils/logger";
 // dependency: barrel re-exports ProjectContext → @/agents → ConversationStore
 // → ConversationRegistry (this file), which would trigger a ReferenceError.
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ConversationMetadata } from "./types";
 import type { ConversationStore } from "./ConversationStore";
-// Note: FullEventId type is available via @/types/event-ids for future typed method signatures
 import {
     listConversationIdsFromDiskForProject,
     listProjectIdsFromDisk,
@@ -72,10 +72,10 @@ class ConversationRegistryImpl {
     private _basePath: string = join(getTenexBasePath(), "projects");
 
     /**
-     * Per-project configurations keyed by projectId (dTag).
+     * Per-project configurations keyed by ProjectDTag.
      * Accumulated by initialize() — never overwritten.
      */
-    private _projectConfigs: Map<string, ProjectRegistryConfig> = new Map();
+    private _projectConfigs: Map<ProjectDTag, ProjectRegistryConfig> = new Map();
 
     /**
      * Union of all agent pubkeys across all initialized projects.
@@ -87,7 +87,7 @@ class ConversationRegistryImpl {
      * Legacy fallback: the last projectId set via initialize().
      * Used only when AsyncLocalStorage context is unavailable (backward compat).
      */
-    private _legacyProjectId: string | null = null;
+    private _legacyProjectId: ProjectDTag | null = null;
 
     get basePath(): string {
         return this._basePath;
@@ -97,7 +97,7 @@ class ConversationRegistryImpl {
      * Get the current project ID via three-tier resolution.
      * Prefer resolveProjectId() for new code paths.
      */
-    get projectId(): string | null {
+    get projectId(): ProjectDTag | null {
         return this.resolveProjectId();
     }
 
@@ -122,7 +122,7 @@ class ConversationRegistryImpl {
      * @param explicitProjectId - Optional explicit project ID to use directly
      * @returns The resolved project ID, or null if none can be determined
      */
-    resolveProjectId(explicitProjectId?: string): string | null {
+    resolveProjectId(explicitProjectId?: ProjectDTag): ProjectDTag | null {
         // Tier 1: Explicit parameter
         if (explicitProjectId) {
             return explicitProjectId;
@@ -133,8 +133,11 @@ class ConversationRegistryImpl {
             const context = projectContextStore.getContext();
             if (context) {
                 const dTag = context.project.tagValue("d");
-                if (dTag && this._projectConfigs.has(dTag)) {
-                    return dTag;
+                if (dTag) {
+                    const typedDTag = createProjectDTag(dTag);
+                    if (this._projectConfigs.has(typedDTag)) {
+                        return typedDTag;
+                    }
                 }
             }
         } catch (error) {
@@ -174,7 +177,7 @@ class ConversationRegistryImpl {
      * Get the agent pubkeys for a specific resolved project ID.
      * Returns the project-specific set if found, otherwise the union of all.
      */
-    private getAgentPubkeysForProject(projectId: string | null): Set<string> {
+    private getAgentPubkeysForProject(projectId: ProjectDTag | null): Set<string> {
         if (projectId) {
             const config = this._projectConfigs.get(projectId);
             if (config) {
@@ -218,7 +221,7 @@ class ConversationRegistryImpl {
      */
     initialize(metadataPath: string, agentPubkeys?: Iterable<string>): void {
         this._basePath = dirname(metadataPath);
-        const projectId = basename(metadataPath);
+        const projectId = createProjectDTag(basename(metadataPath));
         const pubkeys = new Set(agentPubkeys ?? []);
 
         // Accumulate per-project config
@@ -309,7 +312,7 @@ class ConversationRegistryImpl {
     /**
      * Find which project contains a conversation.
      */
-    private findProjectForConversation(conversationId: string, skipProjectId?: string | null): string | undefined {
+    private findProjectForConversation(conversationId: string, skipProjectId?: ProjectDTag | null): ProjectDTag | undefined {
         try {
             if (!existsSync(this._basePath)) return undefined;
 
@@ -326,7 +329,7 @@ class ConversationRegistryImpl {
                 );
 
                 if (existsSync(conversationFile)) {
-                    return projectDir;
+                    return createProjectDTag(projectDir);
                 }
             }
         } catch {
@@ -385,13 +388,13 @@ class ConversationRegistryImpl {
         //
         // BACKFILL LIMITATION: Prefix indexing only happens on create().
         // If the prefix store is empty (fresh install or data loss), pre-existing
-        // conversations won't be resolvable by prefix until the migration script
-        // (src/scripts/migrate-prefix-index.ts) is run, OR until those conversations
-        // receive a new message that triggers re-indexing via conversation events.
+        // conversations won't be resolvable by prefix until they are backfilled
+        // separately, or until those conversations receive a new message that
+        // triggers re-indexing via conversation events.
         // This is acceptable because:
         // 1. Most prefix lookups target recently-active conversations
         // 2. Full 64-char IDs always work as a fallback
-        // 3. A migration script exists for backfilling if needed
+        // 3. The prefix index is only a convenience layer
         if (prefixKVStore.isInitialized()) {
             try {
                 await prefixKVStore.add(eventId);
@@ -655,14 +658,14 @@ class ConversationRegistryImpl {
     /**
      * List all project IDs from disk.
      */
-    listProjectIdsFromDisk(): string[] {
+    listProjectIdsFromDisk(): ProjectDTag[] {
         return listProjectIdsFromDisk(this._basePath);
     }
 
     /**
      * List conversation IDs for a specific project.
      */
-    listConversationIdsFromDiskForProject(projectId: string): string[] {
+    listConversationIdsFromDiskForProject(projectId: ProjectDTag): string[] {
         return listConversationIdsFromDiskForProject(this._basePath, projectId);
     }
 
@@ -706,7 +709,7 @@ class ConversationRegistryImpl {
     readConversationPreviewForProject(
         conversationId: string,
         agentPubkey: string,
-        projectId: string
+        projectId: ProjectDTag
     ): ReturnType<typeof readConversationPreviewForProject> {
         return readConversationPreviewForProject(this._basePath, conversationId, agentPubkey, projectId);
     }

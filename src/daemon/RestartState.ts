@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 
 /**
@@ -9,8 +10,8 @@ import { logger } from "@/utils/logger";
 export interface RestartStateData {
     /** Timestamp when restart was requested */
     requestedAt: number;
-    /** List of project IDs that were booted at the time of restart */
-    bootedProjects: string[];
+    /** List of project d-tags that were booted at the time of restart */
+    bootedProjects: ProjectDTag[];
     /** PID of the process that requested the restart */
     pid: number;
     /** Hostname for debugging */
@@ -49,7 +50,7 @@ export class RestartState {
      * Save restart state before graceful shutdown.
      * Uses atomic write (write to temp file, then rename) to prevent corruption.
      */
-    async save(bootedProjects: string[]): Promise<void> {
+    async save(bootedProjects: ProjectDTag[]): Promise<void> {
         const statePath = this.getStatePath();
         const tempPath = `${statePath}.tmp.${process.pid}`;
 

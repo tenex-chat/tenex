@@ -1,3 +1,5 @@
+import type { ProjectDTag } from "@/types/project-ids";
+
 /** Role types that can be used for message injection */
 export type InjectionRole = "user" | "system";
 
@@ -128,7 +130,7 @@ export interface RALRegistryEntry {
   ralNumber: number;
   agentPubkey: string;
   /** The project this RAL belongs to - required for multi-project isolation in daemon mode */
-  projectId: string;
+  projectId: ProjectDTag;
   /** The conversation this RAL belongs to - RAL is scoped per agent+conversation */
   conversationId: string;
   queuedInjections: QueuedInjection[];

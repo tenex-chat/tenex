@@ -10,12 +10,13 @@ import type { Span } from "@opentelemetry/api";
 import { RALRegistry } from "@/services/ral";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationMarker } from "@/conversations/types";
+import type { ProjectDTag } from "@/types/project-ids";
 
 export interface RALResolutionContext {
     agentPubkey: string;
     conversationId: string;
-    /** Project ID for multi-project isolation in daemon mode */
-    projectId: string;
+    /** Project d-tag for multi-project isolation in daemon mode */
+    projectId: ProjectDTag;
     triggeringEventId: string;
     span: Span;
 }

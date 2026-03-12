@@ -22,6 +22,7 @@ import {
     readMessagesFromDisk,
 } from "../ConversationDiskReader";
 import type { ConversationEntry } from "../types";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /** Current index format version */
 const INDEX_VERSION = "1.0";
@@ -45,14 +46,14 @@ interface DebounceState {
  */
 export class ConversationIndexManager {
     private basePath: string;
-    private projectId: string;
+    private projectId: ProjectDTag;
     private cachedIndex: ConversationIndex | null = null;
     private debounceState: DebounceState = {
         timerId: null,
         pendingConversationIds: new Set(),
     };
 
-    constructor(basePath: string, projectId: string) {
+    constructor(basePath: string, projectId: ProjectDTag) {
         this.basePath = basePath;
         this.projectId = projectId;
     }
@@ -372,7 +373,7 @@ const instances = new Map<string, ConversationIndexManager>();
 /**
  * Get or create an index manager for a project.
  */
-export function getIndexManager(basePath: string, projectId: string): ConversationIndexManager {
+export function getIndexManager(basePath: string, projectId: ProjectDTag): ConversationIndexManager {
     const key = `${basePath}:${projectId}`;
     let manager = instances.get(key);
     if (!manager) {

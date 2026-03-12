@@ -13,6 +13,7 @@ import { prefixKVStore } from "@/services/storage";
 import { Lockfile } from "@/utils/lockfile";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { logger } from "@/utils/logger";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKProject } from "@nostr-dev-kit/ndk";
@@ -66,11 +67,11 @@ export class Daemon {
     // Runtime management delegated to RuntimeLifecycle
     private runtimeLifecycle: RuntimeLifecycle | null = null;
 
-    // Project management
-    private knownProjects = new Map<string, NDKProject>(); // All discovered projects
+    // Project management — keyed by d-tag (ProjectDTag)
+    private knownProjects = new Map<ProjectDTag, NDKProject>();
 
-    // Agent pubkey mapping for routing (pubkey -> project IDs)
-    private agentPubkeyToProjects = new Map<Hexpubkey, Set<string>>();
+    // Agent pubkey mapping for routing (pubkey -> project d-tags)
+    private agentPubkeyToProjects = new Map<Hexpubkey, Set<ProjectDTag>>();
 
     // Agent pubkeys seeded from AgentStorage at startup (covers not-yet-running projects)
     private storedAgentPubkeys = new Set<Hexpubkey>();
@@ -91,7 +92,7 @@ export class Daemon {
     private supervisedMode = false;
 
     // Projects pending auto-boot from restart state (populated by loadRestartState, consumed by handleProjectEvent)
-    private pendingRestartBootProjects: Set<string> = new Set();
+    private pendingRestartBootProjects: Set<ProjectDTag> = new Set();
 
     // Shutdown function (set by setupShutdownHandlers, used by triggerGracefulRestart)
     private shutdownFn: ((exitCode?: number, isGracefulRestart?: boolean) => Promise<void>) | null = null;
@@ -406,14 +407,26 @@ export class Daemon {
     }
 
     /**
-     * Build project ID from event
+     * Extract project d-tag from a project event.
      */
-    private buildProjectId(event: NDKEvent): string {
+    private buildProjectId(event: NDKEvent): ProjectDTag {
         const dTag = event.tags.find((t) => t[0] === "d")?.[1];
         if (!dTag) {
             throw new Error("Project event missing d tag");
         }
-        return `31933:${event.pubkey}:${dTag}`;
+        return createProjectDTag(dTag);
+    }
+
+    /**
+     * Build NIP-33 addresses from known projects for Nostr subscription filters.
+     * This is the boundary where d-tags are converted to NIP-33 addresses.
+     */
+    private buildProjectAddressesForSubscription(): string[] {
+        const addresses: string[] = [];
+        for (const project of this.knownProjects.values()) {
+            addresses.push(project.tagId());
+        }
+        return addresses;
     }
 
     /**
@@ -767,8 +780,8 @@ export class Daemon {
                 return { status: "runtime_unavailable" };
             }
 
-            // Find the runtime for this project
-            const runtime = activeRuntimes.get(projectId);
+            // Find the runtime for this project (projectId arrives as string from InterventionService)
+            const runtime = activeRuntimes.get(projectId as ProjectDTag);
             if (!runtime) {
                 // Runtime not active for this project - transient failure
                 // (Project might not be booted yet, or was stopped)
@@ -856,7 +869,7 @@ export class Daemon {
      * agents are created dynamically via agents_write tool.
      */
     private async updateSubscriptionWithProjectAgents(
-        projectId: string,
+        projectId: ProjectDTag,
         runtime: ProjectRuntime
     ): Promise<void> {
         if (!this.subscriptionManager) return;
@@ -967,7 +980,7 @@ export class Daemon {
      * Handle a dynamically added agent (e.g., created via agents_write tool).
      * Updates the routing map and subscription to make the agent immediately routable.
      */
-    private handleDynamicAgentAdded(projectId: string, agent: AgentInstance): void {
+    private handleDynamicAgentAdded(projectId: ProjectDTag, agent: AgentInstance): void {
         // Add to routing map
         if (!this.agentPubkeyToProjects.has(agent.pubkey)) {
             this.agentPubkeyToProjects.set(agent.pubkey, new Set());
@@ -993,8 +1006,7 @@ export class Daemon {
         }
 
         // Register with global 14199 service
-        const dTag = projectId.split(":").slice(2).join(":");
-        OwnerAgentListService.getInstance().registerAgents(dTag, [agent.pubkey]);
+        OwnerAgentListService.getInstance().registerAgents(projectId, [agent.pubkey]);
 
         // Sync trust service with updated agent pubkeys (cross-project trust)
         this.syncTrustServiceAgentPubkeys();
@@ -1111,7 +1123,7 @@ export class Daemon {
                 }
 
                 if (this.subscriptionManager) {
-                    this.subscriptionManager.updateKnownProjects(Array.from(this.knownProjects.keys()));
+                    this.subscriptionManager.updateKnownProjects(this.buildProjectAddressesForSubscription());
                 }
             }
 
@@ -1126,7 +1138,7 @@ export class Daemon {
 
         // Update subscription for new projects
         if (isNewProject && this.subscriptionManager) {
-            this.subscriptionManager.updateKnownProjects(Array.from(this.knownProjects.keys()));
+            this.subscriptionManager.updateKnownProjects(this.buildProjectAddressesForSubscription());
         }
 
         // Route to active runtime if exists
@@ -1784,23 +1796,23 @@ export class Daemon {
     /**
      * Get known projects
      */
-    getKnownProjects(): Map<string, NDKProject> {
+    getKnownProjects(): Map<ProjectDTag, NDKProject> {
         return this.knownProjects;
     }
 
     /**
      * Get active runtimes
      */
-    getActiveRuntimes(): Map<string, ProjectRuntime> {
+    getActiveRuntimes(): Map<ProjectDTag, ProjectRuntime> {
         return this.runtimeLifecycle?.getActiveRuntimes() || new Map();
     }
 
     /**
      * Kill a specific project runtime
-     * @param projectId - The project ID to kill
+     * @param projectId - The project d-tag to kill
      * @throws Error if the runtime is not found or not running
      */
-    async killRuntime(projectId: string): Promise<void> {
+    async killRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
         }
@@ -1825,7 +1837,7 @@ export class Daemon {
      * @param projectId - The project ID to restart
      * @throws Error if the runtime is not found or restart fails
      */
-    async restartRuntime(projectId: string): Promise<void> {
+    async restartRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
         }
@@ -1855,7 +1867,7 @@ export class Daemon {
      * @param projectId - The project ID to start
      * @throws Error if the project is not found or already running
      */
-    async startRuntime(projectId: string): Promise<void> {
+    async startRuntime(projectId: ProjectDTag): Promise<void> {
         if (!this.runtimeLifecycle) {
             throw new Error("RuntimeLifecycle not initialized");
         }
@@ -1883,7 +1895,7 @@ export class Daemon {
     /**
      * Update subscription after a runtime has been removed
      */
-    private async updateSubscriptionAfterRuntimeRemoved(projectId: string): Promise<void> {
+    private async updateSubscriptionAfterRuntimeRemoved(projectId: ProjectDTag): Promise<void> {
         if (!this.subscriptionManager) return;
 
         try {

@@ -17,6 +17,7 @@ import { RAGService, type RAGDocument, type RAGQueryResult } from "@/services/ra
 import { buildProjectFilter } from "@/services/search/projectFilter";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /** Collection name for conversation embeddings */
 const CONVERSATION_COLLECTION = "conversation_embeddings";
@@ -286,7 +287,7 @@ export class ConversationEmbeddingService {
      * Index all conversations for a project
      * FIX #3: Only count successful indexings
      */
-    public async indexProjectConversations(projectId: string): Promise<number> {
+    public async indexProjectConversations(projectId: ProjectDTag): Promise<number> {
         await this.ensureInitialized();
 
         let indexed = 0;

@@ -7,6 +7,7 @@ import { getPubkeyService } from "@/services/PubkeyService";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
+import type { ProjectDTag } from "@/types/project-ids";
 
 /**
  * Active conversations fragment - provides context about currently active
@@ -18,7 +19,7 @@ import type { PromptFragment } from "../core/types";
 interface ActiveConversationsArgs {
     agent: AgentInstance;
     currentConversationId?: string;
-    projectId?: string;
+    projectId?: ProjectDTag;
 }
 
 interface ActiveConversationEntry {
@@ -273,7 +274,7 @@ function renderChildren(children: ConversationTreeNode[], indent: string, lines:
 function loadActiveConversations(
     _agentPubkey: string, // Not used - we show all active conversations, not filtered by agent
     currentConversationId?: string,
-    projectId?: string
+    projectId?: ProjectDTag
 ): ActiveConversationEntry[] {
     if (!projectId) {
         return []; // Project ID required to scope active conversations

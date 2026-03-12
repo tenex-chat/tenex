@@ -24,6 +24,7 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
+import { createProjectDTag } from "@/types/project-ids";
 import { RALRegistry } from "@/services/ral";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { getToolsObject } from "@/tools/registry";
@@ -123,7 +124,11 @@ export class AgentExecutor {
             try {
                 // Get project ID for multi-project isolation in daemon mode
                 const projectCtx = getProjectContext();
-                const projectId = projectCtx.project.tagId();
+                const dTagValue = projectCtx.project.tagValue("d");
+                if (!dTagValue) {
+                    throw new Error("Project missing d-tag");
+                }
+                const projectId = createProjectDTag(dTagValue);
 
                 const { ralNumber, isResumption, markersToPublish } = await resolveRAL({
                     agentPubkey: context.agent.pubkey,
@@ -576,16 +581,17 @@ export class AgentExecutor {
             sessionManager: setup.sessionManager,
             llmService: setup.llmService,
             messageCompiler: setup.messageCompiler,
-            providerOptions: setup.providerOptions,
+            request: setup.request,
             nudgeContent: setup.nudgeContent,
+            nudges: setup.nudges,
+            nudgeToolPermissions: setup.nudgeToolPermissions,
             skillContent: setup.skillContent,
             skills: setup.skills,
-            ephemeralMessages: setup.ephemeralMessages,
             abortSignal: setup.abortSignal,
             metaModelSystemPrompt: setup.metaModelSystemPrompt,
             variantSystemPrompt: setup.variantSystemPrompt,
         });
 
-        return handler.execute(setup.messages);
+        return handler.execute();
     }
 }

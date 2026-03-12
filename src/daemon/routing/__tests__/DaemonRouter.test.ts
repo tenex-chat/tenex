@@ -8,6 +8,7 @@ import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { DaemonRouter } from "../DaemonRouter";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ProjectRuntime } from "../../ProjectRuntime";
+import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 
 // Mock logger
 mock.module("@/utils/logger", () => ({
@@ -23,34 +24,38 @@ describe("DaemonRouter.determineTargetProject", () => {
     // Shared test data
     const projectAPubkey = "aaaa0000000000000000000000000000000000000000000000000000000000aa";
     const projectBPubkey = "bbbb0000000000000000000000000000000000000000000000000000000000bb";
-    const projectAId = `31933:${projectAPubkey}:project-a`;
-    const projectBId = `31933:${projectBPubkey}:project-b`;
+    // NIP-33 addresses (used in a-tag values from Nostr events)
+    const projectAAddress = `31933:${projectAPubkey}:project-a`;
+    const projectBAddress = `31933:${projectBPubkey}:project-b`;
+    // D-tags (used internally as Map keys)
+    const projectADTag = createProjectDTag("project-a");
+    const projectBDTag = createProjectDTag("project-b");
 
     const agentXPubkey = "xxxx0000000000000000000000000000000000000000000000000000000000xx";
     const agentYPubkey = "yyyy0000000000000000000000000000000000000000000000000000000000yy";
 
-    let knownProjects: Map<string, NDKProject>;
-    let agentPubkeyToProjects: Map<string, Set<string>>;
-    let activeRuntimes: Map<string, ProjectRuntime>;
+    let knownProjects: Map<ProjectDTag, NDKProject>;
+    let agentPubkeyToProjects: Map<string, Set<ProjectDTag>>;
+    let activeRuntimes: Map<ProjectDTag, ProjectRuntime>;
 
     beforeEach(() => {
-        // Setup known projects
+        // Setup known projects (keyed by d-tag)
         knownProjects = new Map([
-            [projectAId, { tagValue: () => "Project A" } as unknown as NDKProject],
-            [projectBId, { tagValue: () => "Project B" } as unknown as NDKProject],
+            [projectADTag, { tagValue: () => "Project A" } as unknown as NDKProject],
+            [projectBDTag, { tagValue: () => "Project B" } as unknown as NDKProject],
         ]);
 
         // Agent X exists in BOTH projects
         // Agent Y exists only in Project A
         agentPubkeyToProjects = new Map([
-            [agentXPubkey, new Set([projectAId, projectBId])],
-            [agentYPubkey, new Set([projectAId])],
+            [agentXPubkey, new Set([projectADTag, projectBDTag])],
+            [agentYPubkey, new Set([projectADTag])],
         ]);
 
         // Both projects are running
         activeRuntimes = new Map([
-            [projectAId, createMockRuntime(projectAId, [agentXPubkey, agentYPubkey])],
-            [projectBId, createMockRuntime(projectBId, [agentXPubkey])],
+            [projectADTag, createMockRuntime(projectADTag, [agentXPubkey, agentYPubkey])],
+            [projectBDTag, createMockRuntime(projectBDTag, [agentXPubkey])],
         ]);
     });
 
@@ -80,7 +85,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             // Agent X exists in both projects, but A-tag should route to Project A
             const event = createMockEvent([
                 ["p", agentXPubkey], // P-tag to Agent X (exists in both projects)
-                ["a", projectAId],   // A-tag explicitly pointing to Project A
+                ["a", projectAAddress],   // A-tag explicitly pointing to Project A
             ], agentYPubkey);
 
             const result = DaemonRouter.determineTargetProject(
@@ -90,7 +95,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 activeRuntimes
             );
 
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("a_tag");
         });
 
@@ -98,7 +103,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             // Even if P-tag would route to Project B, A-tag should win
             const event = createMockEvent([
                 ["p", agentXPubkey], // P-tag to Agent X
-                ["a", projectAId],   // A-tag to Project A
+                ["a", projectAAddress],   // A-tag to Project A
             ], agentYPubkey);
 
             const result = DaemonRouter.determineTargetProject(
@@ -110,13 +115,13 @@ describe("DaemonRouter.determineTargetProject", () => {
 
             // Should use A-tag, not P-tag
             expect(result.method).toBe("a_tag");
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
         });
 
         test("should route via P-tag only when no valid A-tag present", () => {
             // Event without A-tag, only P-tag to agent in single project
             activeRuntimes = new Map([
-                [projectAId, createMockRuntime(projectAId, [agentXPubkey, agentYPubkey])],
+                [projectADTag, createMockRuntime(projectADTag, [agentXPubkey, agentYPubkey])],
                 // Project B is NOT running
             ]);
 
@@ -131,7 +136,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 activeRuntimes
             );
 
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("p_tag_agent");
         });
     });
@@ -159,7 +164,7 @@ describe("DaemonRouter.determineTargetProject", () => {
         test("should route to single active project when agent is in multiple projects but only one is running", () => {
             // Only Project A is running
             activeRuntimes = new Map([
-                [projectAId, createMockRuntime(projectAId, [agentXPubkey, agentYPubkey])],
+                [projectADTag, createMockRuntime(projectADTag, [agentXPubkey, agentYPubkey])],
                 // Project B is NOT running
             ]);
 
@@ -176,7 +181,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             );
 
             // Should route to the only active project
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("p_tag_agent");
         });
     });
@@ -187,7 +192,7 @@ describe("DaemonRouter.determineTargetProject", () => {
 
             // Only Project A is running (for clean P-tag routing)
             activeRuntimes = new Map([
-                [projectAId, createMockRuntime(projectAId, [agentXPubkey, agentYPubkey])],
+                [projectADTag, createMockRuntime(projectADTag, [agentXPubkey, agentYPubkey])],
             ]);
 
             const event = createMockEvent([
@@ -203,7 +208,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             );
 
             // Should fall back to P-tag since A-tag doesn't match known projects
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("p_tag_agent");
         });
     });
@@ -211,7 +216,7 @@ describe("DaemonRouter.determineTargetProject", () => {
     describe("Tag format handling", () => {
         test("should handle lowercase 'a' tags", () => {
             const event = createMockEvent([
-                ["a", projectAId], // lowercase 'a'
+                ["a", projectAAddress], // lowercase 'a'
             ]);
 
             const result = DaemonRouter.determineTargetProject(
@@ -221,7 +226,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 activeRuntimes
             );
 
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("a_tag");
         });
 
@@ -229,7 +234,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             // NIP-33 addressable events use lowercase 'a' tags only
             // Uppercase 'A' is NIP-22 (comments) which we don't support
             const event = createMockEvent([
-                ["A", projectAId], // uppercase 'A' - should NOT match
+                ["A", projectADTag], // uppercase 'A' - should NOT match
             ]);
 
             const result = DaemonRouter.determineTargetProject(
@@ -256,7 +261,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             // Delegation event from Agent Y (Project A only) to Agent X (both projects)
             const delegationEvent = createMockEvent([
                 ["p", agentXPubkey],     // Target: Agent X (exists in both A and B)
-                ["a", projectAId],       // A-tag: Project A (caller's project)
+                ["a", projectAAddress],       // A-tag: Project A (caller's project)
                 ["delegation", "parent-conversation-id"], // Delegation marker
             ], agentYPubkey); // Author: Agent Y (only in Project A)
 
@@ -268,9 +273,9 @@ describe("DaemonRouter.determineTargetProject", () => {
             );
 
             // CRITICAL: Must route to Project A via A-tag, NOT fall back to P-tag
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("a_tag");
-            expect(result.matchedTags).toContain(projectAId);
+            expect(result.matchedTags).toContain(projectAAddress);
         });
 
         test("completion from delegated agent should route back to caller's project", () => {
@@ -280,7 +285,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             // Completion event from Agent X back to Agent Y
             const completionEvent = createMockEvent([
                 ["p", agentYPubkey],     // Target: Agent Y (only in Project A)
-                ["a", projectAId],       // A-tag: Project A (where delegation originated)
+                ["a", projectAAddress],       // A-tag: Project A (where delegation originated)
                 ["status", "completed"],
                 ["e", "delegation-event-id"],
             ], agentXPubkey); // Author: Agent X (in both A and B)
@@ -293,7 +298,7 @@ describe("DaemonRouter.determineTargetProject", () => {
             );
 
             // Must route to Project A via A-tag
-            expect(result.projectId).toBe(projectAId);
+            expect(result.projectId).toBe(projectADTag);
             expect(result.method).toBe("a_tag");
         });
     });

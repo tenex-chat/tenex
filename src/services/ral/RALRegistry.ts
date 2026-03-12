@@ -4,7 +4,7 @@ import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperations
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { ConversationStore } from "@/conversations/ConversationStore";
-// Note: FullEventId type is available via @/types/event-ids for future typed method signatures
+import type { ProjectDTag } from "@/types/project-ids";
 import type {
   InjectionResult,
   InjectionRole,
@@ -18,7 +18,7 @@ import type {
 /** Events emitted by RALRegistry */
 export type RALRegistryEvents = DefaultEventMap & {
   /** Emitted when any RAL state changes (streaming, tools, creation, cleanup) */
-  updated: (...args: [projectId: string, conversationId: string]) => void;
+  updated: (...args: [projectId: ProjectDTag, conversationId: string]) => void;
 };
 
 /**
@@ -100,7 +100,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @param projectId - The project this RAL belongs to (for multi-project isolation)
    * @param conversationId - The conversation ID
    */
-  private emitUpdated(projectId: string, conversationId: string): void {
+  private emitUpdated(projectId: ProjectDTag, conversationId: string): void {
     this.emit("updated", projectId, conversationId);
   }
 
@@ -340,7 +340,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   create(
     agentPubkey: string,
     conversationId: string,
-    projectId: string,
+    projectId: ProjectDTag,
     originalTriggeringEventId?: string,
     traceContext?: { traceId: string; spanId: string }
   ): number {
@@ -965,7 +965,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string,
     ralNumber: number,
     message: string,
-    options?: { ephemeral?: boolean; senderPubkey?: string; eventId?: string }
+    options?: { senderPubkey?: string; eventId?: string }
   ): void {
     this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
@@ -979,7 +979,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     role: "system" | "user",
     message: string,
-    options?: { ephemeral?: boolean; senderPubkey?: string; eventId?: string }
+    options?: { senderPubkey?: string; eventId?: string }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -1003,19 +1003,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       role,
       content: message,
       queuedAt: Date.now(),
-      ephemeral: options?.ephemeral,
       senderPubkey: options?.senderPubkey,
       eventId: options?.eventId,
     });
-
-    // Add telemetry for ephemeral injection queuing (useful for debugging supervision re-engagement)
-    if (options?.ephemeral) {
-      trace.getActiveSpan()?.addEvent("ral.ephemeral_correction_queued", {
-        "ral.number": ralNumber,
-        "message.length": message.length,
-        "message.role": role,
-      });
-    }
   }
 
   /**
@@ -1607,9 +1597,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   async abortWithCascade(
     agentPubkey: string,
     conversationId: string,
-    projectId: string,
+    projectId: ProjectDTag,
     reason?: string,
-    cooldownRegistry?: { add: (projectId: string, convId: string, agentPubkey: string, reason?: string) => void }
+    cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason?: string) => void }
   ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
     const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
 
@@ -2607,7 +2597,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
    * @param projectId - The project ID to filter by
    * @returns Array of active RAL entries for the project
    */
-  getActiveEntriesForProject(projectId: string): RALRegistryEntry[] {
+  getActiveEntriesForProject(projectId: ProjectDTag): RALRegistryEntry[] {
     const results: RALRegistryEntry[] = [];
 
     for (const rals of this.states.values()) {

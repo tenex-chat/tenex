@@ -1,13 +1,5 @@
 import type { Hexpubkey } from "@nostr-dev-kit/ndk";
-
-/**
- * Branded type for Project IDs
- * Format: "31933:authorPubkey:dTag"
- *
- * Using branded types provides compile-time safety to prevent
- * mixing up regular strings with project IDs.
- */
-export type ProjectId = string & { __brand: "ProjectId" };
+import type { ProjectDTag } from "@/types/project-ids";
 
 /**
  * Event classification for daemon routing decisions
@@ -26,7 +18,7 @@ export type EventClassification =
 export type RoutingDecision =
     | {
           type: "route_to_project";
-          projectId: ProjectId;
+          projectId: ProjectDTag;
           method: "a_tag" | "p_tag_agent";
           matchedTags: string[];
       }
@@ -36,12 +28,12 @@ export type RoutingDecision =
       }
     | {
           type: "lesson_hydration";
-          targetProjects: ProjectId[];
+          targetProjects: ProjectDTag[];
           agentDefinitionId: string;
       }
     | {
           type: "project_event";
-          projectId: ProjectId;
+          projectId: ProjectDTag;
           isUpdate: boolean;
       };
 
@@ -54,14 +46,14 @@ export type RuntimeAction = "existing" | "started" | "crashed";
  * Routing context containing all data needed for routing decisions
  */
 export interface RoutingContext {
-    /** Known project IDs mapped to their NDKProject instances */
-    knownProjects: Map<ProjectId, unknown>; // Using unknown to avoid circular deps
-    /** Map of agent pubkeys to their project IDs */
-    agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectId>>;
+    /** Known project d-tags mapped to their NDKProject instances */
+    knownProjects: Map<ProjectDTag, unknown>; // Using unknown to avoid circular deps
+    /** Map of agent pubkeys to their project d-tags */
+    agentPubkeyToProjects: Map<Hexpubkey, Set<ProjectDTag>>;
     /** Whitelisted user pubkeys */
     whitelistedPubkeys: Hexpubkey[];
-    /** Currently active runtime project IDs */
-    activeProjectIds: Set<ProjectId>;
+    /** Currently active runtime project d-tags */
+    activeProjectIds: Set<ProjectDTag>;
 }
 
 /**
@@ -79,7 +71,7 @@ export interface EventRoutingResult {
  * Runtime status for monitoring
  */
 export interface RuntimeStatus {
-    projectId: ProjectId;
+    projectId: ProjectDTag;
     isRunning: boolean;
     title: string;
     startTime: Date | null;
@@ -108,7 +100,7 @@ export interface DaemonStatus {
  */
 export interface SubscriptionState {
     whitelistedPubkeys: Set<Hexpubkey>;
-    knownProjects: Set<ProjectId>;
+    knownProjects: Set<ProjectDTag>;
     agentPubkeys: Set<Hexpubkey>;
     agentDefinitionIds: Set<string>;
     lastUpdate: Date;
@@ -120,7 +112,7 @@ export interface SubscriptionState {
  */
 export interface AgentIndexEntry {
     pubkey: Hexpubkey;
-    projectId: ProjectId;
+    projectId: ProjectDTag;
     name: string;
     slug: string;
 }
@@ -147,4 +139,3 @@ export enum LifecycleEvent {
     RuntimeCrash = "runtime.crash",
     SubscriptionRestart = "subscription.restart",
 }
-
