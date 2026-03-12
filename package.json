@@ -21,7 +21,7 @@
     "tsconfig.json"
   ],
   "scripts": {
-    "start": "bun run ./src/wrapper.ts",
+    "daemon": "bun run ./src/wrapper.ts",
     "build": "bun scripts/build-bundled.js",
     "prepublishOnly": "bun run build",
     "test": "bun test",
