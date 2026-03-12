@@ -5,6 +5,7 @@ import type { TextStreamPart } from "ai";
 import type { EventEmitter } from "tseep";
 import { shouldIgnoreChunk } from "./chunk-validators";
 import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
+import { extractErrorDetails, isToolResultError } from "./utils/tool-errors";
 
 export interface ChunkHandlerState {
     previousChunkType?: string;
@@ -247,31 +248,4 @@ export class ChunkHandler {
     clearCachedContent(): void {
         this.state.cachedContentForComplete = "";
     }
-}
-
-/**
- * Check if a tool result indicates an error
- */
-function isToolResultError(result: unknown): boolean {
-    if (result && typeof result === "object") {
-        const obj = result as Record<string, unknown>;
-        return obj.type === "error-text" || obj.type === "error";
-    }
-    return false;
-}
-
-/**
- * Extract error details from a tool result
- */
-function extractErrorDetails(result: unknown): { type: string; message: string } | undefined {
-    if (result && typeof result === "object") {
-        const obj = result as Record<string, unknown>;
-        if (obj.type === "error-text" || obj.type === "error") {
-            return {
-                type: String(obj.type),
-                message: String(obj.text || obj.message || "Unknown error"),
-            };
-        }
-    }
-    return undefined;
 }

@@ -41,16 +41,21 @@ export function getInvalidToolCalls(
 /**
  * Check if a tool result indicates an error.
  * AI SDK wraps tool execution errors in error-text or error-json formats.
+ * Some tests and mock providers also surface plain "error" objects.
  */
 export function isToolResultError(result: unknown): boolean {
     if (typeof result !== "object" || result === null) {
         return false;
     }
     const res = result as Record<string, unknown>;
-    // Check for AI SDK's known error formats
+    // Check for AI SDK's known error formats plus the mock-provider fallback.
     return (
         (res.type === "error-text" && typeof res.text === "string") ||
-        (res.type === "error-json" && typeof res.json === "object")
+        (res.type === "error-json" && typeof res.json === "object") ||
+        (res.type === "error" &&
+            (typeof res.message === "string" ||
+                res.error instanceof Error ||
+                typeof res.error === "string"))
     );
 }
 
@@ -72,6 +77,18 @@ export function extractErrorDetails(result: unknown): { message: string; type: s
         const errorJson = res.json as Record<string, unknown>;
         const message = errorJson.message || errorJson.error || JSON.stringify(errorJson);
         return { message: String(message), type: "error-json" };
+    }
+
+    if (res.type === "error") {
+        const message =
+            typeof res.message === "string"
+                ? res.message
+                : res.error instanceof Error
+                  ? res.error.message
+                  : typeof res.error === "string"
+                    ? res.error
+                    : "Unknown error";
+        return { message, type: "error" };
     }
 
     return null;
