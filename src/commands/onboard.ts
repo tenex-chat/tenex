@@ -940,6 +940,8 @@ async function runProjectAndAgentsStep(
     const { ndk } = discovery;
     const discoveryReady = waitForAgentDiscovery(discovery);
 
+    await agentStorage.initialize();
+
     // ── Part A: OpenClaw agents (if detected) ───────────────────────────────
     let installedCount = 0;
     const selectedNostrAgentEventIds = new Set<string>();
@@ -1224,7 +1226,6 @@ async function runProjectAndAgentsStep(
     // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
     // These don't have event IDs so they aren't referenced in the project event's agent tags;
     // the daemon needs the local storage association to find them.
-    await agentStorage.initialize();
     const allStoredAgents = await agentStorage.getAllAgents();
     for (const agent of allStoredAgents) {
         if (agent.eventId) continue; // Nostr agents are associated via project event tags
