@@ -15,9 +15,9 @@ export class ModelSelector {
     /**
      * Select an Ollama model interactively with fuzzy search
      */
-    static async selectOllamaModel(currentModel?: string): Promise<string> {
+    static async selectOllamaModel(currentModel?: string, baseUrl?: string): Promise<string> {
         console.log(chalk.gray("Fetching available Ollama models..."));
-        const ollamaModels = await fetchOllamaModels();
+        const ollamaModels = await fetchOllamaModels(baseUrl);
 
         if (ollamaModels.length === 0) {
             console.log(amber("⚠️  Could not reach Ollama. Is Ollama running?"));

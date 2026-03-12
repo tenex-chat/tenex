@@ -10,9 +10,9 @@ export interface OllamaModel {
 /**
  * Fetch available models from local Ollama instance
  */
-export async function fetchOllamaModels(): Promise<OllamaModel[]> {
+export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModel[]> {
     try {
-        const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+        baseUrl = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
         const response = await fetch(`${baseUrl}/api/tags`, {
             method: "GET",
             headers: {

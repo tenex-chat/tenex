@@ -58,7 +58,9 @@ export class ConfigurationManager {
             model = await ModelSelector.selectOpenRouterModel();
         } else if (provider === "ollama") {
             try {
-                model = await ModelSelector.selectOllamaModel();
+                const ollamaUrl = llmsConfig.providers["ollama"]?.apiKey;
+                const baseUrl = typeof ollamaUrl === "string" ? ollamaUrl : undefined;
+                model = await ModelSelector.selectOllamaModel(undefined, baseUrl);
             } catch (e) {
                 if (e instanceof OllamaNotRunningError) {
                     return ConfigurationManager.add(llmsConfig, advanced);
