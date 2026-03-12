@@ -64,19 +64,8 @@ function resolveEntryPoint(): string {
     return srcIndex;
 }
 
-// Configuration
-const MIN_UPTIME_MS = 5000; // Minimum uptime to reset crash counter
-const MAX_CRASHES = 5; // Maximum crashes before giving up
-const CRASH_WINDOW_MS = 60000; // Time window for crash counting
-
-interface CrashRecord {
-    timestamp: number;
-}
-
 class DaemonWrapper {
     private child: ChildProcess | null = null;
-    private crashHistory: CrashRecord[] = [];
-    private startTime: number = 0;
     private isShuttingDown = false;
 
     /**
@@ -137,53 +126,22 @@ class DaemonWrapper {
     }
 
     /**
-     * Main daemon loop - spawn daemon and respawn on clean exit
+     * Main daemon loop - spawn daemon and exit (daemon backgrounds itself)
      */
     private async runDaemonLoop(args: string[]): Promise<void> {
-        while (!this.isShuttingDown) {
-            // Check crash loop
-            if (this.isInCrashLoop()) {
-                console.error("[Wrapper] Crash loop detected - too many crashes in short period");
-                console.error(`[Wrapper] ${this.crashHistory.length} crashes in last ${CRASH_WINDOW_MS / 1000}s`);
-                console.error("[Wrapper] Giving up - please check daemon logs");
-                process.exit(1);
-            }
+        // Spawn daemon - it will fork to background on its own
+        console.log("[Wrapper] Spawning daemon...");
+        this.spawnDaemon(args);
 
-            // Spawn daemon
-            this.startTime = Date.now();
-            const exitCode = await this.spawnDaemon(args);
-            const uptime = Date.now() - this.startTime;
+        // Give it a moment to start
+        await this.sleep(1000);
 
-            console.log(`[Wrapper] Daemon exited with code ${exitCode} after ${Math.round(uptime / 1000)}s`);
-
-            if (this.isShuttingDown) {
-                // Wrapper is shutting down, don't respawn
-                console.log("[Wrapper] Wrapper shutting down, not respawning");
-                break;
-            }
-
-            if (exitCode === 0) {
-                // Clean exit - this is a graceful restart
-                console.log("[Wrapper] Daemon exited cleanly - respawning for graceful restart");
-
-                // Reset crash counter on clean exit after sufficient uptime
-                if (uptime >= MIN_UPTIME_MS) {
-                    this.crashHistory = [];
-                }
-
-                // Wait for daemon to fully clean up (lockfile removal)
-                console.log("[Wrapper] Waiting for daemon cleanup...");
-                await this.waitForLockfileRemoval();
-            } else {
-                // Non-zero exit - this is a crash
-                console.error(`[Wrapper] Daemon crashed with exit code ${exitCode}`);
-                this.recordCrash();
-
-                // Exponential backoff on crashes
-                const backoffMs = Math.min(1000 * Math.pow(2, this.crashHistory.length - 1), 30000);
-                console.log(`[Wrapper] Waiting ${backoffMs / 1000}s before respawn...`);
-                await this.sleep(backoffMs);
-            }
+        // Check if daemon is running via lockfile
+        const lockfileExists = await this.checkLockfileExists();
+        if (lockfileExists) {
+            console.log("[Wrapper] Daemon started successfully");
+        } else {
+            console.error("[Wrapper] Warning: Daemon may not have started (no lockfile found)");
         }
 
         console.log("[Wrapper] Exiting");
@@ -196,7 +154,7 @@ class DaemonWrapper {
     private spawnDaemon(args: string[]): Promise<number> {
         return new Promise((resolve) => {
             const indexPath = resolveEntryPoint();
-            const daemonArgs = [indexPath, "daemon", "--supervised", "--foreground", ...args];
+            const daemonArgs = [indexPath, "daemon", "--supervised", ...args];
 
             // Use Bun when running TypeScript sources; otherwise run compiled JS via Node.
             const runtimeBinary = indexPath.endsWith(".ts")
@@ -224,30 +182,6 @@ class DaemonWrapper {
     }
 
     /**
-     * Record a crash for crash loop detection
-     */
-    private recordCrash(): void {
-        const now = Date.now();
-        this.crashHistory.push({ timestamp: now });
-
-        // Prune old crashes outside the window
-        this.crashHistory = this.crashHistory.filter(
-            (c) => now - c.timestamp < CRASH_WINDOW_MS
-        );
-    }
-
-    /**
-     * Check if we're in a crash loop
-     */
-    private isInCrashLoop(): boolean {
-        const now = Date.now();
-        const recentCrashes = this.crashHistory.filter(
-            (c) => now - c.timestamp < CRASH_WINDOW_MS
-        );
-        return recentCrashes.length >= MAX_CRASHES;
-    }
-
-    /**
      * Sleep for a given duration
      */
     private sleep(ms: number): Promise<void> {
@@ -255,37 +189,32 @@ class DaemonWrapper {
     }
 
     /**
-     * Wait for daemon lockfile to be removed (with timeout)
+     * Get the lockfile path
      */
-    private async waitForLockfileRemoval(timeoutMs: number = 5000): Promise<void> {
-        const lockfilePath = path.join(
+    private getLockfilePath(): string {
+        return path.join(
             process.env.HOME || process.env.USERPROFILE || "/tmp",
             ".tenex",
             "daemon",
             "tenex.lock"
         );
+    }
 
-        const startTime = Date.now();
-
-        while (Date.now() - startTime < timeoutMs) {
-            try {
-                await fs.stat(lockfilePath);
-                // File exists, wait a bit and check again
-                await this.sleep(50);
-            } catch (error) {
-                const err = error as NodeJS.ErrnoException;
-                if (err.code === "ENOENT") {
-                    // File doesn't exist - lockfile was removed
-                    return;
-                }
-                // Other error - just return and let the daemon handle it
-                console.log(`[Wrapper] Unexpected error checking lockfile: ${err.message}`);
-                return;
+    /**
+     * Check if daemon lockfile exists
+     */
+    private async checkLockfileExists(): Promise<boolean> {
+        try {
+            await fs.stat(this.getLockfilePath());
+            return true;
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code === "ENOENT") {
+                return false;
             }
+            // Other error - assume it doesn't exist
+            return false;
         }
-
-        // Timeout reached - log warning but continue anyway
-        console.log(`[Wrapper] Warning: Lockfile still exists after ${timeoutMs}ms - proceeding anyway`);
     }
 }
 

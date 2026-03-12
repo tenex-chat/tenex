@@ -77,6 +77,10 @@ daemonCommand
             child.on("message", (msg: unknown) => {
                 if (msg && typeof msg === "object" && (msg as { type: string }).type === "ready") {
                     console.log(chalk.green(`✅ Daemon running in background (PID: ${child.pid})`));
+                    // Forward "ready" message to our parent (the wrapper, if present)
+                    if (process.send) {
+                        process.send({ type: "ready" });
+                    }
                     child.unref();
                     process.exit(0);
                 }
