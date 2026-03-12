@@ -18,6 +18,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -170,8 +171,9 @@ class DaemonWrapper {
                     this.crashHistory = [];
                 }
 
-                // Small delay to prevent tight loop in edge cases
-                await this.sleep(100);
+                // Wait for daemon to fully clean up (lockfile removal)
+                console.log("[Wrapper] Waiting for daemon cleanup...");
+                await this.waitForLockfileRemoval();
             } else {
                 // Non-zero exit - this is a crash
                 console.error(`[Wrapper] Daemon crashed with exit code ${exitCode}`);
@@ -194,7 +196,7 @@ class DaemonWrapper {
     private spawnDaemon(args: string[]): Promise<number> {
         return new Promise((resolve) => {
             const indexPath = resolveEntryPoint();
-            const daemonArgs = [indexPath, "daemon", "--supervised", ...args];
+            const daemonArgs = [indexPath, "daemon", "--supervised", "--foreground", ...args];
 
             // Use Bun when running TypeScript sources; otherwise run compiled JS via Node.
             const runtimeBinary = indexPath.endsWith(".ts")
@@ -250,6 +252,40 @@ class DaemonWrapper {
      */
     private sleep(ms: number): Promise<void> {
         return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Wait for daemon lockfile to be removed (with timeout)
+     */
+    private async waitForLockfileRemoval(timeoutMs: number = 5000): Promise<void> {
+        const lockfilePath = path.join(
+            process.env.HOME || process.env.USERPROFILE || "/tmp",
+            ".tenex",
+            "daemon",
+            "tenex.lock"
+        );
+
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < timeoutMs) {
+            try {
+                await fs.stat(lockfilePath);
+                // File exists, wait a bit and check again
+                await this.sleep(50);
+            } catch (error) {
+                const err = error as NodeJS.ErrnoException;
+                if (err.code === "ENOENT") {
+                    // File doesn't exist - lockfile was removed
+                    return;
+                }
+                // Other error - just return and let the daemon handle it
+                console.log(`[Wrapper] Unexpected error checking lockfile: ${err.message}`);
+                return;
+            }
+        }
+
+        // Timeout reached - log warning but continue anyway
+        console.log(`[Wrapper] Warning: Lockfile still exists after ${timeoutMs}ms - proceeding anyway`);
     }
 }
 
