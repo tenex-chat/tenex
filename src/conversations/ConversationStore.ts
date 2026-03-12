@@ -39,6 +39,7 @@ import type { FullEventId } from "@/types/event-ids";
 interface BuildMessagesOptions {
     applyPersistedCompression?: boolean;
     includeMessageIds?: boolean;
+    inFlightToolCallIds?: Set<string>;
 }
 
 /**
@@ -699,6 +700,7 @@ export class ConversationStore {
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
             includeMessageIds: options.includeMessageIds,
+            inFlightToolCallIds: options.inFlightToolCallIds,
         });
     }
 
@@ -744,6 +746,7 @@ export class ConversationStore {
             conversationId: this.conversationId ?? undefined,
             getDelegationMessages,
             includeMessageIds: options.includeMessageIds,
+            inFlightToolCallIds: options.inFlightToolCallIds,
         });
     }
 

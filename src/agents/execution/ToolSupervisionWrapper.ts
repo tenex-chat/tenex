@@ -81,8 +81,12 @@ export function wrapToolsWithSupervision(
                     });
                     const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
-                    // Build conversation history from ConversationStore
-                    const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber);
+                    // Build conversation history from ConversationStore.
+                    // Pass the current tool call ID as in-flight to suppress false-positive
+                    // orphaned tool call telemetry (this tool call exists but hasn't completed yet).
+                    const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber, {
+                        inFlightToolCallIds: new Set([options.toolCallId]),
+                    });
 
                     // Get available tools
                     const toolNames = context.agent.tools || [];

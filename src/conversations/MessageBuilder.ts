@@ -68,6 +68,12 @@ export interface MessageBuilderContext {
      * Include stable ids on emitted messages for explicit context preprocessing.
      */
     includeMessageIds?: boolean;
+    /**
+     * Tool call IDs that are currently in-flight (executing but not yet completed).
+     * These will still get synthetic results inserted for valid message structure,
+     * but won't trigger orphaned_tool_calls_reconciled telemetry since they're expected.
+     */
+    inFlightToolCallIds?: Set<string>;
 }
 
 function buildEntryMessageId(entry: ConversationRecord, absoluteIndex: number): string {
@@ -424,6 +430,7 @@ export async function buildMessagesFromEntries(
         indexOffset = 0,
         agentPubkeys = new Set<string>(),
         includeMessageIds = false,
+        inFlightToolCallIds,
     } = ctx;
 
     const result: ModelMessage[] = [];
@@ -771,11 +778,17 @@ export async function buildMessagesFromEntries(
             );
         }
 
-        // Log for debugging/monitoring orphaned tool-calls in production
-        trace.getActiveSpan?.()?.addEvent("conversation.orphaned_tool_calls_reconciled", {
-            "orphan.count": pendingToolCalls.size,
-            "orphan.tool_call_ids": Array.from(pendingToolCalls.keys()).join(","),
-        });
+        // Only emit telemetry for truly unexpected orphans (not in-flight tool calls)
+        const unexpectedOrphanIds = inFlightToolCallIds
+            ? Array.from(pendingToolCalls.keys()).filter(id => !inFlightToolCallIds.has(id))
+            : Array.from(pendingToolCalls.keys());
+
+        if (unexpectedOrphanIds.length > 0) {
+            trace.getActiveSpan?.()?.addEvent("conversation.orphaned_tool_calls_reconciled", {
+                "orphan.count": unexpectedOrphanIds.length,
+                "orphan.tool_call_ids": unexpectedOrphanIds.join(","),
+            });
+        }
     }
 
     // Flush any remaining deferred messages
