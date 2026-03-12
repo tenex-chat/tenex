@@ -58,7 +58,9 @@ export const CONTEXT_INJECTED_TOOLS: ToolName[] = [
     // Home-scoped filesystem tools (injected when agent lacks fs_* tools)
     "home_fs_read",
     "home_fs_write",
+    "home_fs_edit",
     "home_fs_grep",
+    "home_fs_glob",
     // MCP subscription stop (injected when agent has active MCP subscriptions)
     "mcp_subscription_stop",
 ];
