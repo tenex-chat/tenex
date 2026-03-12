@@ -437,10 +437,11 @@ COMMAND CHAINING:
 - Prefer absolute paths over cd: "pytest /foo/bar/tests" NOT "cd /foo/bar && pytest tests"
 
 WHEN NOT TO USE SHELL:
-- File operations: Use fs_read/write_path (NOT cat/echo/sed/awk)
-- Code modifications: Use edit tools directly (NOT sed/awk)
-- File search: Use glob patterns (NOT find/ls)
-- Content search: Use grep tools (NOT grep/rg commands)
+- Reading files: Use fs_read (NOT cat/head/tail)
+- Writing/creating files: Use fs_write or home_fs_write (NOT cat/echo/heredoc). If you don't have fs_write, you cannot write to the project directory — do NOT use shell as a workaround.
+- Editing files: Use fs_edit (NOT sed/awk)
+- File search: Use fs_glob (NOT find/ls)
+- Content search: Use fs_grep (NOT grep/rg commands)
 
 OTHER RESTRICTIONS:
 - NEVER use interactive flags like -i (git rebase -i, git add -i, etc.)
