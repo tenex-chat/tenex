@@ -140,54 +140,6 @@ describe("ConversationStore", () => {
             expect(store.getAllMessages()[0].id).toBe("record:evt-1");
         });
 
-        it("reads legacy compression logs as summary spans", async () => {
-            store.load(PROJECT_ID, CONVERSATION_ID);
-            store.addMessage({
-                pubkey: USER_PUBKEY,
-                content: "hello",
-                messageType: "text",
-                eventId: "evt-1",
-            });
-            store.addMessage({
-                pubkey: AGENT1_PUBKEY,
-                ral: 1,
-                content: "hi",
-                messageType: "text",
-                eventId: "evt-2",
-            });
-
-            const compressionsDir = join(TEST_DIR, PROJECT_ID, "conversations", "compressions");
-            await mkdir(compressionsDir, { recursive: true });
-            await writeFile(
-                join(compressionsDir, `${CONVERSATION_ID}.json`),
-                JSON.stringify({
-                    conversationId: CONVERSATION_ID,
-                    segments: [{
-                        fromEventId: "evt-1",
-                        toEventId: "evt-2",
-                        compressed: "legacy summary",
-                        createdAt: 123,
-                        model: "legacy-model",
-                    }],
-                    updatedAt: 123,
-                }, null, 2)
-            );
-
-            expect(store.loadSummarySpans(CONVERSATION_ID)).toEqual([{
-                startRecordId: "record:evt-1",
-                endRecordId: "record:evt-2",
-                summary: "legacy summary",
-                createdAt: 123,
-                metadata: {
-                    model: "legacy-model",
-                    legacyEventRange: {
-                        fromEventId: "evt-1",
-                        toEventId: "evt-2",
-                    },
-                },
-            }]);
-        });
-
         it("persists context-management scratchpads per agent", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
 

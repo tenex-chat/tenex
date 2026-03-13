@@ -11,7 +11,7 @@ import inquirer from "inquirer";
 import { createPrompt, useState, useKeypress, usePrefix, makeTheme, isUpKey, isDownKey, isEnterKey } from "@inquirer/core";
 import { cursorHide } from "@inquirer/ansi";
 
-type LLMRoleKey = "default" | "summarization" | "supervision" | "search" | "promptCompilation" | "compression";
+type LLMRoleKey = "default" | "summarization" | "supervision" | "search" | "promptCompilation";
 
 const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: string }> = [
     { key: "default", label: "Default", recommendation: "The default model all agents get — pick your best all-rounder" },
@@ -19,7 +19,6 @@ const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: strin
     { key: "supervision", label: "Supervision", recommendation: "Evaluates agent work and decides next steps — choose a model with strong reasoning" },
     { key: "search", label: "Search", recommendation: "Powers search queries — choose a web-connected model like Perplexity Sonar, or leave as default" },
     { key: "promptCompilation", label: "Prompt Compilation", recommendation: "Distills lessons into system prompts — choose a smart model with a large context window" },
-    { key: "compression", label: "Compression", recommendation: "Compresses conversation history to fit context — choose a cheap model with a large context window" },
 ];
 
 /**
@@ -65,9 +64,6 @@ function autoSelectRoles(llmsConfig: TenexLLMs, configNames: string[]): void {
 
     const summarization = cheapestWithContext(100_000);
     if (summarization) llmsConfig.summarization = summarization;
-
-    const compression = cheapestWithContext(0);
-    if (compression) llmsConfig.compression = compression;
 
     const supervision = mostExpensive();
     if (supervision) llmsConfig.supervision = supervision;

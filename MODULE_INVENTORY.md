@@ -26,7 +26,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **Guideline**: Agents should never import `commands/*`. For configuration, import `{ config }` from `@/services` and use `config.getConfigPath(subdir)` for paths or `config.loadConfig()` for configuration data; pass loaded config through constructors when needed.
 
 ### Conversations (`src/conversations`)
-- **Persistence & Stores**: `ConversationStore` persists canonical `ConversationRecord`s plus per-agent context-management scratchpads to the filesystem; legacy `SummarySpan` loading remains only as a compatibility reader for existing compression logs. `persistence/ToolMessageStorage` manages tool-call/result storage.
+- **Persistence & Stores**: `ConversationStore` persists canonical `ConversationRecord`s plus per-agent context-management scratchpads to the filesystem. `persistence/ToolMessageStorage` manages tool-call/result storage.
 - **Services**: `ConversationResolver`, `ConversationSummarizer`, and `MetadataDebounceManager` coordinate resolution, summarization, and metadata updates.
 - **Prompt Projection**: `PromptBuilder.ts` exposes the canonical prompt-building API for turning `ConversationRecord[]` into provider-facing `PromptMessage[]`, while `MessageBuilder.ts` remains the compatibility implementation module underneath.
 - **Formatting**: `formatters/*` and `formatters/utils/*` produce human-readable outputs for UI/debug tooling.

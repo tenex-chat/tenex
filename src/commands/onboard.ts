@@ -137,7 +137,7 @@ function decodeToPubkey(identifier: string): string {
  * Roles that can be assigned to specific LLM configurations.
  * Each role falls back to the "default" configuration when not explicitly set.
  */
-type LLMRoleKey = "default" | "summarization" | "supervision" | "search" | "promptCompilation" | "compression";
+type LLMRoleKey = "default" | "summarization" | "supervision" | "search" | "promptCompilation";
 
 const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: string }> = [
     { key: "default", label: "Default", recommendation: "The default model all agents get — pick your best all-rounder" },
@@ -145,7 +145,6 @@ const MODEL_ROLES: Array<{ key: LLMRoleKey; label: string; recommendation: strin
     { key: "supervision", label: "Supervision", recommendation: "Evaluates agent work and decides next steps — choose a model with strong reasoning" },
     { key: "search", label: "Search", recommendation: "Powers search queries — choose a web-connected model like Perplexity Sonar, or leave as default" },
     { key: "promptCompilation", label: "Prompt Compilation", recommendation: "Distills lessons into system prompts — choose a smart model with a large context window" },
-    { key: "compression", label: "Compression", recommendation: "Compresses conversation history to fit context — choose a cheap model with a large context window" },
 ];
 
 /**
@@ -200,10 +199,6 @@ function autoSelectRoles(
     // Summarization: cheap + large context (>= 100K)
     const summarization = cheapestWithContext(100_000);
     if (summarization) llmsConfig.summarization = summarization;
-
-    // Compression: cheapest with largest context window
-    const compression = cheapestWithContext(0);
-    if (compression) llmsConfig.compression = compression;
 
     // Supervision: most expensive (strongest reasoning)
     const supervision = mostExpensive();

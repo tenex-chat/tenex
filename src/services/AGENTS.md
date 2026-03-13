@@ -25,7 +25,6 @@ Services hold state, integrate external infrastructure, and coordinate workflows
 - `reports/` — Task reports
 - `nudge/` — Stalled agent reminders
 - `prompt-compiler/` — Lesson + comment synthesis
-- `compression/` — Conversation compression
 - `search/` — Unified search
 - `config/` — Config subsystem
 - `skill/` — Skill management

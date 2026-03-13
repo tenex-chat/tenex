@@ -549,7 +549,6 @@ export class AgentExecutor {
             });
 
             result.messageCompiler.advanceCursor();
-            result.messageCompiler.maybeSummarizeAsync();
         }
 
         return responseEvent;

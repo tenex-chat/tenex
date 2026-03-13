@@ -1,4 +1,4 @@
-import { compressionCommand } from "@/commands/config/compression";
+import { contextManagementCommand } from "@/commands/config/context-management";
 import { embedCommand } from "@/commands/config/embed";
 import { escalationCommand } from "@/commands/config/escalation";
 import { identityCommand } from "@/commands/config/identity";
@@ -55,7 +55,7 @@ const MENU_SECTIONS: MenuSection[] = [
     {
         header: "Conversations",
         entries: [
-            { label: "Compression", description: "Token limits and sliding window", command: compressionCommand },
+            { label: "Context", description: "Sliding window and scratchpad strategies", command: contextManagementCommand },
             { label: "Summarization", description: "Auto-summary timing", command: summarizationCommand },
         ],
     },
@@ -140,7 +140,7 @@ export const configCommand = new Command("config")
     .addCommand(escalationCommand)
     .addCommand(interventionCommand)
     .addCommand(relaysCommand)
-    .addCommand(compressionCommand)
+    .addCommand(contextManagementCommand)
     .addCommand(summarizationCommand)
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)

@@ -3,6 +3,7 @@ import {
     ScratchpadStrategy,
     SlidingWindowStrategy,
     createContextManagementRuntime,
+    type ContextManagementStrategy,
     type ContextManagementRequestContext,
     type ContextManagementRuntime,
 } from "ai-sdk-context-management";
@@ -44,6 +45,8 @@ function isResumableProvider(providerId: string): boolean {
 
 function getContextManagementConfig(): {
     enabled: boolean;
+    slidingWindowEnabled: boolean;
+    scratchpadEnabled: boolean;
     keepLastMessages: number;
     maxPromptTokens?: number;
 } {
@@ -55,29 +58,42 @@ function getContextManagementConfig(): {
         }
     })();
 
-    const keepLastMessages = Math.max(0, Math.floor(cfg?.compression?.slidingWindowSize ?? 50));
-    const rawBudget = cfg?.compression?.tokenBudget ?? 40000;
+    const contextConfig = {
+        ...cfg?.compression,
+        ...cfg?.contextManagement,
+    };
+    const keepLastMessages = Math.max(0, Math.floor(contextConfig.slidingWindowSize ?? 50));
+    const rawBudget = contextConfig.tokenBudget ?? 40000;
     const maxPromptTokens = Number.isFinite(rawBudget) && rawBudget > 0
         ? Math.floor(rawBudget)
         : undefined;
 
     return {
-        enabled: cfg?.compression?.enabled ?? true,
+        enabled: contextConfig.enabled ?? true,
+        slidingWindowEnabled: contextConfig.slidingWindowEnabled ?? true,
+        scratchpadEnabled: contextConfig.scratchpadEnabled ?? true,
         keepLastMessages,
         maxPromptTokens,
     };
 }
 
-function createConversationScratchpadRuntime(
+function createConversationContextManagementRuntime(
     conversationStore: ConversationStore,
     config: ReturnType<typeof getContextManagementConfig>
-): ContextManagementRuntime {
-    return createContextManagementRuntime({
-        strategies: [
+): ContextManagementRuntime | undefined {
+    const strategies: ContextManagementStrategy[] = [];
+
+    if (config.slidingWindowEnabled) {
+        strategies.push(
             new SlidingWindowStrategy({
                 keepLastMessages: config.keepLastMessages,
                 maxPromptTokens: config.maxPromptTokens,
-            }),
+            })
+        );
+    }
+
+    if (config.scratchpadEnabled) {
+        strategies.push(
             new ScratchpadStrategy({
                 scratchpadStore: {
                     get: ({ agentId }) => conversationStore.getContextManagementScratchpad(agentId),
@@ -90,8 +106,16 @@ function createConversationScratchpadRuntime(
                             ? conversationStore.listContextManagementScratchpads()
                             : [],
                 },
-            }),
-        ],
+            })
+        );
+    }
+
+    if (strategies.length === 0) {
+        return undefined;
+    }
+
+    return createContextManagementRuntime({
+        strategies,
     });
 }
 
@@ -107,7 +131,10 @@ export function createExecutionContextManagement(options: {
         return undefined;
     }
 
-    const runtime = createConversationScratchpadRuntime(options.conversationStore, config);
+    const runtime = createConversationContextManagementRuntime(options.conversationStore, config);
+    if (!runtime) {
+        return undefined;
+    }
     const optionalTools = options.nudgeToolPermissions && isOnlyToolMode(options.nudgeToolPermissions)
         ? {}
         : runtime.optionalTools as Record<string, AISdkTool>;

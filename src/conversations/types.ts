@@ -39,14 +39,13 @@ interface ConversationRecordFields {
     /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
     senderPubkey?: string;
     /**
-     * Explicit role override for synthetic entries (e.g., compressed summaries).
+     * Explicit role override for synthetic entries.
      * When present, this role is used instead of deriving from pubkey.
-     * Used to ensure compressed summaries are rendered as "system" role, not "user".
      */
     role?: "user" | "assistant" | "tool" | "system";
     /**
      * Human-readable summary of a tool call.
-     * Stored at creation time so the compression system can reference it
+     * Stored at creation time so context-management projections can reference it
      * without needing access to the tool registry.
      */
     humanReadable?: string;
@@ -63,7 +62,7 @@ interface ConversationRecordFields {
 }
 
 export interface ConversationRecord extends ConversationRecordFields {
-    /** Canonical record identity used by summary spans and prompt lineage. */
+    /** Canonical record identity used by prompt lineage and record references. */
     id: string;
 }
 

@@ -581,7 +581,7 @@ export async function buildMessagesFromEntries(
         if (entry.messageType === "tool-result" && entry.toolData) {
             const parts = entry.toolData as ToolResultPart[];
 
-            // Skip orphaned tool-results whose tool-calls were removed by compression/truncation.
+            // Skip orphaned tool-results whose tool-calls were removed by context trimming.
             // If the corresponding tool-call is not in pendingToolCalls, sending this result
             // to the LLM would produce an API error (tool_result without matching tool_use).
             if (parts.some((part) => !pendingToolCalls.has(part.toolCallId))) {

@@ -116,7 +116,6 @@ export class MessageCompiler {
                         context.agent.pubkey,
                         context.ralNumber,
                         {
-                            applyPersistedCompression: false,
                             includeMessageIds: true,
                         }
                     ) as PromptMessage[];
@@ -151,7 +150,6 @@ export class MessageCompiler {
                         context.ralNumber,
                         cursor,
                         {
-                            applyPersistedCompression: false,
                             includeMessageIds: true,
                         }
                     ) as PromptMessage[];
@@ -204,10 +202,6 @@ export class MessageCompiler {
         const messageCount = this.conversationStore.getMessageCount();
         const cursorToSave = messageCount - 1;
         this.sessionManager.saveLastSentMessageIndex(cursorToSave);
-    }
-
-    maybeSummarizeAsync(): void {
-        // Context management now happens in AI SDK middleware at request time.
     }
 
     private buildPlan(): MessageCompilationPlan {

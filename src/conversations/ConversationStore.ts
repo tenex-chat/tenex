@@ -32,14 +32,11 @@ import type {
     ExecutionTime,
     Injection,
 } from "./types";
-import { applySummarySpansToRecords } from "@/services/history-summary/summary-utils.js";
-import type { SummarySpan } from "@/services/history-summary/types";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
 import type { ProjectDTag } from "@/types/project-ids";
 
 interface BuildMessagesOptions {
-    applyPersistedCompression?: boolean;
     includeMessageIds?: boolean;
     inFlightToolCallIds?: Set<string>;
 }
@@ -58,30 +55,6 @@ export type {
     ConversationMetadata,
     Injection,
 } from "./types";
-
-interface SummarySpanLog {
-    conversationId: string;
-    summarySpans: SummarySpan[];
-    updatedAt: number;
-}
-
-interface LegacySummarySpanRecord {
-    startRecordId?: string;
-    endRecordId?: string;
-    fromEventId?: string;
-    toEventId?: string;
-    fromId?: string;
-    toId?: string;
-    compressed?: string;
-    summary?: string;
-    createdAt?: number;
-    model?: string;
-    metadata?: Record<string, unknown>;
-}
-
-function toRecordIdFromEventId(eventId: string): string {
-    return `record:${eventId}`;
-}
 
 function normalizeLoadedMessages(messages: ConversationRecordInput[]): ConversationRecord[] {
     return messages.map((message, index) => ensureConversationRecord(message, index));
@@ -680,21 +653,13 @@ export class ConversationStore {
 
         const activeRals = new Set(this.getActiveRals(agentPubkey));
 
-        const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
-        const summarySpans = shouldApplyPersistedCompression && this.conversationId
-            ? this.loadSummarySpans(this.conversationId)
-            : [];
-        const entries = shouldApplyPersistedCompression && summarySpans.length > 0
-            ? applySummarySpansToRecords(this.state.messages, summarySpans)
-            : this.state.messages;
-
         // Callback to get delegation messages for marker expansion
         const getDelegationMessages = (delegationConversationId: string) => {
             const store = conversationRegistry.get(delegationConversationId);
             return store?.getAllMessages();
         };
 
-        return buildPromptMessagesFromRecords(entries, {
+        return buildPromptMessagesFromRecords(this.state.messages, {
             viewingAgentPubkey: agentPubkey,
             ralNumber,
             activeRals,
@@ -722,16 +687,8 @@ export class ConversationStore {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
         const startIndex = Math.max(afterIndex + 1, 0);
 
-        const shouldApplyPersistedCompression = options.applyPersistedCompression !== false;
-        const summarySpans = shouldApplyPersistedCompression && this.conversationId
-            ? this.loadSummarySpans(this.conversationId)
-            : [];
-        const allEntries = shouldApplyPersistedCompression && summarySpans.length > 0
-            ? applySummarySpansToRecords(this.state.messages, summarySpans)
-            : this.state.messages;
-
-        if (startIndex >= allEntries.length) return [];
-        const entries = allEntries.slice(startIndex);
+        if (startIndex >= this.state.messages.length) return [];
+        const entries = this.state.messages.slice(startIndex);
 
         // Callback to get delegation messages for marker expansion
         const getDelegationMessages = (delegationConversationId: string) => {
@@ -843,130 +800,6 @@ export class ConversationStore {
         if (!isFromAgent) {
             this.state.metadata.last_user_message = event.content;
         }
-    }
-
-    private resolveSummarySpansPath(conversationId: string): string | undefined {
-        if (!this.projectId) {
-            return undefined;
-        }
-
-        const conversationsDir = join(this.basePath, this.projectId, "conversations");
-        const compressionsDir = join(conversationsDir, "compressions");
-        if (!existsSync(compressionsDir)) {
-            return undefined;
-        }
-
-        return join(compressionsDir, `${conversationId}.json`);
-    }
-
-    private normalizeSummarySpan(record: LegacySummarySpanRecord): SummarySpan | undefined {
-        const startRecordId = typeof record.startRecordId === "string"
-            ? record.startRecordId
-            : typeof record.fromEventId === "string"
-                ? toRecordIdFromEventId(record.fromEventId)
-                : typeof record.fromId === "string"
-                    ? record.fromId
-                    : undefined;
-        const endRecordId = typeof record.endRecordId === "string"
-            ? record.endRecordId
-            : typeof record.toEventId === "string"
-                ? toRecordIdFromEventId(record.toEventId)
-                : typeof record.toId === "string"
-                    ? record.toId
-                    : undefined;
-        const summary = typeof record.summary === "string"
-            ? record.summary
-            : typeof record.compressed === "string"
-                ? record.compressed
-                : undefined;
-
-        if (!startRecordId || !endRecordId || !summary) {
-            return undefined;
-        }
-
-        const metadata: Record<string, unknown> = {
-            ...(record.metadata ?? {}),
-        };
-
-        if (typeof record.model === "string" && record.model.length > 0) {
-            metadata.model = record.model;
-        }
-
-        if (typeof record.fromEventId === "string" || typeof record.toEventId === "string") {
-            metadata.legacyEventRange = {
-                fromEventId: record.fromEventId,
-                toEventId: record.toEventId,
-            };
-        }
-
-        return {
-            startRecordId,
-            endRecordId,
-            summary,
-            createdAt: record.createdAt,
-            metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
-        };
-    }
-
-    /**
-     * Load persisted summary spans for a conversation.
-     * Reads both the new summary-span shape and legacy compression-segment logs.
-     */
-    loadSummarySpans(conversationId: string): SummarySpan[] {
-        const summaryPath = this.resolveSummarySpansPath(conversationId);
-        if (!summaryPath || !existsSync(summaryPath)) {
-            return [];
-        }
-
-        try {
-            const data = readFileSync(summaryPath, "utf-8");
-            const parsed = JSON.parse(data) as {
-                conversationId?: string;
-                segments?: LegacySummarySpanRecord[];
-                summarySpans?: LegacySummarySpanRecord[];
-            };
-            const rawSummarySpans: LegacySummarySpanRecord[] = Array.isArray(parsed.summarySpans)
-                ? parsed.summarySpans
-                : Array.isArray(parsed.segments)
-                    ? parsed.segments
-                    : [];
-
-            return rawSummarySpans
-                .map((rawSummarySpan: LegacySummarySpanRecord) => this.normalizeSummarySpan(rawSummarySpan))
-                .filter((summarySpan: SummarySpan | undefined): summarySpan is SummarySpan => summarySpan !== undefined);
-        } catch (error) {
-            logger.warn(`Failed to load summary spans for ${conversationId}:`, error);
-            return [];
-        }
-    }
-
-    /**
-     * Append new summary spans to the log.
-     * Persists only the new summary-span shape.
-     */
-    async appendSummarySpans(
-        conversationId: string,
-        summarySpans: SummarySpan[]
-    ): Promise<void> {
-        if (!this.projectId) {
-            throw new Error("Conversations directory not initialized");
-        }
-
-        const conversationsDir = join(this.basePath, this.projectId, "conversations");
-        const compressionsDir = join(conversationsDir, "compressions");
-        if (!existsSync(compressionsDir)) {
-            mkdirSync(compressionsDir, { recursive: true });
-        }
-
-        const summaryPath = join(compressionsDir, `${conversationId}.json`);
-        const existingSummarySpans = this.loadSummarySpans(conversationId);
-        const log: SummarySpanLog = {
-            conversationId,
-            summarySpans: [...existingSummarySpans, ...summarySpans],
-            updatedAt: Date.now(),
-        };
-
-        await writeFile(summaryPath, JSON.stringify(log, null, 2), "utf-8");
     }
 
 }

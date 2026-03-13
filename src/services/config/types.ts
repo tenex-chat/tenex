@@ -10,6 +10,16 @@ import { z } from "zod";
 // =====================================================================================
 
 export interface TenexConfig {
+    // Context management configuration
+    // Controls request-time prompt projection for full-history providers
+    contextManagement?: {
+        enabled?: boolean; // Enable request-time context management (default: true)
+        tokenBudget?: number; // Target prompt token budget for middleware trimming (default: 40000)
+        slidingWindowSize?: number; // Number of recent non-system messages to preserve before further trimming (default: 50)
+        slidingWindowEnabled?: boolean; // Enable automatic sliding-window trimming (default: true)
+        scratchpadEnabled?: boolean; // Enable agent-managed scratchpad strategy and tool (default: true)
+    };
+
     // Global fields
     whitelistedPubkeys?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
@@ -49,13 +59,14 @@ export interface TenexConfig {
         agent?: string; // Agent slug to route ask() calls through (acts as first line of defense)
     };
 
-    // Compression configuration
-    // Controls conversation history compression to manage context window
+    // Deprecated legacy alias for context management settings.
+    // New writes should use contextManagement instead.
     compression?: {
-        enabled?: boolean; // Enable compression (default: true)
-        tokenThreshold?: number; // Token count that triggers compression (default: 50000)
-        tokenBudget?: number; // Target token count after compression (default: 40000)
-        slidingWindowSize?: number; // Number of recent messages to keep in fallback mode (default: 50)
+        enabled?: boolean;
+        tokenBudget?: number;
+        slidingWindowSize?: number;
+        slidingWindowEnabled?: boolean;
+        scratchpadEnabled?: boolean;
     };
 
     // Intervention configuration
@@ -94,6 +105,15 @@ export interface TenexConfig {
 }
 
 export const TenexConfigSchema = z.object({
+    contextManagement: z
+        .object({
+            enabled: z.boolean().optional(),
+            tokenBudget: z.number().optional(),
+            slidingWindowSize: z.number().optional(),
+            slidingWindowEnabled: z.boolean().optional(),
+            scratchpadEnabled: z.boolean().optional(),
+        })
+        .optional(),
     whitelistedPubkeys: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),
     backendName: z.string().optional(),
@@ -132,9 +152,10 @@ export const TenexConfigSchema = z.object({
     compression: z
         .object({
             enabled: z.boolean().optional(),
-            tokenThreshold: z.number().optional(),
             tokenBudget: z.number().optional(),
             slidingWindowSize: z.number().optional(),
+            slidingWindowEnabled: z.boolean().optional(),
+            scratchpadEnabled: z.boolean().optional(),
         })
         .optional(),
     intervention: z
@@ -243,7 +264,6 @@ export interface TenexLLMs {
     supervision?: string; // Named config to use for agent supervision
     search?: string; // Named config to use for search operations
     promptCompilation?: string; // Named config to use for prompt compilation (compiling lessons into system prompts)
-    compression?: string; // Named config to use for conversation history compression
 }
 
 /**
@@ -294,7 +314,6 @@ export const TenexLLMsSchema = z.object({
     supervision: z.string().optional(),
     search: z.string().optional(),
     promptCompilation: z.string().optional(),
-    compression: z.string().optional(),
 });
 
 // =====================================================================================
