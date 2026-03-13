@@ -548,9 +548,12 @@ export class StreamExecutionHandler {
                 logger.error("Failed to publish stream error event", {
                     error: formatAnyError(publishError),
                 });
+                // Re-throw so AgentExecutor can attempt its own fallback publication.
+                throw streamError;
             }
         }
-        throw streamError;
+        // Return normally — execute() will return { kind: "error-handled" } so AgentExecutor
+        // skips its own error publication (which would produce a duplicate).
     }
 
     /**
