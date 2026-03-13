@@ -20,6 +20,7 @@ import type { FullRuntimeContext } from "./types";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
+import { RALRegistry } from "@/services/ral";
 
 /**
  * Wrap tools with pre-tool supervision checks.
@@ -81,10 +82,20 @@ export function wrapToolsWithSupervision(
                     const systemPrompt = systemPromptMessages.map(m => m.message.content).join("\n\n");
 
                     // Build conversation history from ConversationStore.
-                    // Pass the current tool call ID as in-flight to suppress false-positive
-                    // orphaned tool call telemetry (this tool call exists but hasn't completed yet).
+                    // Pass all currently-executing tool call IDs as in-flight to suppress
+                    // false-positive orphan telemetry. When the LLM issues N parallel tool calls,
+                    // each supervision check runs before any results exist — all N calls appear
+                    // orphaned without this suppression. RALRegistry.activeTools contains exactly
+                    // the tool calls executing right now (registered by tool-will-execute before
+                    // any execute() is called), so it correctly covers parallel siblings without
+                    // pulling in stale unresolved calls from older completed RALs.
+                    const ralRegistry = RALRegistry.getInstance();
+                    const ralEntry = ralRegistry.getRAL(context.agent.pubkey, context.conversationId, context.ralNumber);
+                    const inFlightToolCallIds = ralEntry?.activeTools.size
+                        ? new Set(ralEntry.activeTools.keys())
+                        : new Set([options.toolCallId]);
                     const conversationMessages = await conversationStore.buildMessagesForRal(context.agent.pubkey, context.ralNumber, {
-                        inFlightToolCallIds: new Set([options.toolCallId]),
+                        inFlightToolCallIds,
                     });
 
                     // Get available tools
