@@ -559,6 +559,7 @@ export class EventHandler {
                                 "event.id": event.id,
                                 "event.kind": event.kind,
                                 "event.author": event.pubkey.substring(0, 8),
+                                "event.raw": event.rawEvent() ? JSON.stringify(event.rawEvent()) : "unavailable",
                                 "stop.agent_slug": agent.slug,
                                 "stop.agent_pubkey": agentPubkey.substring(0, 8),
                                 "stop.conversation_id": shortenConversationId(conversationId),
