@@ -8,7 +8,7 @@
 
 export { HeuristicEngine, getHeuristicEngine, resetHeuristicEngine } from "./HeuristicEngine";
 export {
-  createViolationsReminder,
+  createViolationReminders,
   formatViolation,
   formatViolations,
   formatViolationForLog,

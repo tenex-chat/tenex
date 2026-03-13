@@ -9,7 +9,7 @@ import { formatAnyError } from "@/lib/error-formatter";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
-import { createViolationsReminder } from "@/services/heuristics";
+import { createViolationReminders } from "@/services/heuristics";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
@@ -184,23 +184,23 @@ export function createPrepareStep(
                 );
 
                 if (heuristicViolations.length > 0) {
-                    const reminder = createViolationsReminder(heuristicViolations);
+                    const reminders = createViolationReminders(heuristicViolations);
 
-                    if (reminder) {
+                    for (const reminder of reminders) {
                         getSystemReminderContext().queue(reminder);
-
-                        executionSpan?.addEvent("heuristic.violations_injected", {
-                            "ral.number": ralNumber,
-                            "violation.count": heuristicViolations.length,
-                            "violation.ids": heuristicViolations.map((v) => v.id).join(","),
-                        });
-
-                        logger.info("[StreamCallbacks] Injected heuristic violations", {
-                            agent: context.agent.slug,
-                            ralNumber,
-                            violationCount: heuristicViolations.length,
-                        });
                     }
+
+                    executionSpan?.addEvent("heuristic.violations_injected", {
+                        "ral.number": ralNumber,
+                        "violation.count": heuristicViolations.length,
+                        "violation.ids": heuristicViolations.map((v) => v.id).join(","),
+                    });
+
+                    logger.info("[StreamCallbacks] Injected heuristic violations", {
+                        agent: context.agent.slug,
+                        ralNumber,
+                        violationCount: heuristicViolations.length,
+                    });
                 }
 
                 const pendingDelegations = ralRegistry.getConversationPendingDelegations(

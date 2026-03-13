@@ -2141,13 +2141,20 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       };
     }
 
-    // Filter out duplicates (already shown)
+    // Filter out duplicates by heuristicId (not individual violation id)
+    // Check both shown set AND pending queue to prevent accumulation
+    // between tool results that fire before the next prepareStep consume
+    const pendingHeuristicIds = new Set(
+      ral.heuristics.pendingViolations.map((v) => v.heuristicId)
+    );
     const newViolations = violations.filter(
-      (v) => !ral.heuristics!.shownViolationIds.has(v.id)
+      (v) =>
+        !ral.heuristics!.shownViolationIds.has(v.heuristicId) &&
+        !pendingHeuristicIds.has(v.heuristicId)
     );
 
     if (newViolations.length === 0) {
-      return; // All violations already shown
+      return; // All violations already shown or pending
     }
 
     // Add to pending queue
@@ -2188,9 +2195,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const violations = [...ral.heuristics.pendingViolations];
     ral.heuristics.pendingViolations = [];
 
-    // Mark as shown (for deduplication)
+    // Mark heuristicId as shown (for deduplication by heuristic, not by individual violation)
     for (const v of violations) {
-      ral.heuristics.shownViolationIds.add(v.id);
+      ral.heuristics.shownViolationIds.add(v.heuristicId);
     }
 
     trace.getActiveSpan()?.addEvent("ral.heuristic_violations_consumed", {

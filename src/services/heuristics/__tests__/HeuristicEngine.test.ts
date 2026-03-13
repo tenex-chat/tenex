@@ -243,10 +243,10 @@ describe("HeuristicEngine", () => {
 
       const formatted = engine.formatForInjection(violations);
 
-      // Verify system-reminder wrapper and content
-      expect(formatted).toContain('<system-reminder type="heuristic">');
+      // Verify per-heuristic system-reminder wrappers with specific types
+      expect(formatted).toContain('<system-reminder type="h1">');
+      expect(formatted).toContain('<system-reminder type="h2">');
       expect(formatted).toContain("</system-reminder>");
-      expect(formatted).toContain("# Heuristic Reminders");
       expect(formatted).toContain("Warning 1");
       expect(formatted).toContain("Error 1");
     });
