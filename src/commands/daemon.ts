@@ -35,16 +35,13 @@ daemonCommand
         }
 
         // Load configuration (MCP config will be loaded later per-project with metadataPath)
-        const { config: globalConfig, llms: globalLLMs } = await config.loadConfig();
+        const { llms: globalLLMs } = await config.loadConfig();
 
         // Initialize daemon logging
         await logger.initDaemonLogging();
 
         // Get whitelisted pubkeys
-        const whitelistedPubkeys = config.getWhitelistedPubkeys(
-            options.whitelist,
-            globalConfig
-        );
+        const whitelistedPubkeys = config.getWhitelistedPubkeys(options.whitelist);
 
         // Check for required configurations
         const needsSetup =

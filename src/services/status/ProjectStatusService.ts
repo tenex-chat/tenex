@@ -6,7 +6,6 @@ import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import type { TenexConfig } from "@/services/config/types";
 import { type ProjectContext, projectContextStore } from "@/services/projects";
 import { getAllToolNames } from "@/tools/registry";
 import type { ToolName } from "@/tools/types";
@@ -95,7 +94,7 @@ export class ProjectStatusService {
      * Create a status event from the intent.
      * Directly creates the event without depending on AgentPublisher.
      */
-    private createStatusEvent(intent: StatusIntent, loadedConfig?: TenexConfig): NDKEvent {
+    private createStatusEvent(intent: StatusIntent): NDKEvent {
         const event = new NDKEvent(getNDK());
         event.kind = NDKKind.TenexProjectStatus;
         event.content = "";
@@ -111,7 +110,7 @@ export class ProjectStatusService {
         event.tag(["p", projectCtx.project.pubkey]);
         pTaggedPubkeys.add(projectCtx.project.pubkey);
 
-        for (const pubkey of config.getWhitelistedPubkeys(undefined, loadedConfig)) {
+        for (const pubkey of config.getWhitelistedPubkeys()) {
             if (!pTaggedPubkeys.has(pubkey)) {
                 event.tag(["p", pubkey]);
                 pTaggedPubkeys.add(pubkey);
@@ -239,11 +238,8 @@ export class ProjectStatusService {
             // Gather scheduled task info
             await this.gatherScheduledTaskInfo(intent);
 
-            // Load config to pass whitelisted pubkeys to the status event
-            const { config: loadedConfig } = await config.loadConfig();
-
             // Create and publish the status event directly
-            const event = this.createStatusEvent(intent, loadedConfig);
+            const event = this.createStatusEvent(intent);
 
             // Sign and publish with TENEX backend private key
             try {

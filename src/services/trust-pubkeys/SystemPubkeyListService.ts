@@ -63,8 +63,7 @@ export class SystemPubkeyListService {
 
         // Whitelisted daemon pubkeys from loaded config
         try {
-            const loadedConfig = config.getConfig();
-            const whitelisted = config.getWhitelistedPubkeys(undefined, loadedConfig);
+            const whitelisted = config.getWhitelistedPubkeys();
             for (const pubkey of whitelisted) {
                 this.addPubkey(pubkeys, pubkey);
             }
