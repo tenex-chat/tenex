@@ -188,6 +188,41 @@ describe("ConversationStore", () => {
             }]);
         });
 
+        it("persists context-management scratchpads per agent", async () => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+
+            store.setContextManagementScratchpad(AGENT1_PUBKEY, {
+                notes: "Focus on the failing tests",
+                keepLastMessages: 6,
+                omitToolCallIds: ["tool-call-1"],
+                updatedAt: 123,
+                agentLabel: "agent1",
+            });
+            await store.save();
+
+            const store2 = new ConversationStore(TEST_DIR);
+            store2.load(PROJECT_ID, CONVERSATION_ID);
+
+            expect(store2.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
+                notes: "Focus on the failing tests",
+                keepLastMessages: 6,
+                omitToolCallIds: ["tool-call-1"],
+                updatedAt: 123,
+                agentLabel: "agent1",
+            });
+            expect(store2.listContextManagementScratchpads()).toEqual([{
+                agentId: AGENT1_PUBKEY,
+                agentLabel: "agent1",
+                state: {
+                    notes: "Focus on the failing tests",
+                    keepLastMessages: 6,
+                    omitToolCallIds: ["tool-call-1"],
+                    updatedAt: 123,
+                    agentLabel: "agent1",
+                },
+            }]);
+        });
+
         it("should return empty state for new conversation", () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
             expect(store.getAllMessages()).toHaveLength(0);

@@ -275,12 +275,28 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         });
     }
 
+    private wrapWithRequestMiddleware(
+        model: LanguageModel,
+        middlewares?: LanguageModelMiddleware[]
+    ): LanguageModel {
+        if (!middlewares || middlewares.length === 0) {
+            return model;
+        }
+
+        return wrapLanguageModel({
+            model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
+            middleware: middlewares,
+        });
+    }
+
     async stream(
         messages: ModelMessage[],
         tools: Record<string, AISdkTool>,
         options?: {
             abortSignal?: AbortSignal;
             providerOptions?: ProviderOptions;
+            experimentalContext?: unknown;
+            middlewares?: LanguageModelMiddleware[];
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
@@ -293,7 +309,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
         }
     ): Promise<void> {
-        const { model, failedKey: attemptKey } = this.createStandardAttemptContext(messages);
+        const attempt = this.createStandardAttemptContext(messages);
+        const attemptKey = attempt.failedKey;
+        const model = this.wrapWithRequestMiddleware(attempt.model, options?.middlewares);
 
         const processedMessages = prepareMessagesForRequest(messages, this.provider);
 
@@ -349,7 +367,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         });
 
         // Retry with fresh model from rotated provider
-        const { model: retryModel } = this.createStandardAttemptContext(messages);
+        const retryAttempt = this.createStandardAttemptContext(messages);
+        const retryModel = this.wrapWithRequestMiddleware(retryAttempt.model, options?.middlewares);
         const retryResult = await this.runStreamAttempt(
             retryModel, processedMessages, tools, options, startTime,
             { emitStreamError: true }
@@ -373,6 +392,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         options: {
             abortSignal?: AbortSignal;
             providerOptions?: ProviderOptions;
+            experimentalContext?: unknown;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
@@ -475,6 +495,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             stopWhen,
             prepareStep: options?.prepareStep,
             abortSignal: options?.abortSignal,
+            experimental_context: options?.experimentalContext,
 
             experimental_telemetry: this.getTelemetryConfig(),
 
@@ -727,10 +748,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     createLanguageModelFromRegistry(
         provider: string,
         model: string,
-        registry: ProviderRegistryProvider
+        registry: ProviderRegistryProvider,
+        middlewares?: LanguageModelMiddleware[]
     ): LanguageModel {
         const baseModel = registry.languageModel(`${provider}:${model}`);
-        return this.wrapWithMiddleware(baseModel);
+        return this.wrapWithRequestMiddleware(this.wrapWithMiddleware(baseModel), middlewares);
     }
 
     /**

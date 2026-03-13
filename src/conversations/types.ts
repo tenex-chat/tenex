@@ -123,6 +123,20 @@ export interface ConversationMetadata {
     delegationChain?: DelegationChainEntry[];
 }
 
+export interface ContextManagementScratchpadState {
+    notes: string;
+    keepLastMessages?: number | null;
+    omitToolCallIds: string[];
+    updatedAt?: number;
+    agentLabel?: string;
+}
+
+export interface ContextManagementScratchpadEntry {
+    agentId: string;
+    agentLabel?: string;
+    state: ContextManagementScratchpadState;
+}
+
 export interface RalTracker {
     id: number;
 }
@@ -146,4 +160,6 @@ export interface ConversationState {
     executionTime: ExecutionTime;
     /** Meta model variant override per agent - when set, uses this variant instead of keyword detection */
     metaModelVariantOverride?: Record<string, string>; // agentPubkey -> variantName
+    /** Per-agent context-management scratchpads used by middleware-managed prompt projection. */
+    contextManagementScratchpads?: Record<string, ContextManagementScratchpadState>;
 }

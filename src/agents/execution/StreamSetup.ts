@@ -16,14 +16,15 @@ import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import type { LanguageModelMiddleware } from "ai";
 import type { LLMService } from "@/llm/service";
-import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import { MessageCompiler } from "./MessageCompiler";
 import { SessionManager } from "./SessionManager";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { initializeReminderProviders, updateReminderData } from "./system-reminders";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
+import { CONTEXT_MANAGEMENT_KEY, createExecutionContextManagement } from "./context-management";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
 
@@ -86,9 +87,6 @@ export async function setupStreamExecution(
     // to agents that have no default tools configured.
     const toolNames = context.agent.tools || [];
     let toolsObject = getToolsObject(toolNames, context, nudgeResult.toolPermissions);
-
-    // Wrap tools with pre-tool supervision checks
-    toolsObject = wrapToolsWithSupervision(toolsObject, context);
 
     const sessionManager = new SessionManager(
         context.agent,
@@ -226,23 +224,27 @@ export async function setupStreamExecution(
         },
     });
 
-    // Resolve optional dedicated compression LLM service
-    let compressionLlmService: LLMService | undefined;
-    const { llms } = await configService.loadConfig();
-    if (llms.compression) {
-        const compressionConfig = configService.getLLMConfig(llms.compression);
-        compressionLlmService = llmServiceFactory.createService(compressionConfig, {
-            agentName: `${context.agent.slug}-compression`,
-            sessionId: `compression-${context.conversationId.substring(0, 8)}`,
-        });
+    const contextManagement = createExecutionContextManagement({
+        providerId: llmService.provider,
+        conversationId: context.conversationId,
+        agent: context.agent,
+        conversationStore,
+        nudgeToolPermissions: nudgeResult.toolPermissions,
+    });
+
+    if (contextManagement) {
+        toolsObject = {
+            ...toolsObject,
+            ...contextManagement.optionalTools,
+        };
     }
+
+    toolsObject = wrapToolsWithSupervision(toolsObject, context);
 
     const messageCompiler = new MessageCompiler(
         llmService.provider,
         sessionManager,
-        conversationStore,
-        llmService,
-        compressionLlmService
+        conversationStore
     );
 
     const pendingDelegations = ralRegistry.getConversationPendingDelegations(
@@ -306,7 +308,18 @@ export async function setupStreamExecution(
         messageCompiler,
         request: {
             messages,
-        },
+            ...(contextManagement
+                ? {
+                    providerOptions: {
+                        [CONTEXT_MANAGEMENT_KEY]: contextManagement.requestContext,
+                    },
+                    experimentalContext: {
+                        [CONTEXT_MANAGEMENT_KEY]: contextManagement.requestContext,
+                    },
+                    middlewares: [contextManagement.middleware as LanguageModelMiddleware],
+                }
+                : {}),
+        } as LLMModelRequest,
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,

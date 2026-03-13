@@ -150,7 +150,17 @@ export class StreamExecutionHandler {
             // Create callbacks using extracted factory functions
             const prepareStep = createPrepareStep({
                 context,
-                llmService,
+                llmService: {
+                    provider: llmService.provider,
+                    updateUsageFromSteps: (steps) => llmService.updateUsageFromSteps(steps),
+                    createLanguageModelFromRegistry: (provider, model, registry) =>
+                        llmService.createLanguageModelFromRegistry(
+                            provider,
+                            model,
+                            registry,
+                            request.middlewares
+                        ),
+                },
                 messageCompiler: this.config.messageCompiler,
                 nudgeContent: this.config.nudgeContent,
                 nudges: this.config.nudges,
@@ -181,6 +191,9 @@ export class StreamExecutionHandler {
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
                 prepareStep,
+                providerOptions: request.providerOptions,
+                experimentalContext: request.experimentalContext,
+                middlewares: request.middlewares,
             });
 
             await this.flushStreamTextDeltas({

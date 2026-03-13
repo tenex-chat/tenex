@@ -10,15 +10,11 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import type { LessonComment } from "@/services/prompt-compiler";
 import type { SkillData } from "@/services/skill";
-import { config } from "@/services/ConfigService";
 import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { SessionManager } from "./SessionManager";
-import type { LLMService } from "@/llm/service";
-import { HistorySummaryService } from "@/services/history-summary/HistorySummaryService";
-import { PromptPruningService } from "@/services/prompt-pruning/PromptPruningService";
 
 const tracer = trace.getTracer("tenex.message-compiler");
 
@@ -30,7 +26,7 @@ interface MessageCompilationPlan {
 }
 
 /**
- * CompiledMessage - A message with event ID for compression tracking.
+ * CompiledMessage - A message with optional prompt lineage metadata.
  * Combines ModelMessage with optional eventId field.
  */
 export type CompiledMessage = ModelMessage & {
@@ -83,27 +79,14 @@ export interface CompiledMessages {
 export class MessageCompiler {
     private readonly plan: MessageCompilationPlan;
     private currentCursor: number;
-    private readonly historySummaryService: HistorySummaryService;
-    private readonly promptPruningService: PromptPruningService;
 
     constructor(
         private providerId: string,
         private sessionManager: SessionManager,
-        private conversationStore: ConversationStore,
-        llmService?: LLMService,
-        compressionLlmService?: LLMService
+        private conversationStore: ConversationStore
     ) {
         this.plan = this.buildPlan();
         this.currentCursor = this.plan.cursor ?? -1;
-        this.historySummaryService = new HistorySummaryService(
-            conversationStore,
-            llmService,
-            compressionLlmService
-        );
-        this.promptPruningService = new PromptPruningService(
-            conversationStore,
-            conversationStore.getId()
-        );
     }
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
@@ -123,27 +106,12 @@ export class MessageCompiler {
                 span.setAttribute("compilation.mode", this.plan.mode);
 
                 const cursor = this.currentCursor;
-                const session = this.sessionManager.getSession();
-                const compressionConfig = this.getCompressionConfig();
-                const preservedTailCount = this.mapPreservedTailCount(compressionConfig.slidingWindowSize);
                 const messages: ModelMessage[] = [];
                 let systemPromptCount = 0;
                 const dynamicContextCount = 0;
-                let finalPromptTokenEstimate: number | undefined;
 
                 if (this.plan.mode === "full") {
-                    if (compressionConfig.enabled) {
-                        await this.historySummaryService.ensureUnderLimit(context.conversation.id, {
-                            tokenThreshold: compressionConfig.tokenThreshold,
-                            tokenBudget: compressionConfig.tokenBudget,
-                            preservedTailCount,
-                        });
-                    }
-
-                    // Build system prompt messages (sub-span removed - parent compile span is sufficient)
                     const systemPromptMessages = await buildSystemPromptMessages(context);
-
-                    // Build raw conversation history; compression is applied explicitly below.
                     const conversationMessages = await this.conversationStore.buildMessagesForRal(
                         context.agent.pubkey,
                         context.ralNumber,
@@ -158,8 +126,6 @@ export class MessageCompiler {
                         id: `system:${index}`,
                     })) as PromptMessage[];
 
-                    // Inject meta model system prompts if present
-                    // These describe available model variants and variant-specific instructions
                     if (context.metaModelSystemPrompt) {
                         systemMessages.push({
                             id: "system:meta-model",
@@ -177,28 +143,9 @@ export class MessageCompiler {
                         systemPromptCount++;
                     }
 
-                    const preprocessedPrompt = compressionConfig.enabled
-                        ? await this.promptPruningService.prune({
-                            messages: [...systemMessages, ...conversationMessages],
-                            maxTokens: compressionConfig.tokenBudget,
-                            preservedTailCount,
-                            applyStoredSummarySpans: true,
-                        })
-                        : undefined;
-
-                    messages.push(
-                        ...(
-                            compressionConfig.enabled
-                                ? preprocessedPrompt!.messages
-                                : [...systemMessages, ...conversationMessages]
-                        )
-                    );
-                    finalPromptTokenEstimate = preprocessedPrompt?.stats.finalTokenEstimate;
-
+                    messages.push(...systemMessages, ...conversationMessages);
                     systemPromptCount += systemPromptMessages.length;
                 } else {
-                    // In delta mode, only send new conversation messages.
-                    // The session already has full context from initial compilation.
                     const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
                         context.agent.pubkey,
                         context.ralNumber,
@@ -208,22 +155,8 @@ export class MessageCompiler {
                             includeMessageIds: true,
                         }
                     ) as PromptMessage[];
-
-                    const deltaPrompt = compressionConfig.enabled
-                        ? await this.promptPruningService.prune({
-                            messages: conversationMessages,
-                            maxTokens: compressionConfig.tokenBudget,
-                            preservedTailCount,
-                            priorContextTokens: session.priorContextTokens,
-                            applyStoredSummarySpans: false,
-                        })
-                        : undefined;
-
-                    messages.push(...(compressionConfig.enabled ? deltaPrompt!.messages : conversationMessages));
-                    finalPromptTokenEstimate = deltaPrompt?.stats.finalTokenEstimate;
+                    messages.push(...conversationMessages);
                 }
-
-                this.updatePriorContextTokens(finalPromptTokenEstimate, session.priorContextTokens);
 
                 const conversationCount = this.plan.mode === "full"
                     ? messages.length - systemPromptCount - dynamicContextCount
@@ -274,16 +207,7 @@ export class MessageCompiler {
     }
 
     maybeSummarizeAsync(): void {
-        const compressionConfig = this.getCompressionConfig();
-        if (!compressionConfig.enabled) {
-            return;
-        }
-
-        this.historySummaryService.maybeSummarizeAsync(this.conversationStore.getId(), {
-            tokenThreshold: compressionConfig.tokenThreshold,
-            tokenBudget: compressionConfig.tokenBudget,
-            preservedTailCount: this.mapPreservedTailCount(compressionConfig.slidingWindowSize),
-        });
+        // Context management now happens in AI SDK middleware at request time.
     }
 
     private buildPlan(): MessageCompilationPlan {
@@ -321,51 +245,5 @@ export class MessageCompiler {
         const matches = registered.some((metadata) => metadata.id === normalized);
 
         return matches ? normalized : providerId;
-    }
-
-    private getCompressionConfig(): {
-        enabled: boolean;
-        tokenThreshold: number;
-        tokenBudget: number;
-        slidingWindowSize: number;
-    } {
-        const cfg = (() => {
-            try {
-                return config.getConfig();
-            } catch {
-                return undefined;
-            }
-        })();
-
-        return {
-            enabled: cfg?.compression?.enabled ?? true,
-            tokenThreshold: cfg?.compression?.tokenThreshold ?? 50000,
-            tokenBudget: cfg?.compression?.tokenBudget ?? 40000,
-            slidingWindowSize: cfg?.compression?.slidingWindowSize ?? 50,
-        };
-    }
-
-    private mapPreservedTailCount(slidingWindowSize: number): number {
-        return Math.max(4, Math.min(12, slidingWindowSize));
-    }
-
-    private updatePriorContextTokens(
-        finalPromptTokenEstimate: number | undefined,
-        previousPriorContextTokens: number | undefined
-    ): void {
-        const sessionCapabilities = this.getProviderCapabilities();
-        const isStateful = sessionCapabilities?.sessionResumption === true;
-
-        if (!isStateful || finalPromptTokenEstimate === undefined) {
-            return;
-        }
-
-        if (this.plan.mode === "full") {
-            this.sessionManager.savePriorContextTokens(finalPromptTokenEstimate);
-            return;
-        }
-
-        const nextPriorContextTokens = (previousPriorContextTokens ?? 0) + finalPromptTokenEstimate;
-        this.sessionManager.savePriorContextTokens(nextPriorContextTokens);
     }
 }
