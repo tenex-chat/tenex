@@ -1,4 +1,4 @@
-import type { Tool as CoreTool, ModelMessage } from "ai";
+import type { LanguageModelMiddleware, Tool as CoreTool, ModelMessage } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -7,6 +7,7 @@ import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { ToolRegistryContext } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 
 /**
  * Execution context for agent runs.
@@ -97,4 +98,7 @@ export interface LLMCompletionRequest {
 
 export interface LLMModelRequest {
     messages: ModelMessage[];
+    providerOptions?: ProviderOptions;
+    experimentalContext?: unknown;
+    middlewares?: LanguageModelMiddleware[];
 }

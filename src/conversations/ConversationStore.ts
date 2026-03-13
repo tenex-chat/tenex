@@ -14,7 +14,6 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import { join } from "path";
-import type { SummarySpan } from "ai-sdk-context-management";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TodoItem } from "@/services/ral/types";
@@ -27,11 +26,14 @@ import type {
     ConversationRecordInput,
     ConversationMetadata,
     ConversationState,
+    ContextManagementScratchpadEntry,
+    ContextManagementScratchpadState,
     DelegationMarker,
     ExecutionTime,
     Injection,
 } from "./types";
 import { applySummarySpansToRecords } from "@/services/history-summary/summary-utils.js";
+import type { SummarySpan } from "@/services/history-summary/types";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -243,6 +245,7 @@ export class ConversationStore {
         todoNudgedAgents: [],
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
+        contextManagementScratchpads: {},
     };
     private eventIdSet: Set<string> = new Set();
     private blockedAgentsSet: Set<string> = new Set();
@@ -289,6 +292,7 @@ export class ConversationStore {
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
+                contextManagementScratchpads: loaded.contextManagementScratchpads ?? {},
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -305,6 +309,7 @@ export class ConversationStore {
                 todoNudgedAgents: [],
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
+                contextManagementScratchpads: {},
             };
             this.eventIdSet = new Set();
             this.blockedAgentsSet = new Set();
@@ -481,6 +486,47 @@ export class ConversationStore {
         if (this.state.metaModelVariantOverride) {
             delete this.state.metaModelVariantOverride[agentPubkey];
         }
+    }
+
+    getContextManagementScratchpad(agentId: string): ContextManagementScratchpadState | undefined {
+        return this.state.contextManagementScratchpads?.[agentId];
+    }
+
+    setContextManagementScratchpad(agentId: string, state: ContextManagementScratchpadState): void {
+        if (!this.state.contextManagementScratchpads) {
+            this.state.contextManagementScratchpads = {};
+        }
+
+        const hasNotes = state.notes.trim().length > 0;
+        const hasKeepLastMessages = typeof state.keepLastMessages === "number";
+        const hasOmittedToolCalls = state.omitToolCallIds.length > 0;
+
+        if (!hasNotes && !hasKeepLastMessages && !hasOmittedToolCalls) {
+            delete this.state.contextManagementScratchpads[agentId];
+            return;
+        }
+
+        this.state.contextManagementScratchpads[agentId] = {
+            notes: state.notes,
+            keepLastMessages: state.keepLastMessages,
+            omitToolCallIds: [...state.omitToolCallIds],
+            updatedAt: state.updatedAt,
+            agentLabel: state.agentLabel,
+        };
+    }
+
+    listContextManagementScratchpads(): ContextManagementScratchpadEntry[] {
+        const entries = Object.entries(this.state.contextManagementScratchpads ?? {}).map(
+            ([agentId, state]) => ({
+                agentId,
+                agentLabel: state.agentLabel,
+                state,
+            })
+        );
+
+        return entries.sort((a, b) =>
+            (a.agentLabel ?? a.agentId).localeCompare(b.agentLabel ?? b.agentId)
+        );
     }
 
     hasToolCall(toolCallId: string): boolean {

@@ -1,5 +1,5 @@
-import type { SummarySpan } from "ai-sdk-context-management";
 import type { ConversationRecord } from "@/conversations/types";
+import type { SummarySpan } from "./types";
 
 export function createSummaryRecordId(summarySpan: SummarySpan): string {
     return `summary:${summarySpan.startRecordId}:${summarySpan.endRecordId}`;
