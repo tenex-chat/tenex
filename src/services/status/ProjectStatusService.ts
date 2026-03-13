@@ -105,8 +105,17 @@ export class ProjectStatusService {
         // Add project tag
         event.tag(projectCtx.project.tagReference());
 
-        // Add p-tag for the project owner's pubkey
+        // Add p-tags for project owner and whitelisted pubkeys (deduped)
+        const pTaggedPubkeys = new Set<string>();
         event.tag(["p", projectCtx.project.pubkey]);
+        pTaggedPubkeys.add(projectCtx.project.pubkey);
+
+        for (const pubkey of config.getWhitelistedPubkeys()) {
+            if (!pTaggedPubkeys.has(pubkey)) {
+                event.tag(["p", pubkey]);
+                pTaggedPubkeys.add(pubkey);
+            }
+        }
 
         // Track unique agent slugs for single-letter tags
         const uniqueAgentSlugs = new Set<string>();
@@ -120,10 +129,6 @@ export class ProjectStatusService {
                 tags.push("pm");
             }
             event.tag(tags);
-
-            if (agent.pubkey !== projectCtx.project.pubkey) {
-                event.tag(["p", agent.pubkey]);
-            }
 
             // Collect unique agent slugs
             uniqueAgentSlugs.add(agent.slug);
