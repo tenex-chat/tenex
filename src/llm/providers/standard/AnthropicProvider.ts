@@ -9,7 +9,6 @@
  */
 
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { logger } from "@/utils/logger";
 import type { ProviderInitConfig, ProviderMetadata } from "../types";
 import { StandardProvider } from "../base/StandardProvider";
 import { PROVIDER_IDS } from "../provider-ids";
@@ -55,7 +54,6 @@ export class AnthropicProvider extends StandardProvider {
         }
 
         if (isOAuthToken(config.apiKey)) {
-            logger.info("[AnthropicProvider] Using OAuth setup-token auth (Claude Code Max subscription)");
             return createAnthropic({
                 authToken: config.apiKey,
                 headers: {

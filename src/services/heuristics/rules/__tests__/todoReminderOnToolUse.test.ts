@@ -43,7 +43,6 @@ describe("todoReminderOnToolUse Heuristic", () => {
     // Message should NOT contain system-reminder tags (framework adds them)
     expect(result?.message).not.toContain("<system-reminder>");
     expect(result?.message).toContain("todo_write()");
-    expect(result?.message).toContain("Benefits of using todos");
   });
 
   it("should NOT trigger for todo_write tool", () => {

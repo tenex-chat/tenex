@@ -50,13 +50,6 @@ export const todoReminderOnToolUseHeuristic: Heuristic = {
       timestamp: context.evaluationTimestamp,
       message: [
         "You haven't created a todo list yet. Consider using `todo_write()` to track your work.",
-        "",
-        "Benefits of using todos:",
-        "- Shows your progress to observers",
-        "- Helps you stay organized",
-        "- Required before delegating to other agents",
-        "",
-        "Even a simple 1-2 item todo list is valuable!",
       ].join("\n"),
     };
   },

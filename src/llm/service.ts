@@ -462,6 +462,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         const interChunkDelays: number[] = [];
         const SLOW_CHUNK_THRESHOLD_MS = 500;
 
+        // Capture errors from onError — the AI SDK swallows them and doesn't re-throw
+        // in fullStream, so we need to capture them here to propagate correctly.
+        let onErrorCapture: unknown = undefined;
+
         const { fullStream } = streamText({
             model,
             messages: processedMessages,
@@ -494,6 +498,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     "stream.chunk_count_at_error": chunkCount,
                     "stream.last_chunk_type": lastChunkType ?? "none",
                 });
+                onErrorCapture = error;
                 if (emitStreamError) {
                     this.emit("stream-error", { error });
                 }
@@ -626,6 +631,29 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     provider: this.provider,
                     model: this.model,
                 });
+            }
+
+            // The AI SDK swallows errors into onError without re-throwing in fullStream.
+            // If onError was called and the stream did not finish normally, propagate as failure.
+            // Guard with !finishPartSeen: if a finish part was already received, the stream
+            // completed successfully before onError fired (e.g. cleanup-phase error) and we
+            // should not trigger a retry or emit a stream-error for that completed result.
+            if (onErrorCapture !== undefined && !finishPartSeen) {
+                const errorEventAttributes = {
+                    "error.message": onErrorCapture instanceof Error ? onErrorCapture.message : String(onErrorCapture),
+                    "error.type": onErrorCapture instanceof Error ? onErrorCapture.constructor.name : typeof onErrorCapture,
+                    "stream.chunk_count_at_error": chunkCount,
+                    "stream.last_chunk_type": lastChunkType ?? "none",
+                    "stream.finish_part_seen": finishPartSeen,
+                    "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
+                    "error.source": "onError_callback",
+                };
+                if (emitStreamError) {
+                    activeSpan?.addEvent("llm.stream_loop_error", errorEventAttributes);
+                } else {
+                    activeSpan?.addEvent("llm.stream_loop_retry_candidate", errorEventAttributes);
+                }
+                return { success: false, error: onErrorCapture, chunkCount, lastChunkType };
             }
 
             return { success: true };

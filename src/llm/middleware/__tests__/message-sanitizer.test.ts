@@ -79,6 +79,13 @@ mock.module("@/utils/logger", () => ({
 
 import { createMessageSanitizerMiddleware } from "../message-sanitizer";
 
+function getToolCallIdsFromMsg(msg: LanguageModelV3Message): string[] {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) return [];
+    return (msg.content as Array<{ type: string; toolCallId?: string }>)
+        .filter((p) => p.type === "tool-call" && typeof p.toolCallId === "string")
+        .map((p) => p.toolCallId!);
+}
+
 const fakeModel: LanguageModelV3 = {
     specificationVersion: "v3",
     provider: "anthropic",
@@ -147,6 +154,31 @@ describe("message-sanitizer middleware", () => {
 
             expect(result.prompt).toHaveLength(1);
             expect(result.prompt[0].role).toBe("user");
+        });
+
+        test("preserves trailing assistant tool-call messages", async () => {
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Use a tool" }] },
+                {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: "call-1",
+                        toolName: "search",
+                        input: { query: "test" },
+                    }],
+                },
+            ];
+
+            const params = makeParams(prompt);
+            const result = await transformParams({
+                params,
+                type: "stream",
+                model: fakeModel,
+            });
+
+            expect(result).toBe(params);
+            expect(result.prompt).toEqual(prompt);
         });
 
         test("does not strip non-trailing assistant messages", async () => {
@@ -346,6 +378,65 @@ describe("message-sanitizer middleware", () => {
             const entry2 = JSON.parse(lines[1]);
             expect(entry2.fix).toBe("trailing-assistant-stripped");
         });
+
+        test("writes a diagnostic log entry when tool-call ordering is invalid", async () => {
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: "call-a",
+                        toolName: "search",
+                        input: { query: "a" },
+                    }],
+                },
+                {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: "call-b",
+                        toolName: "search",
+                        input: { query: "b" },
+                    }],
+                },
+                {
+                    role: "tool",
+                    content: [{
+                        type: "tool-result",
+                        toolCallId: "call-a",
+                        toolName: "search",
+                        output: { type: "text", value: "result-a" },
+                    }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Continue" }],
+                },
+            ];
+
+            await transformParams({
+                params: makeParams(prompt),
+                type: "stream",
+                model: fakeModel,
+            });
+
+            const logPath = join(testBaseDir, "daemon", "warn.log");
+            expect(existsSync(logPath)).toBe(true);
+
+            const entries = readFileSync(logPath, "utf-8")
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+
+            expect(entries.some((entry) => entry.fix === "invalid-tool-order-detected")).toBe(true);
+
+            const diagnosticEntry = entries.find((entry) => entry.fix === "invalid-tool-order-detected")!;
+            expect(diagnosticEntry.tool_call_ids).toEqual(["call-a", "call-b"]);
+            expect(diagnosticEntry.resolved_tool_call_ids).toEqual(["call-a"]);
+            expect(diagnosticEntry.missing_tool_call_ids).toEqual(["call-b"]);
+            expect(diagnosticEntry.next_block_role).toBe("user");
+        });
     });
 
     describe("OTel span events", () => {
@@ -412,6 +503,64 @@ describe("message-sanitizer middleware", () => {
             const attrs = sanitizerEvents[0].attributes!;
             expect(attrs["sanitizer.fixes"]).toBe("empty-content-stripped,trailing-assistant-stripped");
         });
+
+        test("adds a diagnostic span event when tool-call ordering is invalid", async () => {
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: "call-a",
+                        toolName: "search",
+                        input: { query: "a" },
+                    }],
+                },
+                {
+                    role: "assistant",
+                    content: [{
+                        type: "tool-call",
+                        toolCallId: "call-b",
+                        toolName: "search",
+                        input: { query: "b" },
+                    }],
+                },
+                {
+                    role: "tool",
+                    content: [{
+                        type: "tool-result",
+                        toolCallId: "call-a",
+                        toolName: "search",
+                        output: { type: "text", value: "result-a" },
+                    }],
+                },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Continue" }],
+                },
+            ];
+
+            const params = makeParams(prompt);
+            const result = await transformParams({
+                params,
+                type: "stream",
+                model: fakeModel,
+            });
+
+            expect(result).toBe(params);
+
+            const diagnosticEvents = spanEvents.filter(
+                (e) => e.name === "message-sanitizer.invalid-tool-order-detected"
+            );
+            expect(diagnosticEvents).toHaveLength(1);
+
+            const attrs = diagnosticEvents[0].attributes!;
+            expect(attrs["sanitizer.issue_count"]).toBe(1);
+            expect(attrs["sanitizer.issue_block_starts"]).toBe("1");
+            expect(attrs["sanitizer.missing_tool_call_ids"]).toBe("call-b");
+            expect(attrs["sanitizer.model"]).toBe("anthropic:claude-opus-4-6");
+            expect(attrs["sanitizer.call_type"]).toBe("stream");
+        });
     });
 
     describe("params passthrough", () => {
@@ -452,6 +601,258 @@ describe("message-sanitizer middleware", () => {
             expect(result.temperature).toBe(0.7);
             expect(result.stopSequences).toEqual(["END"]);
             expect(result.prompt).toHaveLength(1);
+        });
+    });
+
+    describe("tool ordering repair", () => {
+        test("relocates misplaced tool results to the correct position", async () => {
+            // Reproduces the exact error pattern from production:
+            // assistant:[call-J, call-L, call-H, call-12e]
+            // tool:[result-J only]
+            // assistant:[call-Q, call-G]        ← violates: L,H,12e not resolved
+            // tool:[result-12e, result-H, result-L, result-G, result-Q]
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool-call", toolCallId: "call-J", toolName: "fs_read", input: {} },
+                        { type: "tool-call", toolCallId: "call-L", toolName: "fs_read", input: {} },
+                        { type: "tool-call", toolCallId: "call-H", toolName: "fs_read", input: {} },
+                        { type: "tool-call", toolCallId: "call-12e", toolName: "fs_read", input: {} },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-J", toolName: "fs_read", output: { type: "text", value: "result-J" } },
+                    ],
+                },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool-call", toolCallId: "call-Q", toolName: "fs_read", input: {} },
+                        { type: "tool-call", toolCallId: "call-G", toolName: "fs_glob", input: {} },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-12e", toolName: "fs_read", output: { type: "text", value: "result-12e" } },
+                        { type: "tool-result", toolCallId: "call-H", toolName: "fs_read", output: { type: "text", value: "result-H" } },
+                        { type: "tool-result", toolCallId: "call-L", toolName: "fs_read", output: { type: "text", value: "result-L" } },
+                        { type: "tool-result", toolCallId: "call-G", toolName: "fs_glob", output: { type: "text", value: "result-G" } },
+                        { type: "tool-result", toolCallId: "call-Q", toolName: "fs_read", output: { type: "text", value: "result-Q" } },
+                    ],
+                },
+            ];
+
+            const result = await transformParams({
+                params: makeParams(prompt),
+                type: "stream",
+                model: fakeModel,
+            });
+
+            const resultPrompt = result.prompt as LanguageModelV3Message[];
+
+            // After repair: assistant(J,L,H,12e) → tool(J,L,H,12e) → assistant(Q,G) → tool(Q,G)
+            // Find the tool message after the first assistant block
+            const firstAssistantIdx = resultPrompt.findIndex(
+                (m) => m.role === "assistant" && getToolCallIdsFromMsg(m).includes("call-J")
+            );
+            expect(firstAssistantIdx).toBeGreaterThan(0);
+
+            // The next message(s) should be tool messages containing ALL results for J,L,H,12e
+            const toolResultsAfterFirst: string[] = [];
+            for (let i = firstAssistantIdx + 1; i < resultPrompt.length; i++) {
+                const msg = resultPrompt[i];
+                if (msg.role === "tool") {
+                    for (const part of msg.content as Array<{ type: string; toolCallId: string }>) {
+                        if (part.type === "tool-result") toolResultsAfterFirst.push(part.toolCallId);
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            expect(toolResultsAfterFirst.sort()).toEqual(["call-12e", "call-H", "call-J", "call-L"]);
+
+            // Verify Q and G calls come after their batch's results
+            const secondAssistantIdx = resultPrompt.findIndex(
+                (m, idx) => idx > firstAssistantIdx && m.role === "assistant" && getToolCallIdsFromMsg(m).includes("call-Q")
+            );
+            expect(secondAssistantIdx).toBeGreaterThan(firstAssistantIdx);
+
+            // Results for Q and G should follow
+            const toolResultsAfterSecond: string[] = [];
+            for (let i = secondAssistantIdx + 1; i < resultPrompt.length; i++) {
+                const msg = resultPrompt[i];
+                if (msg.role === "tool") {
+                    for (const part of msg.content as Array<{ type: string; toolCallId: string }>) {
+                        if (part.type === "tool-result") toolResultsAfterSecond.push(part.toolCallId);
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            expect(toolResultsAfterSecond.sort()).toEqual(["call-G", "call-Q"]);
+        });
+
+        test("logs repair when tool results are relocated", async () => {
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool-call", toolCallId: "call-a", toolName: "search", input: {} },
+                        { type: "tool-call", toolCallId: "call-b", toolName: "search", input: {} },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-a", toolName: "search", output: { type: "text", value: "a" } },
+                    ],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "tool-call", toolCallId: "call-c", toolName: "search", input: {} }],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-b", toolName: "search", output: { type: "text", value: "b" } },
+                        { type: "tool-result", toolCallId: "call-c", toolName: "search", output: { type: "text", value: "c" } },
+                    ],
+                },
+            ];
+
+            await transformParams({
+                params: makeParams(prompt),
+                type: "stream",
+                model: fakeModel,
+            });
+
+            const logPath = join(testBaseDir, "daemon", "warn.log");
+            const entries = readFileSync(logPath, "utf-8")
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+
+            const repairEntry = entries.find((e) => e.fix === "tool-ordering-repaired");
+            expect(repairEntry).toBeDefined();
+            expect(repairEntry.repaired_tool_call_ids).toContain("call-b");
+
+            // OTel event should be present
+            const repairEvents = spanEvents.filter(
+                (e) => e.name === "message-sanitizer.tool-ordering-repaired"
+            );
+            expect(repairEvents).toHaveLength(1);
+        });
+
+        test("does nothing when missing results are not in the prompt at all", async () => {
+            // call-b has no result anywhere — repair can't fix it
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool-call", toolCallId: "call-a", toolName: "search", input: {} },
+                        { type: "tool-call", toolCallId: "call-b", toolName: "search", input: {} },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-a", toolName: "search", output: { type: "text", value: "a" } },
+                    ],
+                },
+                { role: "user", content: [{ type: "text", text: "Continue" }] },
+            ];
+
+            const params = makeParams(prompt);
+            const result = await transformParams({
+                params,
+                type: "stream",
+                model: fakeModel,
+            });
+
+            // Prompt should be unchanged (repair found nothing to move)
+            expect(result).toBe(params);
+
+            // But diagnostic log should still be written
+            const logPath = join(testBaseDir, "daemon", "warn.log");
+            const entries = readFileSync(logPath, "utf-8")
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line));
+
+            expect(entries.some((e) => e.fix === "invalid-tool-order-detected")).toBe(true);
+            expect(entries.some((e) => e.fix === "tool-ordering-repaired")).toBe(false);
+        });
+
+        test("removes empty tool messages after extracting parts", async () => {
+            // After extracting call-b's result from the last message, that message
+            // only has call-c's result left. The message should remain.
+            const prompt: LanguageModelV3Message[] = [
+                { role: "user", content: [{ type: "text", text: "Start" }] },
+                {
+                    role: "assistant",
+                    content: [
+                        { type: "tool-call", toolCallId: "call-a", toolName: "t", input: {} },
+                        { type: "tool-call", toolCallId: "call-b", toolName: "t", input: {} },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-a", toolName: "t", output: { type: "text", value: "a" } },
+                    ],
+                },
+                {
+                    role: "assistant",
+                    content: [{ type: "tool-call", toolCallId: "call-c", toolName: "t", input: {} }],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-b", toolName: "t", output: { type: "text", value: "b" } },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        { type: "tool-result", toolCallId: "call-c", toolName: "t", output: { type: "text", value: "c" } },
+                    ],
+                },
+            ];
+
+            const result = await transformParams({
+                params: makeParams(prompt),
+                type: "stream",
+                model: fakeModel,
+            });
+
+            const resultPrompt = result.prompt as LanguageModelV3Message[];
+
+            // The message that originally had only call-b's result should be removed
+            // (it's now empty after extraction)
+            const emptyToolMessages = resultPrompt.filter(
+                (m) => m.role === "tool" && Array.isArray(m.content) && m.content.length === 0
+            );
+            expect(emptyToolMessages).toHaveLength(0);
+
+            // call-c's result should still be present
+            const allToolResults = resultPrompt
+                .filter((m) => m.role === "tool")
+                .flatMap((m) => (m.content as Array<{ type: string; toolCallId: string }>))
+                .filter((p) => p.type === "tool-result")
+                .map((p) => p.toolCallId);
+
+            expect(allToolResults).toContain("call-a");
+            expect(allToolResults).toContain("call-b");
+            expect(allToolResults).toContain("call-c");
         });
     });
 
