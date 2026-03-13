@@ -121,8 +121,9 @@ export class ProjectStatusService {
             }
             event.tag(tags);
 
-            // Add p-tag for each agent's pubkey
-            event.tag(["p", agent.pubkey]);
+            if (agent.pubkey !== projectCtx.project.pubkey) {
+                event.tag(["p", agent.pubkey]);
+            }
 
             // Collect unique agent slugs
             uniqueAgentSlugs.add(agent.slug);
