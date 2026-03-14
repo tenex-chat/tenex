@@ -536,6 +536,14 @@ export class ConfigService {
     }
 
     /**
+     * Get the configured summarization model name if available.
+     * @returns The summarization model config name or undefined if not configured
+     */
+    getSummarizationModelName(): string | undefined {
+        return this.loadedConfig?.llms?.summarization;
+    }
+
+    /**
      * Ensures that a backend private key exists for TENEX
      * Generates a new one if not present
      */

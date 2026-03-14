@@ -14,10 +14,16 @@ export interface TenexConfig {
     // Controls request-time prompt projection for full-history providers
     contextManagement?: {
         enabled?: boolean; // Enable request-time context management (default: true)
-        tokenBudget?: number; // Target prompt token budget for middleware trimming (default: 40000)
-        slidingWindowSize?: number; // Number of recent non-system messages to preserve before further trimming (default: 50)
-        slidingWindowEnabled?: boolean; // Enable automatic sliding-window trimming (default: true)
+        tokenBudget?: number; // Working prompt budget for graduated context management (default: 40000)
         scratchpadEnabled?: boolean; // Enable agent-managed scratchpad strategy and tool (default: true)
+        forceScratchpadEnabled?: boolean; // Force a scratchpad tool call when the working budget threshold is crossed (default: true)
+        forceScratchpadThresholdPercent?: number; // Forced scratchpad threshold as percent of working budget (default: 70)
+        utilizationWarningEnabled?: boolean; // Warn agents as the working budget fills up (default: true)
+        utilizationWarningThresholdPercent?: number; // Warning threshold as percent of working budget (default: 70)
+        summarizationFallbackEnabled?: boolean; // Enable summarization as a last-resort overflow fallback (default: true)
+        summarizationFallbackThresholdPercent?: number; // Summarization threshold as percent of working budget (default: 90)
+        slidingWindowSize?: number; // Deprecated legacy field; ignored by current runtime
+        slidingWindowEnabled?: boolean; // Deprecated legacy field; ignored by current runtime
     };
 
     // Global fields
@@ -64,9 +70,15 @@ export interface TenexConfig {
     compression?: {
         enabled?: boolean;
         tokenBudget?: number;
+        scratchpadEnabled?: boolean;
+        forceScratchpadEnabled?: boolean;
+        forceScratchpadThresholdPercent?: number;
+        utilizationWarningEnabled?: boolean;
+        utilizationWarningThresholdPercent?: number;
+        summarizationFallbackEnabled?: boolean;
+        summarizationFallbackThresholdPercent?: number;
         slidingWindowSize?: number;
         slidingWindowEnabled?: boolean;
-        scratchpadEnabled?: boolean;
     };
 
     // Intervention configuration
@@ -109,9 +121,15 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             tokenBudget: z.number().optional(),
+            scratchpadEnabled: z.boolean().optional(),
+            forceScratchpadEnabled: z.boolean().optional(),
+            forceScratchpadThresholdPercent: z.number().optional(),
+            utilizationWarningEnabled: z.boolean().optional(),
+            utilizationWarningThresholdPercent: z.number().optional(),
+            summarizationFallbackEnabled: z.boolean().optional(),
+            summarizationFallbackThresholdPercent: z.number().optional(),
             slidingWindowSize: z.number().optional(),
             slidingWindowEnabled: z.boolean().optional(),
-            scratchpadEnabled: z.boolean().optional(),
         })
         .optional(),
     whitelistedPubkeys: z.array(z.string()).optional(),
@@ -153,9 +171,15 @@ export const TenexConfigSchema = z.object({
         .object({
             enabled: z.boolean().optional(),
             tokenBudget: z.number().optional(),
+            scratchpadEnabled: z.boolean().optional(),
+            forceScratchpadEnabled: z.boolean().optional(),
+            forceScratchpadThresholdPercent: z.number().optional(),
+            utilizationWarningEnabled: z.boolean().optional(),
+            utilizationWarningThresholdPercent: z.number().optional(),
+            summarizationFallbackEnabled: z.boolean().optional(),
+            summarizationFallbackThresholdPercent: z.number().optional(),
             slidingWindowSize: z.number().optional(),
             slidingWindowEnabled: z.boolean().optional(),
-            scratchpadEnabled: z.boolean().optional(),
         })
         .optional(),
     intervention: z

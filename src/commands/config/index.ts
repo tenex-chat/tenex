@@ -55,7 +55,7 @@ const MENU_SECTIONS: MenuSection[] = [
     {
         header: "Conversations",
         entries: [
-            { label: "Context", description: "Sliding window and scratchpad strategies", command: contextManagementCommand },
+            { label: "Context", description: "Graduated decay, fallback summarization, scratchpad, and warnings", command: contextManagementCommand },
             { label: "Summarization", description: "Auto-summary timing", command: summarizationCommand },
         ],
     },

@@ -7,7 +7,7 @@ import inquirer from "inquirer";
 export const contextManagementCommand = new Command("context-management")
     .alias("context")
     .alias("compression")
-    .description("Configure request-time context management — sliding window and scratchpad strategies")
+    .description("Configure request-time context management — graduated decay, summarization fallback, scratchpad, and warnings")
     .action(async () => {
         try {
             const globalPath = configService.getGlobalPath();
@@ -17,17 +17,40 @@ export const contextManagementCommand = new Command("context-management")
                 ...existingConfig.contextManagement,
             };
 
-            console.log(`  Enabled: ${contextManagement.enabled ?? true}`);
-            console.log(`  Token budget: ${contextManagement.tokenBudget ?? 40000}`);
-            console.log(`  Sliding window: ${contextManagement.slidingWindowSize ?? 50} messages`);
-            console.log(`  Sliding window strategy: ${contextManagement.slidingWindowEnabled ?? true}`);
-            console.log(`  Scratchpad strategy: ${contextManagement.scratchpadEnabled ?? true}\n`);
+            const currentSettings = {
+                enabled: contextManagement.enabled ?? true,
+                tokenBudget: contextManagement.tokenBudget ?? 40000,
+                scratchpadEnabled: contextManagement.scratchpadEnabled ?? true,
+                forceScratchpadEnabled: contextManagement.forceScratchpadEnabled ?? true,
+                forceScratchpadThresholdPercent:
+                    contextManagement.forceScratchpadThresholdPercent ?? 70,
+                utilizationWarningEnabled: contextManagement.utilizationWarningEnabled ?? true,
+                utilizationWarningThresholdPercent:
+                    contextManagement.utilizationWarningThresholdPercent ?? 70,
+                summarizationFallbackEnabled:
+                    contextManagement.summarizationFallbackEnabled ?? true,
+                summarizationFallbackThresholdPercent:
+                    contextManagement.summarizationFallbackThresholdPercent ?? 90,
+            };
+
+            console.log(`  Enabled: ${currentSettings.enabled}`);
+            console.log(`  Working token budget: ${currentSettings.tokenBudget}`);
+            console.log(`  Scratchpad strategy: ${currentSettings.scratchpadEnabled}`);
+            console.log(
+                `  Forced scratchpad step: ${currentSettings.forceScratchpadEnabled} @ ${currentSettings.forceScratchpadThresholdPercent}%`
+            );
+            console.log(
+                `  Utilization warning: ${currentSettings.utilizationWarningEnabled} @ ${currentSettings.utilizationWarningThresholdPercent}%`
+            );
+            console.log(
+                `  Summarization fallback: ${currentSettings.summarizationFallbackEnabled} @ ${currentSettings.summarizationFallbackThresholdPercent}%\n`
+            );
 
             const { enabled } = await inquirer.prompt([{
                 type: "confirm",
                 name: "enabled",
                 message: "Enable context management?",
-                default: contextManagement.enabled ?? true,
+                default: currentSettings.enabled,
                 theme: inquirerTheme,
             }]);
 
@@ -36,45 +59,116 @@ export const contextManagementCommand = new Command("context-management")
                     {
                         type: "input",
                         name: "tokenBudget",
-                        message: "Token budget:",
-                        default: String(contextManagement.tokenBudget ?? 40000),
+                        message: "Working token budget:",
+                        default: String(currentSettings.tokenBudget),
                         theme: inquirerTheme,
                         validate: (input: string) => /^\d+$/.test(input) || "Must be a number",
-                    },
-                    {
-                        type: "input",
-                        name: "slidingWindowSize",
-                        message: "Sliding window size (messages):",
-                        default: String(contextManagement.slidingWindowSize ?? 50),
-                        theme: inquirerTheme,
-                        validate: (input: string) => /^\d+$/.test(input) || "Must be a number",
-                    },
-                    {
-                        type: "confirm",
-                        name: "slidingWindowEnabled",
-                        message: "Enable sliding window trimming?",
-                        default: contextManagement.slidingWindowEnabled ?? true,
-                        theme: inquirerTheme,
                     },
                     {
                         type: "confirm",
                         name: "scratchpadEnabled",
                         message: "Enable scratchpad strategy/tool?",
-                        default: contextManagement.scratchpadEnabled ?? true,
+                        default: currentSettings.scratchpadEnabled,
                         theme: inquirerTheme,
+                    },
+                    {
+                        type: "confirm",
+                        name: "forceScratchpadEnabled",
+                        message: "Force a scratchpad tool call when the working budget gets tight?",
+                        default: currentSettings.forceScratchpadEnabled,
+                        theme: inquirerTheme,
+                        when: (answers: { scratchpadEnabled?: boolean }) =>
+                            answers.scratchpadEnabled === true,
+                    },
+                    {
+                        type: "input",
+                        name: "forceScratchpadThresholdPercent",
+                        message: "Forced scratchpad threshold (% of working budget):",
+                        default: String(currentSettings.forceScratchpadThresholdPercent),
+                        theme: inquirerTheme,
+                        when: (answers: {
+                            scratchpadEnabled?: boolean;
+                            forceScratchpadEnabled?: boolean;
+                        }) =>
+                            answers.scratchpadEnabled === true
+                            && answers.forceScratchpadEnabled === true,
+                        validate: (input: string) =>
+                            /^\d+$/.test(input) &&
+                                Number(input) >= 1 &&
+                                Number(input) <= 100
+                                ? true
+                                : "Must be a number between 1 and 100",
+                    },
+                    {
+                        type: "confirm",
+                        name: "utilizationWarningEnabled",
+                        message: "Enable utilization warnings?",
+                        default: currentSettings.utilizationWarningEnabled,
+                        theme: inquirerTheme,
+                    },
+                    {
+                        type: "input",
+                        name: "utilizationWarningThresholdPercent",
+                        message: "Utilization warning threshold (% of working budget):",
+                        default: String(currentSettings.utilizationWarningThresholdPercent),
+                        theme: inquirerTheme,
+                        when: (answers: { utilizationWarningEnabled?: boolean }) =>
+                            answers.utilizationWarningEnabled === true,
+                        validate: (input: string) =>
+                            /^\d+$/.test(input) &&
+                                Number(input) >= 1 &&
+                                Number(input) <= 100
+                                ? true
+                                : "Must be a number between 1 and 100",
+                    },
+                    {
+                        type: "confirm",
+                        name: "summarizationFallbackEnabled",
+                        message: "Enable summarization fallback?",
+                        default: currentSettings.summarizationFallbackEnabled,
+                        theme: inquirerTheme,
+                    },
+                    {
+                        type: "input",
+                        name: "summarizationFallbackThresholdPercent",
+                        message: "Summarization fallback threshold (% of working budget):",
+                        default: String(currentSettings.summarizationFallbackThresholdPercent),
+                        theme: inquirerTheme,
+                        when: (answers: { summarizationFallbackEnabled?: boolean }) =>
+                            answers.summarizationFallbackEnabled === true,
+                        validate: (input: string) =>
+                            /^\d+$/.test(input) &&
+                                Number(input) >= 1 &&
+                                Number(input) <= 100
+                                ? true
+                                : "Must be a number between 1 and 100",
                     },
                 ]);
 
                 existingConfig.contextManagement = {
                     enabled: true,
                     tokenBudget: parseInt(answers.tokenBudget),
-                    slidingWindowSize: parseInt(answers.slidingWindowSize),
-                    slidingWindowEnabled: answers.slidingWindowEnabled,
                     scratchpadEnabled: answers.scratchpadEnabled,
+                    forceScratchpadEnabled:
+                        answers.forceScratchpadEnabled ?? currentSettings.forceScratchpadEnabled,
+                    forceScratchpadThresholdPercent: parseInt(
+                        answers.forceScratchpadThresholdPercent ??
+                            String(currentSettings.forceScratchpadThresholdPercent)
+                    ),
+                    utilizationWarningEnabled: answers.utilizationWarningEnabled,
+                    utilizationWarningThresholdPercent: parseInt(
+                        answers.utilizationWarningThresholdPercent ??
+                            String(currentSettings.utilizationWarningThresholdPercent)
+                    ),
+                    summarizationFallbackEnabled: answers.summarizationFallbackEnabled,
+                    summarizationFallbackThresholdPercent: parseInt(
+                        answers.summarizationFallbackThresholdPercent ??
+                            String(currentSettings.summarizationFallbackThresholdPercent)
+                    ),
                 };
             } else {
                 existingConfig.contextManagement = {
-                    ...contextManagement,
+                    ...currentSettings,
                     enabled: false,
                 };
             }

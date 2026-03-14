@@ -163,6 +163,14 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     }
 
     /**
+     * Create a wrapped AI SDK language model instance using this service's provider configuration.
+     * Useful for callers that need to pass a model instance into other AI SDK helpers.
+     */
+    createLanguageModel(messages?: ModelMessage[]): LanguageModel {
+        return this.getLanguageModel(messages);
+    }
+
+    /**
      * Get full telemetry configuration for the current service instance.
      */
     private getTelemetryConfig(): ReturnType<typeof getFullTelemetryConfig> {
@@ -172,6 +180,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             model: this.model,
             temperature: this.temperature,
             maxTokens: this.maxTokens,
+            contextWindow: this.getModelContextWindow(),
             sessionId: this.sessionId,
         });
     }

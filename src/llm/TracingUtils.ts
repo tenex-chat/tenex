@@ -54,6 +54,7 @@ export function getFullTelemetryConfig(config: {
     model: string;
     temperature?: number;
     maxTokens?: number;
+    contextWindow?: number;
     sessionId?: string;
 }): TelemetrySettings {
     return {
@@ -67,6 +68,7 @@ export function getFullTelemetryConfig(config: {
             "llm.model": config.model,
             "llm.temperature": config.temperature ?? 0,
             "llm.max_tokens": config.maxTokens ?? 0,
+            "llm.context_window": config.contextWindow ?? 0,
             "session.id": config.sessionId ?? "unknown",
         },
 
