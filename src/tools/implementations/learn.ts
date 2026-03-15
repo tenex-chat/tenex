@@ -27,9 +27,7 @@ const lessonLearnSchema = z.object({
 
 type LessonLearnInput = z.infer<typeof lessonLearnSchema>;
 type LessonLearnOutput = {
-    message: string;
     eventId: string;
-    title: string;
     hasDetailed: boolean;
 };
 
@@ -112,12 +110,8 @@ async function executeLessonLearn(
         agentName: context.agent.name,
     });
 
-    const message = `Lesson recorded: "${title}"${detailed ? " (with detailed version)" : ""}\n\nThis lesson will be available in future conversations to help avoid similar issues.`;
-
     return {
-        message,
         eventId: lessonEvent.encode(),
-        title,
         hasDetailed: !!detailed,
     };
 }

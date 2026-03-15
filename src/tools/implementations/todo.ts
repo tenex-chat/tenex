@@ -180,8 +180,6 @@ type TodoWriteInput = z.infer<typeof todoWriteSchema>;
 
 interface TodoWriteOutput {
     success: boolean;
-    message: string;
-    totalItems: number;
     error?: string;
     missingIds?: string[];
 }
@@ -205,22 +203,8 @@ async function executeTodoWrite(
         input.force ?? false
     );
 
-    // Generate a concise message based on the operation
-    let message: string;
-    if (!result.success) {
-        message = result.error || "Failed to write todos";
-    } else if (result.items.length === 0) {
-        message = "Todo list cleared";
-    } else if (result.items.length === 1) {
-        message = `Todo list updated with 1 item`;
-    } else {
-        message = `Todo list updated with ${result.items.length} items`;
-    }
-
     return {
         success: result.success,
-        message,
-        totalItems: result.items.length,
         error: result.error,
         missingIds: result.missingIds,
     };

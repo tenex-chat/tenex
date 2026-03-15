@@ -35,8 +35,6 @@ type ReportWriteInput = z.infer<typeof reportWriteSchema>;
 type ReportWriteOutput = {
     success: boolean;
     articleId: string;
-    slug: string;
-    message: string;
     /** Addressable event references for a-tagging on the tool use event */
     referencedAddressableEvents: string[];
     /** Warning messages for non-fatal issues (e.g., local write failed but Nostr succeeded) */
@@ -178,13 +176,6 @@ async function executeReportWrite(
         logger.warn("Failed to index report in RAG", { slug, error: ragMessage });
     }
 
-    let memorizeMessage = "";
-    if (memorize_team) {
-        memorizeMessage = " ⚠️ This report has been team-memorized and will be included in the system prompt of ALL agents in the project.";
-    } else if (memorize) {
-        memorizeMessage = " This report has been memorized and will be included in your system prompt.";
-    }
-
     logger.info("✅ Report written successfully", {
         slug,
         articleId: result.encodedId,
@@ -212,8 +203,6 @@ async function executeReportWrite(
     return {
         success: true,
         articleId: `nostr:${result.encodedId}`,
-        slug,
-        message: `Report "${title}" published successfully.${memorizeMessage}`,
         // Include addressable reference for ToolExecutionTracker to add as a-tag
         referencedAddressableEvents: [result.addressableRef],
         // Include warnings if any non-fatal issues occurred

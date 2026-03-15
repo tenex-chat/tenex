@@ -16,7 +16,6 @@ type ReportReadInput = z.infer<typeof reportReadSchema>;
 
 interface ReportReadOutput {
     success: boolean;
-    slug?: string;
     content?: string;
     message?: string;
 }
@@ -129,7 +128,6 @@ async function executeReportRead(
 
     return {
         success: true,
-        slug,
         content,
     };
 }

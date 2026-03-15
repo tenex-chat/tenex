@@ -81,7 +81,6 @@ interface ConversationSearchOutput {
     success: boolean;
     conversations: ConversationSearchResult[];
     total: number;
-    query: string;
     mode: string;
     searchType?: "full-text" | "title-only" | "semantic" | "hybrid";
     semanticAvailable: boolean;
@@ -324,7 +323,6 @@ async function executeConversationSearch(
         success: true,
         conversations,
         total: conversations.length,
-        query,
         mode: effectiveMode,
         searchType,
         semanticAvailable,

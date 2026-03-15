@@ -73,7 +73,6 @@ type AskInput = z.infer<typeof askSchema>;
 
 interface AskOutput {
   success: boolean;
-  message: string;
   delegationConversationId: string;
 }
 
@@ -256,7 +255,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
         return {
           success: true,
-          message: "Question sent, waiting for response",
           delegationConversationId: eventId,
         };
       }
@@ -351,7 +349,6 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
 
   return {
     success: true,
-    message: "Question sent, waiting for response",
     delegationConversationId: eventId,
   };
 }

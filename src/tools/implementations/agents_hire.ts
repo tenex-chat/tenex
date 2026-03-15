@@ -18,7 +18,6 @@ const agentsHireSchema = z.object({
 type AgentsHireInput = z.infer<typeof agentsHireSchema>;
 type AgentsHireOutput = {
     success: boolean;
-    message?: string;
     error?: string;
     agent?: {
         slug: string;
@@ -92,7 +91,6 @@ async function executeAgentsHire(
 
     return {
         success: true,
-        message: `Successfully hired agent "${agent.name}"`,
         agent: {
             slug: agent.slug,
             name: agent.name,

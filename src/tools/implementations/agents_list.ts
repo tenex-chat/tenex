@@ -27,12 +27,8 @@ type AgentInfo = {
 
 type AgentsListOutput = {
     success: boolean;
-    message?: string;
     error?: string;
     agents: AgentInfo[];
-    summary?: {
-        total: number;
-    };
 };
 
 /**
@@ -64,11 +60,7 @@ async function executeAgentsList(input: AgentsListInput): Promise<AgentsListOutp
 
     return {
         success: true,
-        message: `Found ${agents.length} agents`,
         agents,
-        summary: {
-            total: agents.length,
-        },
     };
 }
 

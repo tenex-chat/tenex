@@ -27,9 +27,7 @@ type AgentsWriteInput = z.infer<typeof agentsWriteSchema>;
 // Define the output type
 interface AgentsWriteOutput {
     success: boolean;
-    message?: string;
     error?: string;
-    filePath?: string;
     agent?: {
         slug: string;
         name: string;
@@ -113,7 +111,6 @@ async function executeAgentsWrite(
 
         return {
             success: true,
-            message: `Successfully updated agent "${name}"`,
             agent: {
                 slug,
                 name,
@@ -167,7 +164,6 @@ async function executeAgentsWrite(
 
     return {
         success: true,
-        message: `Successfully created agent "${name}"`,
         agent: {
             slug,
             name,
