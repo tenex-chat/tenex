@@ -102,12 +102,17 @@ export function createFinishHandler(
                 activeSpan?.setAttribute("openrouter.generation_id", openrouterGenerationId);
             }
 
-            // Extract usage metadata using provider-specific extractor
+            // Extract usage metadata from the most recent completed LLM step.
+            // e.totalUsage is AI SDK's cumulative total across all steps, which would
+            // cause Nostr events to report ever-growing token counts. Using the last
+            // step's per-step usage gives accurate per-invocation values.
+            // Falls back to e.totalUsage when steps is empty (e.g. in tests).
+            const lastStep = e.steps.length > 0 ? e.steps[e.steps.length - 1] : undefined;
             const usage = extractUsageMetadata(
                 config.provider,
                 config.model,
-                e.totalUsage,
-                e.providerMetadata as Record<string, unknown> | undefined
+                lastStep?.usage ?? e.totalUsage,
+                (lastStep?.providerMetadata ?? e.providerMetadata) as Record<string, unknown> | undefined
             );
 
             // DIAGNOSTIC: Log right before emitting complete event

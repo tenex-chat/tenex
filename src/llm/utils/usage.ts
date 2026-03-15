@@ -29,37 +29,25 @@ export interface StepWithProviderMetadata {
 }
 
 /**
- * Calculate cumulative usage from an array of steps.
+ * Extract usage from the most recent completed LLM step.
  * Returns undefined if no steps provided.
  * Extracts token counts, cost, and detailed token breakdowns from OpenRouter providerMetadata.
  */
-export function calculateCumulativeUsage(
+export function extractLastStepUsage(
     steps: StepWithProviderMetadata[]
 ): LanguageModelUsageWithCostUsd | undefined {
     if (steps.length === 0) {
         return undefined;
     }
 
-    const inputTokens = steps.reduce((sum, step) => {
-        const openrouterUsage = step.providerMetadata?.openrouter?.usage;
-        return sum + (openrouterUsage?.promptTokens ?? step.usage?.inputTokens ?? 0);
-    }, 0);
-    const outputTokens = steps.reduce((sum, step) => {
-        const openrouterUsage = step.providerMetadata?.openrouter?.usage;
-        return sum + (openrouterUsage?.completionTokens ?? step.usage?.outputTokens ?? 0);
-    }, 0);
-    const costUsd = steps.reduce((sum, step) => {
-        const openrouterUsage = step.providerMetadata?.openrouter?.usage;
-        return sum + (openrouterUsage?.cost ?? 0);
-    }, 0);
-    const cachedInputTokens = steps.reduce((sum, step) => {
-        const openrouterUsage = step.providerMetadata?.openrouter?.usage;
-        return sum + (openrouterUsage?.promptTokensDetails?.cachedTokens ?? 0);
-    }, 0);
-    const reasoningTokens = steps.reduce((sum, step) => {
-        const openrouterUsage = step.providerMetadata?.openrouter?.usage;
-        return sum + (openrouterUsage?.completionTokensDetails?.reasoningTokens ?? 0);
-    }, 0);
+    const step = steps[steps.length - 1];
+    const openrouterUsage = step.providerMetadata?.openrouter?.usage;
+
+    const inputTokens = openrouterUsage?.promptTokens ?? step.usage?.inputTokens ?? 0;
+    const outputTokens = openrouterUsage?.completionTokens ?? step.usage?.outputTokens ?? 0;
+    const costUsd = openrouterUsage?.cost ?? 0;
+    const cachedInputTokens = openrouterUsage?.promptTokensDetails?.cachedTokens ?? 0;
+    const reasoningTokens = openrouterUsage?.completionTokensDetails?.reasoningTokens ?? 0;
 
     return {
         inputTokens,

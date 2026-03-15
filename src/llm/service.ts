@@ -30,7 +30,7 @@ import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
 import { isRetryableKeyError } from "./retryable-key-errors";
 import { getContextWindow, resolveContextWindow } from "./utils/context-window-cache";
-import { calculateCumulativeUsage } from "./utils/usage";
+import { extractLastStepUsage } from "./utils/usage";
 
 /**
  * Accessor for live provider state. Called per-request so LLMService
@@ -67,7 +67,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     private readonly agentSlug?: string;
     private readonly conversationId?: string;
     private cachedContentForComplete = "";
-    /** Cumulative usage from previous steps, set via setCurrentStepUsage */
+    /** Usage from most recent completed LLM step, set via updateUsageFromSteps */
     private currentStepUsage?: LanguageModelUsageWithCostUsd;
     /** Last user message - stored before streaming for logging in onFinish */
     private lastUserMessage?: string;
@@ -139,16 +139,16 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     }
 
     /**
-     * Update cumulative usage from completed steps.
+     * Update usage from most recent completed LLM step.
      * Called from prepareStep to make usage available for tool-will-execute events.
      * Extracts accurate usage from providerMetadata.openrouter.usage when available.
      */
     updateUsageFromSteps(steps: Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>): void {
-        this.currentStepUsage = calculateCumulativeUsage(steps);
+        this.currentStepUsage = extractLastStepUsage(steps);
     }
 
     /**
-     * Get cumulative usage from previous completed steps.
+     * Get usage from most recent completed LLM step.
      * Returns undefined if no steps have completed yet.
      */
     getCurrentStepUsage(): LanguageModelUsageWithCostUsd | undefined {

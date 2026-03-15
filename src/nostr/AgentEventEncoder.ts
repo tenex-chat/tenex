@@ -554,7 +554,7 @@ export class AgentEventEncoder {
         // Forward branch tag from triggering event
         this.forwardBranchTag(event, context);
 
-        // Add LLM usage tags if available (cumulative from previous steps)
+        // Add LLM usage tags if available (from most recent completed LLM step)
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }

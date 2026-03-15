@@ -1,4 +1,4 @@
-import { trace } from "@opentelemetry/api";
+import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import type { LanguageModel, LanguageModelMiddleware } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
@@ -831,13 +831,57 @@ function buildTelemetryEventName(event: ContextManagementTelemetryEvent): string
     }
 }
 
-function emitTelemetryEvent(event: ContextManagementTelemetryEvent): void {
-    const span = trace.getActiveSpan();
-    if (!span) {
-        return;
-    }
+function createTelemetryCallback(): (event: ContextManagementTelemetryEvent) => void {
+    const tracer = trace.getTracer("tenex");
+    let runtimeSpan: Span | undefined;
 
-    span.addEvent(buildTelemetryEventName(event), buildTelemetryAttributes(event));
+    return (event: ContextManagementTelemetryEvent): void => {
+        const attributes = buildTelemetryAttributes(event);
+        const eventName = buildTelemetryEventName(event);
+
+        if (event.type === "runtime-start") {
+            runtimeSpan = tracer.startSpan(
+                "tenex.context_management",
+                { attributes },
+                otelContext.active()
+            );
+            runtimeSpan.addEvent(eventName, attributes);
+            return;
+        }
+
+        if (event.type === "runtime-complete") {
+            if (runtimeSpan) {
+                runtimeSpan.addEvent(eventName, attributes);
+                runtimeSpan.setAttribute(
+                    "context_management.estimated_tokens_before",
+                    event.estimatedTokensBefore
+                );
+                runtimeSpan.setAttribute(
+                    "context_management.estimated_tokens_after",
+                    event.estimatedTokensAfter
+                );
+                runtimeSpan.setAttribute(
+                    "context_management.message_count_before",
+                    event.messageCountBefore
+                );
+                runtimeSpan.setAttribute(
+                    "context_management.message_count_after",
+                    event.messageCountAfter
+                );
+                runtimeSpan.end();
+                runtimeSpan = undefined;
+            }
+            return;
+        }
+
+        // For strategy-complete and tool-execute-* events, add to the runtime
+        // span if it exists, otherwise fall back to the active span (handles
+        // pre-runtime tool execution like scratchpad tools).
+        const span = runtimeSpan ?? trace.getActiveSpan();
+        if (span) {
+            span.addEvent(eventName, attributes);
+        }
+    };
 }
 
 function createSummarizationModel(options: {
@@ -953,7 +997,7 @@ function createConversationContextManagementRuntime(options: {
 
     return createContextManagementRuntime({
         strategies,
-        telemetry: emitTelemetryEvent,
+        telemetry: createTelemetryCallback(),
         estimator,
         reminderSink: createSystemReminderSink(getSystemReminderContext()),
     });
