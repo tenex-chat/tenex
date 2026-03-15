@@ -25,6 +25,7 @@ import { providerRegistry } from "@/llm/providers";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
+import { isFullEventId, shortenEventId } from "@/types/event-ids";
 import type { AISdkTool } from "@/tools/types";
 
 const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
@@ -49,7 +50,8 @@ function buildDecayPlaceholder(
         ? sanitizeDescription((context.input as Record<string, unknown>).description as string)
         : undefined;
     const eventId = toolCallEventIdMap.get(context.toolCallId);
-    const id = eventId ?? context.toolCallId;
+    const rawId = eventId ?? context.toolCallId;
+    const id = isFullEventId(rawId) ? shortenEventId(rawId) : rawId;
     const descPart = desc ? ` -- "${desc}"` : "";
 
     if (context.action === "placeholder") {

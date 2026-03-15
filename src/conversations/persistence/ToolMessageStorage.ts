@@ -3,6 +3,7 @@ import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
+import { isShortEventId } from "@/types/event-ids";
 import type { ModelMessage } from "ai";
 
 /**
@@ -94,17 +95,24 @@ export class ToolMessageStorage {
     }
 
     /**
-     * Load tool messages from storage by event ID
+     * Load tool messages from storage by event ID (full or short prefix).
      */
     async load(eventId: string): Promise<ModelMessage[] | null> {
         try {
-            const filePath = path.join(this.storageDir, `${eventId}.json`);
+            let resolvedId = eventId;
+
+            if (isShortEventId(eventId)) {
+                const files = await fs.readdir(this.storageDir).catch(() => [] as string[]);
+                const match = files.find((f) => f.endsWith(".json") && f.startsWith(eventId));
+                if (!match) return null;
+                resolvedId = match.slice(0, -5); // strip .json
+            }
+
+            const filePath = path.join(this.storageDir, `${resolvedId}.json`);
             const data = await fs.readFile(filePath, "utf-8");
             const parsed = JSON.parse(data);
-            // The stored messages are valid ModelMessage[] from the store() method
             return parsed.messages as ModelMessage[];
         } catch {
-            // File doesn't exist or can't be read
             return null;
         }
     }

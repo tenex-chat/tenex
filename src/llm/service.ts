@@ -1,6 +1,7 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
+import { devToolsMiddleware } from "@ai-sdk/devtools";
 import { trace } from "@opentelemetry/api";
 import {
     type LanguageModel,
@@ -261,6 +262,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
      */
     private wrapWithMiddleware(baseModel: LanguageModel): LanguageModel {
         const middlewares: LanguageModelMiddleware[] = [];
+
+        // DevTools middleware — must be outermost to capture full request/response
+        middlewares.push(devToolsMiddleware() as LanguageModelMiddleware);
 
         // Message sanitizer — fix message array issues before every API call
         // Must be first so it sanitizes before anything else processes messages

@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
+    "@ai-sdk/devtools": "^0.0.15",
     "@ai-sdk/openai": "^3.0.41",
     "@huggingface/transformers": "^3.8.1",
     "@inquirer/ansi": "^2.0.3",
@@ -64,7 +65,8 @@
     "@opentelemetry/sdk-trace-node": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "ai": "^6.0.116",
-    "ai-sdk-context-management": "^0.3.0",
+    "ai-sdk-context-management": "file:../ai-sdk-context-management",
+    "ai-sdk-message-sanitizer": "^0.1.0",
     "ai-sdk-fs-tools": "^0.2.2",
     "ai-sdk-provider-codex-app-server": "1.1.7",
     "ai-sdk-system-reminders": "^0.2.1",
