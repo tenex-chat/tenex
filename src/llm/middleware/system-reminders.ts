@@ -4,12 +4,11 @@ import { trace } from "@opentelemetry/api";
 import { getSystemReminderContext } from "../system-reminder-context";
 
 export function createTenexSystemRemindersMiddleware(): LanguageModelV3Middleware {
-    const ctx = getSystemReminderContext();
-
     return {
         specificationVersion: "v3" as const,
 
         async transformParams({ params }) {
+            const ctx = getSystemReminderContext();
             const reminders = await ctx.collect();
 
             if (reminders.length === 0) return params;

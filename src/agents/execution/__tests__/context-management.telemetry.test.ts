@@ -182,16 +182,37 @@ describe("TENEX context management telemetry", () => {
         }));
 
         expect(events.some((event) => event.eventName === "context_management.runtime_start")).toBe(true);
-        expect(events.some((event) => event.eventName === "context_management.strategy_complete")).toBe(true);
         expect(events.some((event) => event.eventName === "context_management.runtime_complete")).toBe(true);
-        expect(events.some((event) => event.eventName === "context_management.tool_execute_start")).toBe(true);
-        expect(events.some((event) => event.eventName === "context_management.tool_execute_complete")).toBe(true);
+        expect(
+            events.some((event) =>
+                event.eventName === "context_management.strategy_complete.context-utilization-reminder"
+            )
+        ).toBe(true);
+        expect(
+            events.some((event) =>
+                event.eventName === "context_management.tool_execute_start.scratchpad"
+            )
+        ).toBe(true);
+        expect(
+            events.some((event) =>
+                event.eventName === "context_management.tool_execute_complete.scratchpad"
+            )
+        ).toBe(true);
+
+        const runtimeStartEvent = events.find(
+            (event) => event.eventName === "context_management.runtime_start"
+        );
+        expect(runtimeStartEvent).toBeDefined();
+        expect(String(runtimeStartEvent?.attributes?.["context_management.summary"])).toContain(
+            "Running"
+        );
+        expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(5);
 
         const warningEvent = events.find(
             (event) =>
-                event.eventName === "context_management.strategy_complete" &&
-                event.attributes?.["context_management.strategy_name"] ===
-                    "context-utilization-reminder"
+                event.eventName ===
+                    "context_management.strategy_complete.context-utilization-reminder" &&
+                event.attributes?.["context_management.strategy_name"] === "context-utilization-reminder"
         );
         expect(warningEvent).toBeDefined();
         expect(
@@ -203,19 +224,56 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(warningEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("reminderText");
+        expect(String(warningEvent?.attributes?.["context_management.summary"])).toContain(
+            "Inserted a scratchpad context warning"
+        );
+        expect(warningEvent?.attributes?.["context_management.utilization_percent"]).toBe(86);
 
         const scratchpadEvent = events.find(
             (event) =>
-                event.eventName === "context_management.strategy_complete" &&
+                event.eventName === "context_management.strategy_complete.scratchpad" &&
                 event.attributes?.["context_management.strategy_name"] === "scratchpad"
         );
         expect(scratchpadEvent).toBeDefined();
         expect(
             String(scratchpadEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("forcedToolChoice");
+        expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
+            "forced the next tool call to scratchpad"
+        );
+        expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(true);
+        expect(scratchpadEvent?.attributes?.["context_management.keep_last_messages"]).toBeUndefined();
+
+        const statusEvent = events.find(
+            (event) =>
+                event.eventName === "context_management.strategy_complete.context-window-status" &&
+                event.attributes?.["context_management.strategy_name"] === "context-window-status"
+        );
+        expect(statusEvent).toBeDefined();
+        expect(
+            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
+        ).toContain("estimatedPromptTokens");
+        expect(
+            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
+        ).toContain("workingBudgetUtilizationPercent");
+        expect(String(statusEvent?.attributes?.["context_management.summary"])).toContain(
+            "Inserted context status"
+        );
+        expect(
+            statusEvent?.attributes?.["context_management.working_budget_utilization_percent"]
+        ).toBe(86);
+
+        const decayEvent = events.find(
+            (event) =>
+                event.eventName === "context_management.strategy_complete.tool-result-decay"
+        );
+        expect(decayEvent).toBeDefined();
+        expect(String(decayEvent?.attributes?.["context_management.summary"])).toContain(
+            "tool-result decay"
+        );
 
         const toolEvent = events.find(
-            (event) => event.eventName === "context_management.tool_execute_complete"
+            (event) => event.eventName === "context_management.tool_execute_complete.scratchpad"
         );
         expect(toolEvent).toBeDefined();
         expect(
@@ -224,5 +282,19 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(toolEvent?.attributes?.["context_management.tool_result_json"])
         ).toContain("call-obsolete");
+        expect(String(toolEvent?.attributes?.["context_management.summary"])).toContain(
+            "Updated scratchpad"
+        );
+        expect(toolEvent?.attributes?.["context_management.notes_char_count"]).toBe(30);
+        expect(toolEvent?.attributes?.["context_management.omit_tool_call_id_count"]).toBe(1);
+
+        const runtimeCompleteEvent = events.find(
+            (event) => event.eventName === "context_management.runtime_complete"
+        );
+        expect(runtimeCompleteEvent).toBeDefined();
+        expect(String(runtimeCompleteEvent?.attributes?.["context_management.summary"])).toContain(
+            "Completed context management"
+        );
+        expect(runtimeCompleteEvent?.attributes?.["context_management.tokens_saved"]).not.toBeUndefined();
     });
 });

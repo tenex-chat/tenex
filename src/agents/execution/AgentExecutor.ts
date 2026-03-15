@@ -20,6 +20,10 @@ import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError } from "@/lib/error-formatter";
+import {
+    createTenexSystemReminderContext,
+    runWithSystemReminderContext,
+} from "@/llm/system-reminder-context";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
@@ -120,165 +124,167 @@ export class AgentExecutor {
             },
         }, otelContext.active());
 
-        return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
-            try {
-                // Get project ID for multi-project isolation in daemon mode
-                const projectCtx = getProjectContext();
-                const dTagValue = projectCtx.project.tagValue("d");
-                if (!dTagValue) {
-                    throw new Error("Project missing d-tag");
-                }
-                const projectId = createProjectDTag(dTagValue);
+        return otelContext.with(trace.setSpan(otelContext.active(), span), async () =>
+            runWithSystemReminderContext(async () => {
+                try {
+                    // Get project ID for multi-project isolation in daemon mode
+                    const projectCtx = getProjectContext();
+                    const dTagValue = projectCtx.project.tagValue("d");
+                    if (!dTagValue) {
+                        throw new Error("Project missing d-tag");
+                    }
+                    const projectId = createProjectDTag(dTagValue);
 
-                const { ralNumber, isResumption, markersToPublish } = await resolveRAL({
-                    agentPubkey: context.agent.pubkey,
-                    conversationId: context.conversationId,
-                    projectId,
-                    triggeringEventId: context.triggeringEvent.id,
-                    span,
-                });
-
-                // RACE CONDITION FIX: Early kill check
-                // If this conversation was killed before the agent started (or during RAL resolution),
-                // abort immediately without spending compute resources.
-                const ralRegistry = RALRegistry.getInstance();
-                if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
-                    span.addEvent("executor.aborted_early_kill", {
-                        "ral.number": ralNumber,
-                        "agent.pubkey": context.agent.pubkey.substring(0, 12),
-                        "conversation.id": shortenConversationId(context.conversationId),
+                    const { ralNumber, isResumption, markersToPublish } = await resolveRAL({
+                        agentPubkey: context.agent.pubkey,
+                        conversationId: context.conversationId,
+                        projectId,
+                        triggeringEventId: context.triggeringEvent.id,
+                        span,
                     });
 
-                    logger.info("[AgentExecutor] Execution aborted - conversation was killed before agent started", {
-                        agent: context.agent.slug,
-                        conversationId: shortenConversationId(context.conversationId),
-                        ralNumber,
+                    // RACE CONDITION FIX: Early kill check
+                    // If this conversation was killed before the agent started (or during RAL resolution),
+                    // abort immediately without spending compute resources.
+                    const ralRegistry = RALRegistry.getInstance();
+                    if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
+                        span.addEvent("executor.aborted_early_kill", {
+                            "ral.number": ralNumber,
+                            "agent.pubkey": context.agent.pubkey.substring(0, 12),
+                            "conversation.id": shortenConversationId(context.conversationId),
+                        });
+
+                        logger.info("[AgentExecutor] Execution aborted - conversation was killed before agent started", {
+                            agent: context.agent.slug,
+                            conversationId: shortenConversationId(context.conversationId),
+                            ralNumber,
+                        });
+
+                        // Clean up the RAL we just created since we're not going to use it
+                        ralRegistry.clear(context.agent.pubkey, context.conversationId);
+
+                        span.setStatus({ code: SpanStatusCode.OK, message: "aborted_early_kill" });
+                        return undefined;
+                    }
+
+                    const contextWithRal = { ...context, ralNumber };
+                    const { fullContext, toolTracker, agentPublisher, cleanup } =
+                        this.prepareExecution(contextWithRal);
+
+                    // Publish delegation marker updates to Nostr
+                    // This happens after RAL resolution when delegations have completed
+                    if (markersToPublish && markersToPublish.length > 0) {
+                        span.addEvent("executor.publishing_delegation_markers", {
+                            "marker.count": markersToPublish.length,
+                        });
+
+                        for (const marker of markersToPublish) {
+                            try {
+                                await agentPublisher.delegationMarker(marker);
+                            } catch (error) {
+                                logger.warn("Failed to publish delegation marker", {
+                                    delegationConversationId: marker.delegationConversationId.substring(0, 12),
+                                    status: marker.status,
+                                    error: formatAnyError(error),
+                                });
+                            }
+                        }
+                    }
+
+                    const conversation = fullContext.getConversation();
+                    if (conversation) {
+                        span.setAttributes({
+                            "conversation.message_count": conversation.getMessageCount(),
+                        });
+                    }
+
+                    span.addEvent("executor.started", {
+                        ral_number: ralNumber,
+                        is_resumption: isResumption,
                     });
 
-                    // Clean up the RAL we just created since we're not going to use it
-                    ralRegistry.clear(context.agent.pubkey, context.conversationId);
+                    try {
+                        const result = await this.executeOnce(
+                            fullContext,
+                            toolTracker,
+                            agentPublisher,
+                            ralNumber
+                        );
 
-                    span.setStatus({ code: SpanStatusCode.OK, message: "aborted_early_kill" });
-                    return undefined;
-                }
+                        span.setStatus({ code: SpanStatusCode.OK });
+                        return result;
+                    } finally {
+                        await cleanup();
+                    }
+                } catch (error) {
+                    span.recordException(error as Error);
+                    span.setStatus({ code: SpanStatusCode.ERROR });
 
-                const contextWithRal = { ...context, ralNumber };
-                const { fullContext, toolTracker, agentPublisher, cleanup } =
-                    this.prepareExecution(contextWithRal);
+                    const errorMessage = formatAnyError(error);
+                    const isCreditsError =
+                        errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
 
-                // Publish delegation marker updates to Nostr
-                // This happens after RAL resolution when delegations have completed
-                if (markersToPublish && markersToPublish.length > 0) {
-                    span.addEvent("executor.publishing_delegation_markers", {
-                        "marker.count": markersToPublish.length,
-                    });
+                    const displayMessage = isCreditsError
+                        ? "Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
+                        : `Unable to process your request due to an error: ${errorMessage}`;
 
-                    for (const marker of markersToPublish) {
+                    const conversation = context.getConversation();
+                    if (conversation) {
+                        const agentPublisher = new AgentPublisher(context.agent);
                         try {
-                            await agentPublisher.delegationMarker(marker);
-                        } catch (error) {
-                            logger.warn("Failed to publish delegation marker", {
-                                delegationConversationId: marker.delegationConversationId.substring(0, 12),
-                                status: marker.status,
-                                error: formatAnyError(error),
+                            await agentPublisher.error(
+                                {
+                                    message: displayMessage,
+                                    errorType: isCreditsError ? "insufficient_credits" : "execution_error",
+                                },
+                                {
+                                    triggeringEvent: context.triggeringEvent,
+                                    rootEvent: { id: conversation.getRootEventId() },
+                                    conversationId: conversation.id,
+                                    ralNumber: 0,
+                                }
+                            );
+                        } catch (publishError) {
+                            logger.error("Failed to publish execution error event", {
+                                error: formatAnyError(publishError),
                             });
                         }
                     }
-                }
 
-                const conversation = fullContext.getConversation();
-                if (conversation) {
-                    span.setAttributes({
-                        "conversation.message_count": conversation.getMessageCount(),
+                    logger.writeToWarnLog({
+                        timestamp: new Date().toISOString(),
+                        level: "error",
+                        component: "AgentExecutor",
+                        message: isCreditsError
+                            ? "Execution failed due to insufficient credits"
+                            : "Agent execution failed",
+                        context: {
+                            agentSlug: context.agent.slug,
+                            conversationId: conversation?.id?.substring(0, 12),
+                            isCreditsError,
+                            errorType: isCreditsError ? "insufficient_credits" : "execution_error",
+                        },
+                        error: errorMessage,
+                        stack: error instanceof Error ? error.stack : undefined,
                     });
-                }
 
-                span.addEvent("executor.started", {
-                    ral_number: ralNumber,
-                    is_resumption: isResumption,
-                });
-
-                try {
-                    const result = await this.executeOnce(
-                        fullContext,
-                        toolTracker,
-                        agentPublisher,
-                        ralNumber
+                    logger.error(
+                        isCreditsError
+                            ? "[AgentExecutor] Execution failed due to insufficient credits"
+                            : "[AgentExecutor] Execution failed",
+                        {
+                            agent: context.agent.slug,
+                            error: errorMessage,
+                            conversationId: context.conversationId,
+                        }
                     );
 
-                    span.setStatus({ code: SpanStatusCode.OK });
-                    return result;
+                    throw error;
                 } finally {
-                    await cleanup();
+                    span.end();
                 }
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
-
-                const errorMessage = formatAnyError(error);
-                const isCreditsError =
-                    errorMessage.includes("Insufficient credits") || errorMessage.includes("402");
-
-                const displayMessage = isCreditsError
-                    ? "Unable to process your request: Insufficient credits. Please add more credits at https://openrouter.ai/settings/credits to continue."
-                    : `Unable to process your request due to an error: ${errorMessage}`;
-
-                const conversation = context.getConversation();
-                if (conversation) {
-                    const agentPublisher = new AgentPublisher(context.agent);
-                    try {
-                        await agentPublisher.error(
-                            {
-                                message: displayMessage,
-                                errorType: isCreditsError ? "insufficient_credits" : "execution_error",
-                            },
-                            {
-                                triggeringEvent: context.triggeringEvent,
-                                rootEvent: { id: conversation.getRootEventId() },
-                                conversationId: conversation.id,
-                                ralNumber: 0,
-                            }
-                        );
-                    } catch (publishError) {
-                        logger.error("Failed to publish execution error event", {
-                            error: formatAnyError(publishError),
-                        });
-                    }
-                }
-
-                logger.writeToWarnLog({
-                    timestamp: new Date().toISOString(),
-                    level: "error",
-                    component: "AgentExecutor",
-                    message: isCreditsError
-                        ? "Execution failed due to insufficient credits"
-                        : "Agent execution failed",
-                    context: {
-                        agentSlug: context.agent.slug,
-                        conversationId: conversation?.id?.substring(0, 12),
-                        isCreditsError,
-                        errorType: isCreditsError ? "insufficient_credits" : "execution_error",
-                    },
-                    error: errorMessage,
-                    stack: error instanceof Error ? error.stack : undefined,
-                });
-
-                logger.error(
-                    isCreditsError
-                        ? "[AgentExecutor] Execution failed due to insufficient credits"
-                        : "[AgentExecutor] Execution failed",
-                    {
-                        agent: context.agent.slug,
-                        error: errorMessage,
-                        conversationId: context.conversationId,
-                    }
-                );
-
-                throw error;
-            } finally {
-                span.end();
-            }
-        });
+            }, createTenexSystemReminderContext())
+        );
     }
 
     /**

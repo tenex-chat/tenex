@@ -1,3 +1,4 @@
+import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
@@ -16,7 +17,9 @@ export interface TenexReminderData {
     completedDelegations: CompletedDelegation[];
 }
 
-async function todoListProvider(data: TenexReminderData | undefined) {
+async function todoListProvider(
+    data: TenexReminderData | undefined
+): Promise<SystemReminderDescriptor | null> {
     if (!data) return null;
 
     const todoContent = await agentTodosFragment.template({
@@ -29,7 +32,9 @@ async function todoListProvider(data: TenexReminderData | undefined) {
     return { type: "todo-list", content: todoContent };
 }
 
-async function responseRoutingProvider(data: TenexReminderData | undefined) {
+async function responseRoutingProvider(
+    data: TenexReminderData | undefined
+): Promise<SystemReminderDescriptor | null> {
     if (!data) return null;
 
     const pubkeyService = getPubkeyService();
@@ -41,7 +46,9 @@ async function responseRoutingProvider(data: TenexReminderData | undefined) {
     };
 }
 
-async function delegationsProvider(data: TenexReminderData | undefined) {
+async function delegationsProvider(
+    data: TenexReminderData | undefined
+): Promise<SystemReminderDescriptor | null> {
     if (!data) return null;
 
     const allDelegatedPubkeys = [
@@ -66,16 +73,11 @@ async function delegationsProvider(data: TenexReminderData | undefined) {
     };
 }
 
-let providersInitialized = false;
-
 export function initializeReminderProviders(): void {
-    if (providersInitialized) return;
-
     const ctx = getSystemReminderContext();
     ctx.registerProvider("todo-list", todoListProvider);
     ctx.registerProvider("response-routing", responseRoutingProvider);
     ctx.registerProvider("delegations", delegationsProvider);
-    providersInitialized = true;
 }
 
 export function updateReminderData(data: TenexReminderData): void {

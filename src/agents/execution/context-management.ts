@@ -1,7 +1,8 @@
 import { trace } from "@opentelemetry/api";
-import type { LanguageModelMiddleware } from "ai";
+import type { LanguageModel, LanguageModelMiddleware } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
+    ContextWindowStatusStrategy,
     ContextUtilizationReminderStrategy,
     LLMSummarizationStrategy,
     ScratchpadStrategy,
@@ -14,9 +15,12 @@ import {
     type ContextManagementStrategy,
     type ContextManagementTelemetryEvent,
 } from "ai-sdk-context-management";
+import { createSystemReminderSink } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { providerRegistry } from "@/llm/providers";
+import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
 import type { AISdkTool } from "@/tools/types";
@@ -169,6 +173,549 @@ function addAttribute(
     }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function getRecord(value: unknown, key: string): Record<string, unknown> | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    return isRecord(nested) ? nested : undefined;
+}
+
+function getNumber(value: unknown, key: string): number | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    return typeof nested === "number" && Number.isFinite(nested) ? nested : undefined;
+}
+
+function getBoolean(value: unknown, key: string): boolean | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    return typeof nested === "boolean" ? nested : undefined;
+}
+
+function getString(value: unknown, key: string): string | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    return typeof nested === "string" && nested.length > 0 ? nested : undefined;
+}
+
+function getStringArray(value: unknown, key: string): string[] | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    if (!Array.isArray(nested)) {
+        return undefined;
+    }
+
+    return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function getArrayLength(value: unknown, key: string): number | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    return Array.isArray(nested) ? nested.length : undefined;
+}
+
+function humanizeToken(token: string): string {
+    return token.replace(/[-_]+/g, " ");
+}
+
+function formatTelemetryNumber(value: number): string {
+    return Math.round(value).toLocaleString("en-US");
+}
+
+function formatCount(value: number, singular: string, plural = `${singular}s`): string {
+    return `${formatTelemetryNumber(value)} ${value === 1 ? singular : plural}`;
+}
+
+function clipTelemetrySummary(summary: string): string {
+    const trimmed = summary.trim().replace(/\s+/g, " ");
+    return trimmed.length <= 240 ? trimmed : `${trimmed.slice(0, 237)}...`;
+}
+
+function buildRuntimeStartSummary(event: Extract<ContextManagementTelemetryEvent, { type: "runtime-start" }>): string {
+    const optionalTools = event.optionalToolNames.length > 0
+        ? event.optionalToolNames.join(", ")
+        : "none";
+    return clipTelemetrySummary(
+        `Running ${formatCount(event.strategyNames.length, "strategy")} over ~${formatTelemetryNumber(event.estimatedTokensBefore)} tokens; optional tools: ${optionalTools}.`
+    );
+}
+
+function buildSystemPromptCachingSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const before = getNumber(strategyPayload, "systemMessageCountBefore");
+    const after = getNumber(strategyPayload, "systemMessageCountAfter");
+    const tagged = getNumber(strategyPayload, "taggedSystemMessageCount");
+
+    if (event.reason === "no-system-messages") {
+        return "Skipped system prompt caching because the prompt has no system messages.";
+    }
+
+    if (before !== undefined && after !== undefined) {
+        const taggedSuffix = tagged !== undefined
+            ? `; kept ${formatCount(tagged, "tagged reminder")}.`
+            : ".";
+        return clipTelemetrySummary(
+            `Reordered system messages and consolidated ${formatTelemetryNumber(before)} into ${formatTelemetryNumber(after)}${taggedSuffix}`
+        );
+    }
+
+    return clipTelemetrySummary(
+        `Adjusted the system-message prefix because ${humanizeToken(event.reason)}.`
+    );
+}
+
+function buildToolResultDecaySummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
+    const truncatedCount = getStringArray(strategyPayload, "truncatedToolCallIds")?.length ?? 0;
+    const placeholderCount = getStringArray(strategyPayload, "placeholderToolCallIds")?.length ?? 0;
+    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
+
+    if (event.reason === "below-token-threshold") {
+        return clipTelemetrySummary(
+            `Skipped tool-result decay because the prompt is within budget at ~${formatTelemetryNumber(currentPromptTokens ?? event.estimatedTokensBefore)} tokens.`
+        );
+    }
+
+    if (event.reason === "no-tool-exchanges") {
+        return "Skipped tool-result decay because there were no tool exchanges to compress.";
+    }
+
+    if (event.reason === "no-eligible-tool-exchanges") {
+        return "Skipped tool-result decay because all tool results were still recent or pinned.";
+    }
+
+    const parts: string[] = [];
+    if (truncatedCount > 0) {
+        parts.push(`truncated ${formatCount(truncatedCount, "tool result")}`);
+    }
+    if (placeholderCount > 0) {
+        parts.push(`replaced ${formatCount(placeholderCount, "older tool result")} with placeholders`);
+    }
+
+    if (parts.length === 0) {
+        parts.push("compressed stale tool results");
+    }
+
+    return clipTelemetrySummary(
+        `${parts.join(" and ")}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)}).`
+    );
+}
+
+function buildScratchpadSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const currentState = getRecord(strategyPayload, "currentState");
+    const noteChars = (getString(currentState, "notes") ?? "").length;
+    const keepLastMessages = getNumber(currentState, "keepLastMessages");
+    const forcedToolChoice = getBoolean(strategyPayload, "forcedToolChoice") ?? false;
+    const estimatedTokens = getNumber(strategyPayload, "estimatedTokens");
+    const forceThresholdTokens = getNumber(strategyPayload, "forceThresholdTokens");
+    const appliedOmitCount = getStringArray(strategyPayload, "appliedOmitToolCallIds")?.length ?? 0;
+    const removedExchanges = event.removedToolExchangesDelta;
+
+    const parts = [
+        `Rendered scratchpad context using ${formatTelemetryNumber(noteChars)} note chars`,
+        `removed ${formatCount(removedExchanges, "tool exchange")} from future context`,
+    ];
+
+    if (appliedOmitCount > 0) {
+        parts.push(`applied ${formatCount(appliedOmitCount, "omit tool id")}`);
+    }
+
+    if (keepLastMessages !== undefined) {
+        parts.push(`kept the last ${formatTelemetryNumber(keepLastMessages)} non-system messages`);
+    }
+
+    if (forcedToolChoice) {
+        parts.push(
+            `forced the next tool call to scratchpad at ~${formatTelemetryNumber(
+                estimatedTokens ?? event.estimatedTokensAfter
+            )} tokens${forceThresholdTokens !== undefined ? ` (threshold ~${formatTelemetryNumber(forceThresholdTokens)})` : ""}`
+        );
+    }
+
+    return clipTelemetrySummary(`${parts.join("; ")}.`);
+}
+
+function buildContextUtilizationReminderSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const currentTokens = getNumber(strategyPayload, "currentTokens") ?? event.estimatedTokensBefore;
+    const warningThresholdTokens = getNumber(strategyPayload, "warningThresholdTokens");
+    const utilizationPercent = getNumber(strategyPayload, "utilizationPercent");
+    const mode = getString(strategyPayload, "mode") ?? "generic";
+
+    if (event.reason === "below-warning-threshold") {
+        return clipTelemetrySummary(
+            `Skipped ${mode} context warning because the prompt is at ~${formatTelemetryNumber(currentTokens)} tokens${warningThresholdTokens !== undefined ? `, below the ~${formatTelemetryNumber(warningThresholdTokens)} warning threshold` : ""}.`
+        );
+    }
+
+    return clipTelemetrySummary(
+        `Inserted a ${mode} context warning at ~${formatTelemetryNumber(currentTokens)} tokens${utilizationPercent !== undefined ? ` (${formatTelemetryNumber(utilizationPercent)}% of the working budget)` : ""}.`
+    );
+}
+
+function buildContextWindowStatusSummary(
+    _event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const estimatedPromptTokens = getNumber(strategyPayload, "estimatedPromptTokens");
+    const workingBudgetUtilizationPercent = getNumber(
+        strategyPayload,
+        "workingBudgetUtilizationPercent"
+    );
+    const rawContextWindow = getNumber(strategyPayload, "rawContextWindow");
+    const rawContextUtilizationPercent = getNumber(
+        strategyPayload,
+        "rawContextUtilizationPercent"
+    );
+
+    if (estimatedPromptTokens === undefined) {
+        return "Skipped context window status because no context capacity data was available.";
+    }
+
+    const parts = [
+        `Inserted context status for ~${formatTelemetryNumber(estimatedPromptTokens)} prompt tokens`,
+    ];
+
+    if (workingBudgetUtilizationPercent !== undefined) {
+        parts.push(`${formatTelemetryNumber(workingBudgetUtilizationPercent)}% of the working budget`);
+    }
+
+    if (rawContextWindow !== undefined && rawContextUtilizationPercent !== undefined) {
+        parts.push(
+            `${formatTelemetryNumber(rawContextUtilizationPercent)}% of the raw ${formatTelemetryNumber(rawContextWindow)}-token model window`
+        );
+    }
+
+    return clipTelemetrySummary(`${parts.join(", ")}.`);
+}
+
+function buildSummarizationSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const estimatedTokens = getNumber(strategyPayload, "estimatedTokens") ?? event.estimatedTokensBefore;
+    const messageCount = getArrayLength(strategyPayload, "messagesToSummarize");
+    const summaryText = getString(strategyPayload, "summaryText");
+    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
+
+    if (event.reason === "below-token-threshold") {
+        return clipTelemetrySummary(
+            `Skipped summarization because the prompt is within budget at ~${formatTelemetryNumber(estimatedTokens)} tokens.`
+        );
+    }
+
+    if (event.reason === "no-summarizable-messages") {
+        return "Skipped summarization because there were no older messages eligible for compression.";
+    }
+
+    return clipTelemetrySummary(
+        `Summarized ${formatCount(messageCount ?? 0, "message")} into a ${formatTelemetryNumber(
+            (summaryText ?? "").length
+        )}-char summary, saving ~${formatTelemetryNumber(tokensSaved)} tokens.`
+    );
+}
+
+function buildFallbackStrategySummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>
+): string {
+    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
+
+    if (event.outcome === "skipped") {
+        return clipTelemetrySummary(
+            `${event.strategyName} skipped because ${humanizeToken(event.reason)}.`
+        );
+    }
+
+    return clipTelemetrySummary(
+        `${event.strategyName} applied because ${humanizeToken(event.reason)}, saving ~${formatTelemetryNumber(tokensSaved)} tokens.`
+    );
+}
+
+function buildStrategyCompleteSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    switch (event.strategyName) {
+        case "system-prompt-caching":
+            return buildSystemPromptCachingSummary(event, strategyPayload);
+        case "tool-result-decay":
+            return buildToolResultDecaySummary(event, strategyPayload);
+        case "scratchpad":
+            return buildScratchpadSummary(event, strategyPayload);
+        case "context-utilization-reminder":
+            return buildContextUtilizationReminderSummary(event, strategyPayload);
+        case "context-window-status":
+            return buildContextWindowStatusSummary(event, strategyPayload);
+        case "summarization":
+        case "llm-summarization":
+            return buildSummarizationSummary(event, strategyPayload);
+        default:
+            return buildFallbackStrategySummary(event);
+    }
+}
+
+function buildRuntimeCompleteSummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>
+): string {
+    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
+    return clipTelemetrySummary(
+        `Completed context management: ~${formatTelemetryNumber(event.estimatedTokensBefore)} -> ~${formatTelemetryNumber(event.estimatedTokensAfter)} tokens, saved ~${formatTelemetryNumber(tokensSaved)} tokens, removed ${formatCount(event.removedToolExchangesTotal, "tool exchange")}, pinned ${formatCount(event.pinnedToolCallIdsTotal, "tool call id")}.`
+    );
+}
+
+function buildToolExecuteSummary(
+    event:
+        | Extract<ContextManagementTelemetryEvent, { type: "tool-execute-start" }>
+        | Extract<ContextManagementTelemetryEvent, { type: "tool-execute-complete" }>
+        | Extract<ContextManagementTelemetryEvent, { type: "tool-execute-error" }>
+): string {
+    if (event.type === "tool-execute-start") {
+        return clipTelemetrySummary(
+            `Executing ${event.toolName}${event.strategyName ? ` for ${event.strategyName}` : ""}.`
+        );
+    }
+
+    if (event.type === "tool-execute-error") {
+        return clipTelemetrySummary(
+            `${event.toolName} failed${event.strategyName ? ` during ${event.strategyName}` : ""}.`
+        );
+    }
+
+    if (event.toolName === "scratchpad") {
+        const inputNotes = getString(event.payloads.input, "notes") ?? "";
+        const omitCount = getStringArray(event.payloads.input, "omitToolCallIds")?.length ?? 0;
+        const keepLastMessages = getNumber(event.payloads.input, "keepLastMessages");
+
+        return clipTelemetrySummary(
+            `Updated scratchpad: ${formatTelemetryNumber(inputNotes.length)} note chars, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
+        );
+    }
+
+    return clipTelemetrySummary(
+        `Executed ${event.toolName}${event.strategyName ? ` for ${event.strategyName}` : ""}.`
+    );
+}
+
+function buildDerivedTelemetryAttributes(
+    event: ContextManagementTelemetryEvent
+): Record<string, string | number | boolean> {
+    const attributes: Record<string, string | number | boolean> = {
+        "context_management.event_type": event.type,
+    };
+
+    switch (event.type) {
+        case "runtime-start":
+            attributes["context_management.strategy_count"] = event.strategyNames.length;
+            attributes["context_management.optional_tool_count"] = event.optionalToolNames.length;
+            attributes["context_management.summary"] = buildRuntimeStartSummary(event);
+            break;
+        case "strategy-complete": {
+            const strategyPayload = isRecord(event.payloads.strategy) ? event.payloads.strategy : undefined;
+            const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
+            attributes["context_management.tokens_saved"] = tokensSaved;
+            attributes["context_management.summary"] = buildStrategyCompleteSummary(
+                event,
+                strategyPayload
+            );
+
+            switch (event.strategyName) {
+                case "system-prompt-caching":
+                    addAttribute(
+                        attributes,
+                        "context_management.system_message_count_before",
+                        getNumber(strategyPayload, "systemMessageCountBefore")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.system_message_count_after",
+                        getNumber(strategyPayload, "systemMessageCountAfter")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.tagged_system_message_count",
+                        getNumber(strategyPayload, "taggedSystemMessageCount")
+                    );
+                    break;
+                case "tool-result-decay":
+                    addAttribute(
+                        attributes,
+                        "context_management.current_prompt_tokens",
+                        getNumber(strategyPayload, "currentPromptTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.truncated_tool_result_count",
+                        getStringArray(strategyPayload, "truncatedToolCallIds")?.length
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.placeholder_tool_result_count",
+                        getStringArray(strategyPayload, "placeholderToolCallIds")?.length
+                    );
+                    break;
+                case "scratchpad": {
+                    const currentState = getRecord(strategyPayload, "currentState");
+                    addAttribute(
+                        attributes,
+                        "context_management.notes_char_count",
+                        (getString(currentState, "notes") ?? "").length
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.applied_omit_tool_call_id_count",
+                        getStringArray(strategyPayload, "appliedOmitToolCallIds")?.length
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.keep_last_messages",
+                        getNumber(currentState, "keepLastMessages")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.forced_tool_choice",
+                        getBoolean(strategyPayload, "forcedToolChoice")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.force_threshold_tokens",
+                        getNumber(strategyPayload, "forceThresholdTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.estimated_prompt_tokens",
+                        getNumber(strategyPayload, "estimatedTokens")
+                    );
+                    break;
+                }
+                case "context-utilization-reminder":
+                    addAttribute(
+                        attributes,
+                        "context_management.current_prompt_tokens",
+                        getNumber(strategyPayload, "currentTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.warning_threshold_tokens",
+                        getNumber(strategyPayload, "warningThresholdTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.utilization_percent",
+                        getNumber(strategyPayload, "utilizationPercent")
+                    );
+                    break;
+                case "context-window-status":
+                    addAttribute(
+                        attributes,
+                        "context_management.estimated_prompt_tokens",
+                        getNumber(strategyPayload, "estimatedPromptTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.working_budget_utilization_percent",
+                        getNumber(strategyPayload, "workingBudgetUtilizationPercent")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.raw_context_window",
+                        getNumber(strategyPayload, "rawContextWindow")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.raw_context_utilization_percent",
+                        getNumber(strategyPayload, "rawContextUtilizationPercent")
+                    );
+                    break;
+                case "summarization":
+                case "llm-summarization":
+                    addAttribute(
+                        attributes,
+                        "context_management.messages_summarized_count",
+                        getArrayLength(strategyPayload, "messagesToSummarize")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.summary_char_count",
+                        (getString(strategyPayload, "summaryText") ?? "").length
+                    );
+                    break;
+            }
+            break;
+        }
+        case "tool-execute-start":
+        case "tool-execute-complete":
+        case "tool-execute-error":
+            attributes["context_management.summary"] = buildToolExecuteSummary(event);
+            if (event.toolName === "scratchpad") {
+                addAttribute(
+                    attributes,
+                    "context_management.notes_char_count",
+                    (getString(event.payloads.input, "notes") ?? "").length
+                );
+                addAttribute(
+                    attributes,
+                    "context_management.omit_tool_call_id_count",
+                    getStringArray(event.payloads.input, "omitToolCallIds")?.length
+                );
+                addAttribute(
+                    attributes,
+                    "context_management.keep_last_messages",
+                    getNumber(event.payloads.input, "keepLastMessages")
+                );
+            }
+            break;
+        case "runtime-complete":
+            attributes["context_management.tokens_saved"] = Math.max(
+                0,
+                event.estimatedTokensBefore - event.estimatedTokensAfter
+            );
+            attributes["context_management.summary"] = buildRuntimeCompleteSummary(event);
+            break;
+    }
+
+    return attributes;
+}
+
+function sanitizeTelemetrySegment(value: string): string {
+    return value
+        .trim()
+        .replace(/[^a-zA-Z0-9_.-]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .toLowerCase();
+}
+
 function buildTelemetryAttributes(
     event: ContextManagementTelemetryEvent
 ): Record<string, string | number | boolean> {
@@ -292,7 +839,35 @@ function buildTelemetryAttributes(
             break;
     }
 
-    return attributes;
+    return {
+        ...attributes,
+        ...buildDerivedTelemetryAttributes(event),
+    };
+}
+
+function buildTelemetryEventName(event: ContextManagementTelemetryEvent): string {
+    switch (event.type) {
+        case "runtime-start":
+            return "context_management.runtime_start";
+        case "strategy-complete":
+            return `context_management.strategy_complete.${sanitizeTelemetrySegment(
+                event.strategyName
+            )}`;
+        case "tool-execute-start":
+            return `context_management.tool_execute_start.${sanitizeTelemetrySegment(
+                event.toolName
+            )}`;
+        case "tool-execute-complete":
+            return `context_management.tool_execute_complete.${sanitizeTelemetrySegment(
+                event.toolName
+            )}`;
+        case "tool-execute-error":
+            return `context_management.tool_execute_error.${sanitizeTelemetrySegment(
+                event.toolName
+            )}`;
+        case "runtime-complete":
+            return "context_management.runtime_complete";
+    }
 }
 
 function emitTelemetryEvent(event: ContextManagementTelemetryEvent): void {
@@ -301,30 +876,13 @@ function emitTelemetryEvent(event: ContextManagementTelemetryEvent): void {
         return;
     }
 
-    const eventName = (() => {
-        switch (event.type) {
-            case "runtime-start":
-                return "context_management.runtime_start";
-            case "strategy-complete":
-                return "context_management.strategy_complete";
-            case "tool-execute-start":
-                return "context_management.tool_execute_start";
-            case "tool-execute-complete":
-                return "context_management.tool_execute_complete";
-            case "tool-execute-error":
-                return "context_management.tool_execute_error";
-            case "runtime-complete":
-                return "context_management.runtime_complete";
-        }
-    })();
-
-    span.addEvent(eventName, buildTelemetryAttributes(event));
+    span.addEvent(buildTelemetryEventName(event), buildTelemetryAttributes(event));
 }
 
 function createSummarizationModel(options: {
     conversationId: string;
     agent: AgentInstance;
-}) {
+}): LanguageModel | undefined {
     try {
         const configName = configService.getSummarizationModelName();
         const llmService = configService.createLLMService(configName, {
@@ -422,10 +980,28 @@ function createConversationContextManagementRuntime(options: {
         );
     }
 
+    strategies.push(
+        new ContextWindowStatusStrategy({
+            workingTokenBudget: options.config.workingTokenBudget,
+            estimator,
+            getContextWindow: ({ model }) => {
+                if (!model) {
+                    return undefined;
+                }
+
+                return getContextWindow(
+                    normalizeProviderId(model.provider),
+                    model.modelId
+                );
+            },
+        })
+    );
+
     return createContextManagementRuntime({
         strategies,
         telemetry: emitTelemetryEvent,
         estimator,
+        reminderSink: createSystemReminderSink(getSystemReminderContext()),
     });
 }
 
@@ -451,8 +1027,9 @@ export function createExecutionContextManagement(options: {
         config,
         scratchpadAvailable,
     });
-    const optionalTools =
-        scratchpadAvailable ? (runtime.optionalTools as Record<string, AISdkTool>) : {};
+    const optionalTools = scratchpadAvailable
+        ? (runtime.optionalTools as unknown as Record<string, AISdkTool>)
+        : {};
 
     return {
         middleware: runtime.middleware as LanguageModelMiddleware,

@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import type { AgentInstance } from "@/agents/types";
+import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import * as contextWindowCache from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import {
     CONTEXT_MANAGEMENT_KEY,
@@ -45,9 +48,11 @@ describe("TENEX context management integration", () => {
         store.load(PROJECT_ID, CONVERSATION_ID);
         originalLoadedConfig = (configService as unknown as { loadedConfig?: unknown }).loadedConfig;
         (configService as unknown as { loadedConfig?: unknown }).loadedConfig = undefined;
+        resetSystemReminders();
     });
 
     afterEach(async () => {
+        resetSystemReminders();
         (configService as unknown as { loadedConfig?: unknown }).loadedConfig = originalLoadedConfig;
         await rm(TEST_DIR, { recursive: true, force: true });
     });
@@ -125,8 +130,17 @@ describe("TENEX context management integration", () => {
             },
         } as any);
 
-        expect(JSON.stringify(transformed?.prompt)).toContain("Focus on the parser errors");
+        expect(JSON.stringify(transformed?.prompt)).not.toContain("Focus on the parser errors");
         expect(JSON.stringify(transformed?.prompt)).not.toContain("\"toolCallId\":\"call-old\"");
+        const scratchpadReminders = await getSystemReminderContext().collect();
+        expect(scratchpadReminders).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: "scratchpad",
+                    content: expect.stringContaining("Focus on the parser errors"),
+                }),
+            ])
+        );
     });
 
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
@@ -263,6 +277,11 @@ describe("TENEX context management integration", () => {
         } as any);
 
         expect(JSON.stringify(shortPrompt?.prompt)).not.toContain("[Context utilization:");
+        const shortPromptReminders = await getSystemReminderContext().collect();
+        expect(shortPromptReminders.map((reminder) => reminder.type)).toEqual([
+            "scratchpad",
+            "context-window-status",
+        ]);
 
         const longPrompt = await contextManagement!.middleware.transformParams?.({
             params: {
@@ -296,8 +315,20 @@ describe("TENEX context management integration", () => {
             },
         } as any);
 
-        expect(JSON.stringify(longPrompt?.prompt)).toContain("[Context utilization:");
-        expect(JSON.stringify(longPrompt?.prompt)).toContain("scratchpad(...)");
+        expect(JSON.stringify(longPrompt?.prompt)).not.toContain("[Context utilization:");
+        const utilizationReminders = await getSystemReminderContext().collect();
+        expect(utilizationReminders).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: "context-utilization",
+                    content: expect.stringContaining("[Context utilization:"),
+                }),
+            ])
+        );
+        const utilizationReminder = utilizationReminders.find(
+            (reminder) => reminder.type === "context-utilization"
+        );
+        expect(utilizationReminder?.content).toContain("scratchpad(...)");
     });
 
     test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
@@ -466,6 +497,89 @@ describe("TENEX context management integration", () => {
 
         expect(transformed?.toolChoice).toBeUndefined();
         expect(JSON.stringify(transformed?.prompt)).not.toContain("Use scratchpad(...) now");
-        expect(JSON.stringify(transformed?.prompt)).toContain("Trim or summarize stale context before continuing.");
+        const genericReminder = await getSystemReminderContext().collect();
+        expect(genericReminder).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: "context-utilization",
+                    content: expect.stringContaining(
+                        "Trim or summarize stale context before continuing."
+                    ),
+                }),
+            ])
+        );
+        expect(genericReminder.some((reminder) => reminder.type === "scratchpad")).toBe(false);
+    });
+
+    test("context status reminder reports working budget and raw model window from the final prompt state", async () => {
+        setContextManagementConfig({
+            tokenBudget: 400,
+            scratchpadEnabled: false,
+            utilizationWarningEnabled: false,
+            summarizationFallbackEnabled: false,
+        });
+
+        using contextWindowSpy = spyOn(contextWindowCache, "getContextWindow").mockReturnValue(
+            200000
+        );
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "anthropic",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        expect(contextManagement).toBeDefined();
+
+        const transformed = await contextManagement!.middleware.transformParams?.({
+            params: {
+                prompt: [
+                    { role: "system", content: "You are helpful." },
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: "Inspect the parser flow and keep the prompt focused." }],
+                    },
+                ],
+                providerOptions: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                },
+            },
+            model: {
+                specificationVersion: "v3",
+                provider: "anthropic",
+                modelId: "claude-opus-4-5-20251101",
+                supportedUrls: {},
+                doGenerate: async () => {
+                    throw new Error("unused");
+                },
+                doStream: async () => {
+                    throw new Error("unused");
+                },
+            },
+        } as any);
+
+        expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context status]");
+        const contextStatusReminders = await getSystemReminderContext().collect();
+        expect(contextStatusReminders).toEqual([
+            expect.objectContaining({
+                type: "context-window-status",
+                content: expect.stringContaining("[Context status]"),
+            }),
+        ]);
+        expect(contextStatusReminders[0]?.content).toContain(
+            "Current prompt after context management:"
+        );
+        expect(contextStatusReminders[0]?.content).toContain(
+            "Working budget target: ~400 tokens"
+        );
+        expect(contextStatusReminders[0]?.content).toContain(
+            "Raw model context window: ~200,000 tokens"
+        );
     });
 });

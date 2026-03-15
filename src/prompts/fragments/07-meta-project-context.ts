@@ -209,16 +209,15 @@ export const metaProjectContextFragment: PromptFragment<MetaProjectContextArgs> 
         }
 
         const projectSections = otherProjects.map(project => {
-            const convLines = project.activeConversations.length > 0
-                ? project.activeConversations.map(conv => 
+            const convSection = project.activeConversations.length > 0
+                ? `- Active conversations:\n${project.activeConversations.map(conv =>
                     `  - "${conv.title}" - ${conv.agentName} (${conv.status}, ${conv.duration})`
-                ).join("\n")
-                : "  - No active conversations";
+                ).join("\n")}`
+                : "";
 
-            return `### Project: ${project.title}
-- ID: ${project.dTag}
-- Active conversations:
-${convLines}`;
+            return [`### Project: ${project.title}`, `- ID: ${project.dTag}`, convSection]
+                .filter(Boolean)
+                .join("\n");
         });
 
         return `## Cross-Project Context
