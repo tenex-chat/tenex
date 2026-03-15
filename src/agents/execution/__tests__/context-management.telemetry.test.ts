@@ -268,6 +268,9 @@ describe("TENEX context management telemetry", () => {
         expect(String(decayEvent?.attributes?.["context_management.summary"])).toContain(
             "tool-result decay"
         );
+        const decayPayloads = String(decayEvent?.attributes?.["context_management.strategy_payloads_json"]);
+        expect(decayPayloads).toContain("inputTruncatedCount");
+        expect(decayPayloads).toContain("inputPlaceholderCount");
 
         const toolEvent = events.find(
             (event) => event.eventName === "context_management.tool_execute_complete.scratchpad"

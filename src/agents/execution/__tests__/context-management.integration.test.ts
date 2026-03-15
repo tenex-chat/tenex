@@ -220,7 +220,7 @@ describe("TENEX context management integration", () => {
         } as any);
 
         const transformedJson = JSON.stringify(transformed?.prompt);
-        expect(transformedJson).toContain("[result omitted]");
+        expect(transformedJson).toContain("fs_read(tool:");
         expect(transformedJson).toContain("\"toolCallId\":\"call-1\"");
         expect(transformedJson).toContain("\"toolCallId\":\"call-9\"");
     });

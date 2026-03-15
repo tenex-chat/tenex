@@ -23,7 +23,7 @@
         "@opentelemetry/sdk-trace-node": "^2.6.0",
         "@opentelemetry/semantic-conventions": "^1.40.0",
         "ai": "^6.0.116",
-        "ai-sdk-context-management": "^0.2.4",
+        "ai-sdk-context-management": "^0.3.0",
         "ai-sdk-fs-tools": "^0.2.2",
         "ai-sdk-provider-codex-app-server": "1.1.7",
         "ai-sdk-system-reminders": "^0.2.1",
@@ -648,7 +648,7 @@
 
     "ai": ["ai@6.0.116", "", { "dependencies": { "@ai-sdk/gateway": "3.0.66", "@ai-sdk/provider": "3.0.8", "@ai-sdk/provider-utils": "4.0.19", "@opentelemetry/api": "1.9.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-7yM+cTmyRLeNIXwt4Vj+mrrJgVQ9RMIW5WO0ydoLoYkewIvsMcvUmqS4j2RJTUXaF1HphwmSKUMQ/HypNRGOmA=="],
 
-    "ai-sdk-context-management": ["ai-sdk-context-management@0.2.4", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-94reDjt1exzJrceDEEDd38PP5AOpgI70Gd/lhDUjokVK8fe/4iXQudxoPR7mkKFNF+3VlfCVeE/vxYKP8pv+1g=="],
+    "ai-sdk-context-management": ["ai-sdk-context-management@0.3.0", "", { "peerDependencies": { "@ai-sdk/provider": ">=1.0.0", "ai": ">=6.0.0" } }, "sha512-mXUXKv2d3onA9aym8J0q/6zD893nM+jFZzrB6IBkpuJZwq4eu7MIvR7is7C6zukZ4EIbcUNQaxoX/nm+kvym6Q=="],
 
     "ai-sdk-fs-tools": ["ai-sdk-fs-tools@0.2.2", "", { "dependencies": { "ai-sdk-system-reminders": "^0.2.0" }, "peerDependencies": { "ai": "^6.0.0", "zod": "^4.0.0" } }, "sha512-uoYIhFISNQ8GIPoYT0Tcw+PFUsG3l1zAx5xCM4uHWGeeks1uzu45Qr9HqRI8pGLGkneO2Uc6mFGywasyUhc3tA=="],
 

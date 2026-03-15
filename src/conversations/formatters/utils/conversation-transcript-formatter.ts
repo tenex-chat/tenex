@@ -1,4 +1,5 @@
 import type { ConversationEntry } from "@/conversations/types";
+import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { ToolCallPart } from "ai";
@@ -178,29 +179,6 @@ function extractToolCallParts(entry: ConversationEntry): ToolCallPart[] {
       toolName: typeof tool.toolName === "string" ? tool.toolName : "unknown",
       input: tool.input,
     })) as ToolCallPart[];
-}
-
-function resolveToolCallEventIdMap(entries: ConversationEntry[]): Map<string, string> {
-  const result = new Map<string, string>();
-
-  for (const entry of entries) {
-    if (entry.messageType !== "tool-result" || !entry.eventId || !entry.toolData) {
-      continue;
-    }
-
-    for (const part of entry.toolData) {
-      const raw = part as unknown as Record<string, unknown>;
-      if (typeof raw.toolCallId !== "string" || raw.toolCallId.length === 0) {
-        continue;
-      }
-
-      if (!result.has(raw.toolCallId)) {
-        result.set(raw.toolCallId, entry.eventId);
-      }
-    }
-  }
-
-  return result;
 }
 
 function resolveConversationRootEventId(

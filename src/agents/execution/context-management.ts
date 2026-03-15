@@ -14,10 +14,12 @@ import {
     type ContextManagementRuntime,
     type ContextManagementStrategy,
     type ContextManagementTelemetryEvent,
+    type DecayedToolContext,
 } from "ai-sdk-context-management";
 import { createSystemReminderSink } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { providerRegistry } from "@/llm/providers";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
@@ -29,6 +31,33 @@ const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
+const MAX_DESCRIPTION_LENGTH = 120;
+
+function sanitizeDescription(raw: string): string {
+    // eslint-disable-next-line no-control-regex
+    const cleaned = raw.replace(/[\x00-\x1f\x7f"[\]]/g, "").trim();
+    return cleaned.length <= MAX_DESCRIPTION_LENGTH
+        ? cleaned
+        : cleaned.slice(0, MAX_DESCRIPTION_LENGTH);
+}
+
+function buildDecayPlaceholder(
+    context: DecayedToolContext,
+    toolCallEventIdMap: Map<string, string>,
+): string {
+    const desc = typeof (context.input as Record<string, unknown>)?.description === "string"
+        ? sanitizeDescription((context.input as Record<string, unknown>).description as string)
+        : undefined;
+    const eventId = toolCallEventIdMap.get(context.toolCallId);
+    const id = eventId ?? context.toolCallId;
+    const descPart = desc ? ` -- "${desc}"` : "";
+
+    if (context.action === "placeholder") {
+        return `[${context.toolName} was used, id: ${id}${descPart} -- use fs_read(tool: "${id}") to retrieve]`;
+    }
+
+    return `[truncated, use fs_read(tool: "${id}") for full result]\n`;
+}
 
 export interface ExecutionContextManagement {
     middleware: LanguageModelMiddleware;
@@ -209,6 +238,8 @@ function buildToolResultDecaySummary(
     const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
     const truncatedCount = getNumber(strategyPayload, "truncatedCount") ?? 0;
     const placeholderCount = getNumber(strategyPayload, "placeholderCount") ?? 0;
+    const inputTruncatedCount = getNumber(strategyPayload, "inputTruncatedCount") ?? 0;
+    const inputPlaceholderCount = getNumber(strategyPayload, "inputPlaceholderCount") ?? 0;
     const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
     if (event.reason === "below-token-threshold") {
@@ -227,6 +258,12 @@ function buildToolResultDecaySummary(
     }
     if (placeholderCount > 0) {
         parts.push(`replaced ${formatCount(placeholderCount, "older tool result")} with placeholders`);
+    }
+    if (inputTruncatedCount > 0) {
+        parts.push(`truncated ${formatCount(inputTruncatedCount, "tool input")}`);
+    }
+    if (inputPlaceholderCount > 0) {
+        parts.push(`omitted ${formatCount(inputPlaceholderCount, "tool input")}`);
     }
 
     if (parts.length === 0) {
@@ -497,6 +534,16 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.placeholder_tool_result_count",
                         getNumber(strategyPayload, "placeholderCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.truncated_tool_input_count",
+                        getNumber(strategyPayload, "inputTruncatedCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.placeholder_tool_input_count",
+                        getNumber(strategyPayload, "inputPlaceholderCount")
                     );
                     addAttribute(
                         attributes,
@@ -824,9 +871,18 @@ function createConversationContextManagementRuntime(options: {
     scratchpadAvailable: boolean;
 }): ContextManagementRuntime {
     const estimator = createDefaultPromptTokenEstimator();
+
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
-        new ToolResultDecayStrategy({ estimator }),
+        new ToolResultDecayStrategy({
+            estimator,
+            placeholder: (context) => {
+                const toolCallEventIdMap = resolveToolCallEventIdMap(
+                    options.conversationStore.getAllMessages()
+                );
+                return buildDecayPlaceholder(context, toolCallEventIdMap);
+            },
+        }),
     ];
 
     const summarizationModel = createSummarizationModel({
