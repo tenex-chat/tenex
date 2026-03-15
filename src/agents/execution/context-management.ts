@@ -29,7 +29,6 @@ const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
-const TOOL_RESULT_DECAY_THRESHOLD_RATIO = 0.6;
 
 interface ResolvedContextManagementConfig {
     enabled: boolean;
@@ -177,15 +176,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
-function getRecord(value: unknown, key: string): Record<string, unknown> | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-
-    const nested = value[key];
-    return isRecord(nested) ? nested : undefined;
-}
-
 function getNumber(value: unknown, key: string): number | undefined {
     if (!isRecord(value)) {
         return undefined;
@@ -224,15 +214,6 @@ function getStringArray(value: unknown, key: string): string[] | undefined {
     }
 
     return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-}
-
-function getArrayLength(value: unknown, key: string): number | undefined {
-    if (!isRecord(value)) {
-        return undefined;
-    }
-
-    const nested = value[key];
-    return Array.isArray(nested) ? nested.length : undefined;
 }
 
 function humanizeToken(token: string): string {
@@ -292,8 +273,8 @@ function buildToolResultDecaySummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
-    const truncatedCount = getStringArray(strategyPayload, "truncatedToolCallIds")?.length ?? 0;
-    const placeholderCount = getStringArray(strategyPayload, "placeholderToolCallIds")?.length ?? 0;
+    const truncatedCount = getNumber(strategyPayload, "truncatedCount") ?? 0;
+    const placeholderCount = getNumber(strategyPayload, "placeholderCount") ?? 0;
     const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
     if (event.reason === "below-token-threshold") {
@@ -331,13 +312,12 @@ function buildScratchpadSummary(
     event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
     strategyPayload: Record<string, unknown> | undefined
 ): string {
-    const currentState = getRecord(strategyPayload, "currentState");
-    const noteChars = (getString(currentState, "notes") ?? "").length;
-    const keepLastMessages = getNumber(currentState, "keepLastMessages");
+    const noteChars = getNumber(strategyPayload, "notesCharCount") ?? 0;
+    const keepLastMessages = getNumber(strategyPayload, "keepLastMessages");
     const forcedToolChoice = getBoolean(strategyPayload, "forcedToolChoice") ?? false;
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens");
     const forceThresholdTokens = getNumber(strategyPayload, "forceThresholdTokens");
-    const appliedOmitCount = getStringArray(strategyPayload, "appliedOmitToolCallIds")?.length ?? 0;
+    const appliedOmitCount = getNumber(strategyPayload, "appliedOmitCount") ?? 0;
     const removedExchanges = event.removedToolExchangesDelta;
 
     const parts = [
@@ -425,8 +405,8 @@ function buildSummarizationSummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens") ?? event.estimatedTokensBefore;
-    const messageCount = getArrayLength(strategyPayload, "messagesToSummarize");
-    const summaryText = getString(strategyPayload, "summaryText");
+    const messageCount = getNumber(strategyPayload, "messagesSummarizedCount");
+    const summaryCharCount = getNumber(strategyPayload, "summaryCharCount");
     const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
     if (event.reason === "below-token-threshold") {
@@ -441,7 +421,7 @@ function buildSummarizationSummary(
 
     return clipTelemetrySummary(
         `Summarized ${formatCount(messageCount ?? 0, "message")} into a ${formatTelemetryNumber(
-            (summaryText ?? "").length
+            summaryCharCount ?? 0
         )}-char summary, saving ~${formatTelemetryNumber(tokensSaved)} tokens.`
     );
 }
@@ -576,30 +556,34 @@ function buildDerivedTelemetryAttributes(
                     addAttribute(
                         attributes,
                         "context_management.truncated_tool_result_count",
-                        getStringArray(strategyPayload, "truncatedToolCallIds")?.length
+                        getNumber(strategyPayload, "truncatedCount")
                     );
                     addAttribute(
                         attributes,
                         "context_management.placeholder_tool_result_count",
-                        getStringArray(strategyPayload, "placeholderToolCallIds")?.length
+                        getNumber(strategyPayload, "placeholderCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.total_tool_exchanges",
+                        getNumber(strategyPayload, "totalToolExchanges")
                     );
                     break;
                 case "scratchpad": {
-                    const currentState = getRecord(strategyPayload, "currentState");
                     addAttribute(
                         attributes,
                         "context_management.notes_char_count",
-                        (getString(currentState, "notes") ?? "").length
+                        getNumber(strategyPayload, "notesCharCount")
                     );
                     addAttribute(
                         attributes,
                         "context_management.applied_omit_tool_call_id_count",
-                        getStringArray(strategyPayload, "appliedOmitToolCallIds")?.length
+                        getNumber(strategyPayload, "appliedOmitCount")
                     );
                     addAttribute(
                         attributes,
                         "context_management.keep_last_messages",
-                        getNumber(currentState, "keepLastMessages")
+                        getNumber(strategyPayload, "keepLastMessages")
                     );
                     addAttribute(
                         attributes,
@@ -662,12 +646,12 @@ function buildDerivedTelemetryAttributes(
                     addAttribute(
                         attributes,
                         "context_management.messages_summarized_count",
-                        getArrayLength(strategyPayload, "messagesToSummarize")
+                        getNumber(strategyPayload, "messagesSummarizedCount")
                     );
                     addAttribute(
                         attributes,
                         "context_management.summary_char_count",
-                        (getString(strategyPayload, "summaryText") ?? "").length
+                        getNumber(strategyPayload, "summaryCharCount")
                     );
                     break;
             }
@@ -731,9 +715,7 @@ function buildTelemetryAttributes(
             attributes["context_management.optional_tool_names"] = event.optionalToolNames.join(",");
             attributes["context_management.estimated_tokens_before"] =
                 event.estimatedTokensBefore;
-            attributes["context_management.prompt_json"] = serializeTelemetryValue(
-                event.payloads.prompt
-            );
+            attributes["context_management.message_count"] = event.messageCount;
             attributes["context_management.provider_options_json"] = serializeTelemetryValue(
                 event.payloads.providerOptions
             );
@@ -757,12 +739,8 @@ function buildTelemetryAttributes(
                 "context_management.working_token_budget",
                 event.workingTokenBudget
             );
-            attributes["context_management.prompt_before_json"] = serializeTelemetryValue(
-                event.payloads.promptBefore
-            );
-            attributes["context_management.prompt_after_json"] = serializeTelemetryValue(
-                event.payloads.promptAfter
-            );
+            attributes["context_management.message_count_before"] = event.messageCountBefore;
+            attributes["context_management.message_count_after"] = event.messageCountAfter;
             attributes["context_management.strategy_payloads_json"] = serializeTelemetryValue(
                 event.payloads.strategy ?? null
             );
@@ -830,12 +808,8 @@ function buildTelemetryAttributes(
                 event.removedToolExchangesTotal;
             attributes["context_management.pinned_tool_call_ids_total"] =
                 event.pinnedToolCallIdsTotal;
-            attributes["context_management.prompt_before_json"] = serializeTelemetryValue(
-                event.payloads.promptBefore
-            );
-            attributes["context_management.prompt_after_json"] = serializeTelemetryValue(
-                event.payloads.promptAfter
-            );
+            attributes["context_management.message_count_before"] = event.messageCountBefore;
+            attributes["context_management.message_count_after"] = event.messageCountAfter;
             break;
     }
 
@@ -913,12 +887,7 @@ function createConversationContextManagementRuntime(options: {
     const estimator = createDefaultPromptTokenEstimator();
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
-        new ToolResultDecayStrategy({
-            maxPromptTokens: Math.floor(
-                options.config.workingTokenBudget * TOOL_RESULT_DECAY_THRESHOLD_RATIO
-            ),
-            estimator,
-        }),
+        new ToolResultDecayStrategy({ estimator }),
     ];
 
     if (options.config.summarizationFallbackEnabled) {
