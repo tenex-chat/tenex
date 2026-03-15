@@ -10,22 +10,6 @@ import { z } from "zod";
 // =====================================================================================
 
 export interface TenexConfig {
-    // Context management configuration
-    // Controls request-time prompt projection for full-history providers
-    contextManagement?: {
-        enabled?: boolean; // Enable request-time context management (default: true)
-        tokenBudget?: number; // Working prompt budget for graduated context management (default: 40000)
-        scratchpadEnabled?: boolean; // Enable agent-managed scratchpad strategy and tool (default: true)
-        forceScratchpadEnabled?: boolean; // Force a scratchpad tool call when the working budget threshold is crossed (default: true)
-        forceScratchpadThresholdPercent?: number; // Forced scratchpad threshold as percent of working budget (default: 70)
-        utilizationWarningEnabled?: boolean; // Warn agents as the working budget fills up (default: true)
-        utilizationWarningThresholdPercent?: number; // Warning threshold as percent of working budget (default: 70)
-        summarizationFallbackEnabled?: boolean; // Enable summarization as a last-resort overflow fallback (default: true)
-        summarizationFallbackThresholdPercent?: number; // Summarization threshold as percent of working budget (default: 90)
-        slidingWindowSize?: number; // Deprecated legacy field; ignored by current runtime
-        slidingWindowEnabled?: boolean; // Deprecated legacy field; ignored by current runtime
-    };
-
     // Global fields
     whitelistedPubkeys?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
@@ -65,22 +49,6 @@ export interface TenexConfig {
         agent?: string; // Agent slug to route ask() calls through (acts as first line of defense)
     };
 
-    // Deprecated legacy alias for context management settings.
-    // New writes should use contextManagement instead.
-    compression?: {
-        enabled?: boolean;
-        tokenBudget?: number;
-        scratchpadEnabled?: boolean;
-        forceScratchpadEnabled?: boolean;
-        forceScratchpadThresholdPercent?: number;
-        utilizationWarningEnabled?: boolean;
-        utilizationWarningThresholdPercent?: number;
-        summarizationFallbackEnabled?: boolean;
-        summarizationFallbackThresholdPercent?: number;
-        slidingWindowSize?: number;
-        slidingWindowEnabled?: boolean;
-    };
-
     // Intervention configuration
     // Monitors agent work completions and triggers human-replica review if user doesn't respond
     intervention?: {
@@ -117,21 +85,6 @@ export interface TenexConfig {
 }
 
 export const TenexConfigSchema = z.object({
-    contextManagement: z
-        .object({
-            enabled: z.boolean().optional(),
-            tokenBudget: z.number().optional(),
-            scratchpadEnabled: z.boolean().optional(),
-            forceScratchpadEnabled: z.boolean().optional(),
-            forceScratchpadThresholdPercent: z.number().optional(),
-            utilizationWarningEnabled: z.boolean().optional(),
-            utilizationWarningThresholdPercent: z.number().optional(),
-            summarizationFallbackEnabled: z.boolean().optional(),
-            summarizationFallbackThresholdPercent: z.number().optional(),
-            slidingWindowSize: z.number().optional(),
-            slidingWindowEnabled: z.boolean().optional(),
-        })
-        .optional(),
     whitelistedPubkeys: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),
     backendName: z.string().optional(),
@@ -165,21 +118,6 @@ export const TenexConfigSchema = z.object({
     escalation: z
         .object({
             agent: z.string().optional(),
-        })
-        .optional(),
-    compression: z
-        .object({
-            enabled: z.boolean().optional(),
-            tokenBudget: z.number().optional(),
-            scratchpadEnabled: z.boolean().optional(),
-            forceScratchpadEnabled: z.boolean().optional(),
-            forceScratchpadThresholdPercent: z.number().optional(),
-            utilizationWarningEnabled: z.boolean().optional(),
-            utilizationWarningThresholdPercent: z.number().optional(),
-            summarizationFallbackEnabled: z.boolean().optional(),
-            summarizationFallbackThresholdPercent: z.number().optional(),
-            slidingWindowSize: z.number().optional(),
-            slidingWindowEnabled: z.boolean().optional(),
         })
         .optional(),
     intervention: z

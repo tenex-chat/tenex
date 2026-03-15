@@ -1,4 +1,3 @@
-import { contextManagementCommand } from "@/commands/config/context-management";
 import { embedCommand } from "@/commands/config/embed";
 import { escalationCommand } from "@/commands/config/escalation";
 import { identityCommand } from "@/commands/config/identity";
@@ -55,7 +54,6 @@ const MENU_SECTIONS: MenuSection[] = [
     {
         header: "Conversations",
         entries: [
-            { label: "Context", description: "Graduated decay, fallback summarization, scratchpad, and warnings", command: contextManagementCommand },
             { label: "Summarization", description: "Auto-summary timing", command: summarizationCommand },
         ],
     },
@@ -140,7 +138,6 @@ export const configCommand = new Command("config")
     .addCommand(escalationCommand)
     .addCommand(interventionCommand)
     .addCommand(relaysCommand)
-    .addCommand(contextManagementCommand)
     .addCommand(summarizationCommand)
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)

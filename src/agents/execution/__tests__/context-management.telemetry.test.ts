@@ -216,9 +216,6 @@ describe("TENEX context management telemetry", () => {
         );
         expect(warningEvent).toBeDefined();
         expect(
-            String(warningEvent?.attributes?.["context_management.prompt_before_json"])
-        ).toContain("Long request");
-        expect(
             String(warningEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("warningThresholdTokens");
         expect(

@@ -30,18 +30,6 @@ const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 
-interface ResolvedContextManagementConfig {
-    enabled: boolean;
-    workingTokenBudget: number;
-    scratchpadEnabled: boolean;
-    forceScratchpadEnabled: boolean;
-    forceScratchpadThresholdPercent: number;
-    utilizationWarningEnabled: boolean;
-    utilizationWarningThresholdPercent: number;
-    summarizationFallbackEnabled: boolean;
-    summarizationFallbackThresholdPercent: number;
-}
-
 export interface ExecutionContextManagement {
     middleware: LanguageModelMiddleware;
     optionalTools: Record<string, AISdkTool>;
@@ -70,60 +58,6 @@ function isResumableProvider(providerId: string): boolean {
     return registered?.capabilities.sessionResumption === true;
 }
 
-function clampPositiveInteger(value: unknown, fallback: number): number {
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-        return fallback;
-    }
-
-    return Math.floor(value);
-}
-
-function clampPercent(value: unknown, fallback: number): number {
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-        return fallback;
-    }
-
-    return Math.min(100, Math.max(1, Math.floor(value)));
-}
-
-function getContextManagementConfig(): ResolvedContextManagementConfig {
-    const cfg = (() => {
-        try {
-            return configService.getConfig();
-        } catch {
-            return undefined;
-        }
-    })();
-
-    const contextConfig = {
-        ...cfg?.compression,
-        ...cfg?.contextManagement,
-    };
-
-    return {
-        enabled: contextConfig.enabled ?? true,
-        workingTokenBudget: clampPositiveInteger(
-            contextConfig.tokenBudget,
-            DEFAULT_WORKING_TOKEN_BUDGET
-        ),
-        scratchpadEnabled: contextConfig.scratchpadEnabled ?? true,
-        forceScratchpadEnabled: contextConfig.forceScratchpadEnabled ?? true,
-        forceScratchpadThresholdPercent: clampPercent(
-            contextConfig.forceScratchpadThresholdPercent,
-            DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT
-        ),
-        utilizationWarningEnabled: contextConfig.utilizationWarningEnabled ?? true,
-        utilizationWarningThresholdPercent: clampPercent(
-            contextConfig.utilizationWarningThresholdPercent,
-            DEFAULT_WARNING_THRESHOLD_PERCENT
-        ),
-        summarizationFallbackEnabled: contextConfig.summarizationFallbackEnabled ?? true,
-        summarizationFallbackThresholdPercent: clampPercent(
-            contextConfig.summarizationFallbackThresholdPercent,
-            DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT
-        ),
-    };
-}
 
 function serializeTelemetryValue(value: unknown): string {
     const seen = new WeakSet<object>();
@@ -287,10 +221,6 @@ function buildToolResultDecaySummary(
         return "Skipped tool-result decay because there were no tool exchanges to compress.";
     }
 
-    if (event.reason === "no-eligible-tool-exchanges") {
-        return "Skipped tool-result decay because all tool results were still recent or pinned.";
-    }
-
     const parts: string[] = [];
     if (truncatedCount > 0) {
         parts.push(`truncated ${formatCount(truncatedCount, "tool result")}`);
@@ -303,8 +233,13 @@ function buildToolResultDecaySummary(
         parts.push("compressed stale tool results");
     }
 
+    const warningCount = getNumber(strategyPayload, "warningCount") ?? 0;
+    const warningSuffix = warningCount > 0
+        ? `, warned about ${formatCount(warningCount, "at-risk result")}`
+        : "";
+
     return clipTelemetrySummary(
-        `${parts.join(" and ")}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)}).`
+        `${parts.join(" and ")}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)})${warningSuffix}.`
     );
 }
 
@@ -567,6 +502,11 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.total_tool_exchanges",
                         getNumber(strategyPayload, "totalToolExchanges")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.warning_count",
+                        getNumber(strategyPayload, "warningCount")
                     );
                     break;
                 case "scratchpad": {
@@ -881,7 +821,6 @@ function createConversationContextManagementRuntime(options: {
     conversationStore: ConversationStore;
     conversationId: string;
     agent: AgentInstance;
-    config: ResolvedContextManagementConfig;
     scratchpadAvailable: boolean;
 }): ContextManagementRuntime {
     const estimator = createDefaultPromptTokenEstimator();
@@ -890,27 +829,24 @@ function createConversationContextManagementRuntime(options: {
         new ToolResultDecayStrategy({ estimator }),
     ];
 
-    if (options.config.summarizationFallbackEnabled) {
-        const summarizationModel = createSummarizationModel({
-            conversationId: options.conversationId,
-            agent: options.agent,
-        });
+    const summarizationModel = createSummarizationModel({
+        conversationId: options.conversationId,
+        agent: options.agent,
+    });
 
-        if (summarizationModel) {
-            strategies.push(
-                new LLMSummarizationStrategy({
-                    model: summarizationModel,
-                    maxPromptTokens: Math.floor(
-                        options.config.workingTokenBudget *
-                            (options.config.summarizationFallbackThresholdPercent / 100)
-                    ),
-                    estimator,
-                })
-            );
-        }
+    if (summarizationModel) {
+        strategies.push(
+            new LLMSummarizationStrategy({
+                model: summarizationModel,
+                maxPromptTokens: Math.floor(
+                    DEFAULT_WORKING_TOKEN_BUDGET * (DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT / 100)
+                ),
+                estimator,
+            })
+        );
     }
 
-    if (options.config.scratchpadEnabled && options.scratchpadAvailable) {
+    if (options.scratchpadAvailable) {
         strategies.push(
             new ScratchpadStrategy({
                 scratchpadStore: {
@@ -926,32 +862,25 @@ function createConversationContextManagementRuntime(options: {
                             : [],
                 },
                 reminderTone: "informational",
-                workingTokenBudget: options.config.workingTokenBudget,
-                forceToolThresholdRatio: options.config.forceScratchpadEnabled
-                    ? options.config.forceScratchpadThresholdPercent / 100
-                    : undefined,
-                estimator,
-            })
-        );
-    }
-
-    if (options.config.utilizationWarningEnabled) {
-        strategies.push(
-            new ContextUtilizationReminderStrategy({
-                workingTokenBudget: options.config.workingTokenBudget,
-                warningThresholdRatio:
-                    options.config.utilizationWarningThresholdPercent / 100,
-                mode: options.config.scratchpadEnabled && options.scratchpadAvailable
-                    ? "scratchpad"
-                    : "generic",
+                workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
+                forceToolThresholdRatio: DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT / 100,
                 estimator,
             })
         );
     }
 
     strategies.push(
+        new ContextUtilizationReminderStrategy({
+            workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
+            warningThresholdRatio: DEFAULT_WARNING_THRESHOLD_PERCENT / 100,
+            mode: options.scratchpadAvailable ? "scratchpad" : "generic",
+            estimator,
+        })
+    );
+
+    strategies.push(
         new ContextWindowStatusStrategy({
-            workingTokenBudget: options.config.workingTokenBudget,
+            workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
             estimator,
             getContextWindow: ({ model }) => {
                 if (!model) {
@@ -981,8 +910,7 @@ export function createExecutionContextManagement(options: {
     conversationStore: ConversationStore;
     nudgeToolPermissions?: NudgeToolPermissions;
 }): ExecutionContextManagement | undefined {
-    const config = getContextManagementConfig();
-    if (!config.enabled || isResumableProvider(options.providerId)) {
+    if (isResumableProvider(options.providerId)) {
         return undefined;
     }
 
@@ -993,7 +921,6 @@ export function createExecutionContextManagement(options: {
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
-        config,
         scratchpadAvailable,
     });
     const optionalTools = scratchpadAvailable
