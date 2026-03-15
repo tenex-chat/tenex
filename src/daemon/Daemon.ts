@@ -453,6 +453,16 @@ export class Daemon {
             return;
         }
 
+        // Drop agent events without p-tags silently — no span needed
+        const isRootEvent = !AgentEventDecoder.getReplyTarget(event);
+        if (
+            DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
+            !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects) &&
+            !isRootEvent
+        ) {
+            return;
+        }
+
         const span = createEventSpan(event);
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
@@ -515,19 +525,6 @@ export class Daemon {
         if (AgentEventDecoder.isConfigUpdate(event) && !event.tagValue("a")) {
             addRoutingEvent(span, "agent_config_global", { reason: "kind_24020_no_a_tag" });
             await this.handleGlobalAgentConfigUpdate(event);
-            return;
-        }
-
-        // Filter out agent events without p-tags (but allow root events)
-        // Root events are conversation starters and don't need p-tags
-        const isRootEvent = !AgentEventDecoder.getReplyTarget(event);
-        if (
-            DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
-            !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects) &&
-            !isRootEvent
-        ) {
-            addRoutingEvent(span, "dropped", { reason: "agent_event_without_p_tags" });
-            await logDropped(this.routingLogger, event, "Agent event without p-tags to system entities");
             return;
         }
 
