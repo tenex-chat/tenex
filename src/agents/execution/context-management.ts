@@ -1,9 +1,12 @@
 import { context as otelContext, trace, type Span } from "@opentelemetry/api";
+import type {
+    LanguageModelV3CallOptions,
+    LanguageModelV3Message,
+    LanguageModelV3Prompt,
+} from "@ai-sdk/provider";
 import type { LanguageModel, LanguageModelMiddleware } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
-    ContextWindowStatusStrategy,
-    ContextUtilizationReminderStrategy,
     LLMSummarizationStrategy,
     ScratchpadStrategy,
     SystemPromptCachingStrategy,
@@ -13,8 +16,11 @@ import {
     type ContextManagementRequestContext,
     type ContextManagementRuntime,
     type ContextManagementStrategy,
+    type ContextManagementStrategyExecution,
+    type ContextManagementStrategyState,
     type ContextManagementTelemetryEvent,
     type DecayedToolContext,
+    type PromptTokenEstimator,
 } from "ai-sdk-context-management";
 import { createSystemReminderSink } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
@@ -33,6 +39,19 @@ const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 const MAX_DESCRIPTION_LENGTH = 120;
+const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
+
+interface ContextManagementSettings {
+    enabled: boolean;
+    tokenBudget: number;
+    scratchpadEnabled: boolean;
+    forceScratchpadEnabled: boolean;
+    forceScratchpadThresholdPercent: number;
+    utilizationWarningEnabled: boolean;
+    utilizationWarningThresholdPercent: number;
+    summarizationFallbackEnabled: boolean;
+    summarizationFallbackThresholdPercent: number;
+}
 
 function sanitizeDescription(raw: string): string {
     // eslint-disable-next-line no-control-regex
@@ -181,6 +200,100 @@ function getStringArray(value: unknown, key: string): string[] | undefined {
     return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
+function getRecordKeyCount(value: unknown, key: string): number | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    if (!isRecord(nested)) {
+        return undefined;
+    }
+
+    return Object.keys(nested).length;
+}
+
+function normalizePositiveNumber(value: number | undefined, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+        ? value
+        : fallback;
+}
+
+function normalizePercent(value: number | undefined, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value)
+        ? Math.min(100, Math.max(0, value))
+        : fallback;
+}
+
+function getContextManagementSettings(): ContextManagementSettings {
+    const raw = configService.getContextManagementConfig();
+
+    return {
+        enabled: raw?.enabled ?? true,
+        tokenBudget: Math.floor(
+            normalizePositiveNumber(raw?.tokenBudget, DEFAULT_WORKING_TOKEN_BUDGET)
+        ),
+        scratchpadEnabled: raw?.scratchpadEnabled ?? true,
+        forceScratchpadEnabled: raw?.forceScratchpadEnabled ?? true,
+        forceScratchpadThresholdPercent: normalizePercent(
+            raw?.forceScratchpadThresholdPercent,
+            DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT
+        ),
+        utilizationWarningEnabled: raw?.utilizationWarningEnabled ?? true,
+        utilizationWarningThresholdPercent: normalizePercent(
+            raw?.utilizationWarningThresholdPercent,
+            DEFAULT_WARNING_THRESHOLD_PERCENT
+        ),
+        summarizationFallbackEnabled: raw?.summarizationFallbackEnabled ?? true,
+        summarizationFallbackThresholdPercent: normalizePercent(
+            raw?.summarizationFallbackThresholdPercent,
+            DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT
+        ),
+    };
+}
+
+function isManagedContextSystemMessage(message: LanguageModelV3Message): boolean {
+    if (message.role !== "system") {
+        return false;
+    }
+
+    const contextManagementOptions = message.providerOptions?.contextManagement;
+    if (!isRecord(contextManagementOptions)) {
+        return false;
+    }
+
+    const type = contextManagementOptions.type;
+    return type === "summary" || type === "compaction-summary";
+}
+
+function createManagedContextTokenEstimator(
+    baseEstimator: PromptTokenEstimator
+): PromptTokenEstimator {
+    return {
+        estimateMessage(message: LanguageModelV3Message): number {
+            if (message.role === "system" && !isManagedContextSystemMessage(message)) {
+                return 0;
+            }
+
+            return baseEstimator.estimateMessage(message);
+        },
+        estimatePrompt(prompt: LanguageModelV3Prompt): number {
+            return prompt.reduce((sum, message) => sum + this.estimateMessage(message), 0);
+        },
+        estimateTools(): number {
+            return 0;
+        },
+    };
+}
+
+function estimateRequestTokens(
+    estimator: PromptTokenEstimator,
+    prompt: LanguageModelV3Prompt,
+    tools: LanguageModelV3CallOptions["tools"]
+): number {
+    return estimator.estimatePrompt(prompt) + (estimator.estimateTools?.(tools) ?? 0);
+}
+
 function humanizeToken(token: string): string {
     return token.replace(/[-_]+/g, " ");
 }
@@ -191,6 +304,243 @@ function formatTelemetryNumber(value: number): string {
 
 function formatCount(value: number, singular: string, plural = `${singular}s`): string {
     return `${formatTelemetryNumber(value)} ${value === 1 ? singular : plural}`;
+}
+
+function formatPercent(numerator: number, denominator: number): number {
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+        return 0;
+    }
+
+    return Math.round((numerator / denominator) * 100);
+}
+
+function buildManagedContextUtilizationReminder(options: {
+    currentTokens: number;
+    warningThresholdTokens: number;
+    utilizationPercent: number;
+    mode: "scratchpad" | "generic";
+}): string {
+    const { currentTokens, warningThresholdTokens, utilizationPercent, mode } = options;
+    const lines = [
+        `[Context utilization: ~${formatTelemetryNumber(utilizationPercent)}% of managed working budget]`,
+        `Managed working-context tokens: ~${formatTelemetryNumber(currentTokens)}. Warning threshold: ~${formatTelemetryNumber(warningThresholdTokens)}.`,
+        "This excludes base system prompts, tool definitions, and reminder blocks.",
+    ];
+
+    if (mode === "scratchpad") {
+        lines.push("Your managed working context is getting tight. Use scratchpad(...) now to:");
+        lines.push("- Rewrite your current working state so it reflects what matters now");
+        lines.push("- Update key/value entries and notes for current progress, findings, and next steps");
+        lines.push("- Omit stale tool call IDs you no longer need");
+        lines.push("- Reduce keepLastMessages if the recent tail is larger than necessary");
+    } else {
+        lines.push("Your managed working context is getting tight. Trim or summarize stale working context before continuing.");
+    }
+
+    lines.push("[/Context utilization]");
+    return lines.join("\n");
+}
+
+class ManagedContextUtilizationReminderStrategy implements ContextManagementStrategy {
+    readonly name = "context-utilization-reminder";
+    private readonly workingTokenBudget: number;
+    private readonly warningThresholdRatio: number;
+    private readonly estimator: PromptTokenEstimator;
+    private readonly mode: "scratchpad" | "generic";
+
+    constructor(options: {
+        workingTokenBudget: number;
+        warningThresholdRatio?: number;
+        estimator: PromptTokenEstimator;
+        mode?: "scratchpad" | "generic";
+    }) {
+        this.workingTokenBudget = Math.max(1, Math.floor(options.workingTokenBudget));
+        this.warningThresholdRatio = Math.min(
+            1,
+            Math.max(0, options.warningThresholdRatio ?? (DEFAULT_WARNING_THRESHOLD_PERCENT / 100))
+        );
+        this.estimator = options.estimator;
+        this.mode = options.mode ?? "generic";
+    }
+
+    async apply(
+        state: ContextManagementStrategyState
+    ): Promise<ContextManagementStrategyExecution> {
+        const currentTokens = estimateRequestTokens(this.estimator, state.prompt, state.params?.tools);
+        const warningThresholdTokens = Math.floor(this.workingTokenBudget * this.warningThresholdRatio);
+
+        if (currentTokens < warningThresholdTokens) {
+            return {
+                reason: "below-warning-threshold",
+                workingTokenBudget: this.workingTokenBudget,
+                payloads: {
+                    currentTokens,
+                    warningThresholdTokens,
+                    warningThresholdRatio: this.warningThresholdRatio,
+                    mode: this.mode,
+                    budgetScope: MANAGED_CONTEXT_BUDGET_SCOPE,
+                },
+            };
+        }
+
+        const utilizationPercent = formatPercent(currentTokens, this.workingTokenBudget);
+        const reminderText = buildManagedContextUtilizationReminder({
+            currentTokens,
+            warningThresholdTokens,
+            utilizationPercent,
+            mode: this.mode,
+        });
+
+        await state.emitReminder({
+            kind: "context-utilization",
+            content: reminderText,
+        });
+
+        return {
+            reason: "warning-injected",
+            workingTokenBudget: this.workingTokenBudget,
+            payloads: {
+                currentTokens,
+                warningThresholdTokens,
+                warningThresholdRatio: this.warningThresholdRatio,
+                utilizationPercent,
+                mode: this.mode,
+                budgetScope: MANAGED_CONTEXT_BUDGET_SCOPE,
+                reminderText,
+            },
+        };
+    }
+}
+
+function buildManagedContextWindowStatusReminder(options: {
+    estimatedRequestTokens: number;
+    estimatedMessageTokens: number;
+    estimatedToolTokens: number;
+    managedContextTokens: number;
+    staticOverheadTokens: number;
+    rawContextWindow?: number;
+    workingTokenBudget: number;
+}): string {
+    const {
+        estimatedRequestTokens,
+        estimatedMessageTokens,
+        estimatedToolTokens,
+        managedContextTokens,
+        staticOverheadTokens,
+        rawContextWindow,
+        workingTokenBudget,
+    } = options;
+    const lines = [
+        "[Context status]",
+        `Current request after context management: ~${formatTelemetryNumber(estimatedRequestTokens)} tokens.`,
+        `Managed working context: ~${formatTelemetryNumber(managedContextTokens)} tokens.`,
+    ];
+
+    if (staticOverheadTokens > 0) {
+        lines.push(
+            `Static overhead outside the working budget: ~${formatTelemetryNumber(staticOverheadTokens)} tokens.`
+        );
+    }
+
+    if (estimatedToolTokens > 0) {
+        lines.push(
+            `Breakdown: ~${formatTelemetryNumber(estimatedMessageTokens)} message tokens + ~${formatTelemetryNumber(estimatedToolTokens)} tool-definition tokens.`
+        );
+    }
+
+    lines.push(
+        `Working budget target (managed context only): ~${formatTelemetryNumber(workingTokenBudget)} tokens (~${formatTelemetryNumber(formatPercent(managedContextTokens, workingTokenBudget))}% used).`
+    );
+
+    if (rawContextWindow !== undefined) {
+        lines.push(
+            `Raw model context window: ~${formatTelemetryNumber(rawContextWindow)} tokens (~${formatTelemetryNumber(formatPercent(estimatedRequestTokens, rawContextWindow))}% used).`
+        );
+    }
+
+    lines.push("[/Context status]");
+    return lines.join("\n");
+}
+
+class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
+    readonly name = "context-window-status";
+    private readonly workingTokenBudget: number;
+    private readonly managedEstimator: PromptTokenEstimator;
+    private readonly requestEstimator: PromptTokenEstimator;
+    private readonly getContextWindow?: (options: {
+        model?: { provider: string; modelId: string };
+        requestContext: ContextManagementRequestContext;
+    }) => number | undefined;
+
+    constructor(options: {
+        workingTokenBudget: number;
+        managedEstimator: PromptTokenEstimator;
+        requestEstimator: PromptTokenEstimator;
+        getContextWindow?: (options: {
+            model?: { provider: string; modelId: string };
+            requestContext: ContextManagementRequestContext;
+        }) => number | undefined;
+    }) {
+        this.workingTokenBudget = Math.max(1, Math.floor(options.workingTokenBudget));
+        this.managedEstimator = options.managedEstimator;
+        this.requestEstimator = options.requestEstimator;
+        this.getContextWindow = options.getContextWindow;
+    }
+
+    async apply(
+        state: ContextManagementStrategyState
+    ): Promise<ContextManagementStrategyExecution> {
+        const estimatedMessageTokens = this.requestEstimator.estimatePrompt(state.prompt);
+        const estimatedToolTokens = this.requestEstimator.estimateTools?.(state.params?.tools) ?? 0;
+        const estimatedRequestTokens = estimatedMessageTokens + estimatedToolTokens;
+        const managedContextTokens = estimateRequestTokens(
+            this.managedEstimator,
+            state.prompt,
+            state.params?.tools
+        );
+        const staticOverheadTokens = Math.max(0, estimatedRequestTokens - managedContextTokens);
+        const rawContextWindow = this.getContextWindow?.({
+            model: state.model,
+            requestContext: state.requestContext,
+        });
+        const reminderText = buildManagedContextWindowStatusReminder({
+            estimatedRequestTokens,
+            estimatedMessageTokens,
+            estimatedToolTokens,
+            managedContextTokens,
+            staticOverheadTokens,
+            rawContextWindow,
+            workingTokenBudget: this.workingTokenBudget,
+        });
+
+        await state.emitReminder({
+            kind: "context-window-status",
+            content: reminderText,
+        });
+
+        return {
+            reason: "context-window-status-injected",
+            workingTokenBudget: this.workingTokenBudget,
+            payloads: {
+                estimatedPromptTokens: estimatedRequestTokens,
+                estimatedMessageTokens,
+                estimatedToolTokens,
+                managedContextTokens,
+                staticOverheadTokens,
+                rawContextWindow,
+                rawContextUtilizationPercent: rawContextWindow !== undefined
+                    ? formatPercent(estimatedRequestTokens, rawContextWindow)
+                    : undefined,
+                workingTokenBudget: this.workingTokenBudget,
+                workingBudgetUtilizationPercent: formatPercent(
+                    managedContextTokens,
+                    this.workingTokenBudget
+                ),
+                budgetScope: MANAGED_CONTEXT_BUDGET_SCOPE,
+                reminderText,
+            },
+        };
+    }
 }
 
 function clipTelemetrySummary(summary: string): string {
@@ -287,6 +637,7 @@ function buildScratchpadSummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const noteChars = getNumber(strategyPayload, "notesCharCount") ?? 0;
+    const entryCount = getNumber(strategyPayload, "entryCount") ?? 0;
     const keepLastMessages = getNumber(strategyPayload, "keepLastMessages");
     const forcedToolChoice = getBoolean(strategyPayload, "forcedToolChoice") ?? false;
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens");
@@ -295,7 +646,7 @@ function buildScratchpadSummary(
     const removedExchanges = event.removedToolExchangesDelta;
 
     const parts = [
-        `Rendered scratchpad context using ${formatTelemetryNumber(noteChars)} note chars`,
+        `Rendered scratchpad context using ${formatTelemetryNumber(noteChars)} note chars and ${formatCount(entryCount, "entry", "entries")}`,
         `removed ${formatCount(removedExchanges, "tool exchange")} from future context`,
     ];
 
@@ -326,15 +677,22 @@ function buildContextUtilizationReminderSummary(
     const warningThresholdTokens = getNumber(strategyPayload, "warningThresholdTokens");
     const utilizationPercent = getNumber(strategyPayload, "utilizationPercent");
     const mode = getString(strategyPayload, "mode") ?? "generic";
+    const budgetScope = getString(strategyPayload, "budgetScope");
+    const scopeLabel = budgetScope === MANAGED_CONTEXT_BUDGET_SCOPE
+        ? "managed context"
+        : "prompt";
+    const budgetLabel = budgetScope === MANAGED_CONTEXT_BUDGET_SCOPE
+        ? "managed working budget"
+        : "working budget";
 
     if (event.reason === "below-warning-threshold") {
         return clipTelemetrySummary(
-            `Skipped ${mode} context warning because the prompt is at ~${formatTelemetryNumber(currentTokens)} tokens${warningThresholdTokens !== undefined ? `, below the ~${formatTelemetryNumber(warningThresholdTokens)} warning threshold` : ""}.`
+            `Skipped ${mode} context warning because the ${scopeLabel} is at ~${formatTelemetryNumber(currentTokens)} tokens${warningThresholdTokens !== undefined ? `, below the ~${formatTelemetryNumber(warningThresholdTokens)} warning threshold` : ""}.`
         );
     }
 
     return clipTelemetrySummary(
-        `Inserted a ${mode} context warning at ~${formatTelemetryNumber(currentTokens)} tokens${utilizationPercent !== undefined ? ` (${formatTelemetryNumber(utilizationPercent)}% of the working budget)` : ""}.`
+        `Inserted a ${mode} context warning at ~${formatTelemetryNumber(currentTokens)} ${scopeLabel} tokens${utilizationPercent !== undefined ? ` (${formatTelemetryNumber(utilizationPercent)}% of the ${budgetLabel})` : ""}.`
     );
 }
 
@@ -343,6 +701,7 @@ function buildContextWindowStatusSummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const estimatedPromptTokens = getNumber(strategyPayload, "estimatedPromptTokens");
+    const managedContextTokens = getNumber(strategyPayload, "managedContextTokens");
     const workingBudgetUtilizationPercent = getNumber(
         strategyPayload,
         "workingBudgetUtilizationPercent"
@@ -357,12 +716,16 @@ function buildContextWindowStatusSummary(
         return "Skipped context window status because no context capacity data was available.";
     }
 
-    const parts = [
-        `Inserted context status for ~${formatTelemetryNumber(estimatedPromptTokens)} prompt tokens`,
-    ];
+    const parts = managedContextTokens !== undefined
+        ? [
+            `Inserted context status for ~${formatTelemetryNumber(managedContextTokens)} managed-context tokens (~${formatTelemetryNumber(estimatedPromptTokens)} total request tokens)`,
+        ]
+        : [`Inserted context status for ~${formatTelemetryNumber(estimatedPromptTokens)} request tokens`];
 
     if (workingBudgetUtilizationPercent !== undefined) {
-        parts.push(`${formatTelemetryNumber(workingBudgetUtilizationPercent)}% of the working budget`);
+        parts.push(
+            `${formatTelemetryNumber(workingBudgetUtilizationPercent)}% of the managed working budget`
+        );
     }
 
     if (rawContextWindow !== undefined && rawContextUtilizationPercent !== undefined) {
@@ -468,11 +831,15 @@ function buildToolExecuteSummary(
 
     if (event.toolName === "scratchpad") {
         const inputNotes = getString(event.payloads.input, "notes") ?? "";
+        const appendNotes = getString(event.payloads.input, "appendNotes") ?? "";
         const omitCount = getStringArray(event.payloads.input, "omitToolCallIds")?.length ?? 0;
+        const setEntriesCount = getRecordKeyCount(event.payloads.input, "setEntries") ?? 0;
+        const replaceEntriesCount = getRecordKeyCount(event.payloads.input, "replaceEntries") ?? 0;
+        const removeEntryKeysCount = getStringArray(event.payloads.input, "removeEntryKeys")?.length ?? 0;
         const keepLastMessages = getNumber(event.payloads.input, "keepLastMessages");
 
         return clipTelemetrySummary(
-            `Updated scratchpad: ${formatTelemetryNumber(inputNotes.length)} note chars, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
+            `Updated scratchpad: ${formatTelemetryNumber(inputNotes.length + appendNotes.length)} note chars, ${formatCount(setEntriesCount + replaceEntriesCount, "entry update", "entry updates")}, ${formatCount(removeEntryKeysCount, "entry removal", "entry removals")}, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
         );
     }
 
@@ -561,8 +928,18 @@ function buildDerivedTelemetryAttributes(
                 case "scratchpad": {
                     addAttribute(
                         attributes,
+                        "context_management.entry_count",
+                        getNumber(strategyPayload, "entryCount")
+                    );
+                    addAttribute(
+                        attributes,
                         "context_management.notes_char_count",
                         getNumber(strategyPayload, "notesCharCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.entry_char_count",
+                        getNumber(strategyPayload, "entryCharCount")
                     );
                     addAttribute(
                         attributes,
@@ -607,12 +984,27 @@ function buildDerivedTelemetryAttributes(
                         "context_management.utilization_percent",
                         getNumber(strategyPayload, "utilizationPercent")
                     );
+                    addAttribute(
+                        attributes,
+                        "context_management.budget_scope",
+                        getString(strategyPayload, "budgetScope")
+                    );
                     break;
                 case "context-window-status":
                     addAttribute(
                         attributes,
                         "context_management.estimated_prompt_tokens",
                         getNumber(strategyPayload, "estimatedPromptTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.managed_context_tokens",
+                        getNumber(strategyPayload, "managedContextTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.static_overhead_tokens",
+                        getNumber(strategyPayload, "staticOverheadTokens")
                     );
                     addAttribute(
                         attributes,
@@ -628,6 +1020,11 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.raw_context_utilization_percent",
                         getNumber(strategyPayload, "rawContextUtilizationPercent")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.budget_scope",
+                        getString(strategyPayload, "budgetScope")
                     );
                     break;
                 case "summarization":
@@ -655,6 +1052,18 @@ function buildDerivedTelemetryAttributes(
                     attributes,
                     "context_management.notes_char_count",
                     (getString(event.payloads.input, "notes") ?? "").length
+                        + (getString(event.payloads.input, "appendNotes") ?? "").length
+                );
+                addAttribute(
+                    attributes,
+                    "context_management.entry_update_count",
+                    (getRecordKeyCount(event.payloads.input, "setEntries") ?? 0)
+                        + (getRecordKeyCount(event.payloads.input, "replaceEntries") ?? 0)
+                );
+                addAttribute(
+                    attributes,
+                    "context_management.entry_removal_count",
+                    getStringArray(event.payloads.input, "removeEntryKeys")?.length
                 );
                 addAttribute(
                     attributes,
@@ -916,12 +1325,15 @@ function createConversationContextManagementRuntime(options: {
     agent: AgentInstance;
     scratchpadAvailable: boolean;
 }): ContextManagementRuntime {
-    const estimator = createDefaultPromptTokenEstimator();
+    const settings = getContextManagementSettings();
+    const requestEstimator = createDefaultPromptTokenEstimator();
+    const managedContextEstimator = createManagedContextTokenEstimator(requestEstimator);
+    const scratchpadEnabled = settings.scratchpadEnabled && options.scratchpadAvailable;
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
         new ToolResultDecayStrategy({
-            estimator,
+            estimator: requestEstimator,
             placeholder: (context) => {
                 const toolCallEventIdMap = resolveToolCallEventIdMap(
                     options.conversationStore.getAllMessages()
@@ -936,19 +1348,20 @@ function createConversationContextManagementRuntime(options: {
         agent: options.agent,
     });
 
-    if (summarizationModel) {
+    if (summarizationModel && settings.summarizationFallbackEnabled) {
         strategies.push(
             new LLMSummarizationStrategy({
                 model: summarizationModel,
                 maxPromptTokens: Math.floor(
-                    DEFAULT_WORKING_TOKEN_BUDGET * (DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT / 100)
+                    settings.tokenBudget
+                        * (settings.summarizationFallbackThresholdPercent / 100)
                 ),
-                estimator,
+                estimator: managedContextEstimator,
             })
         );
     }
 
-    if (options.scratchpadAvailable) {
+    if (scratchpadEnabled) {
         strategies.push(
             new ScratchpadStrategy({
                 scratchpadStore: {
@@ -964,26 +1377,31 @@ function createConversationContextManagementRuntime(options: {
                             : [],
                 },
                 reminderTone: "informational",
-                workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
-                forceToolThresholdRatio: DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT / 100,
-                estimator,
+                workingTokenBudget: settings.tokenBudget,
+                forceToolThresholdRatio: settings.forceScratchpadEnabled
+                    ? settings.forceScratchpadThresholdPercent / 100
+                    : undefined,
+                estimator: managedContextEstimator,
+            })
+        );
+    }
+
+    if (settings.utilizationWarningEnabled) {
+        strategies.push(
+            new ManagedContextUtilizationReminderStrategy({
+                workingTokenBudget: settings.tokenBudget,
+                warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
+                mode: scratchpadEnabled ? "scratchpad" : "generic",
+                estimator: managedContextEstimator,
             })
         );
     }
 
     strategies.push(
-        new ContextUtilizationReminderStrategy({
-            workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
-            warningThresholdRatio: DEFAULT_WARNING_THRESHOLD_PERCENT / 100,
-            mode: options.scratchpadAvailable ? "scratchpad" : "generic",
-            estimator,
-        })
-    );
-
-    strategies.push(
-        new ContextWindowStatusStrategy({
-            workingTokenBudget: DEFAULT_WORKING_TOKEN_BUDGET,
-            estimator,
+        new ManagedContextWindowStatusStrategy({
+            workingTokenBudget: settings.tokenBudget,
+            managedEstimator: managedContextEstimator,
+            requestEstimator,
             getContextWindow: ({ model }) => {
                 if (!model) {
                     return undefined;
@@ -1000,7 +1418,7 @@ function createConversationContextManagementRuntime(options: {
     return createContextManagementRuntime({
         strategies,
         telemetry: createTelemetryCallback(),
-        estimator,
+        estimator: requestEstimator,
         reminderSink: createSystemReminderSink(getSystemReminderContext()),
     });
 }
@@ -1012,12 +1430,15 @@ export function createExecutionContextManagement(options: {
     conversationStore: ConversationStore;
     nudgeToolPermissions?: NudgeToolPermissions;
 }): ExecutionContextManagement | undefined {
-    if (isResumableProvider(options.providerId)) {
+    const settings = getContextManagementSettings();
+
+    if (!settings.enabled || isResumableProvider(options.providerId)) {
         return undefined;
     }
 
     const scratchpadAvailable =
-        !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
+        settings.scratchpadEnabled
+        && (!options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions));
 
     const runtime = createConversationContextManagementRuntime({
         conversationStore: options.conversationStore,

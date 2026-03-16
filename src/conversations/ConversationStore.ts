@@ -471,15 +471,17 @@ export class ConversationStore {
         }
 
         const hasNotes = state.notes.trim().length > 0;
+        const hasEntries = Object.keys(state.entries ?? {}).length > 0;
         const hasKeepLastMessages = typeof state.keepLastMessages === "number";
         const hasOmittedToolCalls = state.omitToolCallIds.length > 0;
 
-        if (!hasNotes && !hasKeepLastMessages && !hasOmittedToolCalls) {
+        if (!hasNotes && !hasEntries && !hasKeepLastMessages && !hasOmittedToolCalls) {
             delete this.state.contextManagementScratchpads[agentId];
             return;
         }
 
         this.state.contextManagementScratchpads[agentId] = {
+            ...(state.entries ? { entries: { ...state.entries } } : {}),
             notes: state.notes,
             keepLastMessages: state.keepLastMessages,
             omitToolCallIds: [...state.omitToolCallIds],

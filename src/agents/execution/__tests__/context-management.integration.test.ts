@@ -328,7 +328,80 @@ describe("TENEX context management integration", () => {
         const utilizationReminder = utilizationReminders.find(
             (reminder) => reminder.type === "context-utilization"
         );
+        expect(utilizationReminder?.content).toContain("managed working budget");
         expect(utilizationReminder?.content).toContain("scratchpad(...)");
+    });
+
+    test("managed working budget excludes base system prompts and tool definitions", async () => {
+        setContextManagementConfig({
+            tokenBudget: 100,
+            scratchpadEnabled: true,
+            forceScratchpadEnabled: false,
+            utilizationWarningEnabled: true,
+            utilizationWarningThresholdPercent: 70,
+            summarizationFallbackEnabled: false,
+        });
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        expect(contextManagement).toBeDefined();
+
+        const transformed = await contextManagement!.middleware.transformParams?.({
+            params: {
+                prompt: [
+                    {
+                        role: "system",
+                        content: `You are helpful. ${"s".repeat(800)}`,
+                    },
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: "Short request." }],
+                    },
+                ],
+                providerOptions: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                },
+            },
+            model: {
+                specificationVersion: "v3",
+                provider: "mock",
+                modelId: "mock",
+                supportedUrls: {},
+                doGenerate: async () => {
+                    throw new Error("unused");
+                },
+                doStream: async () => {
+                    throw new Error("unused");
+                },
+            },
+        } as any);
+
+        expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context utilization:");
+        const reminders = await getSystemReminderContext().collect();
+        expect(reminders.map((reminder) => reminder.type)).toEqual([
+            "scratchpad",
+            "context-window-status",
+        ]);
+        const contextStatusReminder = reminders.find(
+            (reminder) => reminder.type === "context-window-status"
+        );
+        expect(contextStatusReminder?.content).toContain("Managed working context:");
+        expect(contextStatusReminder?.content).toContain(
+            "Static overhead outside the working budget:"
+        );
+        expect(contextStatusReminder?.content).toContain(
+            "Working budget target (managed context only): ~100 tokens"
+        );
     });
 
     test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
@@ -503,7 +576,7 @@ describe("TENEX context management integration", () => {
                 expect.objectContaining({
                     type: "context-utilization",
                     content: expect.stringContaining(
-                        "Trim or summarize stale context before continuing."
+                        "Trim or summarize stale working context before continuing."
                     ),
                 }),
             ])
@@ -576,7 +649,10 @@ describe("TENEX context management integration", () => {
             "Current prompt after context management:"
         );
         expect(contextStatusReminders[0]?.content).toContain(
-            "Working budget target: ~400 tokens"
+            "Managed working context:"
+        );
+        expect(contextStatusReminders[0]?.content).toContain(
+            "Working budget target (managed context only): ~400 tokens"
         );
         expect(contextStatusReminders[0]?.content).toContain(
             "Raw model context window: ~200,000 tokens"

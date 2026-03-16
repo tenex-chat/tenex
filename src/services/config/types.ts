@@ -29,6 +29,19 @@ export interface TenexConfig {
         inactivityTimeout?: number; // Milliseconds to wait after last activity before generating summary (default: 300000 = 5 minutes)
     };
 
+    // Context-management configuration
+    contextManagement?: {
+        enabled?: boolean; // Enable context-management middleware (default: true)
+        tokenBudget?: number; // Managed working-context token budget (default: 40000)
+        scratchpadEnabled?: boolean; // Enable scratchpad reminders/tooling (default: true)
+        forceScratchpadEnabled?: boolean; // Force scratchpad tool choice above threshold (default: true)
+        forceScratchpadThresholdPercent?: number; // Managed-context utilization percent that forces scratchpad (default: 70)
+        utilizationWarningEnabled?: boolean; // Emit managed-context utilization warnings (default: true)
+        utilizationWarningThresholdPercent?: number; // Managed-context utilization percent for warnings (default: 70)
+        summarizationFallbackEnabled?: boolean; // Enable LLM summarization fallback above threshold (default: true)
+        summarizationFallbackThresholdPercent?: number; // Managed-context utilization percent for summarization (default: 90)
+    };
+
     // Telemetry configuration
     telemetry?: {
         enabled?: boolean; // Enable OpenTelemetry tracing (default: true)
@@ -100,6 +113,19 @@ export const TenexConfigSchema = z.object({
     summarization: z
         .object({
             inactivityTimeout: z.number().optional(),
+        })
+        .optional(),
+    contextManagement: z
+        .object({
+            enabled: z.boolean().optional(),
+            tokenBudget: z.number().positive().optional(),
+            scratchpadEnabled: z.boolean().optional(),
+            forceScratchpadEnabled: z.boolean().optional(),
+            forceScratchpadThresholdPercent: z.number().min(0).max(100).optional(),
+            utilizationWarningEnabled: z.boolean().optional(),
+            utilizationWarningThresholdPercent: z.number().min(0).max(100).optional(),
+            summarizationFallbackEnabled: z.boolean().optional(),
+            summarizationFallbackThresholdPercent: z.number().min(0).max(100).optional(),
         })
         .optional(),
     telemetry: z

@@ -4,7 +4,7 @@ import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
+import { isOnlyToolMode, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
 import type { SkillData } from "@/services/skill";
 import { PromptCompilerService, type LessonComment } from "@/services/prompt-compiler";
 import { getNDK } from "@/nostr";
@@ -627,6 +627,10 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
 
     // Explain <system-reminder> tags before agents encounter them
     systemPromptBuilder.add("system-reminders-explanation", {});
+
+    if (!nudgeToolPermissions || !isOnlyToolMode(nudgeToolPermissions)) {
+        systemPromptBuilder.add("scratchpad-practice", {});
+    }
 
     // Add global system prompt if configured (ordered by fragment priority)
     systemPromptBuilder.add("global-system-prompt", {});

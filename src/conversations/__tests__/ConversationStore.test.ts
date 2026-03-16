@@ -144,6 +144,9 @@ describe("ConversationStore", () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
 
             store.setContextManagementScratchpad(AGENT1_PUBKEY, {
+                entries: {
+                    objective: "Focus on parser cleanup",
+                },
                 notes: "Focus on the failing tests",
                 keepLastMessages: 6,
                 omitToolCallIds: ["tool-call-1"],
@@ -156,6 +159,9 @@ describe("ConversationStore", () => {
             store2.load(PROJECT_ID, CONVERSATION_ID);
 
             expect(store2.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
+                entries: {
+                    objective: "Focus on parser cleanup",
+                },
                 notes: "Focus on the failing tests",
                 keepLastMessages: 6,
                 omitToolCallIds: ["tool-call-1"],
@@ -166,6 +172,9 @@ describe("ConversationStore", () => {
                 agentId: AGENT1_PUBKEY,
                 agentLabel: "agent1",
                 state: {
+                    entries: {
+                        objective: "Focus on parser cleanup",
+                    },
                     notes: "Focus on the failing tests",
                     keepLastMessages: 6,
                     omitToolCallIds: ["tool-call-1"],
@@ -173,6 +182,28 @@ describe("ConversationStore", () => {
                     agentLabel: "agent1",
                 },
             }]);
+        });
+
+        it("keeps scratchpads that only contain structured entries", async () => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+
+            store.setContextManagementScratchpad(AGENT1_PUBKEY, {
+                entries: {
+                    thesis: "The parser regression is in middleware ordering",
+                },
+                notes: "",
+                omitToolCallIds: [],
+                agentLabel: "agent1",
+            });
+
+            expect(store.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
+                entries: {
+                    thesis: "The parser regression is in middleware ordering",
+                },
+                notes: "",
+                omitToolCallIds: [],
+                agentLabel: "agent1",
+            });
         });
 
         it("should return empty state for new conversation", () => {

@@ -116,6 +116,10 @@ export class ConfigService {
         return this.loadedConfig.config;
     }
 
+    getContextManagementConfig(): TenexConfig["contextManagement"] | undefined {
+        return this.loadedConfig?.config.contextManagement;
+    }
+
     getMCP(): TenexMCP {
         if (!this.loadedConfig) {
             throw new Error("Config not loaded. Call loadConfig() first.");

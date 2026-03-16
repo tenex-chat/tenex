@@ -123,6 +123,7 @@ export interface ConversationMetadata {
 }
 
 export interface ContextManagementScratchpadState {
+    entries?: Record<string, string>;
     notes: string;
     keepLastMessages?: number | null;
     omitToolCallIds: string[];

@@ -89,7 +89,7 @@ describe("TENEX context management telemetry", () => {
             config: {
                 contextManagement: {
                     enabled: true,
-                    tokenBudget: 200,
+                    tokenBudget: 40000,
                     scratchpadEnabled: true,
                     forceScratchpadEnabled: true,
                     forceScratchpadThresholdPercent: 70,
@@ -218,9 +218,12 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(warningEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("warningThresholdTokens");
-        // With DEFAULT_WORKING_TOKEN_BUDGET (40,000) the small test prompt (~172 tokens)
-        // is well below the 70% warning threshold, so the strategy skips.
+        // With a 40,000-token managed budget, the small test prompt is well below
+        // the 70% warning threshold, so the strategy skips.
         expect(warningEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
+        expect(warningEvent?.attributes?.["context_management.budget_scope"]).toBe(
+            "managed-context"
+        );
         expect(String(warningEvent?.attributes?.["context_management.summary"])).toContain(
             "Skipped scratchpad context warning"
         );
@@ -234,7 +237,7 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(scratchpadEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("forcedToolChoice");
-        // With ~172 tokens against a 40,000-token budget, the prompt is well below
+        // With ~172 managed-context tokens against a 40,000-token budget, the prompt is well below
         // the force-scratchpad threshold, so forcedToolChoice is false.
         expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(false);
         expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
@@ -254,10 +257,18 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
         ).toContain("workingBudgetUtilizationPercent");
+        expect(
+            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
+        ).toContain("managedContextTokens");
         expect(String(statusEvent?.attributes?.["context_management.summary"])).toContain(
             "Inserted context status"
         );
-        // ~172 tokens against 40,000-token working budget
+        expect(statusEvent?.attributes?.["context_management.budget_scope"]).toBe(
+            "managed-context"
+        );
+        expect(
+            typeof statusEvent?.attributes?.["context_management.managed_context_tokens"]
+        ).toBe("number");
         expect(
             typeof statusEvent?.attributes?.["context_management.working_budget_utilization_percent"]
         ).toBe("number");

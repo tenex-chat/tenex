@@ -51,6 +51,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 
 ### Prompts (`src/prompts`)
 - **`core/` + `fragments/` + `utils/`**: Compose reusable prompt pieces, compile structured system prompts, and host helper utilities. Execution modules should only import builders from here, never inline long prompt strings.
+- `fragments/04-scratchpad-practice.ts` adds proactive scratchpad guidance only when the current execution still has access to `scratchpad(...)`, so prompt instructions stay aligned with tool restrictions.
 
 ### Tools System (`src/tools`)
 - **Implementations**: `implementations/*.ts` are the concrete actions agents can call (delegation, RAG management, scheduling, file access, shell, etc.). They should delegate to `services/*` when stateful operations are required. The `fs_*` tools are thin TENEX adapters over the external `ai-sdk-fs-tools` package, with TENEX-only hooks for agent-home access, report protection, tool-result loading, and LLM-backed file analysis.
