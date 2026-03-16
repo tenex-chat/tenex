@@ -623,6 +623,9 @@ function buildToolResultDecaySummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
+    const toolContextTokens = getNumber(strategyPayload, "toolContextTokens");
+    const forecastToolContextTokens = getNumber(strategyPayload, "forecastToolContextTokens");
+    const warningForecastExtraTokens = getNumber(strategyPayload, "warningForecastExtraTokens");
     const truncatedCount = getNumber(strategyPayload, "truncatedCount") ?? 0;
     const placeholderCount = getNumber(strategyPayload, "placeholderCount") ?? 0;
     const inputTruncatedCount = getNumber(strategyPayload, "inputTruncatedCount") ?? 0;
@@ -659,11 +662,14 @@ function buildToolResultDecaySummary(
 
     const warningCount = getNumber(strategyPayload, "warningCount") ?? 0;
     const warningSuffix = warningCount > 0
-        ? `, warned about ${formatCount(warningCount, "at-risk result")}`
+        ? `, warned about ${formatCount(warningCount, "at-risk result")}${warningForecastExtraTokens !== undefined ? ` under a +${formatTelemetryNumber(warningForecastExtraTokens)} tool-token forecast` : ""}`
+        : "";
+    const toolContextSuffix = toolContextTokens !== undefined
+        ? ` at ~${formatTelemetryNumber(toolContextTokens)} tool-context tokens${forecastToolContextTokens !== undefined ? ` (forecast ~${formatTelemetryNumber(forecastToolContextTokens)})` : ""}`
         : "";
 
     return clipTelemetrySummary(
-        `${parts.join(" and ")}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)})${warningSuffix}.`
+        `${parts.join(" and ")}${toolContextSuffix}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)})${warningSuffix}.`
     );
 }
 
@@ -928,6 +934,31 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.current_prompt_tokens",
                         getNumber(strategyPayload, "currentPromptTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.tool_context_tokens",
+                        getNumber(strategyPayload, "toolContextTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.forecast_tool_context_tokens",
+                        getNumber(strategyPayload, "forecastToolContextTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.warning_forecast_extra_tokens",
+                        getNumber(strategyPayload, "warningForecastExtraTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.depth_factor",
+                        getNumber(strategyPayload, "depthFactor")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.forecast_depth_factor",
+                        getNumber(strategyPayload, "forecastDepthFactor")
                     );
                     addAttribute(
                         attributes,

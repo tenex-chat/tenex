@@ -285,6 +285,12 @@ describe("TENEX context management telemetry", () => {
         );
         const decayPayloads = String(decayEvent?.attributes?.["context_management.strategy_payloads_json"]);
         expect(decayPayloads).toContain("currentPromptTokens");
+        if (decayPayloads.includes("toolContextTokens")) {
+            expect(decayPayloads).toContain("forecastToolContextTokens");
+            expect(typeof decayEvent?.attributes?.["context_management.tool_context_tokens"]).toBe("number");
+            expect(typeof decayEvent?.attributes?.["context_management.forecast_tool_context_tokens"]).toBe("number");
+            expect(typeof decayEvent?.attributes?.["context_management.warning_forecast_extra_tokens"]).toBe("number");
+        }
 
         const toolEvent = events.find(
             (event) => event.eventName === "context_management.tool_execute_complete.scratchpad"
