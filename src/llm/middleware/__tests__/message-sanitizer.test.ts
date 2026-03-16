@@ -123,9 +123,9 @@ describe("message-sanitizer TENEX wrapper", () => {
         const toolCall = (result.prompt[0] as { content: Array<Record<string, unknown>> }).content[0];
 
         expect(toolCall.input).toEqual({
-            _tenex_invalid_tool_input: true,
-            _tenex_original_input_type: "string",
-            raw_input: "{\"setEntries\": \n<parameter name=\"objective\">debug it</parameter>",
+            _sanitizerInvalidInput: true,
+            _sanitizerOriginalInputType: "string",
+            rawInput: "{\"setEntries\": \n<parameter name=\"objective\">debug it</parameter>",
         });
 
         const logPath = join(testBaseDir, "daemon", "warn.log");
@@ -135,9 +135,9 @@ describe("message-sanitizer TENEX wrapper", () => {
             fix: "tool-call-input-wrapped",
             model: "anthropic:claude-opus-4-6",
             callType: "stream",
-            toolCallId: "call-1",
-            toolName: "scratchpad",
-            inputType: "string",
+            tool_call_id: "call-1",
+            tool_name: "scratchpad",
+            input_type: "string",
         });
     });
 });
