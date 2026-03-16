@@ -65,7 +65,7 @@
     "@opentelemetry/sdk-trace-node": "^2.6.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "ai": "^6.0.116",
-    "ai-sdk-context-management": "github:pablof7z/ai-sdk-context-management#9e3bb9a9b1f4f7f6f5d54b89d126138bc602f29e",
+    "ai-sdk-context-management": "^0.4.0",
     "ai-sdk-message-sanitizer": "^0.1.0",
     "ai-sdk-fs-tools": "^0.2.2",
     "ai-sdk-provider-codex-app-server": "1.1.7",

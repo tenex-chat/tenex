@@ -146,8 +146,8 @@ describe("ConversationStore", () => {
             store.setContextManagementScratchpad(AGENT1_PUBKEY, {
                 entries: {
                     objective: "Focus on parser cleanup",
+                    notes: "Focus on the failing tests",
                 },
-                notes: "Focus on the failing tests",
                 keepLastMessages: 6,
                 omitToolCallIds: ["tool-call-1"],
                 updatedAt: 123,
@@ -160,9 +160,9 @@ describe("ConversationStore", () => {
 
             expect(store2.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
                 entries: {
+                    notes: "Focus on the failing tests",
                     objective: "Focus on parser cleanup",
                 },
-                notes: "Focus on the failing tests",
                 keepLastMessages: 6,
                 omitToolCallIds: ["tool-call-1"],
                 updatedAt: 123,
@@ -173,9 +173,9 @@ describe("ConversationStore", () => {
                 agentLabel: "agent1",
                 state: {
                     entries: {
+                        notes: "Focus on the failing tests",
                         objective: "Focus on parser cleanup",
                     },
-                    notes: "Focus on the failing tests",
                     keepLastMessages: 6,
                     omitToolCallIds: ["tool-call-1"],
                     updatedAt: 123,
@@ -191,7 +191,6 @@ describe("ConversationStore", () => {
                 entries: {
                     thesis: "The parser regression is in middleware ordering",
                 },
-                notes: "",
                 omitToolCallIds: [],
                 agentLabel: "agent1",
             });
@@ -200,8 +199,51 @@ describe("ConversationStore", () => {
                 entries: {
                     thesis: "The parser regression is in middleware ordering",
                 },
-                notes: "",
                 omitToolCallIds: [],
+                agentLabel: "agent1",
+            });
+        });
+
+        it("migrates legacy scratchpad notes into structured entries on load", async () => {
+            const conversationDir = join(TEST_DIR, PROJECT_ID, "conversations");
+            await mkdir(conversationDir, { recursive: true });
+            await writeFile(
+                join(conversationDir, `${CONVERSATION_ID}.json`),
+                JSON.stringify({
+                    activeRal: {},
+                    nextRalNumber: {},
+                    injections: [],
+                    messages: [],
+                    metadata: {},
+                    agentTodos: {},
+                    todoNudgedAgents: [],
+                    blockedAgents: [],
+                    executionTime: {
+                        totalSeconds: 0,
+                        isActive: false,
+                        lastUpdated: 123,
+                    },
+                    contextManagementScratchpads: {
+                        [AGENT1_PUBKEY]: {
+                            notes: "Focus on the failing tests",
+                            keepLastMessages: 6,
+                            omitToolCallIds: ["tool-call-1"],
+                            updatedAt: 123,
+                            agentLabel: "agent1",
+                        },
+                    },
+                }, null, 2)
+            );
+
+            store.load(PROJECT_ID, CONVERSATION_ID);
+
+            expect(store.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
+                entries: {
+                    notes: "Focus on the failing tests",
+                },
+                keepLastMessages: 6,
+                omitToolCallIds: ["tool-call-1"],
+                updatedAt: 123,
                 agentLabel: "agent1",
             });
         });

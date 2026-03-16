@@ -60,6 +60,84 @@ function normalizeLoadedMessages(messages: ConversationRecordInput[]): Conversat
     return messages.map((message, index) => ensureConversationRecord(message, index));
 }
 
+function normalizeScratchpadEntries(
+    entries: Record<string, unknown> | undefined
+): Record<string, string> | undefined {
+    const normalizedEntries = Object.entries(entries ?? {})
+        .flatMap(([key, value]) => {
+            if (typeof value !== "string") {
+                return [];
+            }
+
+            const normalizedKey = key.trim();
+            const normalizedValue = value.trim();
+
+            if (normalizedKey.length === 0 || normalizedValue.length === 0) {
+                return [];
+            }
+
+            return [[normalizedKey, normalizedValue] as const];
+        })
+        .sort(([left], [right]) => left.localeCompare(right));
+
+    if (normalizedEntries.length === 0) {
+        return undefined;
+    }
+
+    return Object.fromEntries(normalizedEntries);
+}
+
+function normalizeContextManagementScratchpadState(
+    state: ContextManagementScratchpadState | undefined
+): ContextManagementScratchpadState | undefined {
+    if (!state) {
+        return undefined;
+    }
+
+    const legacyNotes = typeof state.notes === "string" ? state.notes.trim() : "";
+    const entries = normalizeScratchpadEntries({
+        ...(state.entries ?? {}),
+        ...(legacyNotes.length > 0 && state.entries?.notes === undefined
+            ? { notes: legacyNotes }
+            : {}),
+    });
+    const keepLastMessages = typeof state.keepLastMessages === "number"
+        && Number.isFinite(state.keepLastMessages)
+        ? Math.max(0, Math.floor(state.keepLastMessages))
+        : undefined;
+    const omitToolCallIds = Array.from(
+        new Set(
+            (state.omitToolCallIds ?? [])
+                .filter((toolCallId): toolCallId is string =>
+                    typeof toolCallId === "string" && toolCallId.trim().length > 0
+                )
+                .map((toolCallId) => toolCallId.trim())
+        )
+    );
+    const agentLabel = typeof state.agentLabel === "string" && state.agentLabel.trim().length > 0
+        ? state.agentLabel
+        : undefined;
+
+    return {
+        ...(entries ? { entries } : {}),
+        ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
+        omitToolCallIds,
+        ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
+        ...(agentLabel ? { agentLabel } : {}),
+    };
+}
+
+function normalizeLoadedContextManagementScratchpads(
+    scratchpads: Record<string, ContextManagementScratchpadState> | undefined
+): Record<string, ContextManagementScratchpadState> {
+    return Object.fromEntries(
+        Object.entries(scratchpads ?? {}).flatMap(([agentId, state]) => {
+            const normalizedState = normalizeContextManagementScratchpadState(state);
+            return normalizedState ? [[agentId, normalizedState] as const] : [];
+        })
+    );
+}
+
 export class ConversationStore {
     // ========== STATIC METHODS (delegate to registry) ==========
 
@@ -265,7 +343,11 @@ export class ConversationStore {
                 blockedAgents: loaded.blockedAgents ?? [],
                 executionTime: loaded.executionTime ?? { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 metaModelVariantOverride: loaded.metaModelVariantOverride,
-                contextManagementScratchpads: loaded.contextManagementScratchpads ?? {},
+                contextManagementScratchpads: normalizeLoadedContextManagementScratchpads(
+                    loaded.contextManagementScratchpads as
+                        | Record<string, ContextManagementScratchpadState>
+                        | undefined
+                ),
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -470,24 +552,17 @@ export class ConversationStore {
             this.state.contextManagementScratchpads = {};
         }
 
-        const hasNotes = state.notes.trim().length > 0;
-        const hasEntries = Object.keys(state.entries ?? {}).length > 0;
-        const hasKeepLastMessages = typeof state.keepLastMessages === "number";
-        const hasOmittedToolCalls = state.omitToolCallIds.length > 0;
+        const normalizedState = normalizeContextManagementScratchpadState(state);
+        const hasEntries = Object.keys(normalizedState?.entries ?? {}).length > 0;
+        const hasKeepLastMessages = typeof normalizedState?.keepLastMessages === "number";
+        const hasOmittedToolCalls = (normalizedState?.omitToolCallIds.length ?? 0) > 0;
 
-        if (!hasNotes && !hasEntries && !hasKeepLastMessages && !hasOmittedToolCalls) {
+        if (!hasEntries && !hasKeepLastMessages && !hasOmittedToolCalls) {
             delete this.state.contextManagementScratchpads[agentId];
             return;
         }
 
-        this.state.contextManagementScratchpads[agentId] = {
-            ...(state.entries ? { entries: { ...state.entries } } : {}),
-            notes: state.notes,
-            keepLastMessages: state.keepLastMessages,
-            omitToolCallIds: [...state.omitToolCallIds],
-            updatedAt: state.updatedAt,
-            agentLabel: state.agentLabel,
-        };
+        this.state.contextManagementScratchpads[agentId] = normalizedState!;
     }
 
     listContextManagementScratchpads(): ContextManagementScratchpadEntry[] {

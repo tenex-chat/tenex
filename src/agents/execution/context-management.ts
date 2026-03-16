@@ -7,8 +7,8 @@ import type {
 import type { LanguageModel, LanguageModelMiddleware } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
-    LLMSummarizationStrategy,
     ScratchpadStrategy,
+    SummarizationStrategy,
     SystemPromptCachingStrategy,
     ToolResultDecayStrategy,
     createContextManagementRuntime,
@@ -211,6 +211,26 @@ function getRecordKeyCount(value: unknown, key: string): number | undefined {
     }
 
     return Object.keys(nested).length;
+}
+
+function getRecordStringCharCount(value: unknown, key: string): number | undefined {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+
+    const nested = value[key];
+    if (!isRecord(nested)) {
+        return undefined;
+    }
+
+    let total = 0;
+    for (const [entryKey, entryValue] of Object.entries(nested)) {
+        if (typeof entryValue === "string") {
+            total += entryKey.length + entryValue.length;
+        }
+    }
+
+    return total;
 }
 
 function normalizePositiveNumber(value: number | undefined, fallback: number): number {
@@ -636,8 +656,8 @@ function buildScratchpadSummary(
     event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
     strategyPayload: Record<string, unknown> | undefined
 ): string {
-    const noteChars = getNumber(strategyPayload, "notesCharCount") ?? 0;
     const entryCount = getNumber(strategyPayload, "entryCount") ?? 0;
+    const entryCharCount = getNumber(strategyPayload, "entryCharCount") ?? 0;
     const keepLastMessages = getNumber(strategyPayload, "keepLastMessages");
     const forcedToolChoice = getBoolean(strategyPayload, "forcedToolChoice") ?? false;
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens");
@@ -646,7 +666,7 @@ function buildScratchpadSummary(
     const removedExchanges = event.removedToolExchangesDelta;
 
     const parts = [
-        `Rendered scratchpad context using ${formatTelemetryNumber(noteChars)} note chars and ${formatCount(entryCount, "entry", "entries")}`,
+        `Rendered scratchpad context using ${formatCount(entryCount, "entry", "entries")} across ~${formatTelemetryNumber(entryCharCount)} chars`,
         `removed ${formatCount(removedExchanges, "tool exchange")} from future context`,
     ];
 
@@ -830,16 +850,16 @@ function buildToolExecuteSummary(
     }
 
     if (event.toolName === "scratchpad") {
-        const inputNotes = getString(event.payloads.input, "notes") ?? "";
-        const appendNotes = getString(event.payloads.input, "appendNotes") ?? "";
         const omitCount = getStringArray(event.payloads.input, "omitToolCallIds")?.length ?? 0;
         const setEntriesCount = getRecordKeyCount(event.payloads.input, "setEntries") ?? 0;
         const replaceEntriesCount = getRecordKeyCount(event.payloads.input, "replaceEntries") ?? 0;
         const removeEntryKeysCount = getStringArray(event.payloads.input, "removeEntryKeys")?.length ?? 0;
         const keepLastMessages = getNumber(event.payloads.input, "keepLastMessages");
+        const entryCharCount = (getRecordStringCharCount(event.payloads.input, "setEntries") ?? 0)
+            + (getRecordStringCharCount(event.payloads.input, "replaceEntries") ?? 0);
 
         return clipTelemetrySummary(
-            `Updated scratchpad: ${formatTelemetryNumber(inputNotes.length + appendNotes.length)} note chars, ${formatCount(setEntriesCount + replaceEntriesCount, "entry update", "entry updates")}, ${formatCount(removeEntryKeysCount, "entry removal", "entry removals")}, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
+            `Updated scratchpad: ${formatCount(setEntriesCount + replaceEntriesCount, "entry update", "entry updates")} across ~${formatTelemetryNumber(entryCharCount)} chars, ${formatCount(removeEntryKeysCount, "entry removal", "entry removals")}, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
         );
     }
 
@@ -930,11 +950,6 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.entry_count",
                         getNumber(strategyPayload, "entryCount")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.notes_char_count",
-                        getNumber(strategyPayload, "notesCharCount")
                     );
                     addAttribute(
                         attributes,
@@ -1050,9 +1065,9 @@ function buildDerivedTelemetryAttributes(
             if (event.toolName === "scratchpad") {
                 addAttribute(
                     attributes,
-                    "context_management.notes_char_count",
-                    (getString(event.payloads.input, "notes") ?? "").length
-                        + (getString(event.payloads.input, "appendNotes") ?? "").length
+                    "context_management.entry_char_count",
+                    (getRecordStringCharCount(event.payloads.input, "setEntries") ?? 0)
+                        + (getRecordStringCharCount(event.payloads.input, "replaceEntries") ?? 0)
                 );
                 addAttribute(
                     attributes,
@@ -1350,7 +1365,7 @@ function createConversationContextManagementRuntime(options: {
 
     if (summarizationModel && settings.summarizationFallbackEnabled) {
         strategies.push(
-            new LLMSummarizationStrategy({
+            new SummarizationStrategy({
                 model: summarizationModel,
                 maxPromptTokens: Math.floor(
                     settings.tokenBudget

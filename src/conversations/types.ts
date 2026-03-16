@@ -124,7 +124,8 @@ export interface ConversationMetadata {
 
 export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
-    notes: string;
+    /** @deprecated Legacy field normalized into entries.notes on load/save. */
+    notes?: string;
     keepLastMessages?: number | null;
     omitToolCallIds: string[];
     updatedAt?: number;

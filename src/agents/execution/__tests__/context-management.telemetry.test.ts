@@ -133,7 +133,9 @@ describe("TENEX context management telemetry", () => {
 
         await scratchpadTool.execute(
             {
-                notes: "Track the current parser state",
+                setEntries: {
+                    notes: "Track the current parser state",
+                },
                 omitToolCallIds: ["call-obsolete"],
             },
             {
@@ -298,7 +300,7 @@ describe("TENEX context management telemetry", () => {
         expect(String(toolEvent?.attributes?.["context_management.summary"])).toContain(
             "Updated scratchpad"
         );
-        expect(toolEvent?.attributes?.["context_management.notes_char_count"]).toBe(30);
+        expect(toolEvent?.attributes?.["context_management.entry_update_count"]).toBe(1);
         expect(toolEvent?.attributes?.["context_management.omit_tool_call_id_count"]).toBe(1);
 
         const runtimeCompleteEvent = events.find(

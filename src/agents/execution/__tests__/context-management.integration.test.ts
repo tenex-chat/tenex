@@ -78,7 +78,9 @@ describe("TENEX context management integration", () => {
         };
         await scratchpadTool.execute(
             {
-                notes: "Focus on the parser errors",
+                setEntries: {
+                    notes: "Focus on the parser errors",
+                },
                 omitToolCallIds: ["call-old"],
             },
             {
@@ -90,7 +92,9 @@ describe("TENEX context management integration", () => {
 
         expect(store.getContextManagementScratchpad(AGENT_PUBKEY)).toEqual(
             expect.objectContaining({
-                notes: "Focus on the parser errors",
+                entries: {
+                    notes: "Focus on the parser errors",
+                },
                 omitToolCallIds: ["call-old"],
             })
         );
@@ -471,7 +475,7 @@ describe("TENEX context management integration", () => {
                                 type: "tool-call",
                                 toolCallId: "scratch-call-1",
                                 toolName: "scratchpad",
-                                input: { notes: "Keep parser context" },
+                                input: { setEntries: { notes: "Keep parser context" } },
                             },
                         ],
                     },
@@ -646,7 +650,7 @@ describe("TENEX context management integration", () => {
             }),
         ]);
         expect(contextStatusReminders[0]?.content).toContain(
-            "Current prompt after context management:"
+            "Current request after context management:"
         );
         expect(contextStatusReminders[0]?.content).toContain(
             "Managed working context:"
