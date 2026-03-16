@@ -311,5 +311,86 @@ describe("TENEX context management telemetry", () => {
             "Completed context management"
         );
         expect(runtimeCompleteEvent?.attributes?.["context_management.tokens_saved"]).not.toBeUndefined();
+        expect(
+            String(runtimeCompleteEvent?.attributes?.["context_management.final_prompt_json"])
+        ).toContain("Long request");
+        expect(
+            String(
+                runtimeCompleteEvent?.attributes?.[
+                    "context_management.final_provider_options_json"
+                ]
+            )
+        ).toContain(CONTEXT_MANAGEMENT_KEY);
+        expect(
+            runtimeCompleteEvent?.attributes?.["context_management.final_tool_choice_json"]
+        ).toBeUndefined();
+    });
+
+    test("includes final tool choice when scratchpad forcing mutates the model call", async () => {
+        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = {
+            config: {
+                contextManagement: {
+                    enabled: true,
+                    tokenBudget: 200,
+                    scratchpadEnabled: true,
+                    forceScratchpadEnabled: true,
+                    forceScratchpadThresholdPercent: 70,
+                    utilizationWarningEnabled: false,
+                    utilizationWarningThresholdPercent: 70,
+                    summarizationFallbackEnabled: false,
+                },
+            },
+            llms: { configurations: {}, default: undefined },
+            mcp: { servers: {}, enabled: true },
+            providers: { providers: {} },
+        };
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        await contextManagement!.middleware.transformParams?.({
+            params: {
+                prompt: [
+                    { role: "system", content: "You are helpful." },
+                    {
+                        role: "user",
+                        content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
+                    },
+                ],
+                providerOptions: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                },
+            },
+            model: {
+                specificationVersion: "v3",
+                provider: "mock",
+                modelId: "mock",
+                supportedUrls: {},
+                doGenerate: async () => {
+                    throw new Error("unused");
+                },
+                doStream: async () => {
+                    throw new Error("unused");
+                },
+            },
+        } as any);
+
+        const runtimeCompleteEvent = addEvent.mock.calls
+            .map(([eventName, attributes]) => ({ eventName, attributes }))
+            .find((event) => event.eventName === "context_management.runtime_complete");
+
+        expect(runtimeCompleteEvent).toBeDefined();
+        expect(
+            String(runtimeCompleteEvent?.attributes?.["context_management.final_tool_choice_json"])
+        ).toContain("\"toolName\":\"scratchpad\"");
     });
 });

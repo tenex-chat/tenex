@@ -200,6 +200,21 @@ function getStringArray(value: unknown, key: string): string[] | undefined {
     return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
+function getRuntimeCompletePayload(
+    event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>
+): {
+    prompt?: LanguageModelV3Prompt;
+    providerOptions?: unknown;
+    toolChoice?: unknown;
+} {
+    const payloads = event.payloads;
+    return {
+        prompt: Array.isArray(payloads.prompt) ? payloads.prompt as LanguageModelV3Prompt : undefined,
+        providerOptions: payloads.providerOptions,
+        ...(payloads.toolChoice !== undefined ? { toolChoice: payloads.toolChoice } : {}),
+    };
+}
+
 function getRecordKeyCount(value: unknown, key: string): number | undefined {
     if (!isRecord(value)) {
         return undefined;
@@ -1223,6 +1238,22 @@ function buildTelemetryAttributes(
                 event.pinnedToolCallIdsTotal;
             attributes["context_management.message_count_before"] = event.messageCountBefore;
             attributes["context_management.message_count_after"] = event.messageCountAfter;
+            {
+                const payload = getRuntimeCompletePayload(event);
+                if (payload?.prompt !== undefined) {
+                    attributes["context_management.final_prompt_json"] = serializeTelemetryValue(
+                        payload.prompt
+                    );
+                }
+                if (payload?.providerOptions !== undefined) {
+                    attributes["context_management.final_provider_options_json"] =
+                        serializeTelemetryValue(payload.providerOptions);
+                }
+                if (payload?.toolChoice !== undefined) {
+                    attributes["context_management.final_tool_choice_json"] =
+                        serializeTelemetryValue(payload.toolChoice);
+                }
+            }
             break;
     }
 
