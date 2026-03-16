@@ -95,4 +95,49 @@ describe("message-sanitizer TENEX wrapper", () => {
         expect(JSON.parse(lines[0]).fix).toBe("empty-content-stripped");
         expect(JSON.parse(lines[1]).fix).toBe("trailing-assistant-stripped");
     });
+
+    test("wraps malformed assistant tool-call input into a dictionary", async () => {
+        const prompt: LanguageModelV3Message[] = [
+            {
+                role: "assistant",
+                content: [{
+                    type: "tool-call",
+                    toolCallId: "call-1",
+                    toolName: "scratchpad",
+                    input: "{\"setEntries\": \n<parameter name=\"objective\">debug it</parameter>",
+                } as LanguageModelV3Message["content"][number]],
+            },
+            {
+                role: "tool",
+                content: [{
+                    type: "tool-result",
+                    toolCallId: "call-1",
+                    toolName: "scratchpad",
+                    output: { type: "text", value: "Tool execution failed" },
+                } as LanguageModelV3Message["content"][number]],
+            },
+            { role: "user", content: [{ type: "text", text: "Continue" }] },
+        ];
+
+        const result = await transformParams({ params: makeParams(prompt), type: "stream", model: fakeModel });
+        const toolCall = (result.prompt[0] as { content: Array<Record<string, unknown>> }).content[0];
+
+        expect(toolCall.input).toEqual({
+            _tenex_invalid_tool_input: true,
+            _tenex_original_input_type: "string",
+            raw_input: "{\"setEntries\": \n<parameter name=\"objective\">debug it</parameter>",
+        });
+
+        const logPath = join(testBaseDir, "daemon", "warn.log");
+        const lines = readFileSync(logPath, "utf-8").trim().split("\n");
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0])).toMatchObject({
+            fix: "tool-call-input-wrapped",
+            model: "anthropic:claude-opus-4-6",
+            callType: "stream",
+            toolCallId: "call-1",
+            toolName: "scratchpad",
+            inputType: "string",
+        });
+    });
 });
