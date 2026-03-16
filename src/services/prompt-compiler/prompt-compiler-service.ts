@@ -438,14 +438,6 @@ export class PromptCompilerService {
         // Use the lessons set at initialization time
         const lessons = this.lessons;
 
-        // If no lessons and no additional prompt, return Base Agent Instructions directly
-        if (lessons.length === 0 && !additionalSystemPrompt) {
-            logger.debug("PromptCompilerService: no lessons or additional prompt, returning Base Agent Instructions", {
-                agentPubkey: this.agentPubkey.substring(0, 8),
-            });
-            return baseAgentInstructions;
-        }
-
         // Calculate freshness inputs
         const maxCreatedAt = this.calculateMaxCreatedAt(lessons);
         // Create deterministic cache key from all relevant inputs:
@@ -479,6 +471,21 @@ export class PromptCompilerService {
                 currentMaxCreatedAt: maxCreatedAt,
                 cacheHashMatch: cached.cacheInputsHash === cacheHash,
             });
+        }
+
+        // If no lessons and no additional prompt, persist the base instructions as a trivial
+        // compiled cache entry so restarts can reload it without falling back again.
+        if (lessons.length === 0 && !additionalSystemPrompt) {
+            logger.debug("PromptCompilerService: no lessons or additional prompt, caching Base Agent Instructions", {
+                agentPubkey: this.agentPubkey.substring(0, 8),
+            });
+            await this.writeCache({
+                effectiveAgentInstructions: baseAgentInstructions,
+                timestamp: Math.floor(Date.now() / 1000),
+                maxCreatedAt,
+                cacheInputsHash: cacheHash,
+            });
+            return baseAgentInstructions;
         }
 
         // Compile with LLM

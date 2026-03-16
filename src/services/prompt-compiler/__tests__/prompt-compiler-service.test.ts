@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { PromptCompilerService, type LessonComment } from "../prompt-compiler-service";
 import type NDK from "@nostr-dev-kit/ndk";
@@ -190,6 +191,47 @@ describe("PromptCompilerService", () => {
 
             expect(result).toBe(baseAgentInstructions);
             expect(llmCallCount).toBe(0); // No LLM call when no lessons
+        });
+
+        test("persists base instructions to disk when no lessons exist so restart can reload compiled cache", async () => {
+            const uniqueAgentPubkey = "no-lessons-cache-agent";
+            const cachePath = PromptCompilerService.getCachePathForAgent(uniqueAgentPubkey);
+            await fs.rm(cachePath, { force: true });
+
+            const baseAgentInstructions = "You are a helpful assistant.";
+
+            const firstService = new PromptCompilerService(
+                uniqueAgentPubkey,
+                whitelistedPubkeys,
+                mockNdk
+            );
+            await firstService.initialize(baseAgentInstructions, []);
+
+            const firstResult = await firstService.compile(baseAgentInstructions);
+            expect(firstResult).toBe(baseAgentInstructions);
+            expect(llmCallCount).toBe(0);
+
+            const cached = JSON.parse(await fs.readFile(cachePath, "utf-8")) as {
+                effectiveAgentInstructions: string;
+                maxCreatedAt: number;
+            };
+            expect(cached.effectiveAgentInstructions).toBe(baseAgentInstructions);
+            expect(cached.maxCreatedAt).toBe(0);
+
+            const secondService = new PromptCompilerService(
+                uniqueAgentPubkey,
+                whitelistedPubkeys,
+                mockNdk
+            );
+            await secondService.initialize(baseAgentInstructions, []);
+
+            expect(secondService.getEffectiveInstructionsSync()).toMatchObject({
+                instructions: baseAgentInstructions,
+                isCompiled: true,
+                source: "compiled_cache",
+            });
+
+            await fs.rm(cachePath, { force: true });
         });
 
         test("throws error when LLM compilation fails", async () => {
