@@ -111,14 +111,32 @@ export class MessageCompiler {
                 const dynamicContextCount = 0;
 
                 if (this.plan.mode === "full") {
-                    const systemPromptMessages = await buildSystemPromptMessages(context);
-                    const conversationMessages = await this.conversationStore.buildMessagesForRal(
-                        context.agent.pubkey,
-                        context.ralNumber,
-                        {
-                            includeMessageIds: true,
+                    const systemPromptMessages = await tracer.startActiveSpan(
+                        "tenex.message.compile.system_prompt",
+                        async (s) => {
+                            try {
+                                return await buildSystemPromptMessages(context);
+                            } finally {
+                                s.end();
+                            }
                         }
-                    ) as PromptMessage[];
+                    );
+                    const conversationMessages = await tracer.startActiveSpan(
+                        "tenex.message.compile.conversation_messages",
+                        async (s) => {
+                            try {
+                                return await this.conversationStore.buildMessagesForRal(
+                                    context.agent.pubkey,
+                                    context.ralNumber,
+                                    {
+                                        includeMessageIds: true,
+                                    }
+                                ) as PromptMessage[];
+                            } finally {
+                                s.end();
+                            }
+                        }
+                    );
 
                     const systemMessages = systemPromptMessages.map((sm, index) => ({
                         ...sm.message,

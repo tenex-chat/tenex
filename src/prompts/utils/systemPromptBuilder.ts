@@ -18,10 +18,13 @@ import { logger } from "@/utils/logger";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ModelMessage } from "ai";
+import { trace } from "@opentelemetry/api";
 
 // Import fragment registration manifest
 import "@/prompts/fragments"; // This auto-registers all fragments
 import { fetchAgentMcpResources } from "@/prompts/fragments/26-mcp-resources";
+
+const tracer = trace.getTracer("tenex.system-prompt-builder");
 
 /**
  * Module-level cache for PromptCompilerService instances per project+agent.
@@ -161,8 +164,17 @@ async function addCoreAgentFragments(
 
     if (hasSchedulingTools) {
         try {
-            const schedulerService = SchedulerService.getInstance();
-            const allTasks = await schedulerService.getTasks();
+            const allTasks = await tracer.startActiveSpan(
+                "tenex.system_prompt.scheduled_tasks",
+                async (span) => {
+                    try {
+                        const schedulerService = SchedulerService.getInstance();
+                        return await schedulerService.getTasks();
+                    } finally {
+                        span.end();
+                    }
+                }
+            );
             builder.add("scheduled-tasks", {
                 agent,
                 scheduledTasks: allTasks,
@@ -237,7 +249,16 @@ async function addCoreAgentFragments(
 
     // Add MCP resources if agent has any MCP tools and mcpManager is available
     if (mcpManager) {
-        const resourcesPerServer = await fetchAgentMcpResources(agent.tools, mcpManager);
+        const resourcesPerServer = await tracer.startActiveSpan(
+            "tenex.system_prompt.mcp_resources",
+            async (span) => {
+                try {
+                    return await fetchAgentMcpResources(agent.tools, mcpManager);
+                } finally {
+                    span.end();
+                }
+            }
+        );
         if (resourcesPerServer.length > 0) {
             builder.add("mcp-resources", {
                 agentPubkey: agent.pubkey,
@@ -250,8 +271,17 @@ async function addCoreAgentFragments(
     // Add RAG collection attribution - shows agents their contributions to RAG collections
     // This uses the provenance tracking metadata (agent_pubkey) from document ingestion
     try {
-        const ragService = RAGService.getInstance();
-        const collections = await ragService.getAllCollectionStats(agent.pubkey);
+        const collections = await tracer.startActiveSpan(
+            "tenex.system_prompt.rag_collection_stats",
+            async (span) => {
+                try {
+                    const ragService = RAGService.getInstance();
+                    return await ragService.getAllCollectionStats(agent.pubkey);
+                } finally {
+                    span.end();
+                }
+            }
+        );
 
         if (collections.length > 0) {
             builder.add("rag-collections", {
@@ -571,18 +601,26 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
         projectCacheKey = project.id || `fallback-${project.pubkey?.substring(0, 16) || "unknown"}`;
     }
 
-    const promptCompiler = await getOrCreatePromptCompiler(
-        projectCacheKey,
-        agent.pubkey,
-        baseAgentInstructions,
-        agent.eventId,
-        lessons,
-        comments,
-        // Pass agent metadata for kind:0 publishing (gap 2 fix)
-        agentInstance?.signer,
-        agentInstance?.name ?? agent.name,
-        agentInstance?.role ?? "",
-        projectTitle
+    const promptCompiler = await tracer.startActiveSpan(
+        "tenex.system_prompt.get_or_create_compiler",
+        async (span) => {
+            try {
+                return await getOrCreatePromptCompiler(
+                    projectCacheKey,
+                    agent.pubkey,
+                    baseAgentInstructions,
+                    agent.eventId,
+                    lessons,
+                    comments,
+                    agentInstance?.signer,
+                    agentInstance?.name ?? agent.name,
+                    agentInstance?.role ?? "",
+                    projectTitle
+                );
+            } finally {
+                span.end();
+            }
+        }
     );
     const usePromptCompiler = !!promptCompiler;
 
@@ -708,10 +746,21 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     // When no AGENTS.md exists, the fragment explicitly states so
     if (projectBasePath) {
         try {
-            const hasRootAgentsMd = await hasProjectRootAgentsMd(projectBasePath);
-            const rootContent = hasRootAgentsMd
-                ? await getRootAgentsMdContent(projectBasePath)
-                : null;
+            const { hasRootAgentsMd, rootContent } = await tracer.startActiveSpan(
+                "tenex.system_prompt.agents_md_read",
+                async (span) => {
+                    try {
+                        const hasRootAgentsMd = await hasProjectRootAgentsMd(projectBasePath);
+                        const rootContent = hasRootAgentsMd
+                            ? await getRootAgentsMdContent(projectBasePath)
+                            : null;
+                        span.setAttribute("has_root_agents_md", hasRootAgentsMd);
+                        return { hasRootAgentsMd, rootContent };
+                    } finally {
+                        span.end();
+                    }
+                }
+            );
             systemPromptBuilder.add("agents-md-guidance", {
                 hasRootAgentsMd,
                 rootAgentsMdContent: rootContent || undefined,
@@ -733,7 +782,16 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     }
 
     // Add core agent fragments using shared composition
-    await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager);
+    await tracer.startActiveSpan(
+        "tenex.system_prompt.core_agent_fragments",
+        async (span) => {
+            try {
+                await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager);
+            } finally {
+                span.end();
+            }
+        }
+    );
 
     // Handle lessons: ONLY add via fragment if NOT using PromptCompilerService
     // When using compiler, lessons are already merged into Effective Agent Instructions
@@ -751,5 +809,15 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions): Promise
     );
 
     // Build and return the complete prompt with all fragments
-    return systemPromptBuilder.build();
+    return tracer.startActiveSpan(
+        "tenex.system_prompt.build_fragments",
+        async (span) => {
+            try {
+                span.setAttribute("fragment.count", systemPromptBuilder.getFragmentCount());
+                return await systemPromptBuilder.build();
+            } finally {
+                span.end();
+            }
+        }
+    );
 }
