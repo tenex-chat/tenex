@@ -579,9 +579,9 @@ export class ConfigService {
     /**
      * Get whitelisted pubkeys with CLI override support
      * If CLI option is provided, it ONLY uses those pubkeys (doesn't merge with config)
-     * Otherwise, returns pubkeys from the configuration
+     * Otherwise, returns pubkeys from the loaded configuration
      */
-    getWhitelistedPubkeys(cliOption?: string, config?: TenexConfig): string[] {
+    getWhitelistedPubkeys(cliOption?: string): string[] {
         const pubkeys: Set<string> = new Set();
 
         // If CLI option is provided, ONLY use those pubkeys (don't merge with config)
@@ -593,10 +593,11 @@ export class ConfigService {
             return Array.from(pubkeys);
         }
 
-        // Otherwise, use config pubkeys
-        if (config?.whitelistedPubkeys) {
-            if (Array.isArray(config.whitelistedPubkeys)) {
-                for (const pk of config.whitelistedPubkeys) {
+        // Otherwise, use internally loaded config pubkeys
+        const loadedConfig = this.getConfig();
+        if (loadedConfig?.whitelistedPubkeys) {
+            if (Array.isArray(loadedConfig.whitelistedPubkeys)) {
+                for (const pk of loadedConfig.whitelistedPubkeys) {
                     if (pk) pubkeys.add(pk);
                 }
             }

@@ -208,7 +208,7 @@ export class AgentRegistry {
      */
     private async republishAgentProfiles(ndkProject: NDKProject): Promise<void> {
         const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
-        const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        const whitelistedPubkeys = config.getWhitelistedPubkeys();
         const publishedCount = { success: 0, failed: 0 };
 
         for (const agent of this.agents.values()) {

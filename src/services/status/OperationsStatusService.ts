@@ -246,7 +246,7 @@ export class OperationsStatusService {
         event.tag(["e", conversationId]);
 
         // Uppercase P-tags for whitelisted human users from config
-        const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        const whitelistedPubkeys = config.getWhitelistedPubkeys();
         for (const pubkey of whitelistedPubkeys) {
             event.tag(["P", pubkey]);
         }

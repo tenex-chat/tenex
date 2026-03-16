@@ -297,7 +297,7 @@ export class TrustPubkeyService {
      */
     private getWhitelistedPubkeys(): string[] {
         try {
-            return config.getWhitelistedPubkeys(undefined, config.getConfig());
+            return config.getWhitelistedPubkeys();
         } catch (error) {
             logger.debug("[TRUST_PUBKEY] Failed to get whitelisted pubkeys from config", {
                 error: error instanceof Error ? error.message : String(error),

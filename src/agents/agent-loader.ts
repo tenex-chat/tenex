@@ -215,7 +215,7 @@ export async function loadAgentIntoRegistry(
     if (ndkProject) {
         try {
             const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
-            const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+            const whitelistedPubkeys = config.getWhitelistedPubkeys();
 
             AgentProfilePublisher.publishAgentProfile(
                 signer,

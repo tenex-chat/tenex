@@ -81,7 +81,7 @@ export class AgentProfilePublisher {
      */
     private static async executeSnapshotPublish(projectDTag: string): Promise<void> {
         const projectAgents = await agentStorage.getProjectAgents(projectDTag);
-        const whitelisted = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        const whitelisted = config.getWhitelistedPubkeys();
 
         // Collect unique agent pubkeys for this project
         const agentPubkeys: string[] = [];

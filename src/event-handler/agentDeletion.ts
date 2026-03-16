@@ -62,7 +62,7 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
         }
 
         // 2. Authorization: event author must be a whitelisted pubkey
-        const whitelistedPubkeys = config.getWhitelistedPubkeys(undefined, config.getConfig());
+        const whitelistedPubkeys = config.getWhitelistedPubkeys();
         if (!whitelistedPubkeys.includes(event.pubkey)) {
             logger.warn("[AgentDeletion] Unauthorized — event author not whitelisted", {
                 eventId: event.id?.substring(0, 12),
