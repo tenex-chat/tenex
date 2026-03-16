@@ -111,32 +111,19 @@ export class MessageCompiler {
                 const dynamicContextCount = 0;
 
                 if (this.plan.mode === "full") {
-                    const systemPromptMessages = await tracer.startActiveSpan(
-                        "tenex.message.compile.system_prompt",
-                        async (s) => {
-                            try {
-                                return await buildSystemPromptMessages(context);
-                            } finally {
-                                s.end();
-                            }
+                    let t0 = performance.now();
+                    const systemPromptMessages = await buildSystemPromptMessages(context);
+                    span.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
+
+                    t0 = performance.now();
+                    const conversationMessages = await this.conversationStore.buildMessagesForRal(
+                        context.agent.pubkey,
+                        context.ralNumber,
+                        {
+                            includeMessageIds: true,
                         }
-                    );
-                    const conversationMessages = await tracer.startActiveSpan(
-                        "tenex.message.compile.conversation_messages",
-                        async (s) => {
-                            try {
-                                return await this.conversationStore.buildMessagesForRal(
-                                    context.agent.pubkey,
-                                    context.ralNumber,
-                                    {
-                                        includeMessageIds: true,
-                                    }
-                                ) as PromptMessage[];
-                            } finally {
-                                s.end();
-                            }
-                        }
-                    );
+                    ) as PromptMessage[];
+                    span.addEvent("conversation_messages_built", { "duration_ms": Math.round(performance.now() - t0) });
 
                     const systemMessages = systemPromptMessages.map((sm, index) => ({
                         ...sm.message,
