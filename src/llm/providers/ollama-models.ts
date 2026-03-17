@@ -17,8 +17,20 @@ export type OllamaModelsResult =
  */
 export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModelsResult> {
     try {
-        baseUrl = baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-        const response = await fetch(`${baseUrl}/api/tags`, {
+        // Normalize baseUrl - treat empty strings as undefined
+        const normalizedUrl = baseUrl?.trim() || process.env.OLLAMA_BASE_URL?.trim() || "http://localhost:11434";
+
+        // Validate URL format
+        let validatedUrl: string;
+        try {
+            const url = new URL(normalizedUrl);
+            validatedUrl = url.origin;
+        } catch {
+            logger.warn(`Invalid Ollama base URL: ${normalizedUrl}, falling back to default`);
+            validatedUrl = "http://localhost:11434";
+        }
+
+        const response = await fetch(`${validatedUrl}/api/tags`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
