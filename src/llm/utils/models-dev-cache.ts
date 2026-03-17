@@ -76,7 +76,7 @@ const PROVIDER_MAPPING: Record<string, string | null> = {
     openrouter: "openrouter",
     // These providers are not in models.dev (local/custom)
     ollama: null,
-    "codex-app-server": null,
+    codex: null,
 };
 
 /**

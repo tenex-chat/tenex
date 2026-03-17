@@ -52,7 +52,7 @@ export class ConfigurationManager {
         // Select model based on provider
         let model: string;
         let modelDisplayName: string | undefined;
-        let reasoningEffort: string | undefined;
+        let effort: string | undefined;
 
         if (provider === "openrouter") {
             model = await ModelSelector.selectOpenRouterModel();
@@ -67,10 +67,10 @@ export class ConfigurationManager {
                 }
                 throw e;
             }
-        } else if (provider === PROVIDER_IDS.CODEX_APP_SERVER) {
+        } else if (provider === PROVIDER_IDS.CODEX) {
             const result = await ConfigurationManager.selectCodexModel();
             model = result.model;
-            reasoningEffort = result.reasoningEffort;
+            effort = result.effort;
         } else {
             // Use models.dev list for Anthropic, OpenAI, and any other provider with data
             const result = await ModelSelector.selectModelsDevModel(
@@ -144,7 +144,7 @@ export class ConfigurationManager {
 
         if (temperature) config.temperature = Number.parseFloat(temperature);
         if (maxTokens) config.maxTokens = Number.parseInt(maxTokens);
-        if (reasoningEffort) config.reasoningEffort = reasoningEffort as LLMConfiguration["reasoningEffort"];
+        if (effort) config.effort = effort as LLMConfiguration["effort"];
 
         llmsConfig.configurations[name] = config;
 
@@ -210,7 +210,7 @@ export class ConfigurationManager {
     /**
      * Select a Codex model and reasoning effort interactively
      */
-    private static async selectCodexModel(): Promise<{ model: string; reasoningEffort?: string }> {
+    private static async selectCodexModel(): Promise<{ model: string; effort?: string }> {
         display.blank();
         display.context("Fetching available Codex models...");
 
@@ -238,30 +238,23 @@ export class ConfigurationManager {
                 },
             ]);
 
-            // Find selected model to get its reasoning efforts
-            const selectedModel = models.find((m) => m.id === model);
-            if (!selectedModel || selectedModel.supportedReasoningEfforts.length === 0) {
-                return { model };
-            }
-
-            // Select reasoning effort
-            const { reasoningEffort } = await inquirer.prompt([
+            const { effort } = await inquirer.prompt([
                 {
                     type: "select",
-                    name: "reasoningEffort",
-                    message: "Select reasoning effort:",
+                    name: "effort",
+                    message: "Select effort:",
                     choices: [
                         { name: "Use model default", value: undefined },
-                        ...selectedModel.supportedReasoningEfforts.map((e) => ({
-                            name: e === selectedModel.defaultReasoningEffort ? `${e} (default)` : e,
-                            value: e,
-                        })),
+                        { name: "low", value: "low" },
+                        { name: "medium", value: "medium" },
+                        { name: "high", value: "high" },
+                        { name: "xhigh", value: "xhigh" },
                     ],
                     theme: inquirerTheme,
                 },
             ]);
 
-            return { model, reasoningEffort };
+            return { model, effort };
         } catch (error) {
             display.hint(`Could not fetch models: ${error}. Using default.`);
             return { model: "gpt-5.1-codex-max" };
@@ -274,7 +267,7 @@ export class ConfigurationManager {
             [PROVIDER_IDS.ANTHROPIC]: "claude-3-5-sonnet-latest",
             [PROVIDER_IDS.OPENAI]: "gpt-4",
             [PROVIDER_IDS.OLLAMA]: "llama3.1:8b",
-            [PROVIDER_IDS.CODEX_APP_SERVER]: "gpt-5.1-codex-max",
+            [PROVIDER_IDS.CODEX]: "gpt-5.1-codex-max",
         };
         return defaults[provider] || "";
     }

@@ -534,14 +534,22 @@ export class AgentExecutor {
             // If there's outstanding work, publish as conversation (not completion)
             if (completionEvent.message.trim().length > 0) {
                 responseEvent = await agentPublisher.conversation(
-                    { content: completionEvent.message, usage: completionEvent.usage },
+                    {
+                        content: completionEvent.message,
+                        usage: completionEvent.usage,
+                        metadata: completionEvent.metadata,
+                    },
                     eventContext
                 );
             }
         } else {
             // No outstanding work - safe to publish as complete
             responseEvent = await agentPublisher.complete(
-                { content: completionEvent.message, usage: completionEvent.usage },
+                {
+                    content: completionEvent.message,
+                    usage: completionEvent.usage,
+                    metadata: completionEvent.metadata,
+                },
                 eventContext
             );
         }

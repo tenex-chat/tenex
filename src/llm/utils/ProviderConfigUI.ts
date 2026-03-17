@@ -21,7 +21,7 @@ export class ProviderConfigUI {
             [PROVIDER_IDS.ANTHROPIC]: "Anthropic (Claude)",
             [PROVIDER_IDS.OPENAI]: "OpenAI (GPT)",
             [PROVIDER_IDS.OLLAMA]: "Ollama (Local models)",
-            [PROVIDER_IDS.CODEX_APP_SERVER]: "Codex App Server (GPT-5.1/5.2)",
+            [PROVIDER_IDS.CODEX]: "Codex",
         };
         return names[provider] || provider;
     }

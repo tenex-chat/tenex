@@ -167,6 +167,51 @@ describe("LLM Runtime Tracking", () => {
             );
             expect(executionTimeTag).toBeUndefined();
         });
+
+        it("should include Codex thread and tool metadata tags when provided", () => {
+            const encoder = new AgentEventEncoder();
+
+            const mockTriggeringEvent = new NDKEvent();
+            mockTriggeringEvent.pubkey = "user-pubkey-123";
+            mockTriggeringEvent.id = "event-id-123";
+            mockTriggeringEvent.tags = [];
+
+            const context: EventContext = {
+                triggeringEvent: mockTriggeringEvent,
+                rootEvent: { id: "root-event-id" },
+                conversationId: "conv-123",
+                model: "gpt-5-codex",
+                ralNumber: 1,
+            };
+
+            const completionEvent = encoder.encodeCompletion(
+                {
+                    content: "Task completed",
+                    metadata: {
+                        threadId: "thread_123",
+                        turnId: "turn_456",
+                        toolTotalCalls: 7,
+                        toolTotalDurationMs: 4200,
+                        toolCommandCalls: 2,
+                        toolFileChangeCalls: 1,
+                        toolMcpCalls: 3,
+                        toolWebSearchCalls: 1,
+                        toolOtherCalls: 0,
+                    },
+                },
+                context
+            );
+
+            expect(completionEvent.tags).toContainEqual(["llm-thread-id", "thread_123"]);
+            expect(completionEvent.tags).toContainEqual(["llm-turn-id", "turn_456"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-total-calls", "7"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-total-duration-ms", "4200"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-command-calls", "2"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-file-change-calls", "1"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-mcp-calls", "3"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-web-search-calls", "1"]);
+            expect(completionEvent.tags).toContainEqual(["llm-tool-other-calls", "0"]);
+        });
     });
 
     describe("Test Case 2: Parallel delegation with different runtimes", () => {

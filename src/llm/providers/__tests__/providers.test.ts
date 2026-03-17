@@ -3,7 +3,7 @@ import { OpenRouterProvider } from "../standard/OpenRouterProvider";
 import { AnthropicProvider } from "../standard/AnthropicProvider";
 import { OpenAIProvider } from "../standard/OpenAIProvider";
 import { OllamaProvider } from "../standard/OllamaProvider";
-import { CodexAppServerProvider } from "../agent/CodexAppServerProvider";
+import { CodexProvider } from "../agent/CodexProvider";
 
 describe("Provider Metadata", () => {
     describe("standard providers", () => {
@@ -34,12 +34,12 @@ describe("Provider Metadata", () => {
     });
 
     describe("agent providers", () => {
-        it("CodexAppServerProvider has correct static METADATA with kebab-case id", () => {
-            expect(CodexAppServerProvider.METADATA.id).toBe("codex-app-server");
-            expect(CodexAppServerProvider.METADATA.category).toBe("agent");
-            expect(CodexAppServerProvider.METADATA.capabilities.builtInTools).toBe(true);
-            expect(CodexAppServerProvider.METADATA.capabilities.mcpSupport).toBe(true);
-            expect(CodexAppServerProvider.METADATA.capabilities.requiresApiKey).toBe(false);
+        it("CodexProvider has correct static METADATA", () => {
+            expect(CodexProvider.METADATA.id).toBe("codex");
+            expect(CodexProvider.METADATA.category).toBe("agent");
+            expect(CodexProvider.METADATA.capabilities.builtInTools).toBe(true);
+            expect(CodexProvider.METADATA.capabilities.mcpSupport).toBe(true);
+            expect(CodexProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });
     });
 
@@ -51,8 +51,8 @@ describe("Provider Metadata", () => {
             const anthropic = new AnthropicProvider();
             expect(anthropic.metadata).toBe(AnthropicProvider.METADATA);
 
-            const codexAppServer = new CodexAppServerProvider();
-            expect(codexAppServer.metadata).toBe(CodexAppServerProvider.METADATA);
+            const codex = new CodexProvider();
+            expect(codex.metadata).toBe(CodexProvider.METADATA);
         });
     });
 });
@@ -64,7 +64,7 @@ describe("Provider ID conventions", () => {
             AnthropicProvider.METADATA,
             OpenAIProvider.METADATA,
             OllamaProvider.METADATA,
-            CodexAppServerProvider.METADATA,
+            CodexProvider.METADATA,
         ];
 
         for (const metadata of allMetadata) {
@@ -95,6 +95,6 @@ describe("Provider Registration Array", () => {
         expect(ids).toContain("anthropic");
         expect(ids).toContain("openai");
         expect(ids).toContain("ollama");
-        expect(ids).toContain("codex-app-server");
+        expect(ids).toContain("codex");
     });
 });

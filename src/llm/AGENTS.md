@@ -16,7 +16,7 @@ Abstraction layer for LLM providers. Agents and services never talk to provider 
 ## Subdirectories
 
 - `providers/standard/` — Standard providers (Claude, OpenAI, OpenRouter, Ollama, Gemini)
-- `providers/agent/` — Agent-specific providers (CodexAppServer) with tool adapters
+- `providers/agent/` — Agent-specific providers (Codex) with tool adapters
 - `providers/registry/` — Provider registration
 - `providers/base/` — Base provider interfaces
 - `middleware/` — Request/response middleware pipeline

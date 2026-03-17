@@ -6,7 +6,7 @@
  */
 
 export const PROVIDER_IDS = {
-    CODEX_APP_SERVER: "codex-app-server",
+    CODEX: "codex",
     OPENROUTER: "openrouter",
     ANTHROPIC: "anthropic",
     OPENAI: "openai",

@@ -690,9 +690,9 @@ async function autoDetectProviders(existing: TenexProviders, preDetectedOpenClaw
         commandExists("codex"),
     ]);
 
-    if (hasCodex && !providers.providers[PROVIDER_IDS.CODEX_APP_SERVER]) {
-        providers.providers[PROVIDER_IDS.CODEX_APP_SERVER] = { apiKey: "none" };
-        detectedSources.push("Codex CLI (codex-app-server)");
+    if (hasCodex && !providers.providers[PROVIDER_IDS.CODEX]) {
+        providers.providers[PROVIDER_IDS.CODEX] = { apiKey: "none" };
+        detectedSources.push("Codex CLI (codex)");
     }
 
     // 2. Detect Ollama

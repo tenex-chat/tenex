@@ -1,14 +1,14 @@
 /**
- * Usage metadata extraction dispatcher
+ * Usage and metadata extraction dispatcher
  *
- * Routes usage metadata extraction to the appropriate provider-specific extractor.
+ * Routes provider-specific usage and metadata extraction based on provider ID.
  */
 
 import type { LanguageModelUsage } from "ai";
-import type { LanguageModelUsageWithCostUsd } from "../types";
+import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "../types";
 import { PROVIDER_IDS } from "./provider-ids";
 import { OpenRouterProvider } from "./standard/OpenRouterProvider";
-import { CodexAppServerProvider } from "./agent/CodexAppServerProvider";
+import { CodexProvider } from "./agent/CodexProvider";
 
 /**
  * AI SDK usage with optional extended fields (for standard providers)
@@ -58,10 +58,22 @@ export function extractUsageMetadata(
     switch (provider) {
         case PROVIDER_IDS.OPENROUTER:
             return OpenRouterProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
-        case PROVIDER_IDS.CODEX_APP_SERVER:
-            return CodexAppServerProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
+        case PROVIDER_IDS.CODEX:
+            return CodexProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
         default:
             return extractStandardUsage(model, totalUsage);
+    }
+}
+
+export function extractLLMMetadata(
+    provider: string,
+    providerMetadata: Record<string, unknown> | undefined
+): LLMMetadata | undefined {
+    switch (provider) {
+        case PROVIDER_IDS.CODEX:
+            return CodexProvider.extractMetadata(providerMetadata);
+        default:
+            return undefined;
     }
 }
 

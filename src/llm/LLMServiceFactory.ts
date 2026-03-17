@@ -62,7 +62,7 @@ export class LLMServiceFactory {
 
         // Also ensure agent providers are initialized (they don't need API keys).
         // Add them with empty configs if not already present.
-        const agentProviders = [PROVIDER_IDS.CODEX_APP_SERVER];
+        const agentProviders = [PROVIDER_IDS.CODEX];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {
                 configs[providerId] = {};
@@ -124,7 +124,7 @@ export class LLMServiceFactory {
             agentName: context?.agentName,
             workingDirectory: context?.workingDirectory,
             mcpConfig: context?.mcpConfig,
-            reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" }).reasoningEffort,
+            providerConfig: config as Record<string, unknown>,
             onStreamStart: context?.onStreamStart,
         };
 

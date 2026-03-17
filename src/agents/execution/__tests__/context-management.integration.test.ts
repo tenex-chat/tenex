@@ -57,7 +57,7 @@ describe("TENEX context management integration", () => {
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
-    test("enables context management for codex-app-server", () => {
+    test("enables context management for codex", () => {
         setContextManagementConfig({});
 
         const agent = {
@@ -67,7 +67,7 @@ describe("TENEX context management integration", () => {
         } as AgentInstance;
 
         const contextManagement = createExecutionContextManagement({
-            providerId: "codex-app-server",
+            providerId: "codex",
             conversationId: CONVERSATION_ID,
             agent,
             conversationStore: store,

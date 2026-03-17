@@ -193,7 +193,7 @@ function createMockRegistry(): ProviderRegistryProvider {
 /**
  * Create a mock agent provider function.
  */
-function createMockAgentProvider(provider = "codex-app-server") {
+function createMockAgentProvider(provider = "codex") {
     return mock(() => ({
         specificationVersion: "v2",
         provider,
@@ -237,14 +237,14 @@ describe("LLMService", () => {
             const agentProvider = createMockAgentProvider();
             const service = new LLMService(
                 null,
-                "codex-app-server",
+                "codex",
                 "gpt-5-codex",
                 mockAgentCapabilities,
                 undefined,
                 undefined,
                 agentProvider
             );
-            expect(service.provider).toBe("codex-app-server");
+            expect(service.provider).toBe("codex");
         });
 
         test("stores temperature and maxTokens", () => {
@@ -265,7 +265,7 @@ describe("LLMService", () => {
             const agentProvider = createMockAgentProvider();
             const service = new LLMService(
                 null,
-                "codex-app-server",
+                "codex",
                 "gpt-5-codex",
                 mockAgentCapabilities,
                 undefined,
@@ -672,7 +672,7 @@ describe("LLMService stream()", () => {
         const agentProvider = createMockAgentProvider();
         const service = new LLMService(
             null,
-            "codex-app-server",
+            "codex",
             "gpt-5-codex",
             mockAgentCapabilities,
             undefined,
@@ -803,11 +803,11 @@ describe("LLMService stream()", () => {
         expect(completeEvent.usage.totalTokens).toBe(300); // Calculated fallback
     });
 
-    test("extracts costUsd from codex-app-server provider metadata", async () => {
+    test("extracts Codex thread and tool metadata from provider metadata", async () => {
         const agentProvider = createMockAgentProvider();
         const service = new LLMService(
             null,
-            "codex-app-server",
+            "codex",
             "gpt-5-codex",
             mockAgentCapabilities,
             undefined,
@@ -832,7 +832,19 @@ describe("LLMService stream()", () => {
                 finishReason: "stop",
                 providerMetadata: {
                     "codex-app-server": {
-                        costUsd: 0.16652625,
+                        threadId: "thread_123",
+                        turnId: "turn_456",
+                        toolExecutionStats: {
+                            totalCalls: 7,
+                            totalDurationMs: 4200,
+                            byType: {
+                                exec: 2,
+                                patch: 1,
+                                mcp: 3,
+                                web_search: 1,
+                                other: 0,
+                            },
+                        },
                     },
                 },
             });
@@ -840,11 +852,21 @@ describe("LLMService stream()", () => {
 
         expect(completeSpy).toHaveBeenCalled();
         const completeEvent = completeSpy.mock.calls[0][0];
-        // costUsd should come from provider metadata
-        expect(completeEvent.usage.costUsd).toBe(0.16652625);
         // Token counts should come from AI SDK totalUsage (fallback)
         expect(completeEvent.usage.inputTokens).toBe(55865);
         expect(completeEvent.usage.outputTokens).toBe(324);
+        expect(completeEvent.usage.costUsd).toBeUndefined();
+        expect(completeEvent.metadata).toEqual({
+            threadId: "thread_123",
+            turnId: "turn_456",
+            toolTotalCalls: 7,
+            toolTotalDurationMs: 4200,
+            toolCommandCalls: 2,
+            toolFileChangeCalls: 1,
+            toolMcpCalls: 3,
+            toolWebSearchCalls: 1,
+            toolOtherCalls: 0,
+        });
     });
 
     test("respects custom onStopCheck callback", async () => {

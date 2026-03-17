@@ -1,5 +1,5 @@
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
+import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
@@ -115,6 +115,9 @@ export class AgentEventEncoder {
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
         }
+        if (intent.metadata) {
+            this.addLLMMetadataTags(event, intent.metadata);
+        }
 
         // Note: LLM runtime (incremental) is added via addStandardTags() using context.llmRuntime
         this.addStandardTags(event, context);
@@ -158,6 +161,9 @@ export class AgentEventEncoder {
 
         if (intent.usage) {
             this.addLLMUsageTags(event, intent.usage);
+        }
+        if (intent.metadata) {
+            this.addLLMMetadataTags(event, intent.metadata);
         }
 
         this.addStandardTags(event, context);
@@ -408,6 +414,36 @@ export class AgentEventEncoder {
         }
         if ("contextWindow" in usage && usage.contextWindow !== undefined) {
             event.tag(["llm-context-window", String(usage.contextWindow)]);
+        }
+    }
+
+    private addLLMMetadataTags(event: NDKEvent, metadata: LLMMetadata): void {
+        if (metadata.threadId !== undefined) {
+            event.tag(["llm-thread-id", metadata.threadId]);
+        }
+        if (metadata.turnId !== undefined) {
+            event.tag(["llm-turn-id", metadata.turnId]);
+        }
+        if (metadata.toolTotalCalls !== undefined) {
+            event.tag(["llm-tool-total-calls", String(metadata.toolTotalCalls)]);
+        }
+        if (metadata.toolTotalDurationMs !== undefined) {
+            event.tag(["llm-tool-total-duration-ms", String(metadata.toolTotalDurationMs)]);
+        }
+        if (metadata.toolCommandCalls !== undefined) {
+            event.tag(["llm-tool-command-calls", String(metadata.toolCommandCalls)]);
+        }
+        if (metadata.toolFileChangeCalls !== undefined) {
+            event.tag(["llm-tool-file-change-calls", String(metadata.toolFileChangeCalls)]);
+        }
+        if (metadata.toolMcpCalls !== undefined) {
+            event.tag(["llm-tool-mcp-calls", String(metadata.toolMcpCalls)]);
+        }
+        if (metadata.toolWebSearchCalls !== undefined) {
+            event.tag(["llm-tool-web-search-calls", String(metadata.toolWebSearchCalls)]);
+        }
+        if (metadata.toolOtherCalls !== undefined) {
+            event.tag(["llm-tool-other-calls", String(metadata.toolOtherCalls)]);
         }
     }
 

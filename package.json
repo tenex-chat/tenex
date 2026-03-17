@@ -68,7 +68,7 @@
     "ai-sdk-context-management": "^0.5.0",
     "ai-sdk-fs-tools": "^0.2.2",
     "ai-sdk-message-sanitizer": "^0.1.1",
-    "ai-sdk-provider-codex-app-server": "1.1.7",
+    "ai-sdk-provider-codex-cli": "1.1.0",
     "ai-sdk-system-reminders": "0.3.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",

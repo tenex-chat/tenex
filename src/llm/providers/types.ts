@@ -104,8 +104,8 @@ export interface ProviderRuntimeContext {
     workingDirectory?: string;
     /** MCP configuration - passed from services layer to avoid layer violations */
     mcpConfig?: MCPConfig;
-    /** Reasoning effort level (for codex-app-server) */
-    reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
+    /** Provider-specific configuration from the resolved LLM config */
+    providerConfig?: Record<string, unknown>;
     /** Callback invoked when an agent stream exposes a message injector */
     onStreamStart?: OnStreamStartCallback;
 }

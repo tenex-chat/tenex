@@ -5,15 +5,19 @@
  * including supported reasoning effort levels.
  */
 
-import { listModels } from "ai-sdk-provider-codex-app-server";
-import type { ModelInfo } from "ai-sdk-provider-codex-app-server";
+import { listModels } from "ai-sdk-provider-codex-cli";
+
+interface CodexListModelInfo {
+    id: string;
+    name?: string | null;
+    description?: string | null;
+    isDefault?: boolean | null;
+}
 
 export interface CodexModelOption {
     id: string;
     displayName: string;
     description: string;
-    supportedReasoningEfforts: string[];
-    defaultReasoningEffort: string;
     isDefault: boolean;
 }
 
@@ -23,15 +27,11 @@ export interface CodexModelOption {
 export async function listCodexModels(): Promise<CodexModelOption[]> {
     const { models } = await listModels();
 
-    return models.map((model: ModelInfo) => ({
+    return models.map((model: CodexListModelInfo) => ({
         id: model.id,
-        displayName: model.displayName,
-        description: model.description,
-        supportedReasoningEfforts: model.supportedReasoningEfforts.map(
-            (e) => e.reasoningEffort
-        ),
-        defaultReasoningEffort: model.defaultReasoningEffort,
-        isDefault: model.isDefault,
+        displayName: model.name ?? model.id,
+        description: model.description ?? "",
+        isDefault: model.isDefault === true,
     }));
 }
 
@@ -47,7 +47,6 @@ export async function getDefaultCodexModel(): Promise<CodexModelOption | undefin
  * Format model info for display
  */
 export function formatCodexModel(model: CodexModelOption): string {
-    const efforts = model.supportedReasoningEfforts.join(", ");
     const defaultMark = model.isDefault ? " (default)" : "";
-    return `${model.id}${defaultMark}\n  ${model.description}\n  Reasoning: ${efforts} (default: ${model.defaultReasoningEffort})`;
+    return `${model.id}${defaultMark}\n  ${model.description}`;
 }

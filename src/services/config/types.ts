@@ -225,8 +225,26 @@ export interface LLMConfiguration {
     temperature?: number;
     maxTokens?: number;
     topP?: number;
-    /** Reasoning effort level (for codex-app-server provider) */
-    reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh";
+    /** Codex reasoning effort */
+    effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+    /** Codex reasoning summary detail */
+    summary?: "auto" | "concise" | "detailed" | "none";
+    /** Codex system personality */
+    personality?: "none" | "friendly" | "pragmatic";
+    /** Codex execution approval policy */
+    approvalPolicy?: "untrusted" | "on-failure" | "on-request" | "never";
+    /** Codex sandbox policy */
+    sandboxPolicy?: "read-only" | "workspace-write" | "danger-full-access";
+    /** Additional Codex instructions appended to the system prompt */
+    developerInstructions?: string;
+    /** Additional Codex base instructions */
+    baseInstructions?: string;
+    /** Additional Codex config overrides */
+    configOverrides?: Record<string, unknown>;
+    /** Enable RMCP client support for Codex */
+    rmcpClient?: boolean;
+    /** Close the shared Codex app-server after this many idle milliseconds */
+    idleTimeoutMs?: number;
     [key: string]: unknown; // Allow additional provider-specific settings
 }
 
@@ -283,7 +301,16 @@ export const StandardLLMConfigurationSchema = z
         temperature: z.number().optional(),
         maxTokens: z.number().optional(),
         topP: z.number().optional(),
-        reasoningEffort: z.enum(["none", "low", "medium", "high", "xhigh"]).optional(),
+        effort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+        summary: z.enum(["auto", "concise", "detailed", "none"]).optional(),
+        personality: z.enum(["none", "friendly", "pragmatic"]).optional(),
+        approvalPolicy: z.enum(["untrusted", "on-failure", "on-request", "never"]).optional(),
+        sandboxPolicy: z.enum(["read-only", "workspace-write", "danger-full-access"]).optional(),
+        developerInstructions: z.string().optional(),
+        baseInstructions: z.string().optional(),
+        configOverrides: z.record(z.string(), z.unknown()).optional(),
+        rmcpClient: z.boolean().optional(),
+        idleTimeoutMs: z.number().int().positive().optional(),
     })
     .passthrough(); // Allow additional properties
 

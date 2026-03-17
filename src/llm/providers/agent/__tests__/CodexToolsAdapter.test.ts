@@ -1,11 +1,10 @@
 import { describe, it, expect, mock, beforeEach } from "bun:test";
 import type { AISdkTool } from "@/tools/types";
 
-// Track calls to createSdkMcpServer
+// Track calls to createSdkMcpServer for adapter assertions.
 let createSdkMcpServerCalls: { name: string; tools: unknown[] }[] = [];
 
-// Mock the module before importing the adapter
-mock.module("ai-sdk-provider-codex-app-server", () => ({
+mock.module("ai-sdk-provider-codex-cli", () => ({
     createSdkMcpServer: (args: { name: string; tools: unknown[] }) => {
         createSdkMcpServerCalls.push(args);
         return { name: args.name, tools: args.tools };
@@ -13,10 +12,9 @@ mock.module("ai-sdk-provider-codex-app-server", () => ({
     tool: (config: { name: string; description: string; parameters: unknown; execute: unknown }) => config,
 }));
 
-// Import after mocking
-import { CodexAppServerToolsAdapter } from "../CodexAppServerToolsAdapter";
+import { CodexToolsAdapter } from "../CodexToolsAdapter";
 
-describe("CodexAppServerToolsAdapter", () => {
+describe("CodexToolsAdapter", () => {
     const mockTool: AISdkTool = {
         description: "Test tool",
         inputSchema: {},
@@ -38,7 +36,7 @@ describe("CodexAppServerToolsAdapter", () => {
                 ask: mockTool,
             };
 
-            CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
@@ -61,7 +59,7 @@ describe("CodexAppServerToolsAdapter", () => {
                 fs_read: mockTool,
             };
 
-            CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
@@ -97,7 +95,7 @@ describe("CodexAppServerToolsAdapter", () => {
                 fs_edit: mockTool,
             };
 
-            CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
@@ -115,7 +113,7 @@ describe("CodexAppServerToolsAdapter", () => {
                 fs_write: mockTool,
             };
 
-            const server = CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
             expect(server).toBeDefined();
             expect(createSdkMcpServerCalls).toHaveLength(1);
@@ -125,7 +123,7 @@ describe("CodexAppServerToolsAdapter", () => {
         it("should handle empty tools object", () => {
             const tools: Record<string, AISdkTool> = {};
 
-            const server = CodexAppServerToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
 
             expect(server).toBeUndefined();
             expect(createSdkMcpServerCalls).toHaveLength(0);

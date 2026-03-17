@@ -3,7 +3,7 @@
  * Centralized types for event encoding and publishing.
  */
 
-import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
+import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // ============================================================================
@@ -13,6 +13,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 export interface CompletionIntent {
     content: string;
     usage?: LanguageModelUsageWithCostUsd;
+    metadata?: LLMMetadata;
     summary?: string;
     // Note: llmRuntime is now tracked via EventContext.llmRuntime for all events
 }
@@ -21,6 +22,7 @@ export interface ConversationIntent {
     content: string;
     isReasoning?: boolean;
     usage?: LanguageModelUsageWithCostUsd;
+    metadata?: LLMMetadata;
 }
 
 export interface DelegationIntent {

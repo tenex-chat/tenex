@@ -28,7 +28,7 @@ export const AI_SDK_PROVIDERS = [
     PROVIDER_IDS.ANTHROPIC,
     PROVIDER_IDS.OPENAI,
     PROVIDER_IDS.OLLAMA,
-    PROVIDER_IDS.CODEX_APP_SERVER,
+    PROVIDER_IDS.CODEX,
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];
 
@@ -42,6 +42,18 @@ export type LanguageModelUsageWithCostUsd = LanguageModelUsage & {
     /** Model context window size in tokens */
     contextWindow?: number;
 };
+
+export interface LLMMetadata {
+    threadId?: string;
+    turnId?: string;
+    toolTotalCalls?: number;
+    toolTotalDurationMs?: number;
+    toolCommandCalls?: number;
+    toolFileChangeCalls?: number;
+    toolMcpCalls?: number;
+    toolWebSearchCalls?: number;
+    toolOtherCalls?: number;
+}
 
 /**
  * Callback invoked when message injection completes
@@ -112,6 +124,7 @@ export interface CompleteEvent {
     message: string;
     steps: StepResult<Record<string, AISdkTool>>[];
     usage: LanguageModelUsageWithCostUsd;
+    metadata?: LLMMetadata;
     finishReason?: string;
     reasoning?: string;
 }

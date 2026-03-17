@@ -55,7 +55,7 @@ export function getKeys(apiKey: string | string[] | undefined): string[] {
 }
 
 function needsApiKey(providerId: string): boolean {
-    return providerId !== PROVIDER_IDS.CODEX_APP_SERVER;
+    return providerId !== PROVIDER_IDS.CODEX;
 }
 
 export function isOllama(providerId: string): boolean {

@@ -4,5 +4,5 @@
  * Exports all agent-based providers.
  */
 
-export { CodexAppServerProvider } from "./CodexAppServerProvider";
-export { CodexAppServerToolsAdapter } from "./CodexAppServerToolsAdapter";
+export { CodexProvider } from "./CodexProvider";
+export { CodexToolsAdapter } from "./CodexToolsAdapter";

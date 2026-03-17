@@ -1,26 +1,22 @@
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
-import { createSdkMcpServer, tool, type SdkMcpServer, type Tool, type ToolDefinition } from "ai-sdk-provider-codex-app-server";
+import {
+    createSdkMcpServer,
+    tool,
+    type LocalTool as Tool,
+    type LocalToolDefinition as ToolDefinition,
+    type SdkMcpServer,
+} from "ai-sdk-provider-codex-cli";
 import { z, type ZodRawShape } from "zod";
 
-/**
- * Converts TENEX tools to Codex App Server SDK MCP server format.
- *
- * This adapter uses createSdkMcpServer which handles HTTP server lifecycle
- * automatically for in-process MCP servers.
- */
-export class CodexAppServerToolsAdapter {
-    /**
-     * Create an SDK MCP server from TENEX tools
-     * Pass the result directly to mcpServers in provider settings.
-     */
+export class CodexToolsAdapter {
     static createSdkMcpServer(
         tools: Record<string, AISdkTool>,
         context: { agentName?: string }
     ): SdkMcpServer | undefined {
         const localTools = Object.entries(tools);
 
-        logger.debug("[CodexAppServerToolsAdapter] Input tools analysis:", {
+        logger.debug("[CodexToolsAdapter] Input tools analysis:", {
             totalTools: Object.keys(tools).length,
             localToolsCount: localTools.length,
             localToolNames: localTools.map(([name]) => name),
@@ -33,7 +29,7 @@ export class CodexAppServerToolsAdapter {
 
         const codexTools = this.convertTools(localTools, tools);
 
-        logger.info("[CodexAppServerToolsAdapter] Creating SDK MCP server:", {
+        logger.info("[CodexToolsAdapter] Creating SDK MCP server:", {
             serverName: "tenex",
             toolCount: codexTools.length,
             toolNames: localTools.map(([name]) => name),
@@ -75,7 +71,7 @@ export class CodexAppServerToolsAdapter {
                         throw new Error(`Tool ${name} not found or has no execute function`);
                     }
 
-                    logger.debug(`[CodexAppServerToolsAdapter] Executing tool ${name}`);
+                    logger.debug(`[CodexToolsAdapter] Executing tool ${name}`);
 
                     const result = await executeTool.execute(args, {
                         abortSignal: new AbortController().signal,

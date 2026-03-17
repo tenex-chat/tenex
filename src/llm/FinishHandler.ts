@@ -7,7 +7,11 @@ import type {
 } from "ai";
 import type { EventEmitter } from "tseep";
 import { getInvalidToolCalls } from "./utils/tool-errors";
-import { extractUsageMetadata, extractOpenRouterGenerationId } from "./providers/usage-metadata";
+import {
+    extractLLMMetadata,
+    extractOpenRouterGenerationId,
+    extractUsageMetadata,
+} from "./providers/usage-metadata";
 import type { LLMServiceEventMap } from "./types";
 
 export interface FinishHandlerConfig {
@@ -87,9 +91,11 @@ export function createFinishHandler(
             const usedErrorFallback = fallbackLevel === "error";
 
             // Capture OpenRouter generation ID for trace correlation
-            const openrouterGenerationId = extractOpenRouterGenerationId(
-                e.providerMetadata as Record<string, unknown> | undefined
-            );
+            const lastStep = e.steps.length > 0 ? e.steps[e.steps.length - 1] : undefined;
+            const latestProviderMetadata =
+                (lastStep?.providerMetadata ?? e.providerMetadata) as Record<string, unknown> | undefined;
+
+            const openrouterGenerationId = extractOpenRouterGenerationId(latestProviderMetadata);
             if (openrouterGenerationId) {
                 activeSpan?.setAttribute("openrouter.generation_id", openrouterGenerationId);
             }
@@ -99,13 +105,13 @@ export function createFinishHandler(
             // cause Nostr events to report ever-growing token counts. Using the last
             // step's per-step usage gives accurate per-invocation values.
             // Falls back to e.totalUsage when steps is empty (e.g. in tests).
-            const lastStep = e.steps.length > 0 ? e.steps[e.steps.length - 1] : undefined;
             const usage = extractUsageMetadata(
                 config.provider,
                 config.model,
                 lastStep?.usage ?? e.totalUsage,
-                (lastStep?.providerMetadata ?? e.providerMetadata) as Record<string, unknown> | undefined
+                latestProviderMetadata
             );
+            const metadata = extractLLMMetadata(config.provider, latestProviderMetadata);
 
             // DIAGNOSTIC: Log right before emitting complete event
             const beforeEmitTime = Date.now();
@@ -130,6 +136,7 @@ export function createFinishHandler(
                     ...usage,
                     contextWindow: config.getModelContextWindow(),
                 },
+                metadata,
                 finishReason: e.finishReason,
             });
 
