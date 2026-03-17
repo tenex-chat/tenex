@@ -103,7 +103,6 @@ export function createAgentInstance(
                 {
                     tools: options?.tools ?? {},
                     agentName: storedAgent.name,
-                    sessionId: options?.sessionId,
                     workingDirectory: options?.workingDirectory ?? registry.getBasePath(),
                     mcpConfig: mergedMcpConfig,
                     conversationId: options?.conversationId,

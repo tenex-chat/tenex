@@ -50,7 +50,6 @@ export class SupervisorLLMService {
             // Create LLM service
             this.llmService = llmServiceFactory.createService(supervisionConfig, {
                 agentName: "supervisor",
-                sessionId: `supervisor-${Date.now()}`,
             });
 
             this.initialized = true;

@@ -16,7 +16,7 @@ Core multi-agent coordination. Agent definitions, registration, execution orches
 
 ## Subdirectories
 
-- `execution/` — Core execution engine (~18 files): `AgentExecutor`, `MessageCompiler`, `StreamSetup`, `StreamCallbacks`, `ToolExecutionTracker`, `SessionManager`, etc.
+- `execution/` — Core execution engine (~17 files): `AgentExecutor`, `MessageCompiler`, `StreamSetup`, `StreamCallbacks`, `ToolExecutionTracker`, etc.
 - `supervision/` — Agent supervision logic
 - `types/` — Shared type definitions
 

@@ -57,6 +57,26 @@ describe("TENEX context management integration", () => {
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
+    test("enables context management for codex-app-server", () => {
+        setContextManagementConfig({});
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+
+        const contextManagement = createExecutionContextManagement({
+            providerId: "codex-app-server",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        expect(contextManagement).toBeDefined();
+        expect(contextManagement?.middleware).toBeDefined();
+    });
+
     test("scratchpad tool persists state and affects the next prompt projection", async () => {
         const agent = {
             name: "executor",

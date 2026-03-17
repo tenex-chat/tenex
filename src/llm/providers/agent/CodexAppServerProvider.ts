@@ -29,7 +29,6 @@ import { PROVIDER_IDS } from "../provider-ids";
  */
 interface CodexAppServerProviderMetadata {
     costUsd?: number;
-    sessionId?: string;
 }
 
 /**
@@ -57,7 +56,6 @@ export class CodexAppServerProvider extends AgentProvider {
             streaming: true,
             toolCalling: true,
             builtInTools: true,
-            sessionResumption: true,
             requiresApiKey: false,
             mcpSupport: true,
         },
@@ -95,7 +93,6 @@ export class CodexAppServerProvider extends AgentProvider {
     ): CodexAppServerSettings {
         trace.getActiveSpan()?.addEvent("llm_factory.creating_codex_app_server", {
             "agent.name": context.agentName ?? "",
-            "session.id": context.sessionId ?? "",
         });
 
         const toolNames = context.tools ? Object.keys(context.tools) : [];
@@ -168,10 +165,6 @@ export class CodexAppServerProvider extends AgentProvider {
                 });
             },
         };
-
-        if (context.sessionId) {
-            settings.resume = context.sessionId;
-        }
 
         return settings;
     }

@@ -1,8 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { providerRegistry } from "@/llm/providers";
-import type { ProviderCapabilities } from "@/llm/providers/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import type { CompletedDelegation, PendingDelegation } from "@/services/ral/types";
@@ -14,16 +12,8 @@ import type { PromptMessage } from "@/conversations/PromptBuilder";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import type { ModelMessage } from "ai";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
-import type { SessionManager } from "./SessionManager";
 
 const tracer = trace.getTracer("tenex.message-compiler");
-
-type CompilationMode = "full" | "delta";
-
-interface MessageCompilationPlan {
-    mode: CompilationMode;
-    cursor?: number;
-}
 
 /**
  * CompiledMessage - A message with optional prompt lineage metadata.
@@ -67,7 +57,6 @@ export interface MessageCompilerContext {
 
 export interface CompiledMessages {
     messages: ModelMessage[];
-    mode: CompilationMode;
     counts: {
         systemPrompt: number;
         conversation: number;
@@ -77,17 +66,7 @@ export interface CompiledMessages {
 }
 
 export class MessageCompiler {
-    private readonly plan: MessageCompilationPlan;
-    private currentCursor: number;
-
-    constructor(
-        private providerId: string,
-        private sessionManager: SessionManager,
-        private conversationStore: ConversationStore
-    ) {
-        this.plan = this.buildPlan();
-        this.currentCursor = this.plan.cursor ?? -1;
-    }
+    constructor(private conversationStore: ConversationStore) {}
 
     async compile(context: MessageCompilerContext): Promise<CompiledMessages> {
         return tracer.startActiveSpan("tenex.message.compile", async (span) => {
@@ -103,67 +82,51 @@ export class MessageCompiler {
                 span.setAttribute("agent.slug", context.agent.slug);
                 span.setAttribute("conversation.id", shortenConversationId(context.conversation.id));
                 span.setAttribute("ral.number", context.ralNumber);
-                span.setAttribute("compilation.mode", this.plan.mode);
 
-                const cursor = this.currentCursor;
                 const messages: ModelMessage[] = [];
                 let systemPromptCount = 0;
                 const dynamicContextCount = 0;
 
-                if (this.plan.mode === "full") {
-                    let t0 = performance.now();
-                    const systemPromptMessages = await buildSystemPromptMessages(context);
-                    span.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
+                let t0 = performance.now();
+                const systemPromptMessages = await buildSystemPromptMessages(context);
+                span.addEvent("system_prompt_built", { "duration_ms": Math.round(performance.now() - t0) });
 
-                    t0 = performance.now();
-                    const conversationMessages = await this.conversationStore.buildMessagesForRal(
-                        context.agent.pubkey,
-                        context.ralNumber,
-                        {
-                            includeMessageIds: true,
-                        }
-                    ) as PromptMessage[];
-                    span.addEvent("conversation_messages_built", { "duration_ms": Math.round(performance.now() - t0) });
-
-                    const systemMessages = systemPromptMessages.map((sm, index) => ({
-                        ...sm.message,
-                        id: `system:${index}`,
-                    })) as PromptMessage[];
-
-                    if (context.metaModelSystemPrompt) {
-                        systemMessages.push({
-                            id: "system:meta-model",
-                            role: "system",
-                            content: context.metaModelSystemPrompt,
-                        } as PromptMessage);
-                        systemPromptCount++;
+                t0 = performance.now();
+                const conversationMessages = await this.conversationStore.buildMessagesForRal(
+                    context.agent.pubkey,
+                    context.ralNumber,
+                    {
+                        includeMessageIds: true,
                     }
-                    if (context.variantSystemPrompt) {
-                        systemMessages.push({
-                            id: "system:variant",
-                            role: "system",
-                            content: context.variantSystemPrompt,
-                        } as PromptMessage);
-                        systemPromptCount++;
-                    }
+                ) as PromptMessage[];
+                span.addEvent("conversation_messages_built", { "duration_ms": Math.round(performance.now() - t0) });
 
-                    messages.push(...systemMessages, ...conversationMessages);
-                    systemPromptCount += systemPromptMessages.length;
-                } else {
-                    const conversationMessages = await this.conversationStore.buildMessagesForRalAfterIndex(
-                        context.agent.pubkey,
-                        context.ralNumber,
-                        cursor,
-                        {
-                            includeMessageIds: true,
-                        }
-                    ) as PromptMessage[];
-                    messages.push(...conversationMessages);
+                const systemMessages = systemPromptMessages.map((sm, index) => ({
+                    ...sm.message,
+                    id: `system:${index}`,
+                })) as PromptMessage[];
+
+                if (context.metaModelSystemPrompt) {
+                    systemMessages.push({
+                        id: "system:meta-model",
+                        role: "system",
+                        content: context.metaModelSystemPrompt,
+                    } as PromptMessage);
+                    systemPromptCount++;
+                }
+                if (context.variantSystemPrompt) {
+                    systemMessages.push({
+                        id: "system:variant",
+                        role: "system",
+                        content: context.variantSystemPrompt,
+                    } as PromptMessage);
+                    systemPromptCount++;
                 }
 
-                const conversationCount = this.plan.mode === "full"
-                    ? messages.length - systemPromptCount - dynamicContextCount
-                    : messages.length;
+                messages.push(...systemMessages, ...conversationMessages);
+                systemPromptCount += systemPromptMessages.length;
+
+                const conversationCount = messages.length - systemPromptCount - dynamicContextCount;
 
                 const counts = {
                     systemPrompt: systemPromptCount,
@@ -178,11 +141,7 @@ export class MessageCompiler {
                 span.setAttribute("counts.dynamic_context", counts.dynamicContext);
                 span.setAttribute("counts.total", counts.total);
 
-                // Update cursor for subsequent prepareStep calls within same execution.
-                // This prevents resending the same raw conversation entries during streaming.
-                this.currentCursor = Math.max(this.conversationStore.getMessageCount() - 1, cursor);
-
-                return { messages, mode: this.plan.mode, counts };
+                return { messages, counts };
             } catch (error) {
                 span.recordException(error as Error);
                 span.setStatus({ code: SpanStatusCode.ERROR });
@@ -191,58 +150,5 @@ export class MessageCompiler {
                 span.end();
             }
         });
-    }
-
-    advanceCursor(): void {
-        const sessionCapabilities = this.getProviderCapabilities();
-        const isStateful = sessionCapabilities?.sessionResumption === true;
-
-        if (!isStateful) {
-            return;
-        }
-
-        // Use current message count (includes agent's response), not compile-time cursor.
-        // advanceCursor is called after agent responds, so we want the cursor to point
-        // to the last message the agent knows about (its own response).
-        const messageCount = this.conversationStore.getMessageCount();
-        const cursorToSave = messageCount - 1;
-        this.sessionManager.saveLastSentMessageIndex(cursorToSave);
-    }
-
-    private buildPlan(): MessageCompilationPlan {
-        const session = this.sessionManager.getSession();
-        const capabilities = this.getProviderCapabilities();
-        const isStateful = capabilities?.sessionResumption === true;
-        const hasSession = Boolean(session.sessionId);
-        const cursor = session.lastSentMessageIndex;
-        const cursorIsValid =
-            typeof cursor === "number" && cursor < this.conversationStore.getMessageCount();
-
-        if (isStateful && hasSession && cursorIsValid) {
-            return { mode: "delta", cursor };
-        }
-
-        return { mode: "full" };
-    }
-
-    private getProviderCapabilities(): ProviderCapabilities | undefined {
-        const normalized = this.normalizeProviderId(this.providerId);
-        const provider = providerRegistry.getProvider(normalized);
-        if (provider) {
-            return provider.metadata.capabilities;
-        }
-
-        const registered = providerRegistry
-            .getRegisteredProviders()
-            .find((metadata) => metadata.id === normalized);
-        return registered?.capabilities;
-    }
-
-    private normalizeProviderId(providerId: string): string {
-        const normalized = providerId.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
-        const registered = providerRegistry.getRegisteredProviders();
-        const matches = registered.some((metadata) => metadata.id === normalized);
-
-        return matches ? normalized : providerId;
     }
 }

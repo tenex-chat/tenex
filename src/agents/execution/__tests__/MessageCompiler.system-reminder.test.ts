@@ -1,9 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
 import { tmpdir } from "os";
+import { join } from "path";
 import type { AgentInstance } from "@/agents/types";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { MessageCompiler } from "../MessageCompiler";
+import {
+    initializeReminderProviders,
+    resetSystemReminders,
+    updateReminderData,
+} from "../system-reminders";
 
 let todoTemplateCallCount = 0;
 
@@ -25,16 +34,6 @@ const getName = mock(async (pubkey: string) => {
     return names[pubkey] ?? "Unknown";
 });
 
-const mockStatefulProvider = {
-    id: "mock-stateful",
-    metadata: {
-        id: "mock-stateful",
-        capabilities: {
-            sessionResumption: true,
-        },
-    },
-};
-
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
 }));
@@ -51,29 +50,6 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-mock.module("@/llm/providers", () => ({
-    providerRegistry: {
-        getProvider: (id: string) => {
-            if (id === "mock-stateful") {
-                return mockStatefulProvider;
-            }
-            return undefined;
-        },
-        getRegisteredProviders: () => [mockStatefulProvider.metadata],
-    },
-}));
-
-import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { AgentMetadataStore } from "@/services/agents";
-import { MessageCompiler } from "../MessageCompiler";
-import { SessionManager } from "../SessionManager";
-import {
-    initializeReminderProviders,
-    updateReminderData,
-    resetSystemReminders,
-} from "../system-reminders";
-
 describe("MessageCompiler and TENEX system reminders", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
@@ -85,8 +61,27 @@ describe("MessageCompiler and TENEX system reminders", () => {
     let metadataPath: string;
     let conversationStore: ConversationStore;
     let agent: AgentInstance;
-    let sessionManager: SessionManager;
     let project: NDKProject;
+
+    async function compile(ralNumber: number) {
+        const compiler = new MessageCompiler(conversationStore);
+        return compiler.compile({
+            agent,
+            project,
+            conversation: conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory,
+            currentBranch: "main",
+            availableAgents: [agent],
+            agentLessons: new Map(),
+            mcpManager: undefined,
+            nudgeContent: "",
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+            ralNumber,
+        });
+    }
 
     beforeEach(() => {
         testDir = join(tmpdir(), `msg-compiler-reminder-${Date.now()}`);
@@ -107,7 +102,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
                 new AgentMetadataStore(convId, "test-agent", metadataPath),
         } as AgentInstance;
 
-        sessionManager = new SessionManager(agent, conversationId, workingDirectory);
         project = {} as NDKProject;
 
         buildSystemPromptMessages.mockClear();
@@ -126,7 +120,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         mock.restore();
     });
 
-    it("does not return provider options from compile in full mode", async () => {
+    it("returns only rebuilt messages and counts", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Hello, can you help me?",
@@ -134,26 +128,9 @@ describe("MessageCompiler and TENEX system reminders", () => {
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
 
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        const compiled = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
+        const compiled = await compile(ralNumber);
 
         expect("providerOptions" in compiled).toBe(false);
-        expect(compiled.mode).toBe("full");
         expect(compiled.messages.find((message) => message.role === "user")?.content).toBe(
             "Hello, can you help me?"
         );
@@ -207,7 +184,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         ]);
     });
 
-    it("keeps delta compilation separate from reminder collection and recomputes reminders on each refresh", async () => {
+    it("recomputes reminders and rebuilds the full prompt on every refresh", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -220,6 +197,17 @@ describe("MessageCompiler and TENEX system reminders", () => {
             content: "Initial response",
             messageType: "text",
         });
+
+        const first = await compile(ralNumber);
+        updateReminderData({
+            agent,
+            conversation: conversationStore,
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+        });
+        await getSystemReminderContext().collect();
+
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Follow-up question",
@@ -232,60 +220,32 @@ describe("MessageCompiler and TENEX system reminders", () => {
             messageType: "text",
         });
 
-        sessionManager.saveSession("session-1", "event-1", 1);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const compiled = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
-        expect(compiled.mode).toBe("delta");
-        expect(compiled.messages).toHaveLength(2);
-        expect(compiled.messages.find((message) => message.role === "user")?.content).toBe(
-            "Follow-up question"
-        );
-
-        // First update + collect
+        const second = await compile(ralNumber);
         updateReminderData({
             agent,
             conversation: conversationStore,
             respondingToPubkey: userPubkey,
             pendingDelegations: [],
-            completedDelegations: [],
+            completedDelegations: [
+                {
+                    delegationConversationId: "delegation-2",
+                    recipientPubkey: "completed-pubkey",
+                    senderPubkey: agentPubkey,
+                    transcript: [],
+                    completedAt: Date.now(),
+                    ralNumber,
+                    status: "completed",
+                },
+            ],
         });
-        await getSystemReminderContext().collect();
-
-        const previousCallCount = todoTemplateCallCount;
-
-        // Second update + collect should recompute (providers run each time)
-        updateReminderData({
-            agent,
-            conversation: conversationStore,
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-        });
-
         const reminders = await getSystemReminderContext().collect();
-        const types = reminders.map((r) => r.type);
 
-        expect(types).toEqual([
-            "todo-list",
-            "response-routing",
-        ]);
-        expect(todoTemplateCallCount).toBeGreaterThan(previousCallCount);
+        expect(buildSystemPromptMessages).toHaveBeenCalledTimes(2);
+        expect(first.messages).toHaveLength(3);
+        expect(second.messages).toHaveLength(5);
+        expect(second.messages.find((message) => message.role === "user" && message.content === "Initial message")).toBeDefined();
+        expect(second.messages.find((message) => message.role === "user" && message.content === "Follow-up question")).toBeDefined();
+        expect(todoTemplateCallCount).toBe(2);
+        expect(reminders.map((reminder) => reminder.type)).toContain("delegations");
     });
 });

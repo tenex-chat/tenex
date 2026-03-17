@@ -104,7 +104,6 @@ export abstract class BaseProvider implements ILLMProvider {
                 streaming: true,
                 toolCalling: true,
                 builtInTools: false,
-                sessionResumption: false,
                 requiresApiKey: true,
                 mcpSupport: false,
                 ...capabilities,

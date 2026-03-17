@@ -24,8 +24,6 @@ export interface ProviderCapabilities {
     toolCalling: boolean;
     /** Whether the provider has built-in tools */
     builtInTools: boolean;
-    /** Whether the provider supports session resumption */
-    sessionResumption: boolean;
     /** Whether the provider requires an API key */
     requiresApiKey: boolean;
     /** Whether the provider supports MCP servers */
@@ -102,8 +100,6 @@ export interface ProviderRuntimeContext {
     tools?: Record<string, AISdkTool>;
     /** Agent name for telemetry */
     agentName?: string;
-    /** Session ID for resumable sessions */
-    sessionId?: string;
     /** Working directory for agent execution */
     workingDirectory?: string;
     /** MCP configuration - passed from services layer to avoid layer violations */

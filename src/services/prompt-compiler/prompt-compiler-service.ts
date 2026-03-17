@@ -552,7 +552,6 @@ export class PromptCompilerService {
         const llmConfig = config.getLLMConfig(configName);
         const llmService = llmServiceFactory.createService(llmConfig, {
             agentName: "prompt-compiler",
-            sessionId: `prompt-compiler-${this.agentPubkey.substring(0, 8)}`,
         });
 
         // Format lessons with their comments (all lessons, regardless of comments)

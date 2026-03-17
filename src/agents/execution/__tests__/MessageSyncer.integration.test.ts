@@ -114,7 +114,6 @@ describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
                 config.createLLMService(defaultLlm, {
                     tools: options?.tools ?? {},
                     agentName: "test-agent",
-                    sessionId: options?.sessionId,
                     workingDirectory: options?.workingDirectory ?? projectPath,
                 }),
             sign: async (event: NDKEvent) => {

@@ -215,7 +215,7 @@ export function createPrepareStep(
                 );
 
                 // Compile messages (sub-span removed - MessageCompiler.compile has its own span)
-                const { messages: rebuiltMessages, mode } = await messageCompiler.compile({
+                const { messages: rebuiltMessages } = await messageCompiler.compile({
                     agent: context.agent,
                     project: projectContext.project,
                     conversation,
@@ -245,14 +245,7 @@ export function createPrepareStep(
                     completedDelegations,
                 });
 
-                span.setAttribute("compilation.mode", mode);
                 span.setAttribute("compiled.message_count", rebuiltMessages.length);
-
-                // For delta mode with no new messages, keep original
-                if (mode === "delta" && rebuiltMessages.length === 0) {
-                    logger.debug("[StreamCallbacks] prepareStep: delta mode with no new messages, keeping original");
-                    return undefined;
-                }
 
                 // Dynamic model switching
                 if (isMetaModel) {

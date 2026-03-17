@@ -12,7 +12,6 @@ import {
     type CompleteEvent,
     type ContentEvent,
     type ReasoningEvent,
-    type SessionCapturedEvent,
     type StreamErrorEvent,
 } from "@/llm/types";
 import { shortenConversationId } from "@/utils/conversation-id";
@@ -30,7 +29,6 @@ import type { LanguageModel } from "ai";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
 import type { MessageCompiler } from "./MessageCompiler";
-import type { SessionManager } from "./SessionManager";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { createPrepareStep } from "./StreamCallbacks";
 import { setupToolEventHandlers } from "./ToolEventHandlers";
@@ -50,7 +48,6 @@ export interface StreamExecutionConfig {
     toolTracker: ToolExecutionTracker;
     ralNumber: number;
     toolsObject: Record<string, AISdkTool>;
-    sessionManager: SessionManager;
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
@@ -395,10 +392,6 @@ export class StreamExecutionHandler {
                     error: formatAnyError(publishError),
                 });
             }
-        });
-
-        llmService.on("session-captured", ({ sessionId: capturedSessionId }: SessionCapturedEvent) => {
-            this.config.sessionManager.saveSession(capturedSessionId, context.triggeringEvent.id);
         });
 
         // Setup tool event handlers via extracted module

@@ -63,7 +63,6 @@ export interface AgentInstance {
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;
-        sessionId?: string;
         workingDirectory?: string;
         /** MCP configuration to pass to the provider */
         mcpConfig?: MCPConfig;

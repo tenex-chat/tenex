@@ -4,7 +4,17 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import type { AgentInstance } from "@/agents/types";
+import { MessageCompiler } from "@/agents/execution/MessageCompiler";
+import {
+    initializeReminderProviders,
+    resetSystemReminders,
+    updateReminderData,
+} from "@/agents/execution/system-reminders";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { createTenexSystemRemindersMiddleware } from "../system-reminders";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "SYSTEM_PROMPT" } },
@@ -19,16 +29,6 @@ const getName = mock(async (pubkey: string) => {
     };
     return names[pubkey] ?? "Unknown";
 });
-
-const mockStatefulProvider = {
-    id: "mock-stateful",
-    metadata: {
-        id: "mock-stateful",
-        capabilities: {
-            sessionResumption: true,
-        },
-    },
-};
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
@@ -45,30 +45,6 @@ mock.module("@/services/PubkeyService", () => ({
         getName,
     }),
 }));
-
-mock.module("@/llm/providers", () => ({
-    providerRegistry: {
-        getProvider: (id: string) => {
-            if (id === "mock-stateful") {
-                return mockStatefulProvider;
-            }
-            return undefined;
-        },
-        getRegisteredProviders: () => [mockStatefulProvider.metadata],
-    },
-}));
-
-import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { AgentMetadataStore } from "@/services/agents";
-import { MessageCompiler } from "@/agents/execution/MessageCompiler";
-import { SessionManager } from "@/agents/execution/SessionManager";
-import {
-    initializeReminderProviders,
-    updateReminderData,
-    resetSystemReminders,
-} from "@/agents/execution/system-reminders";
-import { createTenexSystemRemindersMiddleware } from "../system-reminders";
 
 function toProviderPrompt(messages: Array<{ role: string; content: unknown }>): LanguageModelV3Message[] {
     return messages.map((message) => {
@@ -102,8 +78,27 @@ describe("TENEX system reminder middleware integration", () => {
     let metadataPath: string;
     let conversationStore: ConversationStore;
     let agent: AgentInstance;
-    let sessionManager: SessionManager;
     let project: NDKProject;
+
+    async function compile(ralNumber: number) {
+        const compiler = new MessageCompiler(conversationStore);
+        return compiler.compile({
+            agent,
+            project,
+            conversation: conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory,
+            currentBranch: "main",
+            availableAgents: [agent],
+            agentLessons: new Map(),
+            mcpManager: undefined,
+            nudgeContent: "",
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+            ralNumber,
+        });
+    }
 
     beforeEach(() => {
         testDir = join(tmpdir(), `tenex-reminder-integration-${Date.now()}`);
@@ -124,7 +119,6 @@ describe("TENEX system reminder middleware integration", () => {
                 new AgentMetadataStore(convId, "test-agent", metadataPath),
         } as AgentInstance;
 
-        sessionManager = new SessionManager(agent, conversationId, workingDirectory);
         project = {} as NDKProject;
         resetSystemReminders();
         initializeReminderProviders();
@@ -147,40 +141,13 @@ describe("TENEX system reminder middleware integration", () => {
         const ralNumber = conversationStore.createRal(agentPubkey);
 
         const ctx = getSystemReminderContext();
-
-        // Queue an ephemeral heuristic reminder
         ctx.queue({
             type: "heuristic",
             content: "Update your todo list before using more tools.",
         });
 
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        const compiled = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [
-                {
-                    delegationConversationId: "delegation-1",
-                    recipientPubkey: "delegated-pubkey",
-                    senderPubkey: agentPubkey,
-                    prompt: "Do a task",
-                    ralNumber,
-                },
-            ],
-            completedDelegations: [],
-            ralNumber,
-        });
+        const compiled = await compile(ralNumber);
 
-        // Set reminder data (providers run lazily at collect time)
         updateReminderData({
             agent,
             conversation: conversationStore,
@@ -197,7 +164,6 @@ describe("TENEX system reminder middleware integration", () => {
             completedDelegations: [],
         });
 
-        // The middleware collects from context automatically via transformParams
         const middleware = createTenexSystemRemindersMiddleware();
         const result = await middleware.transformParams?.({
             params: {
@@ -211,13 +177,13 @@ describe("TENEX system reminder middleware integration", () => {
         const textPart = userPrompt?.content[0];
         expect(textPart?.type).toBe("text");
         expect(textPart?.text).toContain("Hello, can you help me?");
-        expect(textPart?.text).toContain('<system-reminder type="todo-list">');
-        expect(textPart?.text).toContain('<system-reminder type="response-routing">');
-        expect(textPart?.text).toContain('<system-reminder type="delegations">');
-        expect(textPart?.text).toContain('<system-reminder type="heuristic">');
+        expect(textPart?.text).toContain("<todo-list>");
+        expect(textPart?.text).toContain("<response-routing>");
+        expect(textPart?.text).toContain("<delegations>");
+        expect(textPart?.text).toContain("<heuristic>");
     });
 
-    it("delivers deferred reminders after advance() while still injecting fresh persistent reminders", async () => {
+    it("keeps deferred reminders across turns while injecting fresh persistent reminders into rebuilt prompts", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Initial message",
@@ -230,41 +196,22 @@ describe("TENEX system reminder middleware integration", () => {
             content: "Initial response",
             messageType: "text",
         });
+
+        const ctx = getSystemReminderContext();
+        ctx.queue({
+            type: "supervision-message",
+            content: "Task Tracking Suggestion: create a todo before continuing.",
+        });
+        ctx.advance();
+
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "Follow-up question",
             messageType: "text",
         });
 
-        const ctx = getSystemReminderContext();
+        const compiled = await compile(ralNumber);
 
-        // Queue a supervision message (available at the next collect() call)
-        ctx.queue({
-            type: "supervision-message",
-            content: "Task Tracking Suggestion: create a todo before continuing.",
-        });
-
-        sessionManager.saveSession("session-1", "event-1", 1);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const compiled = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
-        // Set reminder data (providers run lazily at collect time)
         updateReminderData({
             agent,
             conversation: conversationStore,
@@ -282,13 +229,13 @@ describe("TENEX system reminder middleware integration", () => {
             model: { provider: "test", modelId: "model" } as any,
         });
 
-        const userPrompt = result?.prompt.find((message) => message.role === "user");
+        const userPrompt = result?.prompt.findLast((message) => message.role === "user");
         const textPart = userPrompt?.content[0];
-        expect(compiled.mode).toBe("delta");
+        expect(compiled.messages).toHaveLength(4);
         expect(textPart?.type).toBe("text");
         expect(textPart?.text).toContain("Follow-up question");
-        expect(textPart?.text).toContain('<system-reminder type="todo-list">');
-        expect(textPart?.text).toContain('<system-reminder type="response-routing">');
-        expect(textPart?.text).toContain('<system-reminder type="supervision-message">');
+        expect(textPart?.text).toContain("<todo-list>");
+        expect(textPart?.text).toContain("<response-routing>");
+        expect(textPart?.text).toContain("<supervision-message>");
     });
 });

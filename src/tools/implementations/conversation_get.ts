@@ -310,7 +310,6 @@ async function executeConversationGet(
             // Create LLM service
             const llmService = llmServiceFactory.createService(llmConfig, {
                 agentName: "conversation-analyzer",
-                sessionId: `analyzer-${targetConversationId}`,
             });
 
             // Format conversation for LLM processing

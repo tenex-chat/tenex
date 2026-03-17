@@ -749,44 +749,6 @@ export class ConversationStore {
         });
     }
 
-    async buildMessagesForRalAfterIndex(
-        agentPubkey: string,
-        ralNumber: number,
-        afterIndex: number,
-        options: BuildMessagesOptions = {}
-    ): Promise<ModelMessage[]> {
-        // INVARIANT: conversationId should always be set after load()
-        // If missing, delegation markers won't expand - log a warning for debugging
-        if (!this.conversationId) {
-            logger.warn("[ConversationStore.buildMessagesForRalAfterIndex] conversationId is null - delegation markers will not expand");
-        }
-
-        const activeRals = new Set(this.getActiveRals(agentPubkey));
-        const startIndex = Math.max(afterIndex + 1, 0);
-
-        if (startIndex >= this.state.messages.length) return [];
-        const entries = this.state.messages.slice(startIndex);
-
-        // Callback to get delegation messages for marker expansion
-        const getDelegationMessages = (delegationConversationId: string) => {
-            const store = conversationRegistry.get(delegationConversationId);
-            return store?.getAllMessages();
-        };
-
-        return buildPromptMessagesFromRecords(entries, {
-            viewingAgentPubkey: agentPubkey,
-            ralNumber,
-            activeRals,
-            indexOffset: startIndex,
-
-            agentPubkeys: ConversationStore.agentPubkeys,
-            conversationId: this.conversationId ?? undefined,
-            getDelegationMessages,
-            includeMessageIds: options.includeMessageIds,
-            inFlightToolCallIds: options.inFlightToolCallIds,
-        });
-    }
-
     // Metadata Operations
 
     getMetadata(): ConversationMetadata {

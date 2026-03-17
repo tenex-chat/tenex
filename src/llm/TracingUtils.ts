@@ -55,7 +55,6 @@ export function getFullTelemetryConfig(config: {
     temperature?: number;
     maxTokens?: number;
     contextWindow?: number;
-    sessionId?: string;
 }): TelemetrySettings {
     return {
         isEnabled: true,
@@ -69,7 +68,6 @@ export function getFullTelemetryConfig(config: {
             "llm.temperature": config.temperature ?? 0,
             "llm.max_tokens": config.maxTokens ?? 0,
             "llm.context_window": config.contextWindow ?? 0,
-            "session.id": config.sessionId ?? "unknown",
         },
 
         // FULL DATA - no privacy filters for debugging

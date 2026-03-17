@@ -2,7 +2,7 @@
  * StreamSetup - Handles pre-stream setup for LLM execution
  *
  * This module contains the setup logic that prepares everything needed
- * before streaming begins: tool wrapping, session management, injection processing,
+ * before streaming begins: tool wrapping, injection processing,
  * meta model resolution, and initial message compilation.
  */
 
@@ -19,7 +19,6 @@ import { trace } from "@opentelemetry/api";
 import type { LanguageModelMiddleware } from "ai";
 import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
-import { SessionManager } from "./SessionManager";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { initializeReminderProviders, updateReminderData } from "./system-reminders";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
@@ -33,7 +32,6 @@ import type { AISdkTool } from "@/tools/types";
  */
 export interface StreamSetupResult {
     toolsObject: Record<string, AISdkTool>;
-    sessionManager: SessionManager;
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
@@ -87,13 +85,6 @@ export async function setupStreamExecution(
     // to agents that have no default tools configured.
     const toolNames = context.agent.tools || [];
     let toolsObject = getToolsObject(toolNames, context, nudgeResult.toolPermissions);
-
-    const sessionManager = new SessionManager(
-        context.agent,
-        context.conversationId,
-        context.workingDirectory
-    );
-    const { sessionId } = sessionManager.getSession();
 
     const ralRegistry = RALRegistry.getInstance();
     const conversationStore = context.conversationStore;
@@ -206,7 +197,6 @@ export async function setupStreamExecution(
 
     const llmService = context.agent.createLLMService({
         tools: toolsObject,
-        sessionId,
         workingDirectory: context.workingDirectory,
         conversationId: context.conversationId,
         resolvedConfigName,
@@ -241,11 +231,7 @@ export async function setupStreamExecution(
 
     toolsObject = wrapToolsWithSupervision(toolsObject, context);
 
-    const messageCompiler = new MessageCompiler(
-        llmService.provider,
-        sessionManager,
-        conversationStore
-    );
+    const messageCompiler = new MessageCompiler(conversationStore);
 
     const pendingDelegations = ralRegistry.getConversationPendingDelegations(
         context.agent.pubkey,
@@ -258,7 +244,7 @@ export async function setupStreamExecution(
         ralNumber
     );
 
-    const { messages, counts, mode } = await messageCompiler.compile({
+    const { messages, counts } = await messageCompiler.compile({
         agent: context.agent,
         project: projectContext.project,
         conversation,
@@ -298,12 +284,10 @@ export async function setupStreamExecution(
         "message.count": counts.total,
         "system_prompt.count": counts.systemPrompt,
         "conversation.count": counts.conversation,
-        "message.mode": mode,
     });
 
     return {
         toolsObject,
-        sessionManager,
         llmService,
         messageCompiler,
         request: {

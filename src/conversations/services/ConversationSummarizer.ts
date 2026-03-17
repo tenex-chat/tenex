@@ -51,7 +51,6 @@ export class ConversationSummarizer {
                     summarizationConfig,
                     {
                         agentName: "summarizer",
-                        sessionId: `summarizer-${conversation.id}`,
                     }
                 );
 

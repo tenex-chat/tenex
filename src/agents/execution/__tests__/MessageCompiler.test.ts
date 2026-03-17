@@ -1,9 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdirSync, rmSync } from "fs";
-import { join } from "path";
 import { tmpdir } from "os";
 import type { AgentInstance } from "@/agents/types";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
+import { join } from "path";
+import { MessageCompiler } from "../MessageCompiler";
+import {
+    initializeReminderProviders,
+    resetSystemReminders,
+    updateReminderData,
+} from "../system-reminders";
 
 const buildSystemPromptMessages = mock(async () => [
     { message: { role: "system", content: "STATIC_SYSTEM_A" } },
@@ -18,16 +27,6 @@ const getName = mock(async (pubkey: string) => {
     };
     return names[pubkey] ?? "Unknown";
 });
-
-const mockStatefulProvider = {
-    id: "mock-stateful",
-    metadata: {
-        id: "mock-stateful",
-        capabilities: {
-            sessionResumption: true,
-        },
-    },
-};
 
 mock.module("@/prompts/utils/systemPromptBuilder", () => ({
     buildSystemPromptMessages,
@@ -45,25 +44,6 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-mock.module("@/llm/providers", () => ({
-    providerRegistry: {
-        getProvider: (id: string) => {
-            if (id === "mock-stateful") {
-                return mockStatefulProvider;
-            }
-            return undefined;
-        },
-        getRegisteredProviders: () => [mockStatefulProvider.metadata],
-    },
-}));
-
-import { ConversationStore } from "@/conversations/ConversationStore";
-import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { AgentMetadataStore } from "@/services/agents";
-import { MessageCompiler } from "../MessageCompiler";
-import { SessionManager } from "../SessionManager";
-import { initializeReminderProviders, updateReminderData, resetSystemReminders } from "../system-reminders";
-
 describe("MessageCompiler", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
@@ -75,8 +55,28 @@ describe("MessageCompiler", () => {
     let metadataPath: string;
     let conversationStore: ConversationStore;
     let agent: AgentInstance;
-    let sessionManager: SessionManager;
     let project: NDKProject;
+
+    async function compile(ralNumber: number, extra: Partial<Parameters<MessageCompiler["compile"]>[0]> = {}) {
+        const compiler = new MessageCompiler(conversationStore);
+        return compiler.compile({
+            agent,
+            project,
+            conversation: conversationStore,
+            projectBasePath: "/tmp/project",
+            workingDirectory,
+            currentBranch: "main",
+            availableAgents: [agent],
+            agentLessons: new Map(),
+            mcpManager: undefined,
+            nudgeContent: "",
+            respondingToPubkey: userPubkey,
+            pendingDelegations: [],
+            completedDelegations: [],
+            ralNumber,
+            ...extra,
+        });
+    }
 
     beforeEach(() => {
         testDir = join(tmpdir(), `message-compiler-${Date.now()}`);
@@ -97,7 +97,6 @@ describe("MessageCompiler", () => {
                 new AgentMetadataStore(convId, "agent-slug", metadataPath),
         } as AgentInstance;
 
-        sessionManager = new SessionManager(agent, conversationId, workingDirectory);
         project = {} as NDKProject;
 
         buildSystemPromptMessages.mockClear();
@@ -114,7 +113,7 @@ describe("MessageCompiler", () => {
         }
     });
 
-    it("builds full context for stateless providers", async () => {
+    it("builds the full prompt with system and conversation messages", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "hello",
@@ -128,20 +127,7 @@ describe("MessageCompiler", () => {
             messageType: "text",
         });
 
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-
-        const { messages, mode } = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
+        const { messages, counts } = await compile(ralNumber, {
             pendingDelegations: [
                 {
                     delegationConversationId: "delegation-1",
@@ -151,23 +137,21 @@ describe("MessageCompiler", () => {
                     ralNumber,
                 },
             ],
-            completedDelegations: [],
-            ralNumber,
         });
 
         const contents = messages.map((message) =>
             typeof message.content === "string" ? message.content : JSON.stringify(message.content)
         );
 
-        expect(mode).toBe("full");
         expect(buildSystemPromptMessages).toHaveBeenCalledTimes(1);
         expect(contents[0]).toBe("STATIC_SYSTEM_A");
         expect(contents[1]).toBe("STATIC_SYSTEM_B");
         expect(contents[2]).toContain("hello");
         expect(contents[3]).toContain("hi");
-        expect(messages).toHaveLength(4);
+        expect(counts.systemPrompt).toBe(2);
+        expect(counts.conversation).toBe(2);
+        expect(counts.total).toBe(4);
 
-        // Verify reminders via the context singleton
         updateReminderData({
             agent,
             conversation: conversationStore,
@@ -189,7 +173,7 @@ describe("MessageCompiler", () => {
         expect(reminderContent).toContain("Your response will be sent to @User.");
     });
 
-    it("builds delta context for session-stateful providers", async () => {
+    it("rebuilds the full prompt on every compile", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "old user",
@@ -202,6 +186,8 @@ describe("MessageCompiler", () => {
             content: "old agent",
             messageType: "text",
         });
+
+        const first = await compile(ralNumber);
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "new user",
@@ -213,197 +199,49 @@ describe("MessageCompiler", () => {
             content: "new agent",
             messageType: "text",
         });
-
-        sessionManager.saveSession("session-1", "event-1", 1);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const { messages, mode } = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
-        const contents = messages.map((message) =>
-            typeof message.content === "string" ? message.content : JSON.stringify(message.content)
-        );
-
-        expect(mode).toBe("delta");
-        // In delta mode, only new conversation messages are sent - no system context
-        // The session already has full context from initial compilation
-        expect(contents.join(" ")).not.toContain("STATIC_SYSTEM_A");
-        expect(contents.join(" ")).not.toContain("[System Context]");
-        expect(contents.join(" ")).not.toContain("old user");
-        expect(contents.join(" ")).not.toContain("old agent");
-        expect(contents.join(" ")).toContain("new user");
-        expect(contents.join(" ")).toContain("new agent");
-        expect(messages.length).toBe(2);
-    });
-
-    it("falls back to full context when cursor is invalid", async () => {
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "hello",
-            messageType: "text",
-        });
-        const ralNumber = conversationStore.createRal(agentPubkey);
-        conversationStore.addMessage({
-            pubkey: agentPubkey,
-            ral: ralNumber,
-            content: "hi",
-            messageType: "text",
-        });
-
-        sessionManager.saveSession("session-1", "event-1", 99);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const { mode } = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
-        expect(mode).toBe("full");
-        expect(buildSystemPromptMessages).toHaveBeenCalledTimes(1);
-    });
-
-    it("advances the delta cursor between compiles", async () => {
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "old user",
-            messageType: "text",
-        });
-        const ralNumber = conversationStore.createRal(agentPubkey);
-        conversationStore.addMessage({
-            pubkey: agentPubkey,
-            ral: ralNumber,
-            content: "new agent",
-            messageType: "text",
-        });
-
-        sessionManager.saveSession("session-1", "event-1", 0);
-
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        const first = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
+        const second = await compile(ralNumber);
 
         const firstContents = first.messages.map((message) =>
             typeof message.content === "string" ? message.content : JSON.stringify(message.content)
         );
-
-        expect(first.mode).toBe("delta");
-        expect(first.counts.conversation).toBe(1);
-        expect(firstContents.join(" ")).toContain("new agent");
-
-        const second = await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-
         const secondContents = second.messages.map((message) =>
             typeof message.content === "string" ? message.content : JSON.stringify(message.content)
         );
 
-        expect(second.mode).toBe("delta");
-        expect(second.counts.conversation).toBe(0);
-        expect(secondContents.join(" ")).not.toContain("new agent");
+        expect(buildSystemPromptMessages).toHaveBeenCalledTimes(2);
+        expect(firstContents.join(" ")).toContain("old user");
+        expect(firstContents.join(" ")).not.toContain("new user");
+        expect(secondContents.join(" ")).toContain("STATIC_SYSTEM_A");
+        expect(secondContents.join(" ")).toContain("old user");
+        expect(secondContents.join(" ")).toContain("old agent");
+        expect(secondContents.join(" ")).toContain("new user");
+        expect(secondContents.join(" ")).toContain("new agent");
+        expect(second.counts.systemPrompt).toBe(2);
+        expect(second.counts.conversation).toBe(4);
     });
 
-    it("persists cursor advancement for session-stateful providers", async () => {
+    it("includes meta-model and variant prompts in the rebuilt system prompt", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,
             content: "hello",
             messageType: "text",
         });
         const ralNumber = conversationStore.createRal(agentPubkey);
-        conversationStore.addMessage({
-            pubkey: agentPubkey,
-            content: "hi",
-            messageType: "text",
-            ral: ralNumber,
+
+        const { messages, counts } = await compile(ralNumber, {
+            metaModelSystemPrompt: "META_PROMPT",
+            variantSystemPrompt: "VARIANT_PROMPT",
         });
 
-        const compiler = new MessageCompiler("mock-stateful", sessionManager, conversationStore);
-        await compiler.compile({
-            agent,
-            project,
-            conversation: conversationStore,
-            projectBasePath: "/tmp/project",
-            workingDirectory,
-            currentBranch: "main",
-            availableAgents: [agent],
-            agentLessons: new Map(),
-            mcpManager: undefined,
-            nudgeContent: "",
-            respondingToPubkey: userPubkey,
-            pendingDelegations: [],
-            completedDelegations: [],
-            ralNumber,
-        });
-        compiler.advanceCursor();
+        const systemContents = messages
+            .filter((message) => message.role === "system")
+            .map((message) => message.content);
 
-        const restartedSessionManager = new SessionManager(agent, conversationId, workingDirectory);
-        expect(restartedSessionManager.getSession().lastSentMessageIndex).toBe(1);
-    });
-
-    it("does not advance cursor for stateless providers", () => {
-        conversationStore.addMessage({
-            pubkey: userPubkey,
-            content: "hello",
-            messageType: "text",
-        });
-
-        const compiler = new MessageCompiler("openrouter", sessionManager, conversationStore);
-        compiler.advanceCursor();
-
-        const restartedSessionManager = new SessionManager(agent, conversationId, workingDirectory);
-        expect(restartedSessionManager.getSession().lastSentMessageIndex).toBeUndefined();
+        expect(systemContents).toContain("STATIC_SYSTEM_A");
+        expect(systemContents).toContain("STATIC_SYSTEM_B");
+        expect(systemContents).toContain("META_PROMPT");
+        expect(systemContents).toContain("VARIANT_PROMPT");
+        expect(counts.systemPrompt).toBe(4);
+        expect(counts.conversation).toBe(1);
     });
 });

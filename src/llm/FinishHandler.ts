@@ -6,7 +6,6 @@ import type {
     StreamTextOnFinishCallback,
 } from "ai";
 import type { EventEmitter } from "tseep";
-import { PROVIDER_IDS } from "./providers/provider-ids";
 import { getInvalidToolCalls } from "./utils/tool-errors";
 import { extractUsageMetadata, extractOpenRouterGenerationId } from "./providers/usage-metadata";
 import type { LLMServiceEventMap } from "./types";
@@ -86,13 +85,6 @@ export function createFinishHandler(
 
             const usedFallbackToText = fallbackLevel === "text";
             const usedErrorFallback = fallbackLevel === "error";
-
-            emitSessionCapturedFromMetadata(
-                emitter,
-                config.provider,
-                e.providerMetadata as Record<string, unknown> | undefined,
-                false
-            );
 
             // Capture OpenRouter generation ID for trace correlation
             const openrouterGenerationId = extractOpenRouterGenerationId(
@@ -252,28 +244,4 @@ function recordInvalidToolCalls(
         model,
         provider,
     });
-}
-
-/**
- * Emit session-captured event from provider metadata
- */
-function emitSessionCapturedFromMetadata(
-    emitter: EventEmitter<LLMServiceEventMap>,
-    provider: string,
-    providerMetadata: Record<string, unknown> | undefined,
-    recordSpanEvent: boolean
-): void {
-    if (provider === PROVIDER_IDS.CODEX_APP_SERVER) {
-        const sessionId = (
-            providerMetadata?.[PROVIDER_IDS.CODEX_APP_SERVER] as { sessionId?: string } | undefined
-        )?.sessionId;
-        if (sessionId) {
-            if (recordSpanEvent) {
-                trace.getActiveSpan()?.addEvent("llm.session_captured", {
-                    "session.id": sessionId,
-                });
-            }
-            emitter.emit("session-captured", { sessionId });
-        }
-    }
 }

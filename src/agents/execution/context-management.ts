@@ -27,7 +27,6 @@ import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { providerRegistry } from "@/llm/providers";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
@@ -87,25 +86,7 @@ export interface ExecutionContextManagement {
 }
 
 function normalizeProviderId(providerId: string): string {
-    const normalized = providerId.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
-    const registered = providerRegistry.getRegisteredProviders();
-    const matches = registered.some((metadata) => metadata.id === normalized);
-
-    return matches ? normalized : providerId;
-}
-
-function isResumableProvider(providerId: string): boolean {
-    const normalized = normalizeProviderId(providerId);
-    const provider = providerRegistry.getProvider(normalized);
-
-    if (provider) {
-        return provider.metadata.capabilities.sessionResumption === true;
-    }
-
-    const registered = providerRegistry
-        .getRegisteredProviders()
-        .find((metadata) => metadata.id === normalized);
-    return registered?.capabilities.sessionResumption === true;
+    return providerId.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
 }
 
 
@@ -1380,7 +1361,6 @@ function createSummarizationModel(options: {
         const configName = configService.getSummarizationModelName();
         const llmService = configService.createLLMService(configName, {
             agentName: "context-summarizer",
-            sessionId: `context-summarizer-${options.conversationId}-${options.agent.pubkey}`,
             conversationId: options.conversationId,
         });
         return llmService.createLanguageModel();
@@ -1509,7 +1489,7 @@ export function createExecutionContextManagement(options: {
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
 
-    if (!settings.enabled || isResumableProvider(options.providerId)) {
+    if (!settings.enabled) {
         return undefined;
     }
 

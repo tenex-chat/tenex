@@ -38,7 +38,6 @@ describe("Provider Metadata", () => {
             expect(CodexAppServerProvider.METADATA.id).toBe("codex-app-server");
             expect(CodexAppServerProvider.METADATA.category).toBe("agent");
             expect(CodexAppServerProvider.METADATA.capabilities.builtInTools).toBe(true);
-            expect(CodexAppServerProvider.METADATA.capabilities.sessionResumption).toBe(true);
             expect(CodexAppServerProvider.METADATA.capabilities.mcpSupport).toBe(true);
             expect(CodexAppServerProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });

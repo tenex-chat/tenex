@@ -14,7 +14,6 @@ const createMockProviderClass = (id: string, requiresApiKey = true): ProviderReg
             streaming: true,
             toolCalling: true,
             builtInTools: false,
-            sessionResumption: false,
             requiresApiKey,
             mcpSupport: false,
         },

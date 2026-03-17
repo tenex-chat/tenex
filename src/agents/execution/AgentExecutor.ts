@@ -553,8 +553,6 @@ export class AgentExecutor {
                 "event.id": responseEvent.id || "",
                 is_completion: !finalOutstandingWork.hasWork,
             });
-
-            result.messageCompiler.advanceCursor();
         }
 
         return responseEvent;
@@ -583,7 +581,6 @@ export class AgentExecutor {
             toolTracker,
             ralNumber,
             toolsObject: setup.toolsObject,
-            sessionManager: setup.sessionManager,
             llmService: setup.llmService,
             messageCompiler: setup.messageCompiler,
             request: setup.request,

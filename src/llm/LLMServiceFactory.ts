@@ -96,7 +96,6 @@ export class LLMServiceFactory {
         context?: {
             tools?: Record<string, AISdkTool>;
             agentName?: string;
-            sessionId?: string;
             /** Working directory path for agent execution */
             workingDirectory?: string;
             /** MCP configuration - passed from services layer to providers */
@@ -123,7 +122,6 @@ export class LLMServiceFactory {
         const runtimeContext: ProviderRuntimeContext = {
             tools: context?.tools,
             agentName: context?.agentName,
-            sessionId: context?.sessionId,
             workingDirectory: context?.workingDirectory,
             mcpConfig: context?.mcpConfig,
             reasoningEffort: (config as { reasoningEffort?: "none" | "low" | "medium" | "high" | "xhigh" }).reasoningEffort,
@@ -158,7 +156,6 @@ export class LLMServiceFactory {
                 config.maxTokens,
                 modelResult.providerFunction as (model: string, options?: Record<string, unknown>) => LanguageModel,
                 modelResult.agentSettings as Record<string, unknown>,
-                context?.sessionId,
                 agentSlug,
                 context?.conversationId
             );
@@ -185,7 +182,6 @@ export class LLMServiceFactory {
             config.maxTokens,
             undefined,
             undefined,
-            context?.sessionId,
             agentSlug,
             context?.conversationId,
             keyRotationHandler

@@ -12,7 +12,6 @@ const mockCapabilities: ProviderCapabilities = {
     streaming: true,
     toolCalling: true,
     builtInTools: false,
-    sessionResumption: false,
     requiresApiKey: true,
     mcpSupport: false,
 };
@@ -594,7 +593,6 @@ describe("LLMService telemetry configuration", () => {
             1000,
             undefined,
             undefined,
-            undefined,
             "test-agent"
         );
 
@@ -834,7 +832,6 @@ describe("LLMService stream()", () => {
                 finishReason: "stop",
                 providerMetadata: {
                     "codex-app-server": {
-                        sessionId: "stream-session-456",
                         costUsd: 0.16652625,
                     },
                 },
@@ -1324,7 +1321,6 @@ describe("LLMService key rotation retry", () => {
             "openrouter",
             "gpt-4",
             mockCapabilities,
-            undefined,
             undefined,
             undefined,
             undefined,

@@ -64,7 +64,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         options?: Record<string, unknown>
     ) => LanguageModel;
     private readonly agentBaseSettings?: Record<string, unknown>;
-    private readonly sessionId?: string;
     private readonly agentSlug?: string;
     private readonly conversationId?: string;
     private cachedContentForComplete = "";
@@ -88,7 +87,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         maxTokens?: number,
         agentProviderFunction?: (model: string, options?: Record<string, unknown>) => LanguageModel,
         agentBaseSettings?: Record<string, unknown>,
-        sessionId?: string,
         agentSlug?: string,
         conversationId?: string,
         keyRotationHandler?: KeyRotationHandler
@@ -102,7 +100,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         this.maxTokens = maxTokens;
         this.agentProviderFunction = agentProviderFunction;
         this.agentBaseSettings = agentBaseSettings;
-        this.sessionId = sessionId;
         this.agentSlug = agentSlug;
         this.conversationId = conversationId;
         this.keyRotationHandler = keyRotationHandler;
@@ -182,7 +179,6 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             temperature: this.temperature,
             maxTokens: this.maxTokens,
             contextWindow: this.getModelContextWindow(),
-            sessionId: this.sessionId,
         });
     }
 

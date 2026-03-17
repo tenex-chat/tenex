@@ -59,7 +59,6 @@ export async function synthesizeContent(content: string, prompt: string, source:
     const llmConfig = config.getLLMConfig(configName);
     const llmService = llmServiceFactory.createService(llmConfig, {
         agentName: "content-synthesizer",
-        sessionId: `synthesizer-${Date.now()}`,
     });
 
     const { object: result } = await llmService.generateObject(

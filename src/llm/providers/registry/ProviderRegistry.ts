@@ -267,7 +267,6 @@ export class ProviderRegistry {
                         streaming: true,
                         toolCalling: true,
                         builtInTools: false,
-                        sessionResumption: false,
                         requiresApiKey: false,
                         mcpSupport: false,
                     },

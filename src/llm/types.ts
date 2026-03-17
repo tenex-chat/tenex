@@ -124,13 +124,6 @@ export interface StreamErrorEvent {
 }
 
 /**
- * Session captured event
- */
-export interface SessionCapturedEvent {
-    sessionId: string;
-}
-
-/**
  * Reasoning delta event
  */
 export interface ReasoningEvent {
@@ -154,5 +147,4 @@ export type LLMServiceEventMap = DefaultEventMap & {
     "tool-will-execute": (...args: [event: ToolWillExecuteEvent]) => void;
     "tool-did-execute": (...args: [event: ToolDidExecuteEvent]) => void;
     "complete": (...args: [event: CompleteEvent]) => void;
-    "session-captured": (...args: [event: SessionCapturedEvent]) => void;
 };
