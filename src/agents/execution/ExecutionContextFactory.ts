@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
@@ -31,7 +31,7 @@ export async function createExecutionContext(params: {
      */
     projectBasePath: string;
     triggeringEvent: NDKEvent;
-    agentPublisher?: AgentPublisher;
+    agentPublisher?: AgentRuntimePublisher;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
     debug?: boolean;

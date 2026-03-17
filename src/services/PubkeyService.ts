@@ -9,6 +9,11 @@ const tracer = trace.getTracer("tenex.pubkey-service");
 // Note: get_name and fetch_profile spans removed as they are trivial O(1) lookups
 // that add noise without debugging value. The warmUserProfiles span is kept for batch operations.
 
+function isNdkUnavailableError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("NDK not initialized");
+}
+
 interface UserProfile {
     name?: string;
     display_name?: string;
@@ -140,10 +145,16 @@ export class PubkeyService {
                 return profile;
             }
         } catch (error) {
-            logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
-                pubkey,
-                error,
-            });
+            if (isNdkUnavailableError(error)) {
+                logger.debug("[PUBKEY_NAME_REPO] Skipping user profile fetch because NDK is unavailable", {
+                    pubkey,
+                });
+            } else {
+                logger.warn("[PUBKEY_NAME_REPO] Failed to fetch user profile", {
+                    pubkey,
+                    error,
+                });
+            }
         }
 
         // Return empty profile if fetch failed

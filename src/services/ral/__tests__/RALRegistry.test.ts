@@ -403,6 +403,33 @@ describe("RALRegistry", () => {
       expect(state?.queuedInjections).toEqual([]);
     });
 
+    it("should preserve principal snapshots on queued user messages", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "User message", {
+        senderPubkey: "linked-user-pubkey",
+        senderPrincipal: {
+          id: "telegram:user:42",
+          transport: "telegram",
+          linkedPubkey: "linked-user-pubkey",
+          displayName: "Alice Telegram",
+        },
+        targetedPrincipals: [{
+          id: `nostr:${agentPubkey}`,
+          transport: "nostr",
+          linkedPubkey: agentPubkey,
+          displayName: "agent",
+        }],
+      });
+
+      const injections = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
+
+      expect(injections).toHaveLength(1);
+      expect(injections[0].senderPrincipal?.id).toBe("telegram:user:42");
+      expect(injections[0].senderPrincipal?.displayName).toBe("Alice Telegram");
+      expect(injections[0].targetedPrincipals?.[0]?.linkedPubkey).toBe(agentPubkey);
+    });
+
     it("should return copy of injections, not original array", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
 

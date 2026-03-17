@@ -32,6 +32,7 @@ Use any key names that fit your task. Common patterns:
 ### How to use it
 
 - Rewrite entries to reflect current state, don't append chronologically
+- Prefer compact current state over a long running log
 - Once captured, prune the tool calls that produced the information
 - If you've read something twice, that's a sign you should have captured it the first time
 

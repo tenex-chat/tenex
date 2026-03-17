@@ -1,4 +1,5 @@
 import type { AgentMetadataStore } from "@/services/agents";
+import type { TelegramAgentConfig } from "@/events/runtime/RuntimeAgent";
 import type { LLMService } from "@/llm/service";
 import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
 import type { OnStreamStartCallback } from "@/llm/types";
@@ -60,6 +61,8 @@ export interface AgentInstance {
      * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
      */
     projectOverrides?: Record<string, AgentProjectConfig>;
+    /** Telegram transport configuration for this agent */
+    telegram?: TelegramAgentConfig;
     createMetadataStore(conversationId: string): AgentMetadataStore;
     createLLMService(options?: {
         tools?: Record<string, CoreTool>;

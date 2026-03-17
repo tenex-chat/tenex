@@ -10,6 +10,8 @@ Encapsulates all Nostr protocol interactions. Higher layers never manipulate NDK
 - `InterventionPublisher.ts` — Intervention event publishing
 - `AgentEventEncoder.ts` — Encode data into Nostr event format
 - `AgentEventDecoder.ts` — Decode Nostr events into TENEX data
+- `NostrInboundAdapter.ts` — Normalize inbound Nostr events into canonical transport envelopes
+- `InboundEnvelopeEventBridge.ts` — Compatibility bridge that maps canonical inbound envelopes back into minimal legacy `NDKEvent` shape during migration
 - `kinds.ts` — **Single source of truth** for all event kind constants
 - `keys.ts` — Key management
 - `encryption.ts` — NIP-44/NIP-04 encryption

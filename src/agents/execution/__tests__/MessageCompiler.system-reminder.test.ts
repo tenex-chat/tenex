@@ -6,6 +6,8 @@ import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
+import { IdentityBindingStore } from "@/services/identity/IdentityBindingStoreService";
+import { IdentityService } from "@/services/identity/IdentityService";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { MessageCompiler } from "../MessageCompiler";
 import {
@@ -49,7 +51,6 @@ mock.module("@/services/PubkeyService", () => ({
         getName,
     }),
 }));
-
 describe("MessageCompiler and TENEX system reminders", () => {
     const projectId = "project-1";
     const conversationId = "conv-1";
@@ -84,6 +85,8 @@ describe("MessageCompiler and TENEX system reminders", () => {
     }
 
     beforeEach(() => {
+        IdentityService.resetInstance();
+        IdentityBindingStore.resetInstance();
         testDir = join(tmpdir(), `msg-compiler-reminder-${Date.now()}`);
         metadataPath = join(testDir, "metadata-root");
         mkdirSync(testDir, { recursive: true });
@@ -113,6 +116,8 @@ describe("MessageCompiler and TENEX system reminders", () => {
     });
 
     afterEach(() => {
+        IdentityService.resetInstance();
+        IdentityBindingStore.resetInstance();
         if (testDir) {
             rmSync(testDir, { recursive: true, force: true });
         }

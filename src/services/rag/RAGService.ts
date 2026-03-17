@@ -201,6 +201,13 @@ export class RAGService {
             RAGService.instance = null;
         }
     }
+
+    public static async closeInstance(): Promise<void> {
+        if (RAGService.instance) {
+            await RAGService.instance.close().catch(() => undefined);
+            RAGService.instance = null;
+        }
+    }
 }
 
 // Export the main types for convenience

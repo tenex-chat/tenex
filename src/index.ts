@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initializeTelemetry } from "@/telemetry/setup";
+import { initializeTelemetry, shutdownTelemetry } from "@/telemetry/setup";
 
 /**
  * Get the base TENEX directory path for early initialization.
@@ -71,6 +71,15 @@ function getTelemetryConfig(): TelemetryConfig {
 const telemetryConfig = getTelemetryConfig();
 initializeTelemetry(telemetryConfig.enabled, telemetryConfig.serviceName, telemetryConfig.endpoint);
 
+async function shutdownTelemetrySafely(): Promise<void> {
+    await Promise.race([
+        shutdownTelemetry().catch(() => undefined),
+        new Promise<void>((resolve) => {
+            setTimeout(resolve, 1000);
+        }),
+    ]);
+}
+
 // Main execution - all imports happen AFTER telemetry is initialized
 // This ensures OpenTelemetry can properly instrument all imported modules
 async function main(): Promise<void> {
@@ -123,21 +132,27 @@ async function main(): Promise<void> {
     program.exitOverride();
 
     try {
-        // Issue #2: Use parseAsync to properly catch async command errors
-        await program.parseAsync(process.argv);
-    } catch (error) {
-        // Commander throws CommanderError for --help, --version, and actual errors
-        // Check if it's a "help" or "version" exit - these are not real errors
-        if (
-            error instanceof Error &&
-            "code" in error &&
-            (error.code === "commander.helpDisplayed" || error.code === "commander.version")
-        ) {
-            // Normal exit for help/version - exit cleanly
-            process.exit(0);
+        try {
+            // Issue #2: Use parseAsync to properly catch async command errors
+            await program.parseAsync(process.argv);
+        } catch (error) {
+            // Commander throws CommanderError for --help, --version, and actual errors
+            // Check if it's a "help" or "version" exit - these are not real errors
+            if (
+                error instanceof Error &&
+                "code" in error &&
+                (error.code === "commander.helpDisplayed" || error.code === "commander.version")
+            ) {
+                await shutdownTelemetrySafely();
+                process.exit(0);
+            }
+            handleCliError(error, "Fatal error in TENEX CLI");
         }
-        handleCliError(error, "Fatal error in TENEX CLI");
+    } finally {
+        await shutdownTelemetrySafely();
     }
+
+    process.exit(0);
 }
 
 // Execute CLI - this is an application, not a library

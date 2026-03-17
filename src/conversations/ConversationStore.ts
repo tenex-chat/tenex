@@ -31,6 +31,8 @@ import type {
     DelegationMarker,
     ExecutionTime,
     Injection,
+    MessagePrincipalContext,
+    PrincipalSnapshot,
 } from "./types";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
@@ -169,8 +171,8 @@ export class ConversationStore {
         return conversationRegistry.has(conversationId);
     }
 
-    static async create(event: NDKEvent): Promise<ConversationStore> {
-        return conversationRegistry.create(event);
+    static async create(event: NDKEvent, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
+        return conversationRegistry.create(event, principalContext);
     }
 
     static findByEventId(eventId: string): ConversationStore | undefined {
@@ -189,8 +191,12 @@ export class ConversationStore {
         return conversationRegistry.getCachedEvent(eventId);
     }
 
-    static async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
-        return conversationRegistry.addEvent(conversationId, event);
+    static async addEvent(
+        conversationId: string,
+        event: NDKEvent,
+        principalContext?: MessagePrincipalContext
+    ): Promise<void> {
+        return conversationRegistry.addEvent(conversationId, event, principalContext);
     }
 
     static setConversationTitle(conversationId: string, title: string): void {
@@ -820,13 +826,42 @@ export class ConversationStore {
         return targeted;
     }
 
-    addEventMessage(event: NDKEvent, isFromAgent: boolean): void {
+    private static buildDefaultSenderPrincipal(event: NDKEvent): PrincipalSnapshot {
+        return {
+            id: `nostr:${event.pubkey}`,
+            transport: "nostr",
+            linkedPubkey: event.pubkey,
+        };
+    }
+
+    private static buildDefaultTargetedPrincipals(event: NDKEvent): PrincipalSnapshot[] | undefined {
+        const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
+        if (targetedPubkeys.length === 0) {
+            return undefined;
+        }
+
+        return targetedPubkeys.map((pubkey) => ({
+            id: `nostr:${pubkey}`,
+            transport: "nostr",
+            linkedPubkey: pubkey,
+        }));
+    }
+
+    addEventMessage(
+        event: NDKEvent,
+        isFromAgent: boolean,
+        principalContext?: MessagePrincipalContext
+    ): void {
         if (!event.id) return;
         if (event.kind !== 1) return;
         if (event.tagValue("tool")) return;
         if (this.hasEventId(event.id)) return;
 
         const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
+        const targetedPrincipals =
+            principalContext?.targetedPrincipals?.length
+                ? principalContext.targetedPrincipals
+                : ConversationStore.buildDefaultTargetedPrincipals(event);
         this.addMessage({
             pubkey: event.pubkey,
             content: event.content,
@@ -834,6 +869,9 @@ export class ConversationStore {
             eventId: event.id,
             timestamp: event.created_at,
             targetedPubkeys: targetedPubkeys.length > 0 ? targetedPubkeys : undefined,
+            targetedPrincipals,
+            senderPrincipal:
+                principalContext?.senderPrincipal ?? ConversationStore.buildDefaultSenderPrincipal(event),
         });
 
         if (!isFromAgent) {

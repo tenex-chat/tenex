@@ -965,7 +965,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     conversationId: string,
     ralNumber: number,
     message: string,
-    options?: { senderPubkey?: string; eventId?: string }
+    options?: {
+      senderPubkey?: string;
+      senderPrincipal?: QueuedInjection["senderPrincipal"];
+      targetedPrincipals?: QueuedInjection["targetedPrincipals"];
+      eventId?: string;
+    }
   ): void {
     this.queueMessage(agentPubkey, conversationId, ralNumber, "user", message, options);
   }
@@ -979,7 +984,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     ralNumber: number,
     role: "system" | "user",
     message: string,
-    options?: { senderPubkey?: string; eventId?: string }
+    options?: {
+      senderPubkey?: string;
+      senderPrincipal?: QueuedInjection["senderPrincipal"];
+      targetedPrincipals?: QueuedInjection["targetedPrincipals"];
+      eventId?: string;
+    }
   ): void {
     const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
     if (!ral) {
@@ -1004,6 +1014,8 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       content: message,
       queuedAt: Date.now(),
       senderPubkey: options?.senderPubkey,
+      senderPrincipal: options?.senderPrincipal,
+      targetedPrincipals: options?.targetedPrincipals,
       eventId: options?.eventId,
     });
   }

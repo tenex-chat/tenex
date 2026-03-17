@@ -6,8 +6,9 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import type { ProjectContext } from "@/services/projects";
+import { logger } from "@/utils/logger";
 import { ROOT_CONTEXT, SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import { z } from "zod";
 
@@ -56,13 +57,20 @@ export class ConversationSummarizer {
 
                 // Prepare conversation content from stored messages
                 const messages = conversation.getAllMessages();
-                const pubkeyService = getPubkeyService();
+                const identityService = getIdentityService();
 
                 // Resolve pubkeys to names for all participants
                 const textMessages = messages.filter((entry) => entry.messageType === "text");
                 const formattedMessages = await Promise.all(
                     textMessages.map(async (entry) => {
-                        const name = await pubkeyService.getName(entry.pubkey);
+                        const name = await identityService.getDisplayName({
+                            principalId: entry.senderPrincipal?.id,
+                            linkedPubkey: entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey,
+                            displayName: entry.senderPrincipal?.displayName,
+                            username: entry.senderPrincipal?.username,
+                            kind: entry.senderPrincipal?.kind,
+                            fallbackName: entry.role === "system" ? "system" : undefined,
+                        });
                         return `${name}: ${entry.content}`;
                     })
                 );
@@ -172,36 +180,6 @@ export class ConversationSummarizer {
 
 
 
-                // Publish metadata event
-                const ndk = getNDK();
-                const event = new NDKEventMetadata(ndk);
-                event.kind = NDKKind.EventMetadata;
-                event.setConversationId(conversation.id);
-
-                // Add metadata tags
-                if (result.title) {
-                    event.tags.push(["title", result.title]);
-                }
-                if (result.summary) {
-                    event.tags.push(["summary", result.summary]);
-                }
-                if (result.status_label) {
-                    event.tags.push(["status-label", result.status_label]);
-                }
-                if (result.status_current_activity) {
-                    event.tags.push(["status-current-activity", result.status_current_activity]);
-                }
-                if (result.categories && result.categories.length > 0) {
-                    for (const category of result.categories) {
-                        event.tags.push(["t", category]);
-                    }
-                }
-                event.tags.push(["a", this.context.project.tagId()]); // Project reference
-                event.tags.push(["model", summarizationConfig.model]);
-
-                // LOCAL-FIRST: Persist to local storage BEFORE publishing to Nostr
-                // This ensures operational cache is always populated regardless of Nostr publish outcome
-                // Nostr events are for replication/audit, local files are the primary read source
                 conversation.updateMetadata({
                     ...(result.title ? { title: result.title } : {}),
                     ...(result.summary ? { summary: result.summary } : {}),
@@ -209,41 +187,51 @@ export class ConversationSummarizer {
                     ...(result.status_current_activity ? { statusCurrentActivity: result.status_current_activity } : {}),
                 });
                 await conversation.save();
-                console.log(
-                    `Persisted local metadata for conversation ${conversation.id}: ${result.title}`
-                );
 
-                // Sign and publish with backend signer
-                const backendSigner = await config.getBackendSigner();
-                await event.sign(backendSigner);
+                if (result.categories && result.categories.length > 0) {
+                    await this.categoryManager.updateCategories(result.categories);
+                }
 
-                // Await publish and handle errors gracefully - local persistence already succeeded
                 try {
+                    const ndk = getNDK();
+                    const event = new NDKEventMetadata(ndk);
+                    event.kind = NDKKind.EventMetadata;
+                    event.setConversationId(conversation.id);
+
+                    if (result.title) {
+                        event.tags.push(["title", result.title]);
+                    }
+                    if (result.summary) {
+                        event.tags.push(["summary", result.summary]);
+                    }
+                    if (result.status_label) {
+                        event.tags.push(["status-label", result.status_label]);
+                    }
+                    if (result.status_current_activity) {
+                        event.tags.push(["status-current-activity", result.status_current_activity]);
+                    }
+                    if (result.categories && result.categories.length > 0) {
+                        for (const category of result.categories) {
+                            event.tags.push(["t", category]);
+                        }
+                    }
+                    event.tags.push(["a", this.context.project.tagId()]);
+                    event.tags.push(["model", summarizationConfig.model]);
+
+                    const backendSigner = await config.getBackendSigner();
+                    await event.sign(backendSigner);
                     await event.publish();
                     console.log(
-                        `Published metadata to Nostr for conversation ${conversation.id}: ${result.title}`
+                        `Published metadata for conversation ${conversation.id}: ${result.title}`
                     );
                 } catch (publishError) {
-                    // Log but don't fail - local metadata is already persisted
-                    console.warn(
-                        `Failed to publish metadata to Nostr for conversation ${conversation.id}:`,
-                        publishError
-                    );
+                    logger.debug("[ConversationSummarizer] Skipping metadata publish", {
+                        conversationId: conversation.id,
+                        error: publishError instanceof Error ? publishError.message : String(publishError),
+                    });
                     span.addEvent("nostr_publish_failed", {
                         error: publishError instanceof Error ? publishError.message : String(publishError),
                     });
-                }
-
-                // Also persist summary to local metadata for prompt fragments
-                // This ensures "Recent Conversations" section can display summaries
-                conversation.updateMetadata({
-                    summary: result.summary,
-                });
-                await conversation.save();
-
-                // Update category tally for future consistency
-                if (result.categories && result.categories.length > 0) {
-                    await this.categoryManager.updateCategories(result.categories);
                 }
 
                 span.setStatus({ code: SpanStatusCode.OK });

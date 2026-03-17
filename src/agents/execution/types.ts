@@ -2,8 +2,8 @@ import type { LanguageModelMiddleware, Tool as CoreTool, ModelMessage } from "ai
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { CompleteEvent } from "@/llm/types";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { ToolRegistryContext } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -29,7 +29,7 @@ export interface ExecutionContext {
     getConversation: () => ConversationStore | undefined;
 
     // Runtime dependencies - added by prepareExecution()
-    agentPublisher?: AgentPublisher;
+    agentPublisher?: AgentRuntimePublisher;
     ralNumber?: number;
     conversationStore?: ConversationStore;
 

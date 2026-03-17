@@ -10,6 +10,7 @@ import { relaysCommand } from "@/commands/config/relays";
 import { rolesCommand } from "@/commands/config/roles";
 import { summarizationCommand } from "@/commands/config/summarization";
 import { systemPromptCommand } from "@/commands/config/system-prompt";
+import { telegramCommand } from "@/commands/config/telegram";
 import { telemetryCommand } from "@/commands/config/telemetry";
 import { inquirerTheme } from "@/utils/cli-theme";
 import chalk from "chalk";
@@ -43,6 +44,7 @@ const MENU_SECTIONS: MenuSection[] = [
         entries: [
             { label: "Escalation", description: "Route ask() through an agent first", command: escalationCommand },
             { label: "Intervention", description: "Auto-review when you're idle", command: interventionCommand },
+            { label: "Telegram", description: "Bot tokens, DMs, and group bindings", command: telegramCommand },
         ],
     },
     {
@@ -139,6 +141,7 @@ export const configCommand = new Command("config")
     .addCommand(interventionCommand)
     .addCommand(relaysCommand)
     .addCommand(summarizationCommand)
+    .addCommand(telegramCommand)
     .addCommand(identityCommand)
     .addCommand(systemPromptCommand)
     .addCommand(loggingCommand)

@@ -1,15 +1,17 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import type {
     LanguageModelV3CallOptions,
     LanguageModelV3Message,
     LanguageModelV3Prompt,
 } from "@ai-sdk/provider";
-import type { LanguageModel, LanguageModelMiddleware } from "ai";
+import type { LanguageModel, LanguageModelMiddleware, ToolSet } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
+    LLMSummarizationStrategy,
     ScratchpadStrategy,
-    SummarizationStrategy,
     SystemPromptCachingStrategy,
+    ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
     type ContextManagementRequestContext,
@@ -19,21 +21,32 @@ import {
     type ContextManagementStrategyState,
     type ContextManagementTelemetryEvent,
     type PromptTokenEstimator,
+    type ScratchpadConversationEntry as RuntimeScratchpadConversationEntry,
+    type ScratchpadState as RuntimeScratchpadState,
 } from "ai-sdk-context-management";
-import { createSystemReminderSink } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type {
+    ContextManagementScratchpadEntry as StoredScratchpadEntry,
+    ContextManagementScratchpadState as StoredScratchpadState,
+} from "@/conversations/types";
+import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
+import { isFullEventId, shortenEventId } from "@/types/event-ids";
 import type { AISdkTool } from "@/tools/types";
 
-const DEFAULT_WORKING_TOKEN_BUDGET = 72000;
+const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
 const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
+const modelMetadataStorage = new AsyncLocalStorage<{
+    provider: string;
+    modelId: string;
+} | undefined>();
 
 interface ContextManagementSettings {
     tokenBudget: number;
@@ -44,6 +57,17 @@ interface ContextManagementSettings {
     utilizationWarningThresholdPercent: number;
     summarizationFallbackEnabled: boolean;
     summarizationFallbackThresholdPercent: number;
+}
+
+function buildDecayPlaceholder(
+    toolName: string,
+    toolCallId: string,
+    toolCallEventIdMap: Map<string, string>,
+): string {
+    const eventId = toolCallEventIdMap.get(toolCallId);
+    const rawId = eventId ?? toolCallId;
+    const id = isFullEventId(rawId) ? shortenEventId(rawId) : rawId;
+    return `[${toolName} was used, id: ${id} -- use fs_read(tool: "${id}") to retrieve]`;
 }
 
 export interface ExecutionContextManagement {
@@ -148,19 +172,12 @@ function getStringArray(value: unknown, key: string): string[] | undefined {
     return nested.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
-function getRuntimeCompletePayload(
+function getRuntimeCompletePrompt(
     event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>
-): {
-    prompt?: LanguageModelV3Prompt;
-    providerOptions?: unknown;
-    toolChoice?: unknown;
-} {
-    const payloads = event.payloads;
-    return {
-        prompt: Array.isArray(payloads.prompt) ? payloads.prompt as LanguageModelV3Prompt : undefined,
-        providerOptions: payloads.providerOptions,
-        ...(payloads.toolChoice !== undefined ? { toolChoice: payloads.toolChoice } : {}),
-    };
+): LanguageModelV3Prompt | undefined {
+    return Array.isArray(event.payloads.promptAfter)
+        ? event.payloads.promptAfter as LanguageModelV3Prompt
+        : undefined;
 }
 
 function getRecordKeyCount(value: unknown, key: string): number | undefined {
@@ -194,6 +211,225 @@ function getRecordStringCharCount(value: unknown, key: string): number | undefin
     }
 
     return total;
+}
+
+function normalizeScratchpadEntries(
+    entries: Record<string, unknown> | undefined
+): Record<string, string> | undefined {
+    const normalizedEntries = Object.entries(entries ?? {})
+        .flatMap(([key, value]) => {
+            if (typeof value !== "string") {
+                return [];
+            }
+
+            const normalizedKey = key.trim();
+            const normalizedValue = value.trim();
+            if (normalizedKey.length === 0 || normalizedValue.length === 0) {
+                return [];
+            }
+
+            return [[normalizedKey, normalizedValue] as const];
+        })
+        .sort(([left], [right]) => left.localeCompare(right));
+
+    if (normalizedEntries.length === 0) {
+        return undefined;
+    }
+
+    return Object.fromEntries(normalizedEntries);
+}
+
+function serializeScratchpadEntries(entries: Record<string, string> | undefined): string {
+    const normalizedEntries = normalizeScratchpadEntries(entries);
+    if (!normalizedEntries) {
+        return "";
+    }
+
+    const sections: string[] = [];
+    const notes = normalizedEntries.notes?.trim();
+    if (notes) {
+        sections.push(notes);
+    }
+
+    for (const [key, value] of Object.entries(normalizedEntries)) {
+        if (key === "notes") {
+            continue;
+        }
+        sections.push(`${key}: ${value}`);
+    }
+
+    return sections.join("\n");
+}
+
+function buildStoredScratchpadEntries(
+    notes: string | undefined,
+    existingEntries: Record<string, string> | undefined
+): Record<string, string> | undefined {
+    const normalizedEntries = normalizeScratchpadEntries(existingEntries as Record<string, unknown> | undefined)
+        ?? {};
+    const trimmedNotes = notes?.trim();
+
+    if (trimmedNotes) {
+        normalizedEntries.notes = trimmedNotes;
+    } else {
+        delete normalizedEntries.notes;
+    }
+
+    return Object.keys(normalizedEntries).length > 0
+        ? normalizedEntries
+        : undefined;
+}
+
+function toRuntimeScratchpadState(
+    state: StoredScratchpadState | undefined
+): RuntimeScratchpadState | undefined {
+    if (!state) {
+        return undefined;
+    }
+
+    return {
+        notes: serializeScratchpadEntries(state.entries),
+        keepLastMessages: state.keepLastMessages,
+        omitToolCallIds: state.omitToolCallIds ?? [],
+        ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
+        ...(state.agentLabel ? { agentLabel: state.agentLabel } : {}),
+    };
+}
+
+function fromRuntimeScratchpadState(
+    state: RuntimeScratchpadState,
+    previousState: StoredScratchpadState | undefined
+): StoredScratchpadState {
+    return {
+        ...(buildStoredScratchpadEntries(state.notes, previousState?.entries)
+            ? {
+                entries: buildStoredScratchpadEntries(state.notes, previousState?.entries),
+            }
+            : {}),
+        ...(state.keepLastMessages !== undefined ? { keepLastMessages: state.keepLastMessages } : {}),
+        omitToolCallIds: state.omitToolCallIds,
+        ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
+        ...(state.agentLabel ?? previousState?.agentLabel
+            ? { agentLabel: state.agentLabel ?? previousState?.agentLabel }
+            : {}),
+    };
+}
+
+function toRuntimeScratchpadConversationEntries(
+    entries: StoredScratchpadEntry[] | undefined
+): RuntimeScratchpadConversationEntry[] {
+    return (entries ?? []).map((entry) => ({
+        agentId: entry.agentId,
+        agentLabel: entry.agentLabel,
+        state: toRuntimeScratchpadState(entry.state) ?? {
+            notes: "",
+            omitToolCallIds: [],
+        },
+    }));
+}
+
+function getScratchpadNotes(value: unknown): string | undefined {
+    const directNotes = getString(value, "notes");
+    if (directNotes !== undefined) {
+        return directNotes;
+    }
+
+    const setEntries = isRecord(value) && isRecord(value.setEntries)
+        ? value.setEntries
+        : undefined;
+    const replaceEntries = isRecord(value) && isRecord(value.replaceEntries)
+        ? value.replaceEntries
+        : undefined;
+    const notes = typeof replaceEntries?.notes === "string"
+        ? replaceEntries.notes
+        : typeof setEntries?.notes === "string"
+            ? setEntries.notes
+            : undefined;
+
+    return notes?.trim().length ? notes : undefined;
+}
+
+function getScratchpadEntryUpdateCount(value: unknown): number {
+    if (getString(value, "notes") !== undefined) {
+        return 1;
+    }
+
+    return (getRecordKeyCount(value, "setEntries") ?? 0)
+        + (getRecordKeyCount(value, "replaceEntries") ?? 0);
+}
+
+function getScratchpadEntryCharCount(value: unknown): number {
+    const notes = getScratchpadNotes(value);
+    if (notes !== undefined) {
+        return notes.length;
+    }
+
+    return (getRecordStringCharCount(value, "setEntries") ?? 0)
+        + (getRecordStringCharCount(value, "replaceEntries") ?? 0);
+}
+
+function getScratchpadEntryCountFromState(strategyPayload: Record<string, unknown> | undefined): number {
+    const currentState = isRecord(strategyPayload?.currentState)
+        ? strategyPayload.currentState
+        : undefined;
+    const notes = getString(currentState, "notes");
+    if (notes !== undefined) {
+        return notes.trim().length > 0 ? 1 : 0;
+    }
+
+    return getNumber(strategyPayload, "entryCount") ?? 0;
+}
+
+function getScratchpadEntryCharCountFromState(
+    strategyPayload: Record<string, unknown> | undefined
+): number {
+    const currentState = isRecord(strategyPayload?.currentState)
+        ? strategyPayload.currentState
+        : undefined;
+    const notes = getString(currentState, "notes");
+    if (notes !== undefined) {
+        return notes.length;
+    }
+
+    return getNumber(strategyPayload, "entryCharCount") ?? 0;
+}
+
+function getScratchpadAppliedOmitCount(strategyPayload: Record<string, unknown> | undefined): number {
+    const appliedOmitToolCallIds = getStringArray(strategyPayload, "appliedOmitToolCallIds");
+    if (appliedOmitToolCallIds) {
+        return appliedOmitToolCallIds.length;
+    }
+
+    return getNumber(strategyPayload, "appliedOmitCount") ?? 0;
+}
+
+function getScratchpadKeepLastMessages(
+    strategyPayload: Record<string, unknown> | undefined
+): number | undefined {
+    return getNumber(strategyPayload, "appliedKeepLastMessages")
+        ?? getNumber(strategyPayload, "keepLastMessages");
+}
+
+function buildFinalRuntimeTelemetryAttributes(
+    params: Partial<LanguageModelV3CallOptions> | undefined
+): Record<string, string> {
+    const attributes: Record<string, string> = {};
+
+    if (params?.prompt !== undefined) {
+        attributes["context_management.final_prompt_json"] = serializeTelemetryValue(params.prompt);
+    }
+    if (params?.providerOptions !== undefined) {
+        attributes["context_management.final_provider_options_json"] = serializeTelemetryValue(
+            params.providerOptions
+        );
+    }
+    if (params?.toolChoice !== undefined) {
+        attributes["context_management.final_tool_choice_json"] = serializeTelemetryValue(
+            params.toolChoice
+        );
+    }
+
+    return attributes;
 }
 
 function normalizePositiveNumber(value: number | undefined, fallback: number): number {
@@ -312,7 +548,7 @@ function buildManagedContextUtilizationReminder(options: {
     if (mode === "scratchpad") {
         lines.push("Your managed working context is getting tight. Use scratchpad(...) now to:");
         lines.push("- Rewrite your current working state so it reflects what matters now");
-        lines.push("- Update key/value entries and notes for current progress, findings, and next steps");
+        lines.push("- Update your notes for current progress, findings, and next steps");
         lines.push("- Omit stale tool call IDs you no longer need");
         lines.push("- Reduce keepLastMessages if the recent tail is larger than necessary");
     } else {
@@ -373,8 +609,8 @@ class ManagedContextUtilizationReminderStrategy implements ContextManagementStra
             mode: this.mode,
         });
 
-        await state.emitReminder({
-            kind: "context-utilization",
+        getSystemReminderContext().queue({
+            type: "context-utilization",
             content: reminderText,
         });
 
@@ -449,19 +685,13 @@ class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
     private readonly workingTokenBudget: number;
     private readonly managedEstimator: PromptTokenEstimator;
     private readonly requestEstimator: PromptTokenEstimator;
-    private readonly getContextWindow?: (options: {
-        model?: { provider: string; modelId: string };
-        requestContext: ContextManagementRequestContext;
-    }) => number | undefined;
+    private readonly getContextWindow?: (requestContext: ContextManagementRequestContext) => number | undefined;
 
     constructor(options: {
         workingTokenBudget: number;
         managedEstimator: PromptTokenEstimator;
         requestEstimator: PromptTokenEstimator;
-        getContextWindow?: (options: {
-            model?: { provider: string; modelId: string };
-            requestContext: ContextManagementRequestContext;
-        }) => number | undefined;
+        getContextWindow?: (requestContext: ContextManagementRequestContext) => number | undefined;
     }) {
         this.workingTokenBudget = Math.max(1, Math.floor(options.workingTokenBudget));
         this.managedEstimator = options.managedEstimator;
@@ -481,10 +711,7 @@ class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
             state.params?.tools
         );
         const staticOverheadTokens = Math.max(0, estimatedRequestTokens - managedContextTokens);
-        const rawContextWindow = this.getContextWindow?.({
-            model: state.model,
-            requestContext: state.requestContext,
-        });
+        const rawContextWindow = this.getContextWindow?.(state.requestContext);
         const reminderText = buildManagedContextWindowStatusReminder({
             estimatedRequestTokens,
             estimatedMessageTokens,
@@ -495,8 +722,8 @@ class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
             workingTokenBudget: this.workingTokenBudget,
         });
 
-        await state.emitReminder({
-            kind: "context-window-status",
+        getSystemReminderContext().queue({
+            type: "context-window-status",
             content: reminderText,
         });
 
@@ -522,6 +749,119 @@ class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
                 reminderText,
             },
         };
+    }
+}
+
+function clonePromptForMutation(prompt: LanguageModelV3Prompt): LanguageModelV3Prompt {
+    if (typeof structuredClone === "function") {
+        return structuredClone(prompt);
+    }
+
+    return JSON.parse(JSON.stringify(prompt)) as LanguageModelV3Prompt;
+}
+
+function stripScratchpadReminderFromPrompt(
+    prompt: LanguageModelV3Prompt,
+    reminderText: string
+): LanguageModelV3Prompt {
+    const cloned = clonePromptForMutation(prompt);
+
+    for (let messageIndex = cloned.length - 1; messageIndex >= 0; messageIndex--) {
+        const message = cloned[messageIndex];
+        if (message.role !== "user") {
+            continue;
+        }
+
+        const content = [...message.content];
+        for (let partIndex = content.length - 1; partIndex >= 0; partIndex--) {
+            const part = content[partIndex];
+            if (part.type === "text" && part.text === reminderText) {
+                content.splice(partIndex, 1);
+                if (content.length === 0) {
+                    cloned.splice(messageIndex, 1);
+                } else {
+                    cloned[messageIndex] = {
+                        ...message,
+                        content,
+                    };
+                }
+                return cloned;
+            }
+        }
+
+        break;
+    }
+
+    return cloned;
+}
+
+function normalizeScratchpadToolInput(
+    input: unknown
+): {
+    notes?: string;
+    keepLastMessages?: number | null;
+    omitToolCallIds?: string[];
+} {
+    const notes = getScratchpadNotes(input)
+        ?? serializeScratchpadEntries(
+            normalizeScratchpadEntries({
+                ...(isRecord(input) && isRecord(input.setEntries) ? input.setEntries : {}),
+                ...(isRecord(input) && isRecord(input.replaceEntries) ? input.replaceEntries : {}),
+            })
+        );
+    const keepLastMessages = getNumber(input, "keepLastMessages");
+    const omitToolCallIds = getStringArray(input, "omitToolCallIds");
+
+    return {
+        ...(notes ? { notes } : {}),
+        ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
+        ...(omitToolCallIds ? { omitToolCallIds } : {}),
+    };
+}
+
+class QueuedScratchpadStrategy implements ContextManagementStrategy {
+    readonly name = "scratchpad";
+    private readonly delegate: ScratchpadStrategy;
+
+    constructor(options: ConstructorParameters<typeof ScratchpadStrategy>[0]) {
+        this.delegate = new ScratchpadStrategy(options);
+    }
+
+    getOptionalTools(): ToolSet {
+        const tools = this.delegate.getOptionalTools();
+        const scratchpadTool = tools.scratchpad as AISdkTool & {
+            execute?: (input: unknown, options: unknown) => Promise<unknown>;
+        };
+
+        if (!scratchpadTool?.execute) {
+            return tools;
+        }
+
+        return {
+            ...tools,
+            scratchpad: {
+                ...scratchpadTool,
+                execute: (input, options) =>
+                    scratchpadTool.execute?.(normalizeScratchpadToolInput(input), options),
+            },
+        };
+    }
+
+    async apply(
+        state: ContextManagementStrategyState
+    ): Promise<ContextManagementStrategyExecution | void> {
+        const execution = await this.delegate.apply(state);
+        const reminderText = getString(execution?.payloads, "reminderText");
+
+        if (reminderText) {
+            state.updatePrompt(stripScratchpadReminderFromPrompt(state.prompt, reminderText));
+            getSystemReminderContext().queue({
+                type: "scratchpad",
+                content: reminderText,
+            });
+        }
+
+        return execution;
     }
 }
 
@@ -565,19 +905,76 @@ function buildSystemPromptCachingSummary(
     );
 }
 
+function buildToolResultDecaySummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    strategyPayload: Record<string, unknown> | undefined
+): string {
+    const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
+    const toolContextTokens = getNumber(strategyPayload, "toolContextTokens");
+    const forecastToolContextTokens = getNumber(strategyPayload, "forecastToolContextTokens");
+    const warningForecastExtraTokens = getNumber(strategyPayload, "warningForecastExtraTokens");
+    const truncatedCount = getStringArray(strategyPayload, "truncatedToolCallIds")?.length
+        ?? getNumber(strategyPayload, "truncatedCount")
+        ?? 0;
+    const placeholderCount = getStringArray(strategyPayload, "placeholderToolCallIds")?.length
+        ?? getNumber(strategyPayload, "placeholderCount")
+        ?? 0;
+    const inputTruncatedCount = getNumber(strategyPayload, "inputTruncatedCount") ?? 0;
+    const inputPlaceholderCount = getNumber(strategyPayload, "inputPlaceholderCount") ?? 0;
+    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
+    if (event.reason === "below-token-threshold") {
+        return clipTelemetrySummary(
+            `Skipped tool-result decay because the prompt is within budget at ~${formatTelemetryNumber(currentPromptTokens ?? event.estimatedTokensBefore)} tokens.`
+        );
+    }
+
+    if (event.reason === "no-tool-exchanges") {
+        return "Skipped tool-result decay because there were no tool exchanges to compress.";
+    }
+
+    const parts: string[] = [];
+    if (truncatedCount > 0) {
+        parts.push(`truncated ${formatCount(truncatedCount, "tool result")}`);
+    }
+    if (placeholderCount > 0) {
+        parts.push(`replaced ${formatCount(placeholderCount, "older tool result")} with placeholders`);
+    }
+    if (inputTruncatedCount > 0) {
+        parts.push(`truncated ${formatCount(inputTruncatedCount, "tool input")}`);
+    }
+    if (inputPlaceholderCount > 0) {
+        parts.push(`omitted ${formatCount(inputPlaceholderCount, "tool input")}`);
+    }
+
+    if (parts.length === 0) {
+        parts.push("compressed stale tool results");
+    }
+
+    const warningCount = getNumber(strategyPayload, "warningCount") ?? 0;
+    const warningSuffix = warningCount > 0
+        ? `, warned about ${formatCount(warningCount, "at-risk result")}${warningForecastExtraTokens !== undefined ? ` under a +${formatTelemetryNumber(warningForecastExtraTokens)} tool-token forecast` : ""}`
+        : "";
+    const toolContextSuffix = toolContextTokens !== undefined
+        ? ` at ~${formatTelemetryNumber(toolContextTokens)} tool-context tokens${forecastToolContextTokens !== undefined ? ` (forecast ~${formatTelemetryNumber(forecastToolContextTokens)})` : ""}`
+        : "";
+
+    return clipTelemetrySummary(
+        `${parts.join(" and ")}${toolContextSuffix}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)})${warningSuffix}.`
+    );
+}
 
 function buildScratchpadSummary(
     event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
     strategyPayload: Record<string, unknown> | undefined
 ): string {
-    const entryCount = getNumber(strategyPayload, "entryCount") ?? 0;
-    const entryCharCount = getNumber(strategyPayload, "entryCharCount") ?? 0;
-    const keepLastMessages = getNumber(strategyPayload, "keepLastMessages");
+    const entryCount = getScratchpadEntryCountFromState(strategyPayload);
+    const entryCharCount = getScratchpadEntryCharCountFromState(strategyPayload);
+    const keepLastMessages = getScratchpadKeepLastMessages(strategyPayload);
     const forcedToolChoice = getBoolean(strategyPayload, "forcedToolChoice") ?? false;
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens");
     const forceThresholdTokens = getNumber(strategyPayload, "forceThresholdTokens");
-    const appliedOmitCount = getNumber(strategyPayload, "appliedOmitCount") ?? 0;
+    const appliedOmitCount = getScratchpadAppliedOmitCount(strategyPayload);
     const removedExchanges = event.removedToolExchangesDelta;
 
     const parts = [
@@ -677,8 +1074,13 @@ function buildSummarizationSummary(
     strategyPayload: Record<string, unknown> | undefined
 ): string {
     const estimatedTokens = getNumber(strategyPayload, "estimatedTokens") ?? event.estimatedTokensBefore;
-    const messageCount = getNumber(strategyPayload, "messagesSummarizedCount");
-    const summaryCharCount = getNumber(strategyPayload, "summaryCharCount");
+    const messageCount = getNumber(strategyPayload, "messagesSummarizedCount")
+        ?? getRecordKeyCount({ messagesToSummarize: getStringArray(strategyPayload, "messagesToSummarize") }, "messagesToSummarize")
+        ?? (Array.isArray(strategyPayload?.messagesToSummarize)
+            ? strategyPayload.messagesToSummarize.length
+            : undefined);
+    const summaryCharCount = getNumber(strategyPayload, "summaryCharCount")
+        ?? getString(strategyPayload, "summaryText")?.length;
     const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
     if (event.reason === "below-token-threshold") {
@@ -721,6 +1123,8 @@ function buildStrategyCompleteSummary(
     switch (event.strategyName) {
         case "system-prompt-caching":
             return buildSystemPromptCachingSummary(event, strategyPayload);
+        case "tool-result-decay":
+            return buildToolResultDecaySummary(event, strategyPayload);
         case "scratchpad":
             return buildScratchpadSummary(event, strategyPayload);
         case "context-utilization-reminder":
@@ -764,15 +1168,13 @@ function buildToolExecuteSummary(
 
     if (event.toolName === "scratchpad") {
         const omitCount = getStringArray(event.payloads.input, "omitToolCallIds")?.length ?? 0;
-        const setEntriesCount = getRecordKeyCount(event.payloads.input, "setEntries") ?? 0;
-        const replaceEntriesCount = getRecordKeyCount(event.payloads.input, "replaceEntries") ?? 0;
+        const entryUpdateCount = getScratchpadEntryUpdateCount(event.payloads.input);
         const removeEntryKeysCount = getStringArray(event.payloads.input, "removeEntryKeys")?.length ?? 0;
         const keepLastMessages = getNumber(event.payloads.input, "keepLastMessages");
-        const entryCharCount = (getRecordStringCharCount(event.payloads.input, "setEntries") ?? 0)
-            + (getRecordStringCharCount(event.payloads.input, "replaceEntries") ?? 0);
+        const entryCharCount = getScratchpadEntryCharCount(event.payloads.input);
 
         return clipTelemetrySummary(
-            `Updated scratchpad: ${formatCount(setEntriesCount + replaceEntriesCount, "entry update", "entry updates")} across ~${formatTelemetryNumber(entryCharCount)} chars, ${formatCount(removeEntryKeysCount, "entry removal", "entry removals")}, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
+            `Updated scratchpad: ${formatCount(entryUpdateCount, "entry update", "entry updates")} across ~${formatTelemetryNumber(entryCharCount)} chars, ${formatCount(removeEntryKeysCount, "entry removal", "entry removals")}, ${formatCount(omitCount, "omit tool id")}${keepLastMessages !== undefined ? `, keep-last-messages=${formatTelemetryNumber(keepLastMessages)}` : ""}.`
         );
     }
 
@@ -821,26 +1223,90 @@ function buildDerivedTelemetryAttributes(
                         getNumber(strategyPayload, "taggedSystemMessageCount")
                     );
                     break;
+                case "tool-result-decay":
+                    addAttribute(
+                        attributes,
+                        "context_management.current_prompt_tokens",
+                        getNumber(strategyPayload, "currentPromptTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.tool_context_tokens",
+                        getNumber(strategyPayload, "toolContextTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.forecast_tool_context_tokens",
+                        getNumber(strategyPayload, "forecastToolContextTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.warning_forecast_extra_tokens",
+                        getNumber(strategyPayload, "warningForecastExtraTokens")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.depth_factor",
+                        getNumber(strategyPayload, "depthFactor")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.forecast_depth_factor",
+                        getNumber(strategyPayload, "forecastDepthFactor")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.truncated_tool_result_count",
+                        getStringArray(strategyPayload, "truncatedToolCallIds")?.length
+                            ?? getNumber(strategyPayload, "truncatedCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.placeholder_tool_result_count",
+                        getStringArray(strategyPayload, "placeholderToolCallIds")?.length
+                            ?? getNumber(strategyPayload, "placeholderCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.truncated_tool_input_count",
+                        getNumber(strategyPayload, "inputTruncatedCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.placeholder_tool_input_count",
+                        getNumber(strategyPayload, "inputPlaceholderCount")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.total_tool_exchanges",
+                        getNumber(strategyPayload, "totalToolExchanges")
+                    );
+                    addAttribute(
+                        attributes,
+                        "context_management.warning_count",
+                        getNumber(strategyPayload, "warningCount")
+                    );
+                    break;
                 case "scratchpad": {
                     addAttribute(
                         attributes,
                         "context_management.entry_count",
-                        getNumber(strategyPayload, "entryCount")
+                        getScratchpadEntryCountFromState(strategyPayload)
                     );
                     addAttribute(
                         attributes,
                         "context_management.entry_char_count",
-                        getNumber(strategyPayload, "entryCharCount")
+                        getScratchpadEntryCharCountFromState(strategyPayload)
                     );
                     addAttribute(
                         attributes,
                         "context_management.applied_omit_tool_call_id_count",
-                        getNumber(strategyPayload, "appliedOmitCount")
+                        getScratchpadAppliedOmitCount(strategyPayload)
                     );
                     addAttribute(
                         attributes,
                         "context_management.keep_last_messages",
-                        getNumber(strategyPayload, "keepLastMessages")
+                        getScratchpadKeepLastMessages(strategyPayload)
                     );
                     addAttribute(
                         attributes,
@@ -924,11 +1390,15 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.messages_summarized_count",
                         getNumber(strategyPayload, "messagesSummarizedCount")
+                            ?? (Array.isArray(strategyPayload?.messagesToSummarize)
+                                ? strategyPayload.messagesToSummarize.length
+                                : undefined)
                     );
                     addAttribute(
                         attributes,
                         "context_management.summary_char_count",
                         getNumber(strategyPayload, "summaryCharCount")
+                            ?? getString(strategyPayload, "summaryText")?.length
                     );
                     break;
             }
@@ -942,14 +1412,12 @@ function buildDerivedTelemetryAttributes(
                 addAttribute(
                     attributes,
                     "context_management.entry_char_count",
-                    (getRecordStringCharCount(event.payloads.input, "setEntries") ?? 0)
-                        + (getRecordStringCharCount(event.payloads.input, "replaceEntries") ?? 0)
+                    getScratchpadEntryCharCount(event.payloads.input)
                 );
                 addAttribute(
                     attributes,
                     "context_management.entry_update_count",
-                    (getRecordKeyCount(event.payloads.input, "setEntries") ?? 0)
-                        + (getRecordKeyCount(event.payloads.input, "replaceEntries") ?? 0)
+                    getScratchpadEntryUpdateCount(event.payloads.input)
                 );
                 addAttribute(
                     attributes,
@@ -1004,7 +1472,6 @@ function buildTelemetryAttributes(
             attributes["context_management.optional_tool_names"] = event.optionalToolNames.join(",");
             attributes["context_management.estimated_tokens_before"] =
                 event.estimatedTokensBefore;
-            attributes["context_management.message_count"] = event.messageCount;
             attributes["context_management.provider_options_json"] = serializeTelemetryValue(
                 event.payloads.providerOptions
             );
@@ -1028,8 +1495,6 @@ function buildTelemetryAttributes(
                 "context_management.working_token_budget",
                 event.workingTokenBudget
             );
-            attributes["context_management.message_count_before"] = event.messageCountBefore;
-            attributes["context_management.message_count_after"] = event.messageCountAfter;
             attributes["context_management.strategy_payloads_json"] = serializeTelemetryValue(
                 event.payloads.strategy ?? null
             );
@@ -1097,22 +1562,12 @@ function buildTelemetryAttributes(
                 event.removedToolExchangesTotal;
             attributes["context_management.pinned_tool_call_ids_total"] =
                 event.pinnedToolCallIdsTotal;
-            attributes["context_management.message_count_before"] = event.messageCountBefore;
-            attributes["context_management.message_count_after"] = event.messageCountAfter;
             {
-                const payload = getRuntimeCompletePayload(event);
-                if (payload?.prompt !== undefined) {
+                const prompt = getRuntimeCompletePrompt(event);
+                if (prompt !== undefined) {
                     attributes["context_management.final_prompt_json"] = serializeTelemetryValue(
-                        payload.prompt
+                        prompt
                     );
-                }
-                if (payload?.providerOptions !== undefined) {
-                    attributes["context_management.final_provider_options_json"] =
-                        serializeTelemetryValue(payload.providerOptions);
-                }
-                if (payload?.toolChoice !== undefined) {
-                    attributes["context_management.final_tool_choice_json"] =
-                        serializeTelemetryValue(payload.toolChoice);
                 }
             }
             break;
@@ -1149,27 +1604,59 @@ function buildTelemetryEventName(event: ContextManagementTelemetryEvent): string
     }
 }
 
-function createTelemetryCallback(): (event: ContextManagementTelemetryEvent) => void {
+function createTelemetryCallback(): {
+    emit: (event: ContextManagementTelemetryEvent) => void;
+    finalizeRuntimeComplete: (params?: Partial<LanguageModelV3CallOptions>) => void;
+} {
     const tracer = trace.getTracer("tenex");
     let runtimeSpan: Span | undefined;
+    let pendingRuntimeComplete: {
+        event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>;
+        eventName: string;
+        attributes: Record<string, string | number | boolean>;
+    } | undefined;
 
-    return (event: ContextManagementTelemetryEvent): void => {
-        const attributes = buildTelemetryAttributes(event);
-        const eventName = buildTelemetryEventName(event);
+    return {
+        emit(event: ContextManagementTelemetryEvent): void {
+            const attributes = buildTelemetryAttributes(event);
+            const eventName = buildTelemetryEventName(event);
 
-        if (event.type === "runtime-start") {
-            runtimeSpan = tracer.startSpan(
-                "tenex.context_management",
-                { attributes },
-                otelContext.active()
-            );
-            runtimeSpan.addEvent(eventName, attributes);
-            return;
-        }
-
-        if (event.type === "runtime-complete") {
-            if (runtimeSpan) {
+            if (event.type === "runtime-start") {
+                runtimeSpan = tracer.startSpan(
+                    "tenex.context_management",
+                    { attributes },
+                    otelContext.active()
+                );
                 runtimeSpan.addEvent(eventName, attributes);
+                return;
+            }
+
+            if (event.type === "runtime-complete") {
+                pendingRuntimeComplete = { event, eventName, attributes };
+                return;
+            }
+
+            // For strategy-complete and tool-execute-* events, add to the runtime
+            // span if it exists, otherwise fall back to the active span (handles
+            // pre-runtime tool execution like scratchpad tools).
+            const span = runtimeSpan ?? trace.getActiveSpan();
+            if (span) {
+                span.addEvent(eventName, attributes);
+            }
+        },
+        finalizeRuntimeComplete(params?: Partial<LanguageModelV3CallOptions>): void {
+            if (!pendingRuntimeComplete) {
+                return;
+            }
+
+            const { event, eventName, attributes } = pendingRuntimeComplete;
+            const finalAttributes = {
+                ...attributes,
+                ...buildFinalRuntimeTelemetryAttributes(params),
+            };
+
+            if (runtimeSpan) {
+                runtimeSpan.addEvent(eventName, finalAttributes);
                 runtimeSpan.setAttribute(
                     "context_management.estimated_tokens_before",
                     event.estimatedTokensBefore
@@ -1178,27 +1665,14 @@ function createTelemetryCallback(): (event: ContextManagementTelemetryEvent) => 
                     "context_management.estimated_tokens_after",
                     event.estimatedTokensAfter
                 );
-                runtimeSpan.setAttribute(
-                    "context_management.message_count_before",
-                    event.messageCountBefore
-                );
-                runtimeSpan.setAttribute(
-                    "context_management.message_count_after",
-                    event.messageCountAfter
-                );
                 runtimeSpan.end();
                 runtimeSpan = undefined;
+            } else {
+                trace.getActiveSpan()?.addEvent(eventName, finalAttributes);
             }
-            return;
-        }
 
-        // For strategy-complete and tool-execute-* events, add to the runtime
-        // span if it exists, otherwise fall back to the active span (handles
-        // pre-runtime tool execution like scratchpad tools).
-        const span = runtimeSpan ?? trace.getActiveSpan();
-        if (span) {
-            span.addEvent(eventName, attributes);
-        }
+            pendingRuntimeComplete = undefined;
+        },
     };
 }
 
@@ -1238,6 +1712,15 @@ function createConversationContextManagementRuntime(options: {
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
+        new ToolResultDecayStrategy({
+            estimator: requestEstimator,
+            placeholder: (toolName, toolCallId) => {
+                const toolCallEventIdMap = resolveToolCallEventIdMap(
+                    options.conversationStore.getAllMessages()
+                );
+                return buildDecayPlaceholder(toolName, toolCallId, toolCallEventIdMap);
+            },
+        }),
     ];
 
     const summarizationModel = createSummarizationModel({
@@ -1247,7 +1730,7 @@ function createConversationContextManagementRuntime(options: {
 
     if (summarizationModel && settings.summarizationFallbackEnabled) {
         strategies.push(
-            new SummarizationStrategy({
+            new LLMSummarizationStrategy({
                 model: summarizationModel,
                 maxPromptTokens: Math.floor(
                     settings.tokenBudget
@@ -1260,17 +1743,27 @@ function createConversationContextManagementRuntime(options: {
 
     if (scratchpadEnabled) {
         strategies.push(
-            new ScratchpadStrategy({
+            new QueuedScratchpadStrategy({
                 scratchpadStore: {
                     get: ({ agentId }) =>
-                        options.conversationStore.getContextManagementScratchpad(agentId),
+                        toRuntimeScratchpadState(
+                            options.conversationStore.getContextManagementScratchpad(agentId)
+                        ),
                     set: async ({ agentId }, state) => {
-                        options.conversationStore.setContextManagementScratchpad(agentId, state);
+                        options.conversationStore.setContextManagementScratchpad(
+                            agentId,
+                            fromRuntimeScratchpadState(
+                                state,
+                                options.conversationStore.getContextManagementScratchpad(agentId)
+                            )
+                        );
                         await options.conversationStore.save();
                     },
                     listConversation: (conversationId) =>
                         conversationId === options.conversationStore.getId()
-                            ? options.conversationStore.listContextManagementScratchpads()
+                            ? toRuntimeScratchpadConversationEntries(
+                                options.conversationStore.listContextManagementScratchpads()
+                            )
                             : [],
                 },
                 reminderTone: "informational",
@@ -1299,7 +1792,8 @@ function createConversationContextManagementRuntime(options: {
             workingTokenBudget: settings.tokenBudget,
             managedEstimator: managedContextEstimator,
             requestEstimator,
-            getContextWindow: ({ model }) => {
+            getContextWindow: () => {
+                const model = modelMetadataStorage.getStore();
                 if (!model) {
                     return undefined;
                 }
@@ -1312,12 +1806,36 @@ function createConversationContextManagementRuntime(options: {
         })
     );
 
-    return createContextManagementRuntime({
+    const telemetry = createTelemetryCallback();
+    const runtime = createContextManagementRuntime({
         strategies,
-        telemetry: createTelemetryCallback(),
+        telemetry: telemetry.emit,
         estimator: requestEstimator,
-        reminderSink: createSystemReminderSink(getSystemReminderContext()),
     });
+
+    const middleware: LanguageModelMiddleware = {
+        specificationVersion: "v3",
+        transformParams: async (args) => {
+            const modelInfo = args.model
+                ? {
+                    provider: args.model.provider,
+                    modelId: args.model.modelId,
+                }
+                : undefined;
+
+            return modelMetadataStorage.run(modelInfo, async () => {
+                const transformed = await runtime.middleware.transformParams?.(args as never)
+                    ?? args.params;
+                telemetry.finalizeRuntimeComplete(transformed);
+                return transformed;
+            });
+        },
+    };
+
+    return {
+        ...runtime,
+        middleware,
+    };
 }
 
 export function createExecutionContextManagement(options: {

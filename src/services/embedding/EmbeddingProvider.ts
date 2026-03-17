@@ -143,6 +143,57 @@ export class LocalTransformerEmbeddingProvider implements EmbeddingProvider {
     }
 }
 
+export class MockEmbeddingProvider implements EmbeddingProvider {
+    private readonly dimensions: number;
+    private readonly modelId: string;
+
+    constructor(modelId = "mock/all-MiniLM-L6-v2", dimensions = 384) {
+        this.modelId = modelId;
+        this.dimensions = dimensions;
+    }
+
+    public async embed(text: string): Promise<Float32Array> {
+        return this.buildEmbedding(text);
+    }
+
+    public async embedBatch(texts: string[]): Promise<Float32Array[]> {
+        return texts.map((text) => this.buildEmbedding(text));
+    }
+
+    public async getDimensions(): Promise<number> {
+        return this.dimensions;
+    }
+
+    public getModelId(): string {
+        return this.modelId;
+    }
+
+    private buildEmbedding(text: string): Float32Array {
+        const vector = new Float32Array(this.dimensions);
+        const normalizedText = text.trim().length > 0 ? text : " ";
+
+        for (let index = 0; index < normalizedText.length; index++) {
+            const code = normalizedText.charCodeAt(index);
+            const slot = (code + (index * 31)) % this.dimensions;
+            vector[slot] += ((code % 97) + 1) / 100;
+        }
+
+        let magnitude = 0;
+        for (const value of vector) {
+            magnitude += value * value;
+        }
+
+        if (magnitude > 0) {
+            const scale = 1 / Math.sqrt(magnitude);
+            for (let index = 0; index < vector.length; index++) {
+                vector[index] *= scale;
+            }
+        }
+
+        return vector;
+    }
+}
+
 /**
  * OpenAI-compatible embedding provider
  * Works with OpenAI, OpenRouter, and other OpenAI-compatible APIs

@@ -1,7 +1,14 @@
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import type { TodoItem } from "@/services/ral/types";
 
 export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
+export type PrincipalSnapshot = PrincipalRef;
+
+export interface MessagePrincipalContext {
+    senderPrincipal?: PrincipalSnapshot;
+    targetedPrincipals?: PrincipalSnapshot[];
+}
 
 /**
  * Marker stored in conversation history to track delegation lifecycle.
@@ -36,8 +43,11 @@ interface ConversationRecordFields {
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
+    targetedPrincipals?: PrincipalSnapshot[]; // Optional transport-neutral recipient metadata
     /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
     senderPubkey?: string;
+    /** Optional transport-neutral sender metadata */
+    senderPrincipal?: PrincipalSnapshot;
     /**
      * Explicit role override for synthetic entries.
      * When present, this role is used instead of deriving from pubkey.

@@ -28,6 +28,7 @@ import { logger } from "@/utils/logger";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ConversationMetadata } from "./types";
+import type { MessagePrincipalContext } from "./types";
 import type { ConversationStore } from "./ConversationStore";
 import {
     listConversationIdsFromDiskForProject,
@@ -350,7 +351,7 @@ class ConversationRegistryImpl {
      * Indexes the conversation ID in PrefixKVStore for prefix lookups.
      * Uses three-tier project resolution to determine the correct project.
      */
-    async create(event: NDKEvent): Promise<ConversationStore> {
+    async create(event: NDKEvent, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
         const eventId = event.id;
         if (!eventId) {
             throw new Error("Event must have an ID to create a conversation");
@@ -373,7 +374,7 @@ class ConversationRegistryImpl {
 
         const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
         const isFromAgent = projectAgentPubkeys.has(event.pubkey);
-        store.addEventMessage(event, isFromAgent);
+        store.addEventMessage(event, isFromAgent, principalContext);
 
         this.eventCache.set(eventId, event);
 
@@ -448,12 +449,16 @@ class ConversationRegistryImpl {
     /**
      * Add an event to a conversation.
      */
-    async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
+    async addEvent(
+        conversationId: string,
+        event: NDKEvent,
+        principalContext?: MessagePrincipalContext
+    ): Promise<void> {
         const store = this.getOrLoad(conversationId);
         const currentProjectId = this.resolveProjectId();
         const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
         const isFromAgent = projectAgentPubkeys.has(event.pubkey);
-        store.addEventMessage(event, isFromAgent);
+        store.addEventMessage(event, isFromAgent, principalContext);
 
         if (event.id) {
             this.eventCache.set(event.id, event);
