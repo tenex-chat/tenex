@@ -109,7 +109,9 @@ export async function setupStreamExecution(
                 ? conversationStore.relocateToEnd(injection.eventId, {
                       ral: ralNumber,
                       senderPubkey: injection.senderPubkey,
+                      senderPrincipal: injection.senderPrincipal,
                       targetedPubkeys: [context.agent.pubkey],
+                      targetedPrincipals: injection.targetedPrincipals,
                   })
                 : false;
 
@@ -120,7 +122,9 @@ export async function setupStreamExecution(
                     content: injection.content,
                     messageType: "text",
                     targetedPubkeys: [context.agent.pubkey],
+                    targetedPrincipals: injection.targetedPrincipals,
                     senderPubkey: injection.senderPubkey,
+                    senderPrincipal: injection.senderPrincipal,
                     eventId: injection.eventId,
                 });
             }

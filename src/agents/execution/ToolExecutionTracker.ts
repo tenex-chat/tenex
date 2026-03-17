@@ -12,8 +12,8 @@
 
 import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { EventContext } from "@/nostr/types";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
@@ -63,7 +63,7 @@ interface TrackedExecution {
     /** Event context for publishing (stored for delayed publishing) */
     eventContext?: EventContext;
     /** Agent publisher instance (stored for delayed publishing) */
-    agentPublisher?: AgentPublisher;
+    agentPublisher?: AgentRuntimePublisher;
 }
 
 /**
@@ -77,7 +77,7 @@ export interface TrackExecutionOptions {
     /** Arguments passed to the tool */
     args: unknown;
     /** Publisher for Nostr events */
-    agentPublisher: AgentPublisher;
+    agentPublisher: AgentRuntimePublisher;
     /** Context for event publishing */
     eventContext: EventContext;
     /** Cumulative usage from previous steps (if available) */

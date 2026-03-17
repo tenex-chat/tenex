@@ -1,5 +1,5 @@
 import { ConversationStore } from "../ConversationStore";
-import type { ConversationMetadata } from "../types";
+import type { ConversationMetadata, MessagePrincipalContext } from "../types";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { getNDK } from "@/nostr/ndkClient";
@@ -92,7 +92,10 @@ export class ConversationResolver {
     /**
      * Resolve the conversation for an incoming event.
      */
-    async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
+    async resolveConversationForEvent(
+        event: NDKEvent,
+        principalContext?: MessagePrincipalContext
+    ): Promise<ConversationResolutionResult> {
         const activeSpan = trace.getActiveSpan();
         const replyTarget = AgentEventDecoder.getReplyTarget(event);
 
@@ -110,7 +113,12 @@ export class ConversationResolver {
 
             // Has e tag but conversation not found - try orphaned reply handling
             const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-            const newConversation = await this.handleOrphanedReply(event, replyTarget, mentionedPubkeys);
+            const newConversation = await this.handleOrphanedReply(
+                event,
+                replyTarget,
+                mentionedPubkeys,
+                principalContext
+            );
             if (newConversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "created_from_orphan",
@@ -141,7 +149,7 @@ export class ConversationResolver {
             return { conversation: undefined };
         }
 
-        const conversation = await ConversationStore.create(event);
+        const conversation = await ConversationStore.create(event, principalContext);
         if (conversation) {
             // Check for referenced kind 30023 articles and populate metadata
             const referencedArticle = await extractReferencedArticle(event);
@@ -209,7 +217,8 @@ export class ConversationResolver {
     private async handleOrphanedReply(
         event: NDKEvent,
         replyTargetId: string,
-        mentionedPubkeys: string[]
+        mentionedPubkeys: string[],
+        principalContext?: MessagePrincipalContext
     ): Promise<ConversationStore | undefined> {
         if (mentionedPubkeys.length === 0) {
             return undefined;
@@ -288,7 +297,7 @@ export class ConversationResolver {
         }
 
         if (event.id !== rootEvent.id && !replies.some((r) => r.id === event.id)) {
-            await ConversationStore.addEvent(conversation.id, event);
+            await ConversationStore.addEvent(conversation.id, event, principalContext);
         }
 
         return conversation;

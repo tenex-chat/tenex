@@ -153,7 +153,9 @@ export function createPrepareStep(
                             ? conversationStore.relocateToEnd(injection.eventId, {
                                   ral: ralNumber,
                                   senderPubkey: injection.senderPubkey,
+                                  senderPrincipal: injection.senderPrincipal,
                                   targetedPubkeys: [context.agent.pubkey],
+                                  targetedPrincipals: injection.targetedPrincipals,
                               })
                             : false;
 
@@ -164,7 +166,9 @@ export function createPrepareStep(
                                 content: injection.content,
                                 messageType: "text",
                                 targetedPubkeys: [context.agent.pubkey],
+                                targetedPrincipals: injection.targetedPrincipals,
                                 senderPubkey: injection.senderPubkey,
+                                senderPrincipal: injection.senderPrincipal,
                                 eventId: injection.eventId,
                             });
                         }

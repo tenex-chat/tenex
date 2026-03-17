@@ -5,7 +5,8 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { ConversationResolver } from "@/conversations/services/ConversationResolver";
 import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
-import type { DelegationMarker } from "@/conversations/types";
+import type { DelegationMarker, MessagePrincipalContext, PrincipalSnapshot } from "@/conversations/types";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { formatAnyError } from "@/lib/error-formatter";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
@@ -41,6 +42,7 @@ const getSafeActiveSpan = (): ReturnType<typeof trace.getActiveSpan> => {
 
 interface DispatchContext {
     agentExecutor: AgentExecutor;
+    envelope?: InboundEnvelope;
 }
 
 interface DelegationTarget {
@@ -112,10 +114,11 @@ export class AgentDispatchService {
 
     private async handleChatMessage(
         event: NDKEvent,
-        { agentExecutor }: DispatchContext,
+        { agentExecutor, envelope }: DispatchContext,
         span: ReturnType<typeof tracer.startSpan>
     ): Promise<void> {
         const projectCtx = getProjectContext();
+        const principalContext = this.toMessagePrincipalContext(envelope);
 
         const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(event, projectCtx.agents);
         const isFromAgent = AgentEventDecoder.isEventFromAgent(event, projectCtx.agents);
@@ -145,10 +148,10 @@ export class AgentDispatchService {
             span.addEvent("dispatch.agent_event_not_directed");
 
             const resolver = new ConversationResolver();
-            const result = await resolver.resolveConversationForEvent(event);
+            const result = await resolver.resolveConversationForEvent(event, principalContext);
 
             if (result.conversation) {
-                await ConversationStore.addEvent(result.conversation.id, event);
+                await ConversationStore.addEvent(result.conversation.id, event, principalContext);
                 getSafeActiveSpan()?.addEvent("reply.added_to_history", {
                     "conversation.id": shortenConversationId(result.conversation.id),
                 });
@@ -164,14 +167,15 @@ export class AgentDispatchService {
             return;
         }
 
-        await this.handleReplyLogic(event, agentExecutor, projectCtx, span);
+        await this.handleReplyLogic(event, agentExecutor, projectCtx, span, principalContext);
     }
 
     private async handleReplyLogic(
         event: NDKEvent,
         agentExecutor: AgentExecutor,
         projectCtx: ProjectContext,
-        span: ReturnType<typeof tracer.startSpan>
+        span: ReturnType<typeof tracer.startSpan>,
+        principalContext?: MessagePrincipalContext
     ): Promise<void> {
         const delegationResult = await handleDelegationCompletion(event);
         const delegationTarget = AgentRouter.resolveDelegationTarget(delegationResult, projectCtx);
@@ -204,7 +208,10 @@ export class AgentDispatchService {
         }
 
         const conversationResolver = new ConversationResolver();
-        const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(event);
+        const { conversation, isNew } = await conversationResolver.resolveConversationForEvent(
+            event,
+            principalContext
+        );
 
         if (!conversation) {
             logger.error("No conversation found or created for event", {
@@ -232,13 +239,13 @@ export class AgentDispatchService {
             });
 
             if (!AgentEventDecoder.isAgentInternalMessage(event)) {
-                await ConversationStore.addEvent(conversation.id, event);
+                await ConversationStore.addEvent(conversation.id, event, principalContext);
             }
             return;
         }
 
         if (!isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
-            await ConversationStore.addEvent(conversation.id, event);
+            await ConversationStore.addEvent(conversation.id, event, principalContext);
         }
 
         if (isNew && !AgentEventDecoder.isAgentInternalMessage(event)) {
@@ -308,6 +315,7 @@ export class AgentDispatchService {
             targetAgents,
             event,
             conversationId: conversation.id,
+            principalContext,
             projectCtx,
             agentExecutor,
             parentSpan: span,
@@ -652,6 +660,7 @@ export class AgentDispatchService {
         targetAgents: AgentInstance[];
         event: NDKEvent;
         conversationId: string;
+        principalContext?: MessagePrincipalContext;
         projectCtx: ProjectContext;
         agentExecutor: AgentExecutor;
         parentSpan: ReturnType<typeof tracer.startSpan>;
@@ -660,6 +669,7 @@ export class AgentDispatchService {
             targetAgents,
             event,
             conversationId,
+            principalContext,
             projectCtx,
             agentExecutor,
             parentSpan,
@@ -721,6 +731,8 @@ export class AgentDispatchService {
                     conversationId,
                     message: event.content,
                     senderPubkey: event.pubkey,
+                    senderPrincipal: principalContext?.senderPrincipal,
+                    targetedPrincipals: principalContext?.targetedPrincipals,
                     eventId: event.id,
                     agentSpan,
                 });
@@ -867,6 +879,8 @@ export class AgentDispatchService {
         conversationId: string;
         message: string;
         senderPubkey: string;
+        senderPrincipal?: PrincipalSnapshot;
+        targetedPrincipals?: PrincipalSnapshot[];
         eventId?: string;
         agentSpan: ReturnType<typeof tracer.startSpan>;
     }): boolean {
@@ -876,6 +890,8 @@ export class AgentDispatchService {
             conversationId,
             message,
             senderPubkey,
+            senderPrincipal,
+            targetedPrincipals,
             eventId,
             agentSpan,
         } = params;
@@ -892,7 +908,7 @@ export class AgentDispatchService {
             conversationId,
             activeRal.ralNumber,
             message,
-            { senderPubkey, eventId }
+            { senderPubkey, senderPrincipal, targetedPrincipals, eventId }
         );
 
         if (activeRal.isStreaming) {
@@ -928,5 +944,16 @@ export class AgentDispatchService {
             "message.length": messageLength,
         });
         return false; // Spawn new execution to wake up the waiting RAL
+    }
+
+    private toMessagePrincipalContext(envelope?: InboundEnvelope): MessagePrincipalContext | undefined {
+        if (!envelope) {
+            return undefined;
+        }
+
+        return {
+            senderPrincipal: envelope.principal,
+            targetedPrincipals: envelope.recipients.length > 0 ? envelope.recipients : undefined,
+        };
     }
 }

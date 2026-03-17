@@ -10,18 +10,20 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdtemp, rm } from "fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { ImagePart, TextPart } from "ai";
 import { ConversationStore } from "../ConversationStore";
 import * as PubkeyService from "@/services/PubkeyService";
 
 describe("ConversationStore - Multimodal Support", () => {
-    const TEST_DIR = "/tmp/tenex-test-conversations-multimodal";
     const PROJECT_ID = "test-project";
     const CONVERSATION_ID = "conv-multimodal";
     const USER_PUBKEY = "user-pk";
     const AGENT_PUBKEY = "agent-pk";
 
+    let testDir: string;
     let store: ConversationStore;
     let pubkeyServiceSpy: ReturnType<typeof spyOn>;
 
@@ -37,14 +39,14 @@ describe("ConversationStore - Multimodal Support", () => {
             },
         } as any);
 
-        await mkdir(TEST_DIR, { recursive: true });
-        store = new ConversationStore(TEST_DIR);
+        testDir = await mkdtemp(join(tmpdir(), "tenex-test-conversations-multimodal-"));
+        store = new ConversationStore(testDir);
         store.load(PROJECT_ID, CONVERSATION_ID);
     });
 
     afterEach(async () => {
         pubkeyServiceSpy.mockRestore();
-        await rm(TEST_DIR, { recursive: true, force: true });
+        await rm(testDir, { recursive: true, force: true });
     });
 
     describe("buildMessagesForRal with image URLs", () => {
@@ -211,7 +213,7 @@ describe("ConversationStore - Multimodal Support", () => {
 
             for (const ext of extensions) {
                 // Reset store for each test
-                const freshStore = new ConversationStore(TEST_DIR);
+                const freshStore = new ConversationStore(testDir);
                 freshStore.load(PROJECT_ID, `conv-${ext}`);
 
                 // Note: Using real-looking domain because example.com is now skipped

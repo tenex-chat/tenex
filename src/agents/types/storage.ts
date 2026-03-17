@@ -1,5 +1,8 @@
 import type { MCPServerConfig } from "@/llm/providers/types";
 import type { AgentCategory } from "@/agents/role-categories";
+import type { TelegramAgentConfig } from "@/events/runtime/RuntimeAgent";
+
+export type { TelegramAgentConfig, TelegramChatBinding } from "@/events/runtime/RuntimeAgent";
 
 /**
  * Default agent configuration block.
@@ -11,6 +14,8 @@ export interface AgentDefaultConfig {
     model?: string;
     /** Default tools list for this agent */
     tools?: string[];
+    /** Telegram transport configuration for this agent */
+    telegram?: TelegramAgentConfig;
 }
 
 /**
@@ -33,6 +38,8 @@ export interface AgentProjectConfig {
      * Empty array or undefined means: use defaults.
      */
     tools?: string[];
+    /** Project-specific Telegram transport override */
+    telegram?: TelegramAgentConfig;
     /**
      * Project-scoped PM designation.
      * When true, this agent is designated as PM for this specific project.
@@ -52,6 +59,8 @@ export interface ProjectScopedConfig {
     llmConfig?: string;
     /** Project-scoped tools list. */
     tools?: string[];
+    /** Project-scoped Telegram transport configuration. */
+    telegram?: TelegramAgentConfig;
     /** Project-scoped PM designation. */
     isPM?: boolean;
 }
@@ -109,6 +118,11 @@ export interface StoredAgentData {
      * @deprecated Use `default.tools` instead.
      */
     tools?: string[];
+    /**
+     * Legacy top-level Telegram transport configuration.
+     * @deprecated Use `default.telegram` instead.
+     */
+    telegram?: TelegramAgentConfig;
 
     /**
      * Default configuration block.

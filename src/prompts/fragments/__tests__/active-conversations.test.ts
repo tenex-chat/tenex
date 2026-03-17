@@ -11,6 +11,8 @@ import {
 } from "../08-active-conversations";
 import type { AgentInstance } from "@/agents/types";
 import type { RALRegistryEntry } from "@/services/ral/types";
+import { IdentityBindingStore } from "@/services/identity/IdentityBindingStoreService";
+import { IdentityService } from "@/services/identity/IdentityService";
 import * as PubkeyServiceModule from "@/services/PubkeyService";
 
 // Mock agent for testing
@@ -66,6 +68,9 @@ describe("activeConversationsFragment", () => {
     let mockPubkeyService: { getNameSync: ReturnType<typeof mock> };
 
     beforeEach(() => {
+        IdentityService.resetInstance();
+        IdentityBindingStore.resetInstance();
+
         // Freeze Date.now so production code and test timestamps stay in sync
         dateNowSpy = spyOn(Date, "now").mockReturnValue(now);
 
@@ -89,6 +94,8 @@ describe("activeConversationsFragment", () => {
     });
 
     afterEach(() => {
+        IdentityService.resetInstance();
+        IdentityBindingStore.resetInstance();
         dateNowSpy.mockRestore();
         getActiveEntriesForProjectSpy.mockRestore();
         conversationRegistryGetSpy.mockRestore();

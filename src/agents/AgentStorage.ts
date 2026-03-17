@@ -1,6 +1,12 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { StoredAgentData, ProjectScopedConfig, AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type {
+    StoredAgentData,
+    ProjectScopedConfig,
+    AgentDefaultConfig,
+    AgentProjectConfig,
+    TelegramAgentConfig,
+} from "@/agents/types";
 import type { AgentCategory } from "@/agents/role-categories";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import {
@@ -20,6 +26,16 @@ import { trace } from "@opentelemetry/api";
 export interface UpdateDefaultConfigOptions {
     /** If true, clears all projectOverrides (default: false) */
     clearProjectOverrides?: boolean;
+}
+
+function hasOwnProperty<T extends object>(value: T, key: PropertyKey): boolean {
+    return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function stripUndefinedValues<T extends object>(value: T): Partial<T> {
+    return Object.fromEntries(
+        Object.entries(value).filter(([, entry]) => entry !== undefined)
+    ) as Partial<T>;
 }
 
 /**
@@ -110,6 +126,7 @@ export function createStoredAgent(config: {
     pmOverrides?: Record<string, boolean>;
     defaultConfig?: AgentDefaultConfig;
     projectOverrides?: Record<string, AgentProjectConfig>;
+    telegram?: TelegramAgentConfig;
     definitionDTag?: string;
     definitionAuthor?: string;
     definitionCreatedAt?: number;
@@ -129,10 +146,15 @@ export function createStoredAgent(config: {
         pmOverrides: config.pmOverrides,
         default: config.defaultConfig,
         projectOverrides: config.projectOverrides,
+        telegram: config.telegram,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
         definitionCreatedAt: config.definitionCreatedAt,
     };
+}
+
+export function deriveAgentPubkeyFromNsec(nsec: string): string {
+    return new NDKPrivateKeySigner(nsec).pubkey;
 }
 
 /**
@@ -508,8 +530,7 @@ export class AgentStorage {
      */
     async saveAgent(agent: StoredAgent): Promise<void> {
         // Get pubkey from nsec
-        const signer = new NDKPrivateKeySigner(agent.nsec);
-        const pubkey = signer.pubkey;
+        const pubkey = deriveAgentPubkeyFromNsec(agent.nsec);
 
         const filePath = path.join(this.agentsDir, `${pubkey}.json`);
 
@@ -901,6 +922,7 @@ export class AgentStorage {
         const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model,
             tools: agent.default?.tools,
+            telegram: agent.default?.telegram ?? agent.telegram,
         };
 
         const projectConfig = projectDTag
@@ -947,6 +969,17 @@ export class AgentStorage {
             } else {
                 delete agent.default.tools;
             }
+        }
+
+        if (hasOwnProperty(updates, "telegram")) {
+            if (updates.telegram) {
+                agent.default.telegram = updates.telegram;
+            } else {
+                delete agent.default.telegram;
+            }
+
+            // Migrate off the legacy top-level field whenever Telegram is updated explicitly.
+            delete agent.telegram;
         }
 
         // Clean up empty default block
@@ -1006,9 +1039,12 @@ export class AgentStorage {
             const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
+                telegram: agent.default?.telegram ?? agent.telegram,
             };
 
-            const deduplicated = deduplicateProjectConfig(defaultConfig, override);
+            const deduplicated = stripUndefinedValues(
+                deduplicateProjectConfig(defaultConfig, override)
+            );
 
             if (!agent.projectOverrides) {
                 agent.projectOverrides = {};
@@ -1033,6 +1069,36 @@ export class AgentStorage {
 
         await this.saveAgent(agent);
         return true;
+    }
+
+    async updateDefaultTelegramConfig(
+        pubkey: string,
+        telegram?: TelegramAgentConfig
+    ): Promise<boolean> {
+        return this.updateDefaultConfig(pubkey, { telegram });
+    }
+
+    async updateProjectTelegramConfig(
+        pubkey: string,
+        projectDTag: string,
+        telegram?: TelegramAgentConfig
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        const existingOverride = agent.projectOverrides?.[projectDTag] ?? {};
+
+        return this.updateProjectOverride(
+            pubkey,
+            projectDTag,
+            {
+                ...existingOverride,
+                telegram,
+            }
+        );
     }
 
     /**

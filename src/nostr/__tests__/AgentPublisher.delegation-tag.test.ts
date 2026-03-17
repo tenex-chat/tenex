@@ -133,7 +133,9 @@ describe("AgentPublisher - Delegation Tag", () => {
         capturedEvents = [];
 
         // Mock NDKEvent.publish to capture events
-        mockPublish = mock(() => Promise.resolve(new Set()));
+        mockPublish = mock(() =>
+            Promise.resolve(new Set([{ url: "wss://relay.test" }] as Array<{ url: string }>))
+        );
 
         spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
             capturedEvents.push(this);

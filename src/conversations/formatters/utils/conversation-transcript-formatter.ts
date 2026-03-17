@@ -1,6 +1,6 @@
 import type { ConversationEntry } from "@/conversations/types";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityDisplayService } from "@/services/identity/IdentityDisplayService";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { ToolCallPart } from "ai";
 
@@ -44,6 +44,11 @@ export interface ConversationXmlRenderResult {
   firstShortId: string | null;
   lastShortId: string | null;
 }
+
+type ConversationPrincipal =
+  | ConversationEntry["senderPrincipal"]
+  | NonNullable<ConversationEntry["targetedPrincipals"]>[number]
+  | undefined;
 
 function escapeXml(value: string): string {
   return value
@@ -112,9 +117,11 @@ function formatDelegationMarkerContent(entry: ConversationEntry): string | null 
     return null;
   }
 
-  const pubkeyService = getPubkeyService();
+  const identityDisplayService = getIdentityDisplayService();
   const shortConversationId = marker.delegationConversationId.slice(0, PREFIX_LENGTH);
-  const recipientName = pubkeyService.getNameSync(marker.recipientPubkey);
+  const recipientName = identityDisplayService.resolveDisplayNameSync({
+    linkedPubkey: marker.recipientPubkey,
+  });
 
   if (marker.status === "pending") {
     return `⏳ Delegation ${shortConversationId} → ${recipientName} in progress`;
@@ -242,11 +249,24 @@ function buildToolXmlAttributes(
   return attrs;
 }
 
+function resolveEntryDisplayName(
+  pubkey: string | undefined,
+  principal: ConversationPrincipal,
+  identityDisplayService: ReturnType<typeof getIdentityDisplayService>
+): string {
+  return identityDisplayService.resolveDisplayNameSync({
+    principalId: principal?.id,
+    linkedPubkey: pubkey,
+    displayName: principal?.displayName,
+    username: principal?.username,
+  });
+}
+
 export function buildConversationTimeline(
   entries: ConversationEntry[],
   options: ConversationTimelineOptions = {}
 ): ConversationTimeline {
-  const pubkeyService = getPubkeyService();
+  const identityDisplayService = getIdentityDisplayService();
   const t0 = computeBaselineTimestamp(entries);
   let lastKnownTimestamp = t0;
   const timelineEntries: ConversationTimelineEntry[] = [];
@@ -263,10 +283,14 @@ export function buildConversationTimeline(
       continue;
     }
 
-    const authorPubkey = entry.senderPubkey ?? entry.pubkey;
-    const author = pubkeyService.getNameSync(authorPubkey);
-    const recipients = (entry.targetedPubkeys ?? []).map((pubkey) =>
-      pubkeyService.getNameSync(pubkey)
+    const authorPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    const author = resolveEntryDisplayName(authorPubkey, entry.senderPrincipal, identityDisplayService);
+    const recipients = (entry.targetedPubkeys ?? []).map((pubkey, index) =>
+      resolveEntryDisplayName(
+        entry.targetedPrincipals?.[index]?.linkedPubkey ?? pubkey,
+        entry.targetedPrincipals?.[index],
+        identityDisplayService
+      )
     );
 
     timelineEntries.push({

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { resolveCompletionRecipient, createEventContext } from "../EventContextService";
+import {
+    resolveCompletionRecipient,
+    resolveCompletionRecipientPrincipal,
+    createEventContext,
+} from "../EventContextService";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -186,12 +190,13 @@ describe("EventContextService", () => {
         function createMockToolContext(
             conversationStore: ConversationStore | undefined,
             triggeringEventPubkey: string,
-            conversationId: string
+            conversationId: string,
+            tags: string[][] = []
         ): ToolExecutionContext {
             const mockTriggeringEvent = {
                 pubkey: triggeringEventPubkey,
                 id: `event-${conversationId}`,
-                tags: [],
+                tags,
             } as unknown as NDKEvent;
 
             return {
@@ -229,6 +234,11 @@ describe("EventContextService", () => {
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBeUndefined();
+            expect(eventContext.completionRecipientPrincipal).toEqual({
+                id: `nostr:${USER_PUBKEY}`,
+                transport: "nostr",
+                linkedPubkey: USER_PUBKEY,
+            });
             expect(eventContext.triggeringEvent.pubkey).toBe(USER_PUBKEY);
         });
 
@@ -255,6 +265,13 @@ describe("EventContextService", () => {
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBe(EXEC_COORD_PUBKEY);
+            expect(eventContext.completionRecipientPrincipal).toEqual({
+                id: `nostr:${EXEC_COORD_PUBKEY}`,
+                transport: "nostr",
+                linkedPubkey: EXEC_COORD_PUBKEY,
+                displayName: "exec-coord",
+                kind: "agent",
+            });
             expect(eventContext.triggeringEvent.pubkey).toBe(EXEC_COORD_PUBKEY);
         });
 
@@ -273,6 +290,11 @@ describe("EventContextService", () => {
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBeUndefined();
+            expect(eventContext.completionRecipientPrincipal).toEqual({
+                id: `nostr:${USER_PUBKEY}`,
+                transport: "nostr",
+                linkedPubkey: USER_PUBKEY,
+            });
         });
 
         it("should handle missing getConversation gracefully", () => {
@@ -296,6 +318,11 @@ describe("EventContextService", () => {
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBeUndefined();
+            expect(eventContext.completionRecipientPrincipal).toEqual({
+                id: `nostr:${USER_PUBKEY}`,
+                transport: "nostr",
+                linkedPubkey: USER_PUBKEY,
+            });
             expect(eventContext.conversationId).toBe(conversationId);
         });
 
@@ -335,6 +362,65 @@ describe("EventContextService", () => {
 
             expect(eventContext.model).toBe("gpt-4");
             expect(eventContext.llmRuntime).toBe(1500);
+        });
+
+        it("should preserve a transport principal for direct local conversations", async () => {
+            const conversationId = "conv-local-principal";
+            const store = ConversationStore.getOrLoad(conversationId);
+            store.addMessage({
+                pubkey: USER_PUBKEY,
+                senderPrincipal: {
+                    id: "local:user:42",
+                    transport: "local",
+                    linkedPubkey: USER_PUBKEY,
+                    displayName: "Alice Telegram",
+                    kind: "human",
+                },
+                content: "hello from telegram",
+                messageType: "text",
+                timestamp: Math.floor(Date.now() / 1000),
+                eventId: `event-${conversationId}`,
+            });
+            await store.save();
+
+            const toolContext = createMockToolContext(
+                store,
+                USER_PUBKEY,
+                conversationId,
+                [
+                    ["transport", "local"],
+                    ["principal", "local:user:42"],
+                ]
+            );
+            const eventContext = createEventContext(toolContext);
+
+            expect(eventContext.completionRecipientPubkey).toBeUndefined();
+            expect(eventContext.completionRecipientPrincipal).toEqual({
+                id: "local:user:42",
+                transport: "local",
+                linkedPubkey: USER_PUBKEY,
+                displayName: "Alice Telegram",
+                kind: "human",
+            });
+        });
+    });
+
+    describe("resolveCompletionRecipientPrincipal", () => {
+        it("falls back to transport tags when conversation state is unavailable", () => {
+            const triggeringEvent = {
+                pubkey: USER_PUBKEY,
+                id: "event-no-conversation",
+                tags: [
+                    ["transport", "local"],
+                    ["principal", "local:user:99"],
+                ],
+            } as unknown as NDKEvent;
+
+            expect(resolveCompletionRecipientPrincipal(undefined, triggeringEvent)).toEqual({
+                id: "local:user:99",
+                transport: "local",
+                linkedPubkey: USER_PUBKEY,
+            });
         });
     });
 });
