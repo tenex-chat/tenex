@@ -14,7 +14,7 @@ import { trace } from "@opentelemetry/api";
 import { buildConversationRecordId } from "./record-id";
 import type { ConversationRecord, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
 import {
     createImageTracker,
@@ -141,7 +141,8 @@ function deriveRole(
     if (entry.messageType === "tool-result") return "tool";
 
     // Text messages - assistant for own, user for everything else
-    if (entry.pubkey === viewingAgentPubkey) {
+    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    if (senderPubkey === viewingAgentPubkey) {
         return "assistant"; // Own messages
     }
 
@@ -149,16 +150,56 @@ function deriveRole(
 }
 
 /**
- * Resolve a display name through PubkeyService, falling back to its sync path.
- * This keeps all name formatting centralized in PubkeyService.
+ * Resolve a display name through IdentityService, falling back to its sync path.
+ * This keeps all name formatting centralized in the identity layer.
  */
 async function resolveDisplayName(pubkey: string): Promise<string> {
-    const pubkeyService = getPubkeyService();
+    const identityService = getIdentityService();
     try {
-        return await pubkeyService.getName(pubkey);
+        return await identityService.getName(pubkey);
     } catch {
-        return pubkeyService.getNameSync(pubkey);
+        return identityService.getNameSync(pubkey);
     }
+}
+
+function resolveDisplayNameSyncForEntry(
+    entry: ConversationRecord,
+    resolveDisplayName?: (pubkey: string) => string
+): string {
+    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+
+    if (resolveDisplayName) {
+        return resolveDisplayName(senderPubkey);
+    }
+
+    return getIdentityService().getDisplayNameSync({
+        principalId: entry.senderPrincipal?.id,
+        linkedPubkey: senderPubkey,
+        displayName: entry.senderPrincipal?.displayName,
+        username: entry.senderPrincipal?.username,
+        kind: entry.senderPrincipal?.kind,
+    });
+}
+
+function resolveRecipientDisplayNameSync(
+    entry: ConversationRecord,
+    index: number,
+    resolveDisplayName?: (pubkey: string) => string
+): string {
+    const recipientSnapshot = entry.targetedPrincipals?.[index];
+    const recipientPubkey = entry.targetedPubkeys?.[index];
+
+    if (resolveDisplayName && recipientPubkey) {
+        return resolveDisplayName(recipientPubkey);
+    }
+
+    return getIdentityService().getDisplayNameSync({
+        principalId: recipientSnapshot?.id,
+        linkedPubkey: recipientSnapshot?.linkedPubkey ?? recipientPubkey,
+        displayName: recipientSnapshot?.displayName,
+        username: recipientSnapshot?.username,
+        kind: recipientSnapshot?.kind,
+    });
 }
 
 /**
@@ -175,14 +216,14 @@ async function resolveDisplayName(pubkey: string): Promise<string> {
  * 5. Otherwise (user message targeted to me, or no targeting) → "" (no prefix)
  *
  * **Purity note:** This function is pure when a custom `resolveDisplayName` is provided
- * (as done in unit tests). The default resolver calls `PubkeyService.getNameSync()`, which
- * reads from a global service singleton—this is intentional for production use but means
- * the default invocation is not referentially transparent.
+ * (as done in unit tests). The default resolver calls `IdentityService.getNameSync()`,
+ * which reads from a global service singleton. That is intentional for production use
+ * but means the default invocation is not referentially transparent.
  *
  * @param entry - The conversation entry to compute prefix for
  * @param viewingAgentPubkey - The pubkey of the agent viewing/building messages
  * @param agentPubkeys - Set of pubkeys that belong to agents (used to distinguish agents from users)
- * @param resolveDisplayName - Optional injectable name resolver (defaults to PubkeyService.getNameSync)
+ * @param resolveDisplayName - Optional injectable name resolver (defaults to IdentityService.getNameSync)
  * @returns The prefix string to prepend, or empty string for no prefix
  */
 export function computeAttributionPrefix(
@@ -191,10 +232,8 @@ export function computeAttributionPrefix(
     agentPubkeys: Set<string>,
     resolveDisplayName?: (pubkey: string) => string
 ): string {
-    const resolve = resolveDisplayName ?? ((pk: string) => getPubkeyService().getNameSync(pk));
-
     // Determine the actual sender (injected messages track original sender via senderPubkey)
-    const senderPubkey = entry.senderPubkey ?? entry.pubkey;
+    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
 
     // Rule 1: Self message → no prefix
     if (senderPubkey === viewingAgentPubkey) return "";
@@ -206,14 +245,14 @@ export function computeAttributionPrefix(
     // Rule 3: Has targetedPubkeys NOT including viewing agent → routing prefix
     const targetedPubkeys = entry.targetedPubkeys ?? [];
     if (targetedPubkeys.length > 0 && !targetedPubkeys.includes(viewingAgentPubkey)) {
-        const senderName = resolve(senderPubkey);
-        const recipientName = resolve(targetedPubkeys[0]);
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
+        const recipientName = resolveRecipientDisplayNameSync(entry, 0, resolveDisplayName);
         return `[@${senderName} -> @${recipientName}] `;
     }
 
     // Rule 4: Sender is agent → attribution prefix
     if (agentPubkeys.has(senderPubkey)) {
-        const senderName = resolve(senderPubkey);
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
         return `[@${senderName}] `;
     }
 

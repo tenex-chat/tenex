@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
@@ -135,7 +135,7 @@ export interface ExecutionEnvironment {
  * All runtime dependencies are REQUIRED, not optional.
  */
 export interface ToolExecutionContext extends ExecutionEnvironment {
-    agentPublisher: AgentPublisher;
+    agentPublisher: AgentRuntimePublisher;
     ralNumber: number;
 }
 

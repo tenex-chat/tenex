@@ -60,6 +60,7 @@ export class NudgeSkillWhitelistService {
     private referencedEventCache: Map<string, NDKEvent> = new Map();
     /** Debounce timer for coalescing rapid event bursts */
     private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+    private uninitializedReadMethods: Set<string> = new Set();
 
     private constructor() {}
 
@@ -306,7 +307,7 @@ export class NudgeSkillWhitelistService {
      */
     getWhitelistedNudges(): WhitelistItem[] {
         if (!this.initialized) {
-            logger.warn("[NudgeSkillWhitelistService] getWhitelistedNudges called before initialize() — returning empty list");
+            this.logUninitializedRead("getWhitelistedNudges");
         }
         return this.cache?.nudges || [];
     }
@@ -316,7 +317,7 @@ export class NudgeSkillWhitelistService {
      */
     getWhitelistedSkills(): WhitelistItem[] {
         if (!this.initialized) {
-            logger.warn("[NudgeSkillWhitelistService] getWhitelistedSkills called before initialize() — returning empty list");
+            this.logUninitializedRead("getWhitelistedSkills");
         }
         return this.cache?.skills || [];
     }
@@ -326,10 +327,20 @@ export class NudgeSkillWhitelistService {
      */
     getAllWhitelistedItems(): WhitelistItem[] {
         if (!this.initialized) {
-            logger.warn("[NudgeSkillWhitelistService] getAllWhitelistedItems called before initialize() — returning empty list");
+            this.logUninitializedRead("getAllWhitelistedItems");
         }
         if (!this.cache) return [];
         return [...this.cache.nudges, ...this.cache.skills];
+    }
+
+    private logUninitializedRead(methodName: string): void {
+        if (this.uninitializedReadMethods.has(methodName)) {
+            return;
+        }
+        this.uninitializedReadMethods.add(methodName);
+        logger.debug(
+            `[NudgeSkillWhitelistService] ${methodName} called before initialize() — returning empty list`
+        );
     }
 
     /**
@@ -378,5 +389,6 @@ export class NudgeSkillWhitelistService {
         this.whitelistPubkeys.clear();
         this.latestWhitelistEvents.clear();
         this.referencedEventCache.clear();
+        this.uninitializedReadMethods.clear();
     }
 }

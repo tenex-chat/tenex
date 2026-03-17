@@ -18,6 +18,8 @@ import { assertSupervisionHealth } from "@/agents/supervision";
 import { checkPostCompletion } from "./PostCompletionChecker";
 import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError } from "@/lib/error-formatter";
 import {
@@ -30,7 +32,7 @@ import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { createProjectDTag } from "@/types/project-ids";
 import { RALRegistry } from "@/services/ral";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import { getToolsObject } from "@/tools/registry";
 import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -50,11 +52,20 @@ import type {
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
+interface AgentExecutorOptions {
+    publisherFactory?: AgentRuntimePublisherFactory;
+}
+
 export class AgentExecutor {
-    constructor() {
+    private readonly publisherFactory: AgentRuntimePublisherFactory;
+
+    constructor(options: AgentExecutorOptions = {}) {
         // Centralized supervision health check - ensures both total registry size AND
         // post-completion heuristic count are validated (fail-closed semantics)
         assertSupervisionHealth("AgentExecutor");
+        const defaultPublisherFactory: AgentRuntimePublisherFactory = (agent) =>
+            new AgentPublisher(agent);
+        this.publisherFactory = options.publisherFactory ?? defaultPublisherFactory;
     }
 
     /**
@@ -66,8 +77,8 @@ export class AgentExecutor {
             .filter((pk): pk is string => !!pk);
 
         if (senderPubkeys.length > 0) {
-            const pubkeyService = getPubkeyService();
-            void pubkeyService.warmUserProfiles(senderPubkeys).catch((error) => {
+            const identityService = getIdentityService();
+            void identityService.warmUserProfiles(senderPubkeys).catch((error) => {
                 logger.debug("[AgentExecutor] Best-effort profile warming failed", {
                     error: error instanceof Error ? error.message : String(error),
                 });
@@ -93,7 +104,7 @@ export class AgentExecutor {
             projectBasePath: projectPath || "",
             workingDirectory: projectPath || "",
             currentBranch: "main",
-            agentPublisher: {} as AgentPublisher,
+            agentPublisher: {} as AgentRuntimePublisher,
             ralNumber: 0,
             conversationStore: {} as ConversationStore,
             getConversation: () => ({} as ConversationStore),
@@ -230,7 +241,7 @@ export class AgentExecutor {
 
                     const conversation = context.getConversation();
                     if (conversation) {
-                        const agentPublisher = new AgentPublisher(context.agent);
+                        const agentPublisher = this.publisherFactory(context.agent);
                         try {
                             await agentPublisher.error(
                                 {
@@ -295,13 +306,24 @@ export class AgentExecutor {
     ): {
         fullContext: FullRuntimeContext;
         toolTracker: ToolExecutionTracker;
-        agentPublisher: AgentPublisher;
+        agentPublisher: AgentRuntimePublisher;
         cleanup: () => Promise<void>;
     } {
         const toolTracker = new ToolExecutionTracker();
-        const agentPublisher = new AgentPublisher(context.agent);
+        const agentPublisher = this.publisherFactory(context.agent);
         const conversationStore = ConversationStore.getOrLoad(context.conversationId);
         const projectContext = getProjectContext();
+
+        logger.debug("[AgentExecutor] Created runtime publisher", {
+            agent: context.agent.slug,
+            conversationId: shortenConversationId(context.conversationId),
+            publisherImplementation: agentPublisher.constructor?.name ?? "unknown",
+        });
+        trace.getActiveSpan()?.addEvent("runtime.publisher_created", {
+            "agent.slug": context.agent.slug,
+            "conversation.id": shortenConversationId(context.conversationId),
+            "publisher.implementation": agentPublisher.constructor?.name ?? "unknown",
+        });
 
         const fullContext: FullRuntimeContext = {
             agent: context.agent,
@@ -336,7 +358,7 @@ export class AgentExecutor {
     private async executeOnce(
         context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
-        agentPublisher: AgentPublisher,
+        agentPublisher: AgentRuntimePublisher,
         ralNumber: number
     ): Promise<NDKEvent | undefined> {
         let result: StreamExecutionResult;

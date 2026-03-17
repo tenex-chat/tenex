@@ -1,10 +1,12 @@
-import type { AgentInstance } from "@/agents/types";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
+import { AgentPublishError } from "./AgentPublishError";
 import { AgentEventEncoder } from "./AgentEventEncoder";
 import { injectTraceContext } from "./trace-context";
 import type {
@@ -24,11 +26,11 @@ import type {
  * Comprehensive publisher for all agent-related Nostr events.
  * Handles agent creation, responses, completions, and delegations.
  */
-export class AgentPublisher {
-    private agent: AgentInstance;
+export class AgentPublisher implements AgentRuntimePublisher {
+    private agent: RuntimePublishAgent;
     private encoder: AgentEventEncoder;
 
-    constructor(agent: AgentInstance) {
+    constructor(agent: RuntimePublishAgent) {
         this.agent = agent;
         this.encoder = new AgentEventEncoder();
     }
@@ -124,7 +126,15 @@ export class AgentPublisher {
                 tagCount: event.tags?.length || 0,
                 rawEvent: JSON.stringify(event.rawEvent()),
             });
-            throw error;
+            const message = error instanceof Error ? error.message : String(error);
+            throw new AgentPublishError(
+                `Failed to publish ${eventType}: ${message}`,
+                {
+                    cause: error,
+                    event,
+                    eventType,
+                }
+            );
         }
     }
 
@@ -142,6 +152,18 @@ export class AgentPublisher {
             throw new Error("Cannot add delegation tag: conversationId is required in context for delegation events");
         }
         event.tags.push(["delegation", context.conversationId]);
+    }
+
+    /**
+     * Guard delegation-style flows that require a parent conversation ID before
+     * runtime accounting/logging touches the context.
+     */
+    private assertConversationId(context: EventContext, eventType: string): void {
+        if (!context.conversationId) {
+            throw new Error(
+                `Cannot add delegation tag: conversationId is required in context for ${eventType} events`
+            );
+        }
     }
 
     /**
@@ -230,6 +252,7 @@ export class AgentPublisher {
      * Publish a delegation event
      */
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
+        this.assertConversationId(context, "delegation");
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);
@@ -279,6 +302,7 @@ export class AgentPublisher {
      * Returns the published NDKEvent so callers can create a ConversationStore.
      */
     async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
+        this.assertConversationId(context, "delegation");
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
         const event = new NDKEvent(ndk);

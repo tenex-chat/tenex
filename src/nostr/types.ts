@@ -4,6 +4,7 @@
  */
 
 import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // ============================================================================
@@ -199,10 +200,16 @@ export interface EventContext {
      * trigger the current execution (e.g., a user responding to an ask).
      *
      * Resolved by createEventContext() (layer 3, in services/event-context/) from the
-     * ConversationStore's delegation chain. This avoids layer violations - neither
-     * AgentPublisher nor AgentEventEncoder (layer 2) can import ConversationStore (layer 3).
+    * ConversationStore's delegation chain. This avoids layer violations - neither
+    * AgentPublisher nor AgentEventEncoder (layer 2) can import ConversationStore (layer 3).
      */
     completionRecipientPubkey?: string;
+    /**
+     * Transport-aware identity for the completion recipient.
+     * This preserves the canonical principal for non-Nostr gateways even when the
+     * compatibility bridge must synthesize a temporary pubkey for legacy consumers.
+     */
+    completionRecipientPrincipal?: PrincipalRef;
 }
 
 // ============================================================================

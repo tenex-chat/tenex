@@ -7,15 +7,17 @@
 
 import { beforeEach, afterEach } from "bun:test";
 
+const singletonModulesPromise = Promise.all([
+    import("@/services/ral/RALRegistry"),
+    import("@/conversations/ConversationStore"),
+    import("@/llm/providers/registry/ProviderRegistry"),
+]);
+
 /**
  * Reset all singletons to ensure clean state between tests
  */
 async function resetSingletons(): Promise<void> {
-    const [{ RALRegistry }, { ConversationStore }, { ProviderRegistry }] = await Promise.all([
-        import("@/services/ral/RALRegistry"),
-        import("@/conversations/ConversationStore"),
-        import("@/llm/providers/registry/ProviderRegistry"),
-    ]);
+    const [{ RALRegistry }, { ConversationStore }, { ProviderRegistry }] = await singletonModulesPromise;
 
     // Reset RALRegistry singleton
     // @ts-expect-error - accessing private static for testing

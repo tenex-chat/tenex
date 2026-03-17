@@ -95,6 +95,33 @@ describe("conversation-transcript-formatter", () => {
     expect(xml).not.toContain("<tool");
   });
 
+  it("prefers principal snapshots for author and recipient labels", () => {
+    const entries: ConversationEntry[] = [
+      {
+        pubkey: "linked-user-pubkey",
+        senderPrincipal: {
+          id: "telegram:user:42",
+          transport: "telegram",
+          linkedPubkey: "linked-user-pubkey",
+          displayName: "Alice Telegram",
+        },
+        content: "transport-linked message",
+        messageType: "text",
+        timestamp: 150,
+        targetedPubkeys: ["recipient-1-pubkey"],
+        targetedPrincipals: [{
+          id: "telegram:group:99",
+          transport: "telegram",
+          displayName: "Ops Room",
+        }],
+      },
+    ];
+
+    const { xml } = renderConversationXml(entries, { includeToolCalls: false });
+    expect(xml).toContain('author="Alice Telegram"');
+    expect(xml).toContain('recipient="Ops Room"');
+  });
+
   it("falls back to truncated raw args for MCP tools without transcript attrs", () => {
     const entries: ConversationEntry[] = [
       {

@@ -1,3 +1,4 @@
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ProjectDTag } from "@/types/project-ids";
 
 /** Role types that can be used for message injection */
@@ -120,6 +121,10 @@ export interface QueuedInjection {
   queuedAt: number;
   /** Original sender pubkey (for message attribution when sender differs from expected) */
   senderPubkey?: string;
+  /** Optional transport-neutral sender metadata */
+  senderPrincipal?: PrincipalRef;
+  /** Optional transport-neutral recipient metadata */
+  targetedPrincipals?: PrincipalRef[];
   /** Original Nostr event ID (for deduplication - prevents double-insertion via both addEvent and injection paths) */
   eventId?: string;
 }

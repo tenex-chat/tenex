@@ -1,4 +1,5 @@
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { EventContext } from "@/nostr/types";
 import type { ToolExecutionContext } from "@/tools/types";
 
@@ -6,6 +7,47 @@ export interface CreateEventContextOptions {
     model?: string;
     /** Incremental LLM runtime in milliseconds since last event was published */
     llmRuntime?: number;
+}
+
+function getTagValue(
+    event: Pick<ToolExecutionContext["triggeringEvent"], "tags"> & { tagValue?: (tag: string) => string | undefined },
+    tagName: string
+): string | undefined {
+    if (typeof event.tagValue === "function") {
+        return event.tagValue(tagName);
+    }
+
+    return event.tags.find((tag) => tag[0] === tagName)?.[1];
+}
+
+function inferTransport(principalId: string, explicitTransport?: string): PrincipalRef["transport"] {
+    if (explicitTransport) {
+        return explicitTransport as PrincipalRef["transport"];
+    }
+
+    const separatorIndex = principalId.indexOf(":");
+    return separatorIndex === -1
+        ? "nostr"
+        : (principalId.substring(0, separatorIndex) as PrincipalRef["transport"]);
+}
+
+function fallbackPrincipalFromTriggeringEvent(
+    event: ToolExecutionContext["triggeringEvent"]
+): PrincipalRef {
+    const principalId = getTagValue(event, "principal");
+    if (principalId) {
+        return {
+            id: principalId,
+            transport: inferTransport(principalId, getTagValue(event, "transport")),
+            linkedPubkey: event.pubkey,
+        };
+    }
+
+    return {
+        id: `nostr:${event.pubkey}`,
+        transport: "nostr",
+        linkedPubkey: event.pubkey,
+    };
 }
 
 /**
@@ -66,6 +108,50 @@ export function resolveCompletionRecipient(
     return undefined;
 }
 
+export function resolveCompletionRecipientPrincipal(
+    conversationStore: ConversationStore | undefined,
+    triggeringEvent: ToolExecutionContext["triggeringEvent"] | undefined
+): PrincipalRef | undefined {
+    if (!triggeringEvent) {
+        return undefined;
+    }
+
+    const fallbackPrincipal = fallbackPrincipalFromTriggeringEvent(triggeringEvent);
+
+    if (!conversationStore) {
+        return fallbackPrincipal;
+    }
+
+    const delegationChain = conversationStore.metadata?.delegationChain;
+    if (delegationChain && delegationChain.length >= 2) {
+        const immediateDelegator = delegationChain[delegationChain.length - 2];
+        const origin = delegationChain[0];
+
+        if (triggeringEvent.pubkey !== origin.pubkey) {
+            return {
+                id: `nostr:${immediateDelegator.pubkey}`,
+                transport: "nostr",
+                linkedPubkey: immediateDelegator.pubkey,
+                displayName: immediateDelegator.displayName,
+                kind: immediateDelegator.isUser ? "human" : "agent",
+            };
+        }
+    }
+
+    const messages = conversationStore.getAllMessages();
+    let triggeringMessage = undefined;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.eventId === triggeringEvent.id) {
+            triggeringMessage = message;
+            break;
+        }
+    }
+
+    return triggeringMessage?.senderPrincipal ?? fallbackPrincipal;
+}
+
 /**
  * Create EventContext for publishing events.
  * Handles missing conversation context gracefully (e.g., in MCP context).
@@ -95,6 +181,10 @@ export function createEventContext(
     // Resolve completion recipient from delegation chain (layer-3 operation)
     // This pre-resolves the pubkey so AgentEventEncoder (layer 2) doesn't need to import ConversationStore
     const completionRecipientPubkey = resolveCompletionRecipient(conversation, context.triggeringEvent?.pubkey);
+    const completionRecipientPrincipal = resolveCompletionRecipientPrincipal(
+        conversation,
+        context.triggeringEvent
+    );
 
     return {
         triggeringEvent: context.triggeringEvent,
@@ -104,5 +194,6 @@ export function createEventContext(
         ralNumber: context.ralNumber,
         llmRuntime: opts.llmRuntime,
         completionRecipientPubkey,
+        completionRecipientPrincipal,
     };
 }

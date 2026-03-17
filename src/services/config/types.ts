@@ -12,6 +12,7 @@ import { z } from "zod";
 export interface TenexConfig {
     // Global fields
     whitelistedPubkeys?: string[];
+    whitelistedIdentities?: string[];
     tenexPrivateKey?: string; // Backend private key for publishing TENEX announcements
     backendName?: string; // Name for the TENEX backend profile (default: "tenex backend")
     projectsBase?: string; // Base directory for all projects (default: ~/tenex)
@@ -99,6 +100,7 @@ export interface TenexConfig {
 
 export const TenexConfigSchema = z.object({
     whitelistedPubkeys: z.array(z.string()).optional(),
+    whitelistedIdentities: z.array(z.string()).optional(),
     tenexPrivateKey: z.string().optional(),
     backendName: z.string().optional(),
     projectsBase: z.string().optional(),

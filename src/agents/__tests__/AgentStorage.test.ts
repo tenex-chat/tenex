@@ -295,6 +295,63 @@ describe("AgentStorage", () => {
             expect(loaded?.default?.tools).toEqual(newTools);
         });
 
+        it("should update default Telegram config and migrate off legacy top-level telegram", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                telegram: {
+                    botToken: "legacy-token",
+                    allowDMs: true,
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                telegram: {
+                    botToken: "updated-token",
+                    allowDMs: false,
+                    authorizedIdentityIds: ["telegram:user:42"],
+                },
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.telegram).toEqual({
+                botToken: "updated-token",
+                allowDMs: false,
+                authorizedIdentityIds: ["telegram:user:42"],
+            });
+            expect(loaded?.telegram).toBeUndefined();
+        });
+
+        it("should clear default Telegram config when updated with undefined", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "token",
+                        allowDMs: true,
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultTelegramConfig(signer.pubkey, undefined);
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.telegram).toBeUndefined();
+        });
+
         it("should return false for non-existent agent", async () => {
             const success = await storage.updateDefaultConfig("nonexistent-pubkey", {
                 model: "anthropic:claude-opus-4",
@@ -900,6 +957,91 @@ describe("AgentStorage", () => {
 
             await storage.updateProjectScopedIsPM(signer.pubkey, "project-1", undefined);
             loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides).toBeUndefined();
+        });
+
+        it("should update project Telegram config while preserving other override fields", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "default-token",
+                        allowDMs: true,
+                    },
+                },
+                projectOverrides: {
+                    "project-1": {
+                        model: "anthropic:claude-opus-4",
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectTelegramConfig(
+                signer.pubkey,
+                "project-1",
+                {
+                    botToken: "project-token",
+                    allowDMs: false,
+                    chatBindings: [{ chatId: "-1001", title: "Ops" }],
+                }
+            );
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]).toEqual({
+                model: "anthropic:claude-opus-4",
+                telegram: {
+                    botToken: "project-token",
+                    allowDMs: false,
+                    chatBindings: [{ chatId: "-1001", title: "Ops" }],
+                },
+            });
+        });
+
+        it("should clear project Telegram override when it matches defaults", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "shared-token",
+                        allowDMs: true,
+                    },
+                },
+                projectOverrides: {
+                    "project-1": {
+                        telegram: {
+                            botToken: "project-token",
+                            allowDMs: false,
+                        },
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectTelegramConfig(
+                signer.pubkey,
+                "project-1",
+                {
+                    botToken: "shared-token",
+                    allowDMs: true,
+                }
+            );
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.projectOverrides).toBeUndefined();
         });
     });

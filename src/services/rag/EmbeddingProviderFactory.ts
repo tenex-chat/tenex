@@ -6,6 +6,7 @@ import { logger } from "@/utils/logger";
 import {
     type EmbeddingProvider,
     LocalTransformerEmbeddingProvider,
+    MockEmbeddingProvider,
     OpenAIEmbeddingProvider,
 } from "@/services/embedding";
 
@@ -107,6 +108,10 @@ export class EmbeddingProviderFactory {
         const embeddingConfig = customConfig || (await EmbeddingProviderFactory.loadConfiguration(options));
 
         logger.debug(`Creating embedding provider: ${embeddingConfig.provider}/${embeddingConfig.model}`);
+
+        if (process.env.USE_MOCK_LLM === "true") {
+            return new MockEmbeddingProvider(`mock/${embeddingConfig.model}`);
+        }
 
         // Local provider
         if (embeddingConfig.provider === "local") {

@@ -24,10 +24,8 @@ Keep it current by rewriting it in place.
 Do not maintain a chronological log unless the sequence itself matters.
 
 Prefer compact current state:
-- key/value entries for the current objective, thesis, findings, side effects, open questions, or next steps
-- freeform notes only when structure would get in the way
-
-You may choose any entry names that fit the task.
+- concise notes covering the current objective, thesis, findings, side effects, open questions, or next steps
+- rewrite the note in place as the situation changes instead of growing a long running log
 
 Once important tool results are captured in the scratchpad, remove stale tool calls from active context.`,
 };

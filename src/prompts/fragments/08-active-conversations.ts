@@ -3,7 +3,7 @@ import { conversationRegistry } from "@/conversations/ConversationRegistry";
 import type { DelegationChainEntry } from "@/conversations/types";
 import { formatRelativeTimeShort } from "@/lib/time";
 import { RALRegistry } from "@/services/ral/RALRegistry";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import type { PromptFragment } from "../core/types";
@@ -281,7 +281,7 @@ function loadActiveConversations(
     }
 
     const ralRegistry = RALRegistry.getInstance();
-    const pubkeyService = getPubkeyService();
+    const identityService = getIdentityService();
 
     // Get all active RAL entries for this project
     const activeEntries = ralRegistry.getActiveEntriesForProject(projectId);
@@ -325,7 +325,7 @@ function loadActiveConversations(
             }
 
             // Get agent name
-            const agentName = pubkeyService.getNameSync(primaryEntry.agentPubkey);
+            const agentName = identityService.getNameSync(primaryEntry.agentPubkey);
 
             candidateEntries.push({
                 conversationId,
