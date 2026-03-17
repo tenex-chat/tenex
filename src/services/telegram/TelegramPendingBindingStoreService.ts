@@ -3,6 +3,8 @@ import { logger } from "@/utils/logger";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+const PENDING_BINDING_TTL_MS = 1000 * 60 * 60 * 24;
+
 export interface TelegramPendingProjectOption {
     projectId: string;
     title: string;
@@ -17,6 +19,10 @@ export interface TelegramPendingBindingRecord {
 
 function makeKey(agentPubkey: string, channelId: string): string {
     return `${agentPubkey}::${channelId}`;
+}
+
+function isExpired(record: TelegramPendingBindingRecord, now: number = Date.now()): boolean {
+    return now - record.requestedAt > PENDING_BINDING_TTL_MS;
 }
 
 export class TelegramPendingBindingStore {
@@ -44,11 +50,24 @@ export class TelegramPendingBindingStore {
 
     getPending(agentPubkey: string, channelId: string): TelegramPendingBindingRecord | undefined {
         this.ensureLoaded();
-        return this.pending.get(makeKey(agentPubkey, channelId));
+        const key = makeKey(agentPubkey, channelId);
+        const record = this.pending.get(key);
+        if (!record) {
+            return undefined;
+        }
+
+        if (isExpired(record)) {
+            this.pending.delete(key);
+            this.persist();
+            return undefined;
+        }
+
+        return record;
     }
 
     rememberPending(record: TelegramPendingBindingRecord): TelegramPendingBindingRecord {
         this.ensureLoaded();
+        this.pruneExpired();
         this.pending.set(makeKey(record.agentPubkey, record.channelId), record);
         this.persist();
         return record;
@@ -72,11 +91,24 @@ export class TelegramPendingBindingStore {
         }
 
         try {
+            let droppedExpiredRecords = false;
             const parsed = JSON.parse(readFileSync(this.storagePath, "utf8")) as TelegramPendingBindingRecord[];
             for (const record of parsed) {
+                if (!record.agentPubkey || !record.channelId) {
+                    continue;
+                }
+
+                if (isExpired(record)) {
+                    droppedExpiredRecords = true;
+                    continue;
+                }
+
                 if (record.agentPubkey && record.channelId) {
                     this.pending.set(makeKey(record.agentPubkey, record.channelId), record);
                 }
+            }
+            if (droppedExpiredRecords) {
+                this.persist();
             }
         } catch (error) {
             logger.warn("[TelegramPendingBindingStore] Failed to load pending bindings", {
@@ -98,6 +130,23 @@ export class TelegramPendingBindingStore {
                 storagePath: this.storagePath,
                 error: error instanceof Error ? error.message : String(error),
             });
+        }
+    }
+
+    private pruneExpired(now: number = Date.now()): void {
+        let changed = false;
+
+        for (const [key, record] of this.pending.entries()) {
+            if (!isExpired(record, now)) {
+                continue;
+            }
+
+            this.pending.delete(key);
+            changed = true;
+        }
+
+        if (changed) {
+            this.persist();
         }
     }
 }
