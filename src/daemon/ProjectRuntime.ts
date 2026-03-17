@@ -7,7 +7,6 @@ import { checkSupervisionHealth, registerDefaultHeuristics } from "@/agents/supe
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
 import { NDKMCPTool } from "@/events/NDKMCPTool";
-import { createDefaultRuntimePublisherFactory } from "@/events/runtime/createDefaultRuntimePublisherFactory";
 import { getNDK } from "@/nostr";
 import { ProjectContext } from "@/services/projects";
 import { projectContextStore } from "@/services/projects";
@@ -20,6 +19,7 @@ import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
+import { createDefaultRuntimePublisherFactory } from "@/services/runtime/runtime-publisher-factory";
 import { getTelegramGatewayCoordinator } from "@/services/telegram/TelegramGatewayCoordinator";
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
