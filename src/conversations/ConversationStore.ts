@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import { join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { TodoItem } from "@/services/ral/types";
 import { buildPromptMessagesFromRecords } from "./PromptBuilder";
 import { ensureConversationRecord } from "./record-id";
@@ -171,8 +171,8 @@ export class ConversationStore {
         return conversationRegistry.has(conversationId);
     }
 
-    static async create(event: NDKEvent, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
-        return conversationRegistry.create(event, principalContext);
+    static async create(envelope: InboundEnvelope, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
+        return conversationRegistry.create(envelope, principalContext);
     }
 
     static findByEventId(eventId: string): ConversationStore | undefined {
@@ -183,20 +183,20 @@ export class ConversationStore {
         return conversationRegistry.getAll();
     }
 
-    static cacheEvent(event: NDKEvent): void {
-        conversationRegistry.cacheEvent(event);
+    static cacheEnvelope(envelope: InboundEnvelope): void {
+        conversationRegistry.cacheEnvelope(envelope);
     }
 
-    static getCachedEvent(eventId: string): NDKEvent | undefined {
-        return conversationRegistry.getCachedEvent(eventId);
+    static getCachedEnvelope(nativeId: string): InboundEnvelope | undefined {
+        return conversationRegistry.getCachedEnvelope(nativeId);
     }
 
-    static async addEvent(
+    static async addEnvelope(
         conversationId: string,
-        event: NDKEvent,
+        envelope: InboundEnvelope,
         principalContext?: MessagePrincipalContext
     ): Promise<void> {
-        return conversationRegistry.addEvent(conversationId, event, principalContext);
+        return conversationRegistry.addEnvelope(conversationId, envelope, principalContext);
     }
 
     static setConversationTitle(conversationId: string, title: string): void {
@@ -813,69 +813,55 @@ export class ConversationStore {
         return this.blockedAgentsSet;
     }
 
-    // Event Message Operations
+    // Envelope Message Operations
 
-    private static extractTargetedPubkeys(event: NDKEvent): string[] {
-        const pTags = event.getMatchingTags("p");
-        if (pTags.length === 0) return [];
-        const targeted: string[] = [];
-        for (const pTag of pTags) {
-            const pubkey = pTag[1];
-            if (pubkey) targeted.push(pubkey);
-        }
-        return targeted;
-    }
-
-    private static buildDefaultSenderPrincipal(event: NDKEvent): PrincipalSnapshot {
-        return {
-            id: `nostr:${event.pubkey}`,
-            transport: "nostr",
-            linkedPubkey: event.pubkey,
-        };
-    }
-
-    private static buildDefaultTargetedPrincipals(event: NDKEvent): PrincipalSnapshot[] | undefined {
-        const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
-        if (targetedPubkeys.length === 0) {
-            return undefined;
-        }
-
-        return targetedPubkeys.map((pubkey) => ({
-            id: `nostr:${pubkey}`,
-            transport: "nostr",
-            linkedPubkey: pubkey,
-        }));
-    }
-
-    addEventMessage(
-        event: NDKEvent,
+    addEnvelopeMessage(
+        envelope: InboundEnvelope,
         isFromAgent: boolean,
         principalContext?: MessagePrincipalContext
     ): void {
-        if (!event.id) return;
-        if (event.kind !== 1) return;
-        if (event.tagValue("tool")) return;
-        if (this.hasEventId(event.id)) return;
+        const nativeId = envelope.message.nativeId;
+        if (!nativeId) return;
+        if (envelope.metadata.eventKind !== undefined && envelope.metadata.eventKind !== 1) return;
+        if (envelope.metadata.toolName) return;
+        if (this.hasEventId(nativeId)) return;
 
-        const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
+        const targetedPubkeys = envelope.recipients
+            .map((r) => r.linkedPubkey)
+            .filter((pk): pk is string => !!pk);
+
+        const defaultTargetedPrincipals = targetedPubkeys.length > 0
+            ? envelope.recipients.map((r) => ({
+                  id: r.id,
+                  transport: r.transport,
+                  linkedPubkey: r.linkedPubkey,
+              }))
+            : undefined;
+
         const targetedPrincipals =
             principalContext?.targetedPrincipals?.length
                 ? principalContext.targetedPrincipals
-                : ConversationStore.buildDefaultTargetedPrincipals(event);
+                : defaultTargetedPrincipals;
+
+        const senderPrincipal: PrincipalSnapshot = principalContext?.senderPrincipal ?? {
+            id: envelope.principal.id,
+            transport: envelope.principal.transport,
+            linkedPubkey: envelope.principal.linkedPubkey,
+        };
+
         this.addMessage({
-            pubkey: event.pubkey,
-            content: event.content,
+            pubkey: envelope.principal.linkedPubkey ?? envelope.principal.id,
+            content: envelope.content,
             messageType: "text",
-            eventId: event.id,
-            timestamp: event.created_at,
+            eventId: nativeId,
+            timestamp: envelope.occurredAt,
             targetedPubkeys: targetedPubkeys.length > 0 ? targetedPubkeys : undefined,
             targetedPrincipals,
-            senderPrincipal:
-                principalContext?.senderPrincipal ?? ConversationStore.buildDefaultSenderPrincipal(event),
+            senderPrincipal,
         });
 
         if (!isFromAgent) {
-            this.state.metadata.last_user_message = event.content;
+            this.state.metadata.last_user_message = envelope.content;
         }
     }
 

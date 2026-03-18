@@ -35,5 +35,13 @@ export interface InboundEnvelope {
     metadata: {
         eventKind?: number;
         eventTagCount?: number;
+        toolName?: string;
+        statusValue?: string;
+        branchName?: string;
+        articleReferences?: string[];
+        replyTargets?: string[];
+        delegationParentConversationId?: string;
+        nudgeEventIds?: string[];
+        skillEventIds?: string[];
     };
 }
