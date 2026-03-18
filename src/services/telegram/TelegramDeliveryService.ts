@@ -2,7 +2,7 @@ import type { RuntimeAgentRef } from "@/events/runtime/RuntimeAgent";
 import type { EventContext } from "@/nostr/types";
 import { renderTelegramMessage } from "@/services/telegram/telegram-message-renderer";
 import { logger } from "@/utils/logger";
-import { parseTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import { parseTelegramChannelId } from "@/lib/telegram-identifiers";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 
 function getTagValue(event: EventContext["triggeringEvent"], tagName: string): string | undefined {
@@ -10,7 +10,7 @@ function getTagValue(event: EventContext["triggeringEvent"], tagName: string): s
         return event.tagValue(tagName);
     }
 
-    return event.tags.find((tag) => tag[0] === tagName)?.[1];
+    return event.tags.find((tag: string[]) => tag[0] === tagName)?.[1];
 }
 
 function isTelegramContext(context: EventContext): boolean {

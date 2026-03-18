@@ -15,7 +15,7 @@ import { projectContextStore, type ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
-import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import { createTelegramChannelId } from "@/lib/telegram-identifiers";
 import type {
     TelegramBotIdentity,
     TelegramGatewayBinding,

@@ -3,7 +3,7 @@ import { getIdentityBindingStore } from "@/services/identity";
 import {
     createTelegramChannelId,
     createTelegramNativeMessageId,
-} from "@/services/telegram/telegram-identifiers";
+} from "@/lib/telegram-identifiers";
 import type {
     TelegramGatewayBinding,
     TelegramInboundEnvelopeResult,

@@ -3,7 +3,7 @@ import { NDKKind } from "@/nostr/kinds";
 import {
     parseTelegramChannelId,
     parseTelegramNativeMessageId,
-} from "@/services/telegram/telegram-identifiers";
+} from "@/lib/telegram-identifiers";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createHash } from "node:crypto";
 

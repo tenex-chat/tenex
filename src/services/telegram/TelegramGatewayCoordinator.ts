@@ -20,7 +20,7 @@ import { getTelegramChannelBindingStore } from "@/services/telegram/TelegramChan
 import { getTelegramPendingBindingStore } from "@/services/telegram/TelegramPendingBindingStoreService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
-import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import { createTelegramChannelId } from "@/lib/telegram-identifiers";
 import { logger } from "@/utils/logger";
 
 interface TelegramRuntimeRegistration {

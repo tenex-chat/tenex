@@ -21,17 +21,17 @@ function getTagValue(event: NDKEvent, tagName: string): string | undefined {
 
 function getTagValues(event: NDKEvent, tagName: string): string[] {
     const directValues = event.getMatchingTags(tagName)
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
+        .map((tag: string[]) => tag[1])
+        .filter((value: string | undefined): value is string => !!value);
 
     if (directValues.length > 0) {
         return directValues;
     }
 
     return event.tags
-        .filter((tag) => tag[0] === tagName)
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
+        .filter((tag: string[]) => tag[0] === tagName)
+        .map((tag: string[]) => tag[1])
+        .filter((value: string | undefined): value is string => !!value);
 }
 
 export class NostrInboundAdapter {
