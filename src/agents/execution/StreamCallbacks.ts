@@ -148,6 +148,9 @@ export function createPrepareStep(
                 );
 
                 if (newInjections.length > 0) {
+                    const triggeringPrincipalId =
+                        context.triggeringEnvelope.principal.linkedPubkey ??
+                        context.triggeringEnvelope.principal.id;
                     for (const injection of newInjections) {
                         const relocated = injection.eventId
                             ? conversationStore.relocateToEnd(injection.eventId, {
@@ -161,7 +164,7 @@ export function createPrepareStep(
 
                         if (!relocated) {
                             conversationStore.addMessage({
-                                pubkey: context.triggeringEvent.pubkey,
+                                pubkey: triggeringPrincipalId,
                                 ral: ralNumber,
                                 content: injection.content,
                                 messageType: "text",
@@ -235,7 +238,6 @@ export function createPrepareStep(
                     nudgeToolPermissions,
                     skillContent,
                     skills,
-                    respondingToPubkey: context.triggeringEvent.pubkey,
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
@@ -245,7 +247,7 @@ export function createPrepareStep(
                 updateReminderData({
                     agent: context.agent,
                     conversation,
-                    respondingToPubkey: context.triggeringEvent.pubkey,
+                    respondingToPrincipal: context.triggeringEnvelope.principal,
                     pendingDelegations,
                     completedDelegations,
                 });

@@ -70,12 +70,14 @@ mock.module("@/services/dispatch/AgentRouter", () => ({
     AgentRouter: {
         resolveDelegationTarget: mock(() => null),
         unblockAgent: mock(() => ({ unblocked: false })),
-        resolveTargetAgents: mock((event: any, projectCtx: any, conversation: any) => {
-            const pTags = event.tags?.filter((tag: any) => tag[0] === "p") || [];
+        resolveTargetAgents: mock((envelope: any, projectCtx: any, conversation: any) => {
+            const recipientPubkeys = (envelope.recipients || [])
+                .map((recipient: any) => recipient.linkedPubkey)
+                .filter(Boolean);
             const agents: any[] = [];
-            for (const tag of pTags) {
-                const agent = projectCtx.getAgentByPubkey(tag[1]);
-                if (agent && !(conversation?.isAgentBlocked(tag[1]))) {
+            for (const pubkey of recipientPubkeys) {
+                const agent = projectCtx.getAgentByPubkey(pubkey);
+                if (agent && !(conversation?.isAgentBlocked(pubkey))) {
                     agents.push(agent);
                 }
             }
@@ -107,7 +109,7 @@ mock.module("@/conversations/services/ConversationSummarizer", () => ({
 
 // Mock ConfigService
 const createExecutionContextMock = async (params: any) => {
-    const branchTag = params.triggeringEvent?.tags?.find((tag: string[]) => tag[0] === "branch")?.[1];
+    const branchTag = params.triggeringEnvelope?.metadata?.branchName;
     let workingDirectory = params.projectBasePath;
     let currentBranch = "master";
 
@@ -137,7 +139,7 @@ const createExecutionContextMock = async (params: any) => {
         projectBasePath: params.projectBasePath,
         workingDirectory,
         currentBranch,
-        triggeringEvent: params.triggeringEvent,
+        triggeringEnvelope: params.triggeringEnvelope,
         agentPublisher: params.agentPublisher,
         isDelegationCompletion: params.isDelegationCompletion,
         hasPendingDelegations: params.hasPendingDelegations,
@@ -152,7 +154,7 @@ describe("Delegation Event Filtering Bug", () => {
     let ConversationStore: typeof import("@/conversations/ConversationStore").ConversationStore;
     let mockAgentExecutor: AgentExecutor;
     let mockProjectContext: any;
-    let addEventSpy: ReturnType<typeof spyOn>;
+    let addEnvelopeSpy: ReturnType<typeof spyOn>;
     let createExecutionContextSpy: ReturnType<typeof spyOn>;
     let getConfigSpy: ReturnType<typeof spyOn>;
     let handleDelegationCompletionSpy: ReturnType<typeof spyOn>;
@@ -166,8 +168,8 @@ describe("Delegation Event Filtering Bug", () => {
         }
         // Initialize ConversationStore to avoid "must be called before getOrLoad" errors
         ConversationStore.initialize("/tmp/test-metadata");
-        // Mock addEvent to avoid actual file I/O
-        addEventSpy = spyOn(ConversationStore, "addEvent").mockResolvedValue(undefined);
+        // Mock addEnvelope to avoid actual file I/O
+        addEnvelopeSpy = spyOn(ConversationStore, "addEnvelope").mockResolvedValue(undefined);
         createExecutionContextSpy = spyOn(executionContextFactoryModule, "createExecutionContext")
             .mockImplementation(createExecutionContextMock);
         getConfigSpy = spyOn(config, "getConfig").mockReturnValue({
@@ -217,13 +219,14 @@ describe("Delegation Event Filtering Bug", () => {
             },
             getAgentSlugs: () => Array.from(mockProjectContext.agents.keys()),
             project: {
+                dTag: "test-project",
                 tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
             },
         };
     });
 
     afterEach(() => {
-        addEventSpy?.mockRestore();
+        addEnvelopeSpy?.mockRestore();
         createExecutionContextSpy?.mockRestore();
         getConfigSpy?.mockRestore();
         handleDelegationCompletionSpy?.mockRestore();

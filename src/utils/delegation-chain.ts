@@ -29,9 +29,9 @@
  * (the conversation where B was delegated to, i.e., where A delegated to B)
  */
 
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationChainEntry } from "@/conversations/types";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
@@ -58,19 +58,23 @@ import { shortenConversationId } from "@/utils/conversation-id";
  * @returns The delegation chain entries, or undefined if this is a direct user message
  */
 export function buildDelegationChain(
-    event: NDKEvent,
+    envelope: InboundEnvelope,
     currentAgentPubkey: string,
     projectOwnerPubkey: string,
     currentConversationId: string
 ): DelegationChainEntry[] | undefined {
     // Check for delegation tag - if not present, this is a direct user conversation
-    const delegationTag = event.tags.find(t => t[0] === "delegation");
-    if (!delegationTag || !delegationTag[1]) {
+    const parentConversationId = envelope.metadata.delegationParentConversationId;
+    if (!parentConversationId) {
         // Direct user message - no delegation chain needed
         return undefined;
     }
 
-    const parentConversationId = delegationTag[1];
+    const senderPubkey = envelope.principal.linkedPubkey;
+    if (!senderPubkey) {
+        return undefined;
+    }
+
     const chain: DelegationChainEntry[] = [];
 
     // Get project context for agent resolution
@@ -124,7 +128,7 @@ export function buildDelegationChain(
     }
     const collectedAncestors: CollectedEntry[] = [];
 
-    // Track where the immediate delegator (event.pubkey) was delegated TO
+    // Track where the immediate delegator was delegated TO
     // This will be discovered as we walk up
     let immediateDelegatorConvId: string | undefined;
 
@@ -159,7 +163,7 @@ export function buildDelegationChain(
                 }
             }
 
-            // The immediate delegator (event.pubkey) was delegated TO in currentParentId
+            // The immediate delegator was delegated TO in currentParentId
             // (this is the conversation where the stored chain ends, where they work)
             immediateDelegatorConvId = currentParentId;
 
@@ -180,12 +184,9 @@ export function buildDelegationChain(
         const rootEventId = parentStore.getRootEventId();
         let nextParentId: string | undefined;
         if (rootEventId) {
-            const rootEvent = ConversationStore.getCachedEvent(rootEventId);
-            if (rootEvent) {
-                const parentDelegationTag = rootEvent.tags.find(t => t[0] === "delegation");
-                if (parentDelegationTag && parentDelegationTag[1]) {
-                    nextParentId = parentDelegationTag[1];
-                }
+            const rootEnvelope = ConversationStore.getCachedEnvelope(rootEventId);
+            if (rootEnvelope?.metadata.delegationParentConversationId) {
+                nextParentId = rootEnvelope.metadata.delegationParentConversationId;
             }
         }
 
@@ -204,7 +205,7 @@ export function buildDelegationChain(
         }
 
         // If the initiator is the immediate delegator, record where they were delegated TO
-        if (firstMessage.pubkey === event.pubkey && immediateDelegatorConvId === undefined) {
+        if (firstMessage.pubkey === senderPubkey && immediateDelegatorConvId === undefined) {
             immediateDelegatorConvId = nextParentId;
         }
 
@@ -234,12 +235,12 @@ export function buildDelegationChain(
         }
     }
 
-    // Add the immediate delegator (event.pubkey) if not already in chain.
+    // Add the immediate delegator if not already in chain.
     // If chain is empty, delegator is the origin (no conversationId)
     // Otherwise, delegator was delegated TO in immediateDelegatorConvId (or parentConversationId for legacy)
-    if (!seenPubkeys.has(event.pubkey) && !chain.some(e => e.pubkey === event.pubkey)) {
-        const { displayName, isUser } = resolveDisplayName(event.pubkey);
-        seenPubkeys.add(event.pubkey);
+    if (!seenPubkeys.has(senderPubkey) && !chain.some(e => e.pubkey === senderPubkey)) {
+        const { displayName, isUser } = resolveDisplayName(senderPubkey);
+        seenPubkeys.add(senderPubkey);
 
         // If chain is empty, this delegator is the origin (no conversationId)
         // Otherwise, their conversationId = where they were delegated TO
@@ -248,7 +249,7 @@ export function buildDelegationChain(
         const isOrigin = chain.length === 0;
         const delegatorConvId = isOrigin ? undefined : (immediateDelegatorConvId || parentConversationId);
         chain.push({
-            pubkey: event.pubkey,
+            pubkey: senderPubkey,
             displayName,
             isUser,
             conversationId: delegatorConvId, // Store full ID

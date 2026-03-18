@@ -1,6 +1,7 @@
 import type { SystemReminderDescriptor } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { agentTodosFragment } from "@/prompts/fragments/06-agent-todos";
 import { getIdentityService } from "@/services/identity";
@@ -12,7 +13,7 @@ import type {
 export interface TenexReminderData {
     agent: AgentInstance;
     conversation: ConversationStore;
-    respondingToPubkey: string;
+    respondingToPrincipal: PrincipalRef;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
 }
@@ -38,7 +39,13 @@ async function responseRoutingProvider(
     if (!data) return null;
 
     const identityService = getIdentityService();
-    const respondingToName = await identityService.getName(data.respondingToPubkey);
+    const respondingToName = await identityService.getDisplayName({
+        principalId: data.respondingToPrincipal.id,
+        linkedPubkey: data.respondingToPrincipal.linkedPubkey,
+        displayName: data.respondingToPrincipal.displayName,
+        username: data.respondingToPrincipal.username,
+        kind: data.respondingToPrincipal.kind,
+    });
 
     return {
         type: "response-routing",

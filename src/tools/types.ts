@@ -1,8 +1,8 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
 export interface ToolTranscriptArgSpec {
@@ -122,7 +122,7 @@ export interface ExecutionEnvironment {
      * Example: "master", "feature/branch-name", "research/foo"
      */
     currentBranch: string;
-    triggeringEvent: NDKEvent;
+    triggeringEnvelope: InboundEnvelope;
     /**
      * Access to conversation state. May return undefined before full execution setup.
      */

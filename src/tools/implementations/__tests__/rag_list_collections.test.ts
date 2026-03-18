@@ -43,7 +43,7 @@ describe("rag_list_collections tool", () => {
             } as any,
             conversationId: "mock-conversation-id",
             conversationCoordinator: {} as any,
-            triggeringEvent: {
+            triggeringEnvelope: {
                 id: "mock-triggering-event-id",
                 tags: [],
             } as any,

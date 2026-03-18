@@ -14,6 +14,7 @@ import type { EventContext } from "@/nostr/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { ToolExecutionTracker } from "../ToolExecutionTracker";
 
 // Mock the toolMessageStorage
@@ -57,10 +58,17 @@ describe("ToolExecutionTracker", () => {
 
         // Create mock EventContext
         mockEventContext = {
-            triggeringEvent: { id: "trigger-123" } as NDKEvent,
-            rootEvent: { id: "root-123" } as NDKEvent,
+            triggeringEnvelope: createMockInboundEnvelope({
+                message: {
+                    id: "trigger-123",
+                    transport: "nostr",
+                    nativeId: "trigger-123",
+                },
+            }),
+            rootEvent: { id: "root-123" },
             conversationId: "conv-123",
             model: "test:test-model",
+            ralNumber: 1,
         };
 
         // Clear all mocks

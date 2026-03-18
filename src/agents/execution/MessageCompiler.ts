@@ -45,7 +45,6 @@ export interface MessageCompilerContext {
     skillContent?: string;
     /** Individual skill data for rendering in fragments */
     skills?: SkillData[];
-    respondingToPubkey: string;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     ralNumber: number;

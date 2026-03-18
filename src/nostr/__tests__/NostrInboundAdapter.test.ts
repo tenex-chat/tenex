@@ -56,6 +56,14 @@ describe("NostrInboundAdapter", () => {
         expect(envelope.metadata).toEqual({
             eventKind: 1,
             eventTagCount: 4,
+            toolName: undefined,
+            statusValue: undefined,
+            branchName: undefined,
+            articleReferences: undefined,
+            replyTargets: ["e".repeat(64)],
+            delegationParentConversationId: undefined,
+            nudgeEventIds: undefined,
+            skillEventIds: undefined,
         });
     });
 });

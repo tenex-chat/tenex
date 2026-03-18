@@ -9,6 +9,7 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { RALRegistry } from "@/services/ral";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock NDKEvent to prevent actual signing/publishing
 const mockEventId = "mock-event-id-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd";
@@ -95,6 +96,8 @@ mock.module("@/services/ral", () => {
 
 import { createDelegateCrossProjectTool } from "@/tools/implementations/delegate_crossproject";
 
+const createTriggeringEnvelope = () => createMockInboundEnvelope();
+
 describe("delegate_crossproject - Todo enforcement", () => {
     const conversationId = "test-conversation-id-1234567890abcdef1234567890abcdef1234567890abcdef";
     const projectId = "31933:pubkey:test-project";
@@ -126,9 +129,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithTodos = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -147,9 +148,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithNoConversation = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -164,9 +163,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithoutTodos = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",

@@ -21,7 +21,6 @@ export const handleChatMessage = async (
     const envelope = inboundAdapter.toEnvelope(event);
     await runtimeIngressService.handleChatMessage({
         envelope,
-        legacyEvent: event,
         agentExecutor: context.agentExecutor,
         adapter: "NostrInboundAdapter",
     });

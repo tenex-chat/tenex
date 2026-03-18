@@ -1,8 +1,8 @@
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
 import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
 import { shortenConversationId } from "@/utils/conversation-id";
@@ -30,7 +30,7 @@ export async function createExecutionContext(params: {
      * Example: ~/tenex/{dTag}
      */
     projectBasePath: string;
-    triggeringEvent: NDKEvent;
+    triggeringEnvelope: InboundEnvelope;
     agentPublisher?: AgentRuntimePublisher;
     isDelegationCompletion?: boolean;
     hasPendingDelegations?: boolean;
@@ -42,7 +42,7 @@ export async function createExecutionContext(params: {
     mcpManager?: MCPManager;
 }): Promise<ExecutionContext> {
     return tracer.startActiveSpan("tenex.execution_context.create", async (span) => {
-        const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
+        const branchTag = params.triggeringEnvelope.metadata.branchName;
 
         span.setAttributes({
             "agent.slug": params.agent.slug,
@@ -153,7 +153,7 @@ export async function createExecutionContext(params: {
                 projectBasePath: params.projectBasePath,
                 workingDirectory,
                 currentBranch,
-                triggeringEvent: params.triggeringEvent,
+                triggeringEnvelope: params.triggeringEnvelope,
                 agentPublisher: params.agentPublisher,
                 isDelegationCompletion: params.isDelegationCompletion,
                 hasPendingDelegations: params.hasPendingDelegations,

@@ -4,23 +4,7 @@ import { AgentPublisher } from "../AgentPublisher";
 import type { AskConfig, DelegateConfig } from "../types";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "../types";
-
-/**
- * Mock interface for NDKEvent used in tests.
- * Provides type-safe mocking of event properties.
- */
-interface MockTriggeringEvent {
-    id: string;
-    tags: string[][];
-    pubkey?: string;
-}
-
-/**
- * Mock interface for root event.
- */
-interface MockRootEvent {
-    id: string;
-}
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Minimal mocks - only mock what's necessary for these specific tests
 mock.module("../ndkClient", () => ({
@@ -128,6 +112,7 @@ describe("AgentPublisher - Delegation Tag", () => {
     let capturedEvents: NDKEvent[] = [];
     let mockAgentInstance: AgentInstance;
     let publisher: AgentPublisher;
+    let publishSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         capturedEvents = [];
@@ -137,7 +122,7 @@ describe("AgentPublisher - Delegation Tag", () => {
             Promise.resolve(new Set([{ url: "wss://relay.test" }] as Array<{ url: string }>))
         );
 
-        spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
+        publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
             capturedEvents.push(this);
             return mockPublish();
         });
@@ -155,23 +140,31 @@ describe("AgentPublisher - Delegation Tag", () => {
 
     afterEach(() => {
         capturedEvents = [];
+        publishSpy?.mockRestore();
     });
 
     /**
      * Helper to create a valid EventContext for testing.
      */
     function createTestContext(overrides?: Partial<EventContext>): EventContext {
-        const triggeringEvent: MockTriggeringEvent = {
-            id: "triggering-event-id",
-            tags: [],
-            pubkey: "triggering-pubkey",
-        };
-        const rootEvent: MockRootEvent = { id: "root-event-id" };
+        const triggeringEnvelope = createMockInboundEnvelope({
+            principal: {
+                id: "triggering-pubkey",
+                transport: "nostr",
+                linkedPubkey: "triggering-pubkey",
+                kind: "human",
+            },
+            message: {
+                id: "triggering-event-id",
+                transport: "nostr",
+                nativeId: "triggering-event-id",
+            },
+        });
 
         return {
             conversationId: "parent-conversation-id",
-            triggeringEvent: triggeringEvent as unknown as NDKEvent,
-            rootEvent,
+            triggeringEnvelope,
+            rootEvent: { id: "root-event-id" },
             ralNumber: 1,
             ...overrides,
         };

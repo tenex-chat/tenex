@@ -9,44 +9,16 @@ export interface CreateEventContextOptions {
     llmRuntime?: number;
 }
 
-function getTagValue(
-    event: Pick<ToolExecutionContext["triggeringEvent"], "tags"> & { tagValue?: (tag: string) => string | undefined },
-    tagName: string
-): string | undefined {
-    if (typeof event.tagValue === "function") {
-        return event.tagValue(tagName);
-    }
-
-    return event.tags.find((tag) => tag[0] === tagName)?.[1];
-}
-
-function inferTransport(principalId: string, explicitTransport?: string): PrincipalRef["transport"] {
-    if (explicitTransport) {
-        return explicitTransport as PrincipalRef["transport"];
-    }
-
-    const separatorIndex = principalId.indexOf(":");
-    return separatorIndex === -1
-        ? "nostr"
-        : (principalId.substring(0, separatorIndex) as PrincipalRef["transport"]);
-}
-
-function fallbackPrincipalFromTriggeringEvent(
-    event: ToolExecutionContext["triggeringEvent"]
+function fallbackPrincipalFromTriggeringEnvelope(
+    envelope: ToolExecutionContext["triggeringEnvelope"]
 ): PrincipalRef {
-    const principalId = getTagValue(event, "principal");
-    if (principalId) {
-        return {
-            id: principalId,
-            transport: inferTransport(principalId, getTagValue(event, "transport")),
-            linkedPubkey: event.pubkey,
-        };
-    }
-
     return {
-        id: `nostr:${event.pubkey}`,
-        transport: "nostr",
-        linkedPubkey: event.pubkey,
+        id: envelope.principal.id,
+        transport: envelope.principal.transport,
+        linkedPubkey: envelope.principal.linkedPubkey,
+        displayName: envelope.principal.displayName,
+        username: envelope.principal.username,
+        kind: envelope.principal.kind,
     };
 }
 
@@ -55,12 +27,12 @@ function fallbackPrincipalFromTriggeringEvent(
  *
  * This function looks up the conversation's delegation chain and returns the immediate
  * delegator (second-to-last entry). This ensures completions route back up the delegation
- * stack even when RAL state is lost (e.g., daemon restart) and the triggeringEvent
+ * stack even when RAL state is lost (e.g., daemon restart) and the triggeringEnvelope
  * is from a different source (e.g., user responding to an ask).
  *
  * Exception: when the chain origin's pubkey matches the triggering event's pubkey,
  * the caller is interacting directly (not via delegation). In this case the function
- * returns undefined so the caller falls back to triggeringEvent.pubkey, avoiding
+ * returns undefined so the caller falls back to triggeringEnvelope.pubkey, avoiding
  * mis-routing the completion to the intermediate delegator.
  *
  * The delegation chain is persisted in the ConversationStore, so it survives restarts.
@@ -94,7 +66,7 @@ export function resolveCompletionRecipient(
 
         // If the chain origin directly triggered this RAL, the delegation is
         // already complete. Route back to them directly (return undefined so
-        // the caller falls back to triggeringEvent.pubkey).
+        // the caller falls back to triggeringEnvelope.pubkey).
         // In ask-resume, the original trigger is RESTORED to the delegator's
         // message, so this condition is never true there.
         if (triggeringEventPubkey && triggeringEventPubkey === origin.pubkey) {
@@ -104,19 +76,19 @@ export function resolveCompletionRecipient(
         return immediateDelegator.pubkey;
     }
 
-    // No delegation chain or chain too short - caller should fall back to triggeringEvent.pubkey
+    // No delegation chain or chain too short - caller should fall back to triggeringEnvelope.pubkey
     return undefined;
 }
 
 export function resolveCompletionRecipientPrincipal(
     conversationStore: ConversationStore | undefined,
-    triggeringEvent: ToolExecutionContext["triggeringEvent"] | undefined
+    triggeringEnvelope: ToolExecutionContext["triggeringEnvelope"] | undefined
 ): PrincipalRef | undefined {
-    if (!triggeringEvent) {
+    if (!triggeringEnvelope) {
         return undefined;
     }
 
-    const fallbackPrincipal = fallbackPrincipalFromTriggeringEvent(triggeringEvent);
+    const fallbackPrincipal = fallbackPrincipalFromTriggeringEnvelope(triggeringEnvelope);
 
     if (!conversationStore) {
         return fallbackPrincipal;
@@ -127,7 +99,7 @@ export function resolveCompletionRecipientPrincipal(
         const immediateDelegator = delegationChain[delegationChain.length - 2];
         const origin = delegationChain[0];
 
-        if (triggeringEvent.pubkey !== origin.pubkey) {
+        if (triggeringEnvelope.principal.linkedPubkey !== origin.pubkey) {
             return {
                 id: `nostr:${immediateDelegator.pubkey}`,
                 transport: "nostr",
@@ -138,12 +110,16 @@ export function resolveCompletionRecipientPrincipal(
         }
     }
 
+    if (typeof conversationStore.getAllMessages !== "function") {
+        return fallbackPrincipal;
+    }
+
     const messages = conversationStore.getAllMessages();
     let triggeringMessage = undefined;
 
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
-        if (message.eventId === triggeringEvent.id) {
+        if (message.eventId === triggeringEnvelope.message.nativeId) {
             triggeringMessage = message;
             break;
         }
@@ -160,7 +136,7 @@ export function resolveCompletionRecipientPrincipal(
  * from the delegation chain stored in ConversationStore. This ensures completions
  * route back to the immediate delegator even when:
  * - RAL state is lost (e.g., daemon restart)
- * - The triggeringEvent is from a different source (e.g., user responding to an ask)
+ * - The triggeringEnvelope is from a different source (e.g., user responding to an ask)
  *
  * When the chain origin directly triggers the RAL (direct-interaction case), the
  * resolved recipient is undefined and the completion routes to the triggering event's
@@ -176,18 +152,21 @@ export function createEventContext(
         : options ?? {};
 
     const conversation = context.getConversation?.();
-    const rootEventId = conversation?.getRootEventId() ?? context.triggeringEvent?.id;
+    const rootEventId = conversation?.getRootEventId() ?? context.triggeringEnvelope.message.nativeId;
 
     // Resolve completion recipient from delegation chain (layer-3 operation)
     // This pre-resolves the pubkey so AgentEventEncoder (layer 2) doesn't need to import ConversationStore
-    const completionRecipientPubkey = resolveCompletionRecipient(conversation, context.triggeringEvent?.pubkey);
+    const completionRecipientPubkey = resolveCompletionRecipient(
+        conversation,
+        context.triggeringEnvelope.principal.linkedPubkey
+    );
     const completionRecipientPrincipal = resolveCompletionRecipientPrincipal(
         conversation,
-        context.triggeringEvent
+        context.triggeringEnvelope
     );
 
     return {
-        triggeringEvent: context.triggeringEvent,
+        triggeringEnvelope: context.triggeringEnvelope,
         rootEvent: rootEventId ? { id: rootEventId } : {},
         conversationId: context.conversationId,
         model: opts.model ?? context.agent.llmConfig,

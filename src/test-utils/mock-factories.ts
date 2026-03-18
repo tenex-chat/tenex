@@ -1,6 +1,7 @@
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { MockToolCall } from "@/test-utils/mock-llm/types";
 import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { NDKKind } from "@/nostr/kinds";
@@ -70,6 +71,137 @@ export class MockNostrEvent implements Partial<NDKEvent> {
 
 export function createMockNDKEvent(overrides?: Partial<NDKEvent>): NDKEvent {
     return new MockNostrEvent(overrides) as NDKEvent;
+}
+
+export function createMockInboundEnvelope(overrides?: Partial<InboundEnvelope>): InboundEnvelope {
+    const defaultId = `mock-event-${Math.random().toString(36).slice(2, 11)}`;
+    const baseEnvelope: InboundEnvelope = {
+        transport: "nostr",
+        principal: {
+            id: "mock-pubkey",
+            transport: "nostr",
+            linkedPubkey: "mock-pubkey",
+            kind: "human",
+        },
+        channel: {
+            id: "mock-conversation",
+            transport: "nostr",
+            kind: "conversation",
+        },
+        message: {
+            id: defaultId,
+            transport: "nostr",
+            nativeId: defaultId,
+        },
+        recipients: [],
+        content: "Mock event content",
+        occurredAt: Date.now(),
+        capabilities: [],
+        metadata: {
+            eventKind: NDKKind.GenericReply,
+            eventTagCount: 0,
+            replyTargets: [],
+            articleReferences: [],
+            nudgeEventIds: [],
+            skillEventIds: [],
+        },
+    };
+
+    return {
+        ...baseEnvelope,
+        ...overrides,
+        principal: {
+            ...baseEnvelope.principal,
+            ...overrides?.principal,
+        },
+        channel: {
+            ...baseEnvelope.channel,
+            ...overrides?.channel,
+        },
+        message: {
+            ...baseEnvelope.message,
+            ...overrides?.message,
+        },
+        recipients: overrides?.recipients ?? baseEnvelope.recipients,
+        capabilities: overrides?.capabilities ?? baseEnvelope.capabilities,
+        metadata: {
+            ...baseEnvelope.metadata,
+            ...overrides?.metadata,
+        },
+    };
+}
+
+function normalizeMockInboundEnvelope(
+    triggeringEnvelope?: ToolRegistryContext["triggeringEnvelope"] | Partial<NDKEvent>
+): InboundEnvelope {
+    if (
+        triggeringEnvelope &&
+        typeof triggeringEnvelope === "object" &&
+        "transport" in triggeringEnvelope &&
+        "principal" in triggeringEnvelope &&
+        "channel" in triggeringEnvelope &&
+        "message" in triggeringEnvelope
+    ) {
+        return createMockInboundEnvelope(triggeringEnvelope as Partial<InboundEnvelope>);
+    }
+
+    const legacyEvent = triggeringEnvelope as Partial<NDKEvent> | undefined;
+    const branchName = legacyEvent?.tags?.find((tag) => tag[0] === "branch")?.[1];
+    const replyTargets = legacyEvent?.tags
+        ?.filter((tag) => tag[0] === "e" || tag[0] === "E")
+        .map((tag) => tag[1]) ?? [];
+    const nudgeEventIds = legacyEvent?.tags
+        ?.filter((tag) => tag[0] === "nudge")
+        .map((tag) => tag[1]) ?? [];
+    const skillEventIds = legacyEvent?.tags
+        ?.filter((tag) => tag[0] === "skill")
+        .map((tag) => tag[1]) ?? [];
+    const articleReferences = legacyEvent?.tags
+        ?.filter((tag) => tag[0] === "a")
+        .map((tag) => tag[1]) ?? [];
+    const statusValue = legacyEvent?.tags?.find((tag) => tag[0] === "status")?.[1];
+    const toolName = legacyEvent?.tags?.find((tag) => tag[0] === "tool")?.[1];
+    const delegationParentConversationId = legacyEvent?.tags?.find(
+        (tag) => tag[0] === "delegation"
+    )?.[1];
+    const recipients = legacyEvent?.tags
+        ?.filter((tag) => tag[0] === "p" && Boolean(tag[1]))
+        .map((tag) => ({
+            id: tag[1],
+            transport: "nostr" as const,
+            linkedPubkey: tag[1],
+            kind: "agent" as const,
+        })) ?? [];
+    const messageId = legacyEvent?.id ?? `mock-event-${Math.random().toString(36).slice(2, 11)}`;
+    const pubkey = legacyEvent?.pubkey ?? "mock-pubkey";
+
+    return createMockInboundEnvelope({
+        principal: {
+            id: pubkey,
+            transport: "nostr",
+            linkedPubkey: pubkey,
+            kind: "human",
+        },
+        message: {
+            id: messageId,
+            transport: "nostr",
+            nativeId: messageId,
+        },
+        recipients,
+        content: legacyEvent?.content ?? "Mock event content",
+        metadata: {
+            eventKind: legacyEvent?.kind ?? NDKKind.GenericReply,
+            eventTagCount: legacyEvent?.tags?.length ?? 0,
+            branchName,
+            articleReferences,
+            replyTargets,
+            delegationParentConversationId,
+            nudgeEventIds,
+            skillEventIds,
+            statusValue,
+            toolName,
+        },
+    });
 }
 
 export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstance {
@@ -156,7 +288,7 @@ export function createMockToolContext(
     overrides?: Partial<ToolRegistryContext>
 ): ToolRegistryContext {
     const agent = overrides?.agent || createMockAgent();
-    const mockEvent = overrides?.triggeringEvent || createMockNDKEvent();
+    const mockEvent = normalizeMockInboundEnvelope(overrides?.triggeringEnvelope);
     const conversationId =
         overrides?.conversationId || `mock-conv-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -186,7 +318,7 @@ export function createMockToolContext(
         projectBasePath: "/mock/project",
         workingDirectory: "/mock/project",
         currentBranch: "main",
-        triggeringEvent: mockEvent,
+        triggeringEnvelope: mockEvent,
         agentPublisher: mockPublisher as AgentPublisher,
         ralNumber: 1,
         conversationStore: mockConversation,

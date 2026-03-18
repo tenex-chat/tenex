@@ -62,7 +62,7 @@ import type { PendingDelegation } from "@/services/ral/types";
 import type { FullRuntimeContext } from "../types";
 import type { AgentInstance } from "@/agents/types/runtime";
 import type { CompleteEvent } from "@/llm/types";
-import { createMockNDKEvent } from "@/test-utils/mock-factories";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import {
     initializeReminderProviders,
@@ -137,10 +137,14 @@ describe("PostCompletionChecker - True Integration Test", () => {
      * Helper to create a FullRuntimeContext for testing
      */
     const createMockContext = (ralNumber: number): FullRuntimeContext => {
-        const mockEvent = createMockNDKEvent({
-            pubkey: "user-pubkey",
+        const mockEvent = createMockInboundEnvelope({
+            principal: {
+                id: "user-pubkey",
+                transport: "nostr",
+                linkedPubkey: "user-pubkey",
+                kind: "human",
+            },
             content: "Test message",
-            tags: [],
         });
 
         return {
@@ -149,7 +153,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
             projectBasePath: TEST_DIR,
             workingDirectory: TEST_DIR,
             currentBranch: "main",
-            triggeringEvent: mockEvent,
+            triggeringEnvelope: mockEvent,
             agentPublisher: {} as never,
             ralNumber,
             conversationStore,
@@ -421,7 +425,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
             updateReminderData({
                 agent: config.agent,
                 conversation: conversationStore,
-                respondingToPubkey: config.context.triggeringEvent.pubkey,
+                respondingToPubkey: config.context.triggeringEnvelope.principal.linkedPubkey,
                 pendingDelegations: [],
                 completedDelegations: [],
             });

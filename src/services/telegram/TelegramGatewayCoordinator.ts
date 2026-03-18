@@ -485,13 +485,13 @@ export class TelegramGatewayCoordinator {
                 ConversationStore.getOrLoad(session.conversationId);
             }
 
-            const legacyEvent = await this.runtimeIngressService.handleChatMessage({
+            await this.runtimeIngressService.handleChatMessage({
                 envelope,
                 agentExecutor: registration.agentExecutor,
                 adapter: this.inboundAdapter.constructor.name,
             });
 
-            const conversation = ConversationStore.findByEventId(legacyEvent.id ?? "");
+            const conversation = ConversationStore.findByEventId(envelope.message.nativeId);
             if (!conversation) {
                 throw new Error(
                     `Telegram update ${update.update_id} did not resolve a conversation for project ${registration.projectId}`
@@ -503,7 +503,7 @@ export class TelegramGatewayCoordinator {
                 agentPubkey: registration.binding.agent.pubkey,
                 channelId,
                 conversationId: conversation.id,
-                lastMessageId: legacyEvent.id ?? envelope.message.nativeId,
+                lastMessageId: envelope.message.nativeId,
             });
             this.channelBindingStore.rememberBinding({
                 agentPubkey: registration.binding.agent.pubkey,

@@ -11,7 +11,6 @@ import {
 } from "@/agents/supervision";
 import type { ToolExecutionOptions } from "@ai-sdk/provider-utils";
 import type { Tool as CoreTool } from "ai";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
@@ -62,7 +61,7 @@ export function wrapToolsWithSupervision(
                     const projectContext = getProjectContext();
 
                     // Fetch nudge content if triggering event has nudge tags
-                    const preToolNudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+                    const preToolNudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
                     const preToolNudgeContent = preToolNudgeEventIds.length > 0
                         ? await NudgeService.getInstance().fetchNudges(preToolNudgeEventIds)
                         : "";
