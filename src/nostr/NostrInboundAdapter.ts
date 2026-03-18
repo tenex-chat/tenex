@@ -44,6 +44,11 @@ export class NostrInboundAdapter {
         const messageId = toMessageId(nativeMessageId);
         const conversationAnchor = replyTarget ?? nativeMessageId;
 
+        const articleReferences = getTagValues(event, "a").filter(v => v.startsWith("30023:"));
+        const replyTargets = getTagValues(event, "e");
+        const nudgeEventIds = getTagValues(event, "nudge");
+        const skillEventIds = getTagValues(event, "skill");
+
         const channel = projectBinding
             ? {
                   id: `nostr:project:${projectBinding}`,
@@ -87,6 +92,14 @@ export class NostrInboundAdapter {
             metadata: {
                 eventKind: event.kind,
                 eventTagCount: event.tags.length,
+                toolName: getTagValue(event, "tool"),
+                statusValue: getTagValue(event, "status"),
+                branchName: getTagValue(event, "branch"),
+                articleReferences: articleReferences.length > 0 ? articleReferences : undefined,
+                replyTargets: replyTargets.length > 0 ? replyTargets : undefined,
+                delegationParentConversationId: getTagValue(event, "delegation"),
+                nudgeEventIds: nudgeEventIds.length > 0 ? nudgeEventIds : undefined,
+                skillEventIds: skillEventIds.length > 0 ? skillEventIds : undefined,
             },
         };
     }
