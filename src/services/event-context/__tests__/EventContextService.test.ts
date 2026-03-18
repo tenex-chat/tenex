@@ -6,8 +6,8 @@ import {
     resolveCompletionRecipientPrincipal,
     createEventContext,
 } from "../EventContextService";
+import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ToolExecutionContext } from "@/tools/types";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Mock logger to avoid noise during tests
 mock.module("@/utils/logger", () => ({
@@ -187,20 +187,50 @@ describe("EventContextService", () => {
     });
 
     describe("createEventContext", () => {
+        function createMockEnvelope(params: {
+            conversationId: string;
+            transport?: InboundEnvelope["transport"];
+            principal: PrincipalRef;
+            nativeId?: string;
+        }): InboundEnvelope {
+            const transport = params.transport ?? params.principal.transport;
+            const nativeId = params.nativeId ?? `event-${params.conversationId}`;
+
+            return {
+                transport,
+                principal: params.principal,
+                channel: {
+                    id: `${transport}:conversation:${params.conversationId}`,
+                    transport,
+                    kind: "conversation",
+                },
+                message: {
+                    id: `${transport}:${nativeId}`,
+                    transport,
+                    nativeId,
+                },
+                recipients: [],
+                content: "trigger",
+                occurredAt: Math.floor(Date.now() / 1000),
+                capabilities: [],
+                metadata: {},
+            };
+        }
+
         function createMockToolContext(
             conversationStore: ConversationStore | undefined,
             triggeringEventPubkey: string,
-            conversationId: string,
-            tags: string[][] = []
+            conversationId: string
         ): ToolExecutionContext {
-            const mockTriggeringEvent = {
-                pubkey: triggeringEventPubkey,
-                id: `event-${conversationId}`,
-                tags,
-            } as unknown as NDKEvent;
-
             return {
-                triggeringEvent: mockTriggeringEvent,
+                triggeringEnvelope: createMockEnvelope({
+                    conversationId,
+                    principal: {
+                        id: `nostr:${triggeringEventPubkey}`,
+                        transport: "nostr",
+                        linkedPubkey: triggeringEventPubkey,
+                    },
+                }),
                 conversationId,
                 ralNumber: 1,
                 agent: {
@@ -239,11 +269,11 @@ describe("EventContextService", () => {
                 transport: "nostr",
                 linkedPubkey: USER_PUBKEY,
             });
-            expect(eventContext.triggeringEvent.pubkey).toBe(USER_PUBKEY);
+            expect(eventContext.triggeringEnvelope.principal.linkedPubkey).toBe(USER_PUBKEY);
         });
 
         it("should include completionRecipientPubkey when delegator triggers (ask-resume)", async () => {
-            // Ask-resume case: triggeringEvent is from exec-coord (restored via originalTriggeringEventId)
+            // Ask-resume case: triggeringEnvelope is from exec-coord (restored via originalTriggeringEventId)
             const conversationId = "conv-create-context-ask";
             const store = ConversationStore.getOrLoad(conversationId);
             store.addMessage({
@@ -272,7 +302,7 @@ describe("EventContextService", () => {
                 displayName: "exec-coord",
                 kind: "agent",
             });
-            expect(eventContext.triggeringEvent.pubkey).toBe(EXEC_COORD_PUBKEY);
+            expect(eventContext.triggeringEnvelope.principal.linkedPubkey).toBe(EXEC_COORD_PUBKEY);
         });
 
         it("should set completionRecipientPubkey to undefined when no delegation chain", async () => {
@@ -299,14 +329,15 @@ describe("EventContextService", () => {
 
         it("should handle missing getConversation gracefully", () => {
             const conversationId = "conv-mcp-context";
-            const mockTriggeringEvent = {
-                pubkey: USER_PUBKEY,
-                id: `event-${conversationId}`,
-                tags: [],
-            } as unknown as NDKEvent;
-
             const toolContext = {
-                triggeringEvent: mockTriggeringEvent,
+                triggeringEnvelope: createMockEnvelope({
+                    conversationId,
+                    principal: {
+                        id: `nostr:${USER_PUBKEY}`,
+                        transport: "nostr",
+                        linkedPubkey: USER_PUBKEY,
+                    },
+                }),
                 conversationId,
                 ralNumber: 1,
                 agent: {
@@ -383,15 +414,25 @@ describe("EventContextService", () => {
             });
             await store.save();
 
-            const toolContext = createMockToolContext(
-                store,
-                USER_PUBKEY,
+            const toolContext = {
+                triggeringEnvelope: createMockEnvelope({
+                    conversationId,
+                    transport: "local",
+                    principal: {
+                        id: "local:user:42",
+                        transport: "local",
+                        linkedPubkey: USER_PUBKEY,
+                        displayName: "Alice Telegram",
+                        kind: "human",
+                    },
+                }),
                 conversationId,
-                [
-                    ["transport", "local"],
-                    ["principal", "local:user:42"],
-                ]
-            );
+                ralNumber: 1,
+                agent: {
+                    llmConfig: "test-model",
+                } as any,
+                getConversation: () => store,
+            } as ToolExecutionContext;
             const eventContext = createEventContext(toolContext);
 
             expect(eventContext.completionRecipientPubkey).toBeUndefined();
@@ -407,16 +448,31 @@ describe("EventContextService", () => {
 
     describe("resolveCompletionRecipientPrincipal", () => {
         it("falls back to transport tags when conversation state is unavailable", () => {
-            const triggeringEvent = {
-                pubkey: USER_PUBKEY,
-                id: "event-no-conversation",
-                tags: [
-                    ["transport", "local"],
-                    ["principal", "local:user:99"],
-                ],
-            } as unknown as NDKEvent;
+            const triggeringEnvelope: InboundEnvelope = {
+                transport: "local",
+                principal: {
+                    id: "local:user:99",
+                    transport: "local",
+                    linkedPubkey: USER_PUBKEY,
+                },
+                channel: {
+                    id: "local:conversation:event-no-conversation",
+                    transport: "local",
+                    kind: "conversation",
+                },
+                message: {
+                    id: "local:event-no-conversation",
+                    transport: "local",
+                    nativeId: "event-no-conversation",
+                },
+                recipients: [],
+                content: "hello",
+                occurredAt: Math.floor(Date.now() / 1000),
+                capabilities: [],
+                metadata: {},
+            };
 
-            expect(resolveCompletionRecipientPrincipal(undefined, triggeringEvent)).toEqual({
+            expect(resolveCompletionRecipientPrincipal(undefined, triggeringEnvelope)).toEqual({
                 id: "local:user:99",
                 transport: "local",
                 linkedPubkey: USER_PUBKEY,

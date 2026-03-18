@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { EventContext } from "@/nostr/types";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { StreamExecutionHandler } from "../StreamExecutionHandler";
 
 function sleep(ms: number): Promise<void> {
@@ -8,10 +8,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 function createHandler(streamTextDeltaMock: ReturnType<typeof mock>): StreamExecutionHandler {
-    const triggeringEvent = new NDKEvent();
-    triggeringEvent.id = "trigger-event-id";
-    triggeringEvent.pubkey = "trigger-pubkey";
-    triggeringEvent.tags = [];
+    const triggeringEnvelope = createMockInboundEnvelope({
+        principal: {
+            id: "trigger-pubkey",
+            transport: "nostr",
+            linkedPubkey: "trigger-pubkey",
+            kind: "human",
+        },
+        message: {
+            id: "trigger-event-id",
+            transport: "nostr",
+            nativeId: "trigger-event-id",
+        },
+    });
 
     const handler = new StreamExecutionHandler({
         context: {
@@ -27,7 +36,7 @@ function createHandler(streamTextDeltaMock: ReturnType<typeof mock>): StreamExec
             conversationStore: {
                 getMetaModelVariantOverride: () => undefined,
             },
-            triggeringEvent,
+            triggeringEnvelope,
         } as any,
         toolTracker: {} as any,
         ralNumber: 42,
@@ -45,7 +54,7 @@ function createHandler(streamTextDeltaMock: ReturnType<typeof mock>): StreamExec
     });
 
     const eventContext: EventContext = {
-        triggeringEvent,
+        triggeringEnvelope,
         rootEvent: { id: "root-event-id" },
         conversationId: "conversation-id",
         model: "anthropic:claude-haiku-4-5",

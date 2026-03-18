@@ -3,6 +3,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "../types";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 const loggerMocks = {
     debug: mock(),
@@ -48,13 +49,22 @@ describe("AgentPublisher.streamTextDelta", () => {
         } as unknown as AgentInstance;
         const publisher = new AgentPublisher(agent);
 
-        const triggeringEvent = new NDKEvent();
-        triggeringEvent.id = "trigger-id";
-        triggeringEvent.pubkey = "trigger-pubkey";
-        triggeringEvent.tags = [];
+        const triggeringEnvelope = createMockInboundEnvelope({
+            principal: {
+                id: "trigger-pubkey",
+                transport: "nostr",
+                linkedPubkey: "trigger-pubkey",
+                kind: "human",
+            },
+            message: {
+                id: "trigger-id",
+                transport: "nostr",
+                nativeId: "trigger-id",
+            },
+        });
 
         const context: EventContext = {
-            triggeringEvent,
+            triggeringEnvelope,
             rootEvent: { id: "root-event-id" },
             conversationId: "conversation-id-123",
             model: "anthropic:claude-haiku-4-5",

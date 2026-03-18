@@ -32,7 +32,7 @@ function createMockContext(): ConversationToolContext & { getTodosRaw: () => Tod
         projectBasePath: "/test/project",
         workingDirectory: "/test/project",
         currentBranch: "main",
-        triggeringEvent: {} as never,
+        triggeringEnvelope: {} as never,
         agentPublisher: {} as never,
         ralNumber: 1,
         conversationStore: mockConversation as never,

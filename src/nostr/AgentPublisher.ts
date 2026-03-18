@@ -172,7 +172,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
      * Includes both incremental runtime (llm-runtime) and total runtime (llm-runtime-total).
      *
      * DELEGATION CHAIN ROUTING: For conversations with a delegation chain, the completion
-     * is routed to the immediate delegator (second-to-last in chain), not triggeringEvent.pubkey.
+     * is routed to the immediate delegator (second-to-last in chain), not triggeringEnvelope.pubkey.
      * The recipient pubkey is pre-resolved by createEventContext (layer 3) and passed via
      * context.completionRecipientPubkey. This avoids a layer violation - AgentPublisher (layer 2)
      * cannot import ConversationStore directly.

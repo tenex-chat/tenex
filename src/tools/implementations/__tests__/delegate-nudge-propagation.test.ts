@@ -14,6 +14,7 @@ mock.module("@/nostr", () => ({
 
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock the resolution function to return pubkeys for our test agents
 import * as agentResolution from "@/services/agents";
@@ -31,6 +32,15 @@ mockResolve.mockImplementation((slug: string) => {
     }
     return { pubkey: null, availableSlugs };
 });
+
+const createTriggeringEnvelope = (nudgeTags: string[][] = []) =>
+    createMockInboundEnvelope({
+        metadata: {
+            nudgeEventIds: nudgeTags
+                .filter((tag) => tag[0] === "nudge" && Boolean(tag[1]))
+                .map((tag) => tag[1]),
+        },
+    });
 
 describe("Delegate Tool - Nudge Propagation", () => {
     const conversationId = "test-conversation-id";
@@ -56,9 +66,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: nudgeTags,
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(nudgeTags),
         agentPublisher: {
             delegate: async (config: any) => {
                 // Track the delegate call to verify nudge propagation

@@ -300,13 +300,13 @@ export class TelegramGatewayService {
                 ConversationStore.getOrLoad(session.conversationId);
             }
 
-            const legacyEvent = await this.runtimeIngressService.handleChatMessage({
+            await this.runtimeIngressService.handleChatMessage({
                 envelope,
                 agentExecutor: this.options.agentExecutor,
                 adapter: this.inboundAdapter.constructor.name,
             });
 
-            const conversation = ConversationStore.findByEventId(legacyEvent.id ?? "");
+            const conversation = ConversationStore.findByEventId(envelope.message.nativeId);
             if (!conversation) {
                 throw new Error(
                     `Telegram update ${update.update_id} did not resolve a conversation`
@@ -318,7 +318,7 @@ export class TelegramGatewayService {
                 agentPubkey: binding.agent.pubkey,
                 channelId: envelope.channel.id,
                 conversationId: conversation.id,
-                lastMessageId: legacyEvent.id ?? envelope.message.nativeId,
+                lastMessageId: envelope.message.nativeId,
             });
 
             logger.info("[TelegramGatewayService] Routed Telegram update", {

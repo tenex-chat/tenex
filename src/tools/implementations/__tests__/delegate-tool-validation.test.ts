@@ -14,6 +14,7 @@ import { createDelegateTool } from "@/tools/implementations/delegate";
 import { createDelegateFollowupTool } from "@/tools/implementations/delegate_followup";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { projectContextStore } from "@/services/projects";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock the resolution function to return pubkeys for our test agents (slug-only)
 import * as agentResolution from "@/services/agents";
@@ -33,6 +34,8 @@ mockResolve.mockImplementation((slug: string) => {
     return { pubkey: null, availableSlugs };
 });
 
+const createTriggeringEnvelope = () => createMockInboundEnvelope();
+
 describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
     const projectId = "31933:pubkey:test-project";
@@ -48,9 +51,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -73,9 +74,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -258,9 +257,7 @@ describe("Delegation tools - RAL isolation", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {
             delegate: async () => "mock-delegation-id",
         } as any,
@@ -379,9 +376,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {
             delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
         } as any,
@@ -572,9 +567,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
                 pubkey: "agent-pubkey-123",
             } as AgentInstance,
             conversationId,
-            triggeringEvent: {
-                tags: [],
-            } as any,
+            triggeringEnvelope: createTriggeringEnvelope(),
             agentPublisher: {
                 delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
             } as any,
@@ -793,9 +786,7 @@ describe("delegate_followup - Full ID canonicalization", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {
             delegateFollowup: async () => "mock-followup-event-id",
         } as any,

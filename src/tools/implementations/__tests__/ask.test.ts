@@ -4,22 +4,7 @@ import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { AskConfig } from "@/nostr/types";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "@/nostr/types";
-
-/**
- * Mock interface for NDKEvent used in tests.
- */
-interface MockTriggeringEvent {
-  id: string;
-  tags: string[][];
-  pubkey?: string;
-}
-
-/**
- * Mock interface for root event.
- */
-interface MockRootEvent {
-  id: string;
-}
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Minimal mocks
 mock.module("@/nostr/ndkClient", () => ({
@@ -125,13 +110,16 @@ describe("Ask Tool - Multi-question support", () => {
   let capturedEvents: NDKEvent[] = [];
   let mockAgentInstance: AgentInstance;
   let publisher: AgentPublisher;
+  let publishSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     capturedEvents = [];
 
-    mockPublish = mock(() => Promise.resolve(new Set()));
+    mockPublish = mock(() =>
+      Promise.resolve(new Set([{ url: "wss://relay.test" }] as Array<{ url: string }>))
+    );
 
-    spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
+    publishSpy = spyOn(NDKEvent.prototype, "publish").mockImplementation(function (this: NDKEvent) {
       capturedEvents.push(this);
       return mockPublish();
     });
@@ -148,20 +136,28 @@ describe("Ask Tool - Multi-question support", () => {
 
   afterEach(() => {
     capturedEvents = [];
+    publishSpy?.mockRestore();
   });
 
   function createTestContext(overrides?: Partial<EventContext>): EventContext {
-    const triggeringEvent: MockTriggeringEvent = {
-      id: "triggering-event-id",
-      tags: [],
-      pubkey: "triggering-pubkey",
-    };
-    const rootEvent: MockRootEvent = { id: "root-event-id" };
+    const triggeringEnvelope = createMockInboundEnvelope({
+      principal: {
+        id: "triggering-pubkey",
+        transport: "nostr",
+        linkedPubkey: "triggering-pubkey",
+        kind: "human",
+      },
+      message: {
+        id: "triggering-event-id",
+        transport: "nostr",
+        nativeId: "triggering-event-id",
+      },
+    });
 
     return {
       conversationId: "parent-conversation-id",
-      triggeringEvent: triggeringEvent as unknown as NDKEvent,
-      rootEvent,
+      triggeringEnvelope,
+      rootEvent: { id: "root-event-id" },
       ralNumber: 1,
       ...overrides,
     };

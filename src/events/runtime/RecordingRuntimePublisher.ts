@@ -1,6 +1,7 @@
 import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";
 import type {
     AskConfig,
@@ -16,7 +17,6 @@ import type {
 } from "@/nostr/types";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { randomBytes } from "node:crypto";
-import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 
 export interface PublishedRuntimeRecord {
     agentSlug: string;
@@ -53,10 +53,17 @@ function createEventId(): string {
 }
 
 function fallbackRecipientPrincipal(context: EventContext): PrincipalRef {
+    const linkedPubkey =
+        context.completionRecipientPubkey ??
+        context.triggeringEnvelope.principal.linkedPubkey;
+
     return {
-        id: `nostr:${context.completionRecipientPubkey ?? context.triggeringEvent.pubkey}`,
-        transport: "nostr",
-        linkedPubkey: context.completionRecipientPubkey ?? context.triggeringEvent.pubkey,
+        id: linkedPubkey ? `nostr:${linkedPubkey}` : context.triggeringEnvelope.principal.id,
+        transport: linkedPubkey ? "nostr" : context.triggeringEnvelope.principal.transport,
+        linkedPubkey,
+        displayName: context.triggeringEnvelope.principal.displayName,
+        username: context.triggeringEnvelope.principal.username,
+        kind: context.triggeringEnvelope.principal.kind,
     };
 }
 
@@ -100,19 +107,17 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
             context.completionRecipientPrincipal ?? fallbackRecipientPrincipal(context);
         const recipient =
             recipientPrincipal.linkedPubkey ??
-            context.completionRecipientPubkey ??
-            context.triggeringEvent.pubkey;
+            context.completionRecipientPubkey;
         const rootEventId = context.rootEvent.id ?? context.conversationId;
-        const event = this.createEvent(
-            NDKKind.Text,
-            intent.content,
-            [
-                ["p", recipient],
-                ["recipient-principal", recipientPrincipal.id],
-                ["status", "completed"],
-                ["e", rootEventId],
-            ]
-        );
+        const tags: string[][] = [
+            ["recipient-principal", recipientPrincipal.id],
+            ["status", "completed"],
+            ["e", rootEventId],
+        ];
+        if (recipient) {
+            tags.unshift(["p", recipient]);
+        }
+        const event = this.createEvent(NDKKind.Text, intent.content, tags);
 
         this.record("complete", context, {
             recipient,
@@ -151,14 +156,11 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
 
     async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
         const content = `${config.title}\n\n${config.context}`;
-        const event = this.createEvent(
-            NDKKind.Text,
-            content,
-            [["p", context.triggeringEvent.pubkey]]
-        );
+        const tags: string[][] = [["p", config.recipient]];
+        const event = this.createEvent(NDKKind.Text, content, tags);
 
         this.record("ask", context, {
-            recipient: context.triggeringEvent.pubkey,
+            recipient: config.recipient,
             title: config.title,
             questionCount: config.questions.length,
             content,

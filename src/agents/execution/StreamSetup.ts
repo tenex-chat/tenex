@@ -6,7 +6,6 @@
  * meta model resolution, and initial message compilation.
  */
 
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { config as configService } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { NudgeService, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
@@ -65,16 +64,19 @@ export async function setupStreamExecution(
     ralNumber: number,
     injectionProcessor: InjectionProcessor
 ): Promise<StreamSetupResult> {
+    const triggeringPrincipalId =
+        context.triggeringEnvelope.principal.linkedPubkey ?? context.triggeringEnvelope.principal.id;
+
     // === FETCH NUDGES FIRST ===
     // Must fetch nudges BEFORE getToolsObject because nudges can modify available tools
-    const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+    const nudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
     const nudgeResult = nudgeEventIds.length > 0
         ? await NudgeService.getInstance().fetchNudgesWithPermissions(nudgeEventIds)
         : { nudges: [], content: "", toolPermissions: {} };
 
     // === FETCH SKILLS ===
     // Skills do NOT affect tools, but we fetch them early to download attached files
-    const skillEventIds = AgentEventDecoder.extractSkillEventIds(context.triggeringEvent);
+    const skillEventIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
     const skillResult = skillEventIds.length > 0
         ? await SkillService.getInstance().fetchSkills(skillEventIds)
         : { skills: [], content: "" };
@@ -117,7 +119,7 @@ export async function setupStreamExecution(
 
             if (!relocated) {
                 conversationStore.addMessage({
-                    pubkey: context.triggeringEvent.pubkey,
+                    pubkey: triggeringPrincipalId,
                     ral: ralNumber,
                     content: injection.content,
                     messageType: "text",
@@ -264,7 +266,6 @@ export async function setupStreamExecution(
         nudgeToolPermissions: nudgeResult.toolPermissions,
         skillContent: skillResult.content,
         skills: skillResult.skills,
-        respondingToPubkey: context.triggeringEvent.pubkey,
         pendingDelegations,
         completedDelegations,
         ralNumber,
@@ -278,7 +279,7 @@ export async function setupStreamExecution(
     updateReminderData({
         agent: context.agent,
         conversation,
-        respondingToPubkey: context.triggeringEvent.pubkey,
+        respondingToPrincipal: context.triggeringEnvelope.principal,
         pendingDelegations,
         completedDelegations,
     });

@@ -1,10 +1,37 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { EventContext } from "@/nostr/types";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 
 describe("TelegramDeliveryService", () => {
     const originalSendMessage = TelegramBotClient.prototype.sendMessage;
+
+    function createTelegramEnvelope(messageId: string): InboundEnvelope {
+        return {
+            transport: "telegram",
+            principal: {
+                id: "telegram:user:42",
+                transport: "telegram",
+                kind: "human",
+            },
+            channel: {
+                id: "telegram:chat:1001",
+                transport: "telegram",
+                kind: "dm",
+            },
+            message: {
+                id: `telegram:tg_1001_${messageId}`,
+                transport: "telegram",
+                nativeId: `tg_1001_${messageId}`,
+            },
+            recipients: [],
+            content: "hello",
+            occurredAt: 1_773_400_000,
+            capabilities: ["telegram-bot"],
+            metadata: {},
+        };
+    }
 
     afterEach(() => {
         TelegramBotClient.prototype.sendMessage = originalSendMessage;
@@ -27,14 +54,7 @@ describe("TelegramDeliveryService", () => {
             } as any,
             {
                 conversationId: "conversation-1",
-                triggeringEvent: {
-                    pubkey: "f".repeat(64),
-                    tags: [
-                        ["transport", "telegram"],
-                        ["telegram-chat-id", "1001"],
-                        ["telegram-message-id", "5"],
-                    ],
-                } as any,
+                triggeringEnvelope: createTelegramEnvelope("5"),
             } as EventContext,
             "Hello **world**"
         );
@@ -68,14 +88,7 @@ describe("TelegramDeliveryService", () => {
             } as any,
             {
                 conversationId: "conversation-2",
-                triggeringEvent: {
-                    pubkey: "f".repeat(64),
-                    tags: [
-                        ["transport", "telegram"],
-                        ["telegram-chat-id", "1001"],
-                        ["telegram-message-id", "6"],
-                    ],
-                } as any,
+                triggeringEnvelope: createTelegramEnvelope("6"),
             } as EventContext,
             "Hello **world**"
         );

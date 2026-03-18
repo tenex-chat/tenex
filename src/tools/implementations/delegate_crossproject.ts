@@ -146,7 +146,10 @@ async function executeDelegateCrossProject(
     let message = `Delegated to agent '${agentSlug}' in project '${projectId}'. The agent will respond when ready.`;
 
     if (!hasTodos(context)) {
-        message += `\n\n<system-reminder type="delegation-todo-nudge">\nYou just delegated task(s) but don't have a todo list yet. Use \`todo_write()\` to set up a todo list tracking your delegated work and overall workflow.\n</system-reminder>`;
+        message +=
+            "\n\n<system-reminder type=\"delegation-todo-nudge\">\n" +
+            "You just delegated task(s) but don't have a todo list yet. Use `todo_write()` to set up a todo list tracking your delegated work and overall workflow.\n" +
+            "</system-reminder>";
     }
 
     return {
