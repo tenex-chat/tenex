@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { AgentEventEncoder } from "../AgentEventEncoder";
 import type { EventContext } from "../types";
 
@@ -32,13 +32,25 @@ mock.module("@/utils/logger", () => ({
 describe("AgentEventEncoder.encodeStreamTextDelta", () => {
     it("encodes ephemeral stream-delta events with required tags and no completion routing tags", () => {
         const encoder = new AgentEventEncoder();
-        const triggeringEvent = new NDKEvent();
-        triggeringEvent.id = "trigger-id";
-        triggeringEvent.pubkey = "trigger-pubkey";
-        triggeringEvent.tags = [["branch", "feature/alpha"]];
+        const triggeringEnvelope = createMockInboundEnvelope({
+            principal: {
+                id: "trigger-pubkey",
+                transport: "nostr",
+                linkedPubkey: "trigger-pubkey",
+                kind: "human",
+            },
+            message: {
+                id: "trigger-id",
+                transport: "nostr",
+                nativeId: "trigger-id",
+            },
+            metadata: {
+                branchName: "feature/alpha",
+            },
+        });
 
         const context: EventContext = {
-            triggeringEvent,
+            triggeringEnvelope,
             rootEvent: { id: "root-conv-id" },
             conversationId: "conversation-id",
             model: "anthropic:claude-haiku-4-5",

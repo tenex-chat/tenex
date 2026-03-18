@@ -77,7 +77,7 @@ describe("report_write tool", () => {
         workingDirectory: "/tmp/test",
         projectBasePath: "/tmp/test",
         currentBranch: "main",
-        triggeringEvent: {},
+        triggeringEnvelope: {},
         getConversation: () => undefined,
         agentPublisher: {},
         ralNumber: 1,

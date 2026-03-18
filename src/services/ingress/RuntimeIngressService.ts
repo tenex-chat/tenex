@@ -1,31 +1,25 @@
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import { InboundEnvelopeEventBridge } from "@/nostr/InboundEnvelopeEventBridge";
 import { AgentDispatchService } from "@/services/dispatch/AgentDispatchService";
 import { getIdentityService } from "@/services/identity";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 interface RuntimeIngressParams {
     envelope: InboundEnvelope;
-    legacyEvent?: NDKEvent;
     agentExecutor: AgentExecutor;
     adapter: string;
 }
 
 export class RuntimeIngressService {
     private readonly dispatcher = AgentDispatchService.getInstance();
-    private readonly legacyEventBridge = new InboundEnvelopeEventBridge();
 
-    async handleChatMessage(params: RuntimeIngressParams): Promise<NDKEvent> {
+    async handleChatMessage(params: RuntimeIngressParams): Promise<void> {
         const { envelope, agentExecutor, adapter } = params;
-        const legacyEvent = params.legacyEvent ?? this.legacyEventBridge.toEvent(envelope);
         const activeSpan = trace.getActiveSpan();
 
         try {
             const identityService = getIdentityService();
-            const legacyEventSource = params.legacyEvent ? "provided" : "bridged";
 
             identityService.rememberIdentity({
                 principalId: envelope.principal.id,
@@ -52,9 +46,8 @@ export class RuntimeIngressService {
                 messageId: envelope.message.id,
                 replyToId: envelope.message.replyToId,
                 recipientCount: envelope.recipients.length,
-                legacyEventSource,
-                eventId: legacyEvent.id,
-                eventKind: legacyEvent.kind,
+                eventId: envelope.message.nativeId,
+                eventKind: envelope.metadata.eventKind,
             });
 
             activeSpan?.addEvent("runtime.ingress.received", {
@@ -66,13 +59,11 @@ export class RuntimeIngressService {
                 "runtime.message_id": envelope.message.id,
                 "runtime.reply_to_id": envelope.message.replyToId ?? "",
                 "runtime.recipient_count": envelope.recipients.length,
-                "runtime.legacy_event_source": legacyEventSource,
                 "runtime.event_kind": envelope.metadata.eventKind ?? 0,
             });
 
-            await this.dispatcher.dispatch(legacyEvent, {
+            await this.dispatcher.dispatch(envelope, {
                 agentExecutor,
-                envelope,
             });
 
             activeSpan?.addEvent("runtime.ingress.dispatched", {
@@ -92,11 +83,9 @@ export class RuntimeIngressService {
                 principalId: envelope.principal.id,
                 channelId: envelope.channel.id,
                 messageId: envelope.message.id,
-                eventId: legacyEvent.id,
+                eventId: envelope.message.nativeId,
                 error: error instanceof Error ? error.message : String(error),
             });
         }
-
-        return legacyEvent;
     }
 }

@@ -27,6 +27,7 @@ import {
     runWithSystemReminderContext,
 } from "@/llm/system-reminder-context";
 import { shortenConversationId } from "@/utils/conversation-id";
+import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
@@ -97,9 +98,10 @@ export class AgentExecutor {
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
+        const triggeringEnvelope = new NostrInboundAdapter().toEnvelope(originalEvent);
         const context: ToolRegistryContext = {
             agent: agent as ToolRegistryContext["agent"],
-            triggeringEvent: originalEvent,
+            triggeringEnvelope,
             conversationId: originalEvent.id,
             projectBasePath: projectPath || "",
             workingDirectory: projectPath || "",
@@ -130,8 +132,8 @@ export class AgentExecutor {
                 "agent.pubkey": context.agent.pubkey,
                 "agent.role": context.agent.role || "worker",
                 "conversation.id": shortenConversationId(context.conversationId),
-                "triggering_event.id": context.triggeringEvent.id,
-                "triggering_event.kind": context.triggeringEvent.kind || 0,
+                "triggering_event.id": context.triggeringEnvelope.message.nativeId,
+                "triggering_event.kind": context.triggeringEnvelope.metadata.eventKind || 0,
             },
         }, otelContext.active());
 
@@ -150,7 +152,7 @@ export class AgentExecutor {
                         agentPubkey: context.agent.pubkey,
                         conversationId: context.conversationId,
                         projectId,
-                        triggeringEventId: context.triggeringEvent.id,
+                        triggeringEventId: context.triggeringEnvelope.message.nativeId,
                         span,
                     });
 
@@ -249,7 +251,7 @@ export class AgentExecutor {
                                     errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                                 },
                                 {
-                                    triggeringEvent: context.triggeringEvent,
+                                    triggeringEnvelope: context.triggeringEnvelope,
                                     rootEvent: { id: conversation.getRootEventId() },
                                     conversationId: conversation.id,
                                     ralNumber: 0,
@@ -331,7 +333,7 @@ export class AgentExecutor {
             projectBasePath: context.projectBasePath,
             workingDirectory: context.workingDirectory,
             currentBranch: context.currentBranch,
-            triggeringEvent: context.triggeringEvent,
+            triggeringEnvelope: context.triggeringEnvelope,
             agentPublisher,
             ralNumber: context.ralNumber,
             conversationStore,
@@ -409,7 +411,10 @@ export class AgentExecutor {
             );
             // Handle case where completion was skipped (conversation was killed)
             if (responseEvent) {
-                await ConversationStore.addEvent(context.conversationId, responseEvent);
+                await ConversationStore.addEnvelope(
+                    context.conversationId,
+                    new NostrInboundAdapter().toEnvelope(responseEvent)
+                );
             }
             return responseEvent;
         }
@@ -569,7 +574,10 @@ export class AgentExecutor {
         }
 
         if (responseEvent) {
-            await ConversationStore.addEvent(context.conversationId, responseEvent);
+            await ConversationStore.addEnvelope(
+                context.conversationId,
+                new NostrInboundAdapter().toEnvelope(responseEvent)
+            );
 
             trace.getActiveSpan()?.addEvent("executor.published", {
                 "event.id": responseEvent.id || "",

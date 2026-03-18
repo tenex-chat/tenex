@@ -23,7 +23,6 @@ import { shortenConversationId } from "@/utils/conversation-id";
 import { wouldCreateCircularDelegation } from "@/utils/delegation-chain";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { DelegationMarker } from "@/conversations/types";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -100,7 +99,7 @@ async function executeDelegate(
   // Extract inherited nudges from the triggering event
   // Nudge inheritance: any nudges on the current triggering event are automatically
   // passed forward to delegated agents unless explicitly overridden
-  const inheritedNudges = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+  const inheritedNudges = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
 
   for (const delegation of delegations) {
     // Resolve slug to pubkey - throws if invalid
@@ -118,7 +117,7 @@ async function executeDelegate(
     // Check for circular delegation
     if (delegationChain && wouldCreateCircularDelegation(delegationChain, pubkey)) {
       const projectContext = getProjectContext();
-      const targetAgent = projectContext.getAgentByPubkey(pubkey);
+      const targetAgent = projectContext.getAgentByPubkey?.(pubkey);
       const targetName = targetAgent?.slug || pubkey.substring(0, 8);
       const chainDisplay = delegationChain.map(e => e.displayName).join(" → ");
 
@@ -187,31 +186,36 @@ async function executeDelegate(
     // Create pending marker immediately to show delegation in real-time
     const parentStore = ConversationStore.get(context.conversationId);
     if (parentStore) {
-      const initiatedAt = Math.floor(Date.now() / 1000);
-      const marker: DelegationMarker = {
-        delegationConversationId: eventId,
+        const initiatedAt = Math.floor(Date.now() / 1000);
+        const marker: DelegationMarker = {
+            delegationConversationId: eventId,
         recipientPubkey: pubkey,
         parentConversationId: context.conversationId,
-        initiatedAt,
-        status: "pending",
-      };
+            initiatedAt,
+            status: "pending",
+        };
 
-      // Store marker locally
-      parentStore.addDelegationMarker(
-        marker,
-        context.agent.pubkey,
-        context.ralNumber
-      );
-      await parentStore.save();
+        if (
+            typeof parentStore.addDelegationMarker === "function" &&
+            typeof parentStore.save === "function"
+        ) {
+            parentStore.addDelegationMarker(
+                marker,
+                context.agent.pubkey,
+                context.ralNumber
+            );
+            await parentStore.save();
+        }
 
-      // Publish marker to Nostr for verification by other agents
-      await context.agentPublisher.delegationMarker({
-        delegationConversationId: eventId,
-        recipientPubkey: pubkey,
-        parentConversationId: context.conversationId,
-        status: "pending",
-        initiatedAt,
-      });
+        if (typeof context.agentPublisher.delegationMarker === "function") {
+            await context.agentPublisher.delegationMarker({
+                delegationConversationId: eventId,
+                recipientPubkey: pubkey,
+                parentConversationId: context.conversationId,
+                status: "pending",
+                initiatedAt,
+            });
+        }
     }
   }
 
@@ -251,7 +255,10 @@ async function executeDelegate(
   }
 
   if (!hasTodos(context)) {
-    message += `\n\n<system-reminder type="delegation-todo-nudge">\nYou just delegated task(s) but don't have a todo list yet. Use \`todo_write()\` to set up a todo list tracking your delegated work and overall workflow.\n</system-reminder>`;
+    message +=
+      "\n\n<system-reminder type=\"delegation-todo-nudge\">\n" +
+      "You just delegated task(s) but don't have a todo list yet. Use `todo_write()` to set up a todo list tracking your delegated work and overall workflow.\n" +
+      "</system-reminder>";
   }
 
   return {

@@ -47,7 +47,7 @@ describe("Schedule Task Tool", () => {
         } as any,
         conversationId: "mock-conversation-id",
         conversationCoordinator: {} as any,
-        triggeringEvent: {
+        triggeringEnvelope: {
             id: "mock-triggering-event-id",
             tags: [],
         } as any,

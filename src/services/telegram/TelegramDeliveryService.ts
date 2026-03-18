@@ -2,19 +2,14 @@ import type { RuntimeAgentRef } from "@/events/runtime/RuntimeAgent";
 import type { EventContext } from "@/nostr/types";
 import { renderTelegramMessage } from "@/services/telegram/telegram-message-renderer";
 import { logger } from "@/utils/logger";
-import { parseTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import {
+    parseTelegramChannelId,
+    parseTelegramNativeMessageId,
+} from "@/services/telegram/telegram-identifiers";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 
-function getTagValue(event: EventContext["triggeringEvent"], tagName: string): string | undefined {
-    if (typeof event.tagValue === "function") {
-        return event.tagValue(tagName);
-    }
-
-    return event.tags.find((tag) => tag[0] === tagName)?.[1];
-}
-
 function isTelegramContext(context: EventContext): boolean {
-    return getTagValue(context.triggeringEvent, "transport") === "telegram" ||
+    return context.triggeringEnvelope.transport === "telegram" ||
         context.completionRecipientPrincipal?.transport === "telegram";
 }
 
@@ -35,16 +30,16 @@ export class TelegramDeliveryService {
             return;
         }
 
-        const channelId = getTagValue(context.triggeringEvent, "channel");
-        const telegramChannel = channelId ? parseTelegramChannelId(channelId) : undefined;
-        const telegramChatId = getTagValue(context.triggeringEvent, "telegram-chat-id") ??
-            telegramChannel?.chatId;
-        const telegramMessageId = getTagValue(context.triggeringEvent, "telegram-message-id");
-        const telegramThreadId = getTagValue(context.triggeringEvent, "telegram-thread-id") ??
-            telegramChannel?.messageThreadId;
+        const telegramChannel = parseTelegramChannelId(context.triggeringEnvelope.channel.id);
+        const telegramMessage = parseTelegramNativeMessageId(
+            context.triggeringEnvelope.message.nativeId
+        );
+        const telegramChatId = telegramChannel?.chatId ?? telegramMessage?.chatId;
+        const telegramMessageId = telegramMessage?.messageId;
+        const telegramThreadId = telegramChannel?.messageThreadId;
 
         if (!telegramChatId) {
-            logger.warn("[TelegramDeliveryService] Missing telegram chat id on triggering event", {
+            logger.warn("[TelegramDeliveryService] Missing telegram chat id on triggering envelope", {
                 agentSlug: agent.slug,
                 conversationId: context.conversationId,
             });

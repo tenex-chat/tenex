@@ -4,6 +4,7 @@ import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationRecord } from "@/conversations/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { buildLegacyEventSnapshot } from "@/events/runtime/legacy-event-snapshot";
 import { LocalInboundAdapter } from "@/events/runtime/LocalInboundAdapter";
 import {
     RuntimePublishCollector,
@@ -391,7 +392,7 @@ function buildArtifact(params: {
     artifactPath: string;
     turnNumber: number;
     canonicalEnvelope: InboundEnvelope;
-    legacyEvent: NDKEvent;
+    legacyEvent?: NDKEvent;
     collector: RuntimePublishCollector;
     conversationId: string;
     agentPubkey: string;
@@ -402,8 +403,9 @@ function buildArtifact(params: {
     const conversationRecords = conversation?.getAllMessages() ?? [];
     const conversationMessages = buildConversationMessages(params.conversationId);
     const completionRecord = findLatestRecord(records, "complete");
-    const expectedPrincipalPubkey =
-        params.canonicalEnvelope.principal.linkedPubkey ?? params.legacyEvent.pubkey;
+    const legacyEvent = buildLegacyEventSnapshot(params.canonicalEnvelope, params.legacyEvent);
+    const expectedCompletionRecipientPubkey =
+        params.canonicalEnvelope.principal.linkedPubkey;
     const responseContent = extractReplyContent(records, conversationRecords, params.agentPubkey);
     const replyToNativeId = unwrapExternalMessageId(params.canonicalEnvelope.message.replyToId);
 
@@ -419,12 +421,7 @@ function buildArtifact(params: {
         turnNumber: params.turnNumber,
         conversationId: params.conversationId,
         canonicalEnvelope: params.canonicalEnvelope,
-        legacyEvent: {
-            id: params.legacyEvent.id ?? "",
-            pubkey: params.legacyEvent.pubkey,
-            content: params.legacyEvent.content,
-            tags: params.legacyEvent.tags,
-        },
+        legacyEvent,
         response: {
             content: responseContent,
             completionRecord,
@@ -438,7 +435,7 @@ function buildArtifact(params: {
             completionRecipientPrincipalMatchesEnvelope:
                 completionRecord?.payload.recipientPrincipalId === params.canonicalEnvelope.principal.id,
             completionRecipientPubkeyMatchesPrincipalIdentity:
-                completionRecord?.payload.recipient === expectedPrincipalPubkey,
+                completionRecord?.payload.recipient === expectedCompletionRecipientPubkey,
             followupLinkedToPreviousInbound:
                 !params.previousInboundMessageId ||
                 replyToNativeId === params.previousInboundMessageId,
@@ -591,12 +588,11 @@ export const transportChatCommand = new Command("transport-chat")
                 localInboundAdapter: harness.localInboundAdapter,
             });
 
-            const dispatchedLegacyEvent = await projectContextStore.run(
+            await projectContextStore.run(
                 harness.projectContext,
                 async () =>
                     harness.runtimeIngressService.handleChatMessage({
                         envelope: canonicalEnvelope,
-                        legacyEvent,
                         agentExecutor,
                         adapter: legacyEvent
                             ? harness.nostrInboundAdapter.constructor.name
@@ -604,13 +600,13 @@ export const transportChatCommand = new Command("transport-chat")
                     })
             );
 
-            const conversation = ConversationStore.findByEventId(dispatchedLegacyEvent.id ?? "");
+            const conversation = ConversationStore.findByEventId(canonicalEnvelope.message.nativeId);
             if (!conversation) {
                 throw new Error("Transport chat run did not resolve a conversation");
             }
 
             sessionState.turnCount = turnNumber;
-            sessionState.lastInboundMessageId = dispatchedLegacyEvent.id;
+            sessionState.lastInboundMessageId = canonicalEnvelope.message.nativeId;
             sessionState.conversationId = conversation.id;
             writeSessionState(sessionState);
 
@@ -624,7 +620,7 @@ export const transportChatCommand = new Command("transport-chat")
                 artifactPath,
                 turnNumber,
                 canonicalEnvelope,
-                legacyEvent: dispatchedLegacyEvent,
+                legacyEvent,
                 collector,
                 conversationId: conversation.id,
                 agentPubkey: harness.agentPubkey,

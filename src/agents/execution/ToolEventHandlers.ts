@@ -6,6 +6,7 @@
  */
 
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { RALRegistry, extractPendingDelegations } from "@/services/ral";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -210,7 +211,10 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
         });
 
         if (toolEvent) {
-            await ConversationStore.addEvent(context.conversationId, toolEvent);
+            await ConversationStore.addEnvelope(
+                context.conversationId,
+                new NostrInboundAdapter().toEnvelope(toolEvent)
+            );
         }
     });
 

@@ -3,9 +3,8 @@
  * Centralized types for event encoding and publishing.
  */
 
-import type { LanguageModelUsageWithCostUsd } from "@/llm/types";
-import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
+import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
 
 // ============================================================================
 // Intent Types - Express what agents want to communicate
@@ -181,7 +180,7 @@ export type AgentIntent =
 // ============================================================================
 
 export interface EventContext {
-    triggeringEvent: NDKEvent; // The event that triggered this execution (for reply threading)
+    triggeringEnvelope: InboundEnvelope; // The envelope that triggered this execution (for reply threading)
     rootEvent: { id?: string }; // The conversation root event (only ID is used for tagging)
     conversationId: string; // Required for conversation lookup
     executionTime?: number;
@@ -195,7 +194,7 @@ export interface EventContext {
     /**
      * Pre-resolved recipient pubkey for completion events.
      * When set, the encoder uses this pubkey for the completion p-tag instead of
-     * triggeringEvent.pubkey. This supports delegation chain routing where completions
+     * triggeringEnvelope.principal.linkedPubkey. This supports delegation chain routing where completions
      * must route back to the immediate delegator, not the event that happened to
      * trigger the current execution (e.g., a user responding to an ask).
      *

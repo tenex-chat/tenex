@@ -59,7 +59,7 @@ async function executeLessonLearn(
     // Note: encodeLesson only uses addStandardTags which needs model/ralNumber
     // rootEvent.id is not used by lesson encoding
     const eventContext: EventContext = {
-        triggeringEvent: context.triggeringEvent,
+        triggeringEnvelope: context.triggeringEnvelope,
         rootEvent: {},
         conversationId: context.conversationId,
         model: context.agent.llmConfig,

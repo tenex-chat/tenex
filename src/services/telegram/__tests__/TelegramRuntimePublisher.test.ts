@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { EventContext } from "@/nostr/types";
 import { TelegramRuntimePublisher } from "@/services/telegram/TelegramRuntimePublisherService";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 const nostrPublisherMethods = {
     complete: mock(async () => undefined),
@@ -29,6 +30,27 @@ mock.module("@/nostr/AgentPublisher", () => ({
         delegationMarker = nostrPublisherMethods.delegationMarker;
     },
 }));
+
+const createTelegramEnvelope = (messageId: string) =>
+    createMockInboundEnvelope({
+        transport: "telegram",
+        principal: {
+            id: "telegram:user:42",
+            transport: "telegram",
+            linkedPubkey: "f".repeat(64),
+            kind: "human",
+        },
+        channel: {
+            id: "telegram:chat:42",
+            transport: "telegram",
+            kind: "dm",
+        },
+        message: {
+            id: messageId,
+            transport: "telegram",
+            nativeId: `telegram:chat:42:message:${messageId}`,
+        },
+    });
 
 describe("TelegramRuntimePublisher", () => {
     beforeEach(() => {
@@ -65,10 +87,7 @@ describe("TelegramRuntimePublisher", () => {
             conversationId: "conversation-1",
             ralNumber: 1,
             rootEvent: { id: "root-1" },
-            triggeringEvent: {
-                pubkey: "f".repeat(64),
-                tags: [["transport", "telegram"]],
-            } as any,
+            triggeringEnvelope: createTelegramEnvelope("101"),
         };
 
         await publisher.complete({ content: "hello telegram" }, context);
@@ -115,10 +134,7 @@ describe("TelegramRuntimePublisher", () => {
             conversationId: "conversation-2",
             ralNumber: 1,
             rootEvent: { id: "root-2" },
-            triggeringEvent: {
-                pubkey: "f".repeat(64),
-                tags: [["transport", "telegram"]],
-            } as any,
+            triggeringEnvelope: createTelegramEnvelope("102"),
         };
 
         const event = await publisher.complete({ content: "hello telegram" }, context);

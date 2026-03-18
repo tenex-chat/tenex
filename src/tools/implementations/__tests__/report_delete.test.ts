@@ -50,7 +50,7 @@ describe("report_delete tool", () => {
         workingDirectory: "/tmp/test",
         projectBasePath: "/tmp/test",
         currentBranch: "main",
-        triggeringEvent: {},
+        triggeringEnvelope: {},
         getConversation: () => undefined,
         agentPublisher: {},
         ralNumber: 1,
