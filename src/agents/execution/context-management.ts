@@ -8,7 +8,7 @@ import type {
 import type { LanguageModel, LanguageModelMiddleware, ToolSet } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
-    LLMSummarizationStrategy,
+    SummarizationStrategy,
     ScratchpadStrategy,
     SystemPromptCachingStrategy,
     ToolResultDecayStrategy,
@@ -176,8 +176,8 @@ function getStringArray(value: unknown, key: string): string[] | undefined {
 function getRuntimeCompletePrompt(
     event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>
 ): LanguageModelV3Prompt | undefined {
-    return Array.isArray(event.payloads.promptAfter)
-        ? event.payloads.promptAfter as LanguageModelV3Prompt
+    return Array.isArray(event.payloads.prompt)
+        ? event.payloads.prompt as LanguageModelV3Prompt
         : undefined;
 }
 
@@ -240,47 +240,6 @@ function normalizeScratchpadEntries(
     return Object.fromEntries(normalizedEntries);
 }
 
-function serializeScratchpadEntries(entries: Record<string, string> | undefined): string {
-    const normalizedEntries = normalizeScratchpadEntries(entries);
-    if (!normalizedEntries) {
-        return "";
-    }
-
-    const sections: string[] = [];
-    const notes = normalizedEntries.notes?.trim();
-    if (notes) {
-        sections.push(notes);
-    }
-
-    for (const [key, value] of Object.entries(normalizedEntries)) {
-        if (key === "notes") {
-            continue;
-        }
-        sections.push(`${key}: ${value}`);
-    }
-
-    return sections.join("\n");
-}
-
-function buildStoredScratchpadEntries(
-    notes: string | undefined,
-    existingEntries: Record<string, string> | undefined
-): Record<string, string> | undefined {
-    const normalizedEntries = normalizeScratchpadEntries(existingEntries as Record<string, unknown> | undefined)
-        ?? {};
-    const trimmedNotes = notes?.trim();
-
-    if (trimmedNotes) {
-        normalizedEntries.notes = trimmedNotes;
-    } else {
-        delete normalizedEntries.notes;
-    }
-
-    return Object.keys(normalizedEntries).length > 0
-        ? normalizedEntries
-        : undefined;
-}
-
 function toRuntimeScratchpadState(
     state: StoredScratchpadState | undefined
 ): RuntimeScratchpadState | undefined {
@@ -289,7 +248,7 @@ function toRuntimeScratchpadState(
     }
 
     return {
-        notes: serializeScratchpadEntries(state.entries),
+        entries: state.entries,
         keepLastMessages: state.keepLastMessages,
         omitToolCallIds: state.omitToolCallIds ?? [],
         ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
@@ -301,12 +260,13 @@ function fromRuntimeScratchpadState(
     state: RuntimeScratchpadState,
     previousState: StoredScratchpadState | undefined
 ): StoredScratchpadState {
+    const mergedEntries = normalizeScratchpadEntries({
+        ...(previousState?.entries ?? {}),
+        ...(state.entries ?? {}),
+    } as Record<string, unknown>);
+
     return {
-        ...(buildStoredScratchpadEntries(state.notes, previousState?.entries)
-            ? {
-                entries: buildStoredScratchpadEntries(state.notes, previousState?.entries),
-            }
-            : {}),
+        ...(mergedEntries ? { entries: mergedEntries } : {}),
         ...(state.keepLastMessages !== undefined ? { keepLastMessages: state.keepLastMessages } : {}),
         omitToolCallIds: state.omitToolCallIds,
         ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
@@ -754,68 +714,39 @@ class ManagedContextWindowStatusStrategy implements ContextManagementStrategy {
     }
 }
 
-function clonePromptForMutation(prompt: LanguageModelV3Prompt): LanguageModelV3Prompt {
-    if (typeof structuredClone === "function") {
-        return structuredClone(prompt);
-    }
-
-    return JSON.parse(JSON.stringify(prompt)) as LanguageModelV3Prompt;
-}
-
-function stripScratchpadReminderFromPrompt(
-    prompt: LanguageModelV3Prompt,
-    reminderText: string
-): LanguageModelV3Prompt {
-    const cloned = clonePromptForMutation(prompt);
-
-    for (let messageIndex = cloned.length - 1; messageIndex >= 0; messageIndex--) {
-        const message = cloned[messageIndex];
-        if (message.role !== "user") {
-            continue;
-        }
-
-        const content = [...message.content];
-        for (let partIndex = content.length - 1; partIndex >= 0; partIndex--) {
-            const part = content[partIndex];
-            if (part.type === "text" && part.text === reminderText) {
-                content.splice(partIndex, 1);
-                if (content.length === 0) {
-                    cloned.splice(messageIndex, 1);
-                } else {
-                    cloned[messageIndex] = {
-                        ...message,
-                        content,
-                    };
-                }
-                return cloned;
-            }
-        }
-
-        break;
-    }
-
-    return cloned;
-}
-
 function normalizeScratchpadToolInput(
     input: unknown
 ): {
-    notes?: string;
+    setEntries?: Record<string, string>;
+    replaceEntries?: Record<string, string>;
+    removeEntryKeys?: string[];
     keepLastMessages?: number | null;
     omitToolCallIds?: string[];
 } {
-    const notes = getScratchpadNotes(input)
-        ?? serializeScratchpadEntries(
-            normalizeScratchpadEntries({
-                ...(isRecord(input) && isRecord(input.setEntries) ? input.setEntries : {}),
-                ...(isRecord(input) && isRecord(input.replaceEntries) ? input.replaceEntries : {}),
-            })
-        );
     const keepLastMessages = getNumber(input, "keepLastMessages");
     const omitToolCallIds = getStringArray(input, "omitToolCallIds");
 
+    const legacyNotes = getString(input, "notes");
+    if (legacyNotes) {
+        return {
+            setEntries: { notes: legacyNotes },
+            ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
+            ...(omitToolCallIds ? { omitToolCallIds } : {}),
+        };
+    }
+
+    const setEntries = isRecord(input) && isRecord(input.setEntries)
+        ? normalizeScratchpadEntries(input.setEntries)
+        : undefined;
+    const replaceEntries = isRecord(input) && isRecord(input.replaceEntries)
+        ? normalizeScratchpadEntries(input.replaceEntries)
+        : undefined;
+    const removeEntryKeys = getStringArray(input, "removeEntryKeys");
+
     return {
-        ...(notes ? { notes } : {}),
+        ...(setEntries ? { setEntries } : {}),
+        ...(replaceEntries ? { replaceEntries } : {}),
+        ...(removeEntryKeys ? { removeEntryKeys } : {}),
         ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
         ...(omitToolCallIds ? { omitToolCallIds } : {}),
     };
@@ -852,18 +783,7 @@ class QueuedScratchpadStrategy implements ContextManagementStrategy {
     async apply(
         state: ContextManagementStrategyState
     ): Promise<ContextManagementStrategyExecution | void> {
-        const execution = await this.delegate.apply(state);
-        const reminderText = getString(execution?.payloads, "reminderText");
-
-        if (reminderText) {
-            state.updatePrompt(stripScratchpadReminderFromPrompt(state.prompt, reminderText));
-            getSystemReminderContext().queue({
-                type: "scratchpad",
-                content: reminderText,
-            });
-        }
-
-        return execution;
+        return this.delegate.apply(state);
     }
 }
 
@@ -1716,11 +1636,11 @@ function createConversationContextManagementRuntime(options: {
         new SystemPromptCachingStrategy(),
         new ToolResultDecayStrategy({
             estimator: requestEstimator,
-            placeholder: (toolName, toolCallId) => {
+            placeholder: (context: { toolName: string; toolCallId: string }) => {
                 const toolCallEventIdMap = resolveToolCallEventIdMap(
                     options.conversationStore.getAllMessages()
                 );
-                return buildDecayPlaceholder(toolName, toolCallId, toolCallEventIdMap);
+                return buildDecayPlaceholder(context.toolName, context.toolCallId, toolCallEventIdMap);
             },
         }),
     ];
@@ -1732,7 +1652,7 @@ function createConversationContextManagementRuntime(options: {
 
     if (summarizationModel && settings.summarizationFallbackEnabled) {
         strategies.push(
-            new LLMSummarizationStrategy({
+            new SummarizationStrategy({
                 model: summarizationModel,
                 maxPromptTokens: Math.floor(
                     settings.tokenBudget
@@ -1813,6 +1733,14 @@ function createConversationContextManagementRuntime(options: {
         strategies,
         telemetry: telemetry.emit,
         estimator: requestEstimator,
+        reminderSink: {
+            emit(reminder) {
+                getSystemReminderContext().queue({
+                    type: reminder.kind,
+                    content: reminder.content,
+                });
+            },
+        },
     });
 
     const middleware: LanguageModelMiddleware = {
