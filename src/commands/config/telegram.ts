@@ -161,11 +161,11 @@ async function saveScopedTelegramConfig(
 
 async function chooseAgent(): Promise<{ agent: StoredAgent; pubkey: string } | undefined> {
     await agentStorage.initialize();
-    const agents = (await agentStorage.getAllAgents())
+    const agents = (await agentStorage.getCanonicalActiveAgents())
         .sort((left, right) => left.slug.localeCompare(right.slug));
 
     if (agents.length === 0) {
-        console.log(chalk.dim("  No stored agents found."));
+        console.log(chalk.dim("  No active agents found."));
         return undefined;
     }
 
