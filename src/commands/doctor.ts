@@ -47,7 +47,7 @@ async function repairAgents(): Promise<void> {
     await initNDK();
     const ndk = getNDK();
 
-    const agents = await agentStorage.getAllAgents();
+    const agents = await agentStorage.getAllStoredAgents();
     const nostrAgents = agents.filter((a) => a.eventId);
     const skipped = agents.length - nostrAgents.length;
 
@@ -107,7 +107,7 @@ async function repairAgents(): Promise<void> {
 
 async function findOrphanedAgents(purge: boolean): Promise<void> {
     await agentStorage.initialize();
-    const agents = await agentStorage.getAllAgents();
+    const agents = await agentStorage.getAllStoredAgents();
 
     const orphans: Array<{ agent: StoredAgent; pubkey: string }> = [];
     for (const agent of agents) {

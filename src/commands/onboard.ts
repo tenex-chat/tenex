@@ -1221,7 +1221,7 @@ async function runProjectAndAgentsStep(
     // Locally associate non-Nostr agents (e.g. OpenClaw imports) with the meta project.
     // These don't have event IDs so they aren't referenced in the project event's agent tags;
     // the daemon needs the local storage association to find them.
-    const allStoredAgents = await agentStorage.getAllAgents();
+    const allStoredAgents = await agentStorage.getAllStoredAgents();
     for (const agent of allStoredAgents) {
         if (agent.eventId) continue; // Nostr agents are associated via project event tags
         const signer = new NDKPrivateKeySigner(agent.nsec);
