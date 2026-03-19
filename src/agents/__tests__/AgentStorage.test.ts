@@ -1046,6 +1046,91 @@ describe("AgentStorage", () => {
         });
     });
 
+    describe("global agent listings", () => {
+        it("should return every stored agent record in getAllStoredAgents", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+            const signer3 = NDKPrivateKeySigner.generate();
+
+            const canonicalAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "Canonical Agent",
+                role: "assistant",
+            });
+            const duplicateAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Duplicate Agent",
+                role: "assistant",
+            });
+            const inactiveAgent = createStoredAgent({
+                nsec: signer3.nsec,
+                slug: "inactive-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(canonicalAgent);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
+            await storage.saveAgent(duplicateAgent);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+
+            await storage.saveAgent(inactiveAgent);
+            await storage.addAgentToProject(signer3.pubkey, "project-3");
+            await storage.removeAgentFromProject(signer3.pubkey, "project-3");
+
+            const storedAgents = await storage.getAllStoredAgents();
+            expect(storedAgents).toHaveLength(3);
+            expect(storedAgents.map((agent) => agent.name).sort()).toEqual([
+                "Canonical Agent",
+                "Duplicate Agent",
+                "Inactive Agent",
+            ]);
+        });
+
+        it("should return only canonical active agents in getCanonicalActiveAgents", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+            const signer3 = NDKPrivateKeySigner.generate();
+
+            const firstAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "First Agent",
+                role: "assistant",
+            });
+            const canonicalAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Canonical Agent",
+                role: "assistant",
+            });
+            const inactiveAgent = createStoredAgent({
+                nsec: signer3.nsec,
+                slug: "inactive-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(firstAgent);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
+            await storage.saveAgent(canonicalAgent);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+
+            await storage.saveAgent(inactiveAgent);
+            await storage.addAgentToProject(signer3.pubkey, "project-3");
+            await storage.removeAgentFromProject(signer3.pubkey, "project-3");
+
+            const activeAgents = await storage.getCanonicalActiveAgents();
+            expect(activeAgents).toHaveLength(1);
+            expect(activeAgents[0]?.name).toBe("Canonical Agent");
+            expect(activeAgents[0]?.slug).toBe("shared-slug");
+        });
+    });
+
     describe("multi-project slug index", () => {
         it("should track same agent across multiple projects in slug index", async () => {
             const signer = NDKPrivateKeySigner.generate();

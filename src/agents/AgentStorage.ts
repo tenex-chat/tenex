@@ -1188,9 +1188,36 @@ export class AgentStorage {
     }
 
     /**
-     * Get all agents (for debugging/admin purposes)
+     * Get canonical active agents across the store.
+     *
+     * Returns one active agent per slug, using the current bySlug index owner.
+     * This is the safe listing for operator-facing flows and agent selection UIs.
      */
-    async getAllAgents(): Promise<StoredAgent[]> {
+    async getCanonicalActiveAgents(): Promise<StoredAgent[]> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return [];
+
+        const agents: StoredAgent[] = [];
+
+        for (const slugEntry of Object.values(this.index.bySlug)) {
+            const agent = await this.loadAgent(slugEntry.pubkey);
+            if (!agent || !isAgentActive(agent)) {
+                continue;
+            }
+            agents.push(agent);
+        }
+
+        return agents;
+    }
+
+    /**
+     * Get every stored agent record from disk.
+     *
+     * This intentionally includes inactive agents, stale records, and duplicate
+     * slugs. It exists for maintenance and repair flows that need raw storage
+     * visibility rather than canonical runtime semantics.
+     */
+    async getAllStoredAgents(): Promise<StoredAgent[]> {
         await ensureDirectory(this.agentsDir);
         const files = await fs.readdir(this.agentsDir);
         const agents: StoredAgent[] = [];

@@ -35,7 +35,7 @@ interface MonitoredAgent {
 }
 
 interface AgentDefinitionStorage {
-    getAllAgents(): Promise<StoredAgent[]>;
+    getAllStoredAgents(): Promise<StoredAgent[]>;
     saveAgent(agent: StoredAgent): Promise<void>;
     loadAgent(pubkey: string): Promise<StoredAgent | null>;
 }
@@ -191,7 +191,7 @@ export class AgentDefinitionMonitor {
     private async collectMonitoredAgents(): Promise<void> {
         this.monitoredAgents.clear();
 
-        const allAgents = await this.storage.getAllAgents();
+        const allAgents = await this.storage.getAllStoredAgents();
 
         // Migrate legacy agents before the main loop so they can be monitored
         await this.bootstrapLegacyAgents(allAgents);
