@@ -118,6 +118,9 @@ export class PromptCompilerService {
     /** Cache directory */
     private cacheDir: string;
 
+    /** Cache file path */
+    private cachePath: string;
+
     // =====================================================================================
     // EAGER COMPILATION STATE (TIN-10 Enhancement)
     // =====================================================================================
@@ -169,7 +172,8 @@ export class PromptCompilerService {
         this.ndk = ndk;
 
         // Cache at ~/.tenex/agents/prompts/{agentPubkey}.json
-        this.cacheDir = path.dirname(PromptCompilerService.getCachePathForAgent(agentPubkey));
+        this.cachePath = PromptCompilerService.getCachePathForAgent(agentPubkey);
+        this.cacheDir = path.dirname(this.cachePath);
     }
 
     /**
@@ -1092,7 +1096,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
      * Get the cache file path for this agent
      */
     private getCachePath(): string {
-        return PromptCompilerService.getCachePathForAgent(this.agentPubkey);
+        return this.cachePath;
     }
 
     /**

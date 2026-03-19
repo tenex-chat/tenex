@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { TrustResult } from "@/services/trust-pubkeys";
 
@@ -42,11 +42,73 @@ mock.module("@/utils/logger", () => ({
 
 // Spied addEvent so tests can assert on telemetry side-effects
 const mockSpanAddEvent = mock(() => {});
+const mockSpan = () => ({
+    addEvent: mockSpanAddEvent,
+    setAttribute: () => {},
+    setStatus: () => {},
+    end: () => {},
+    isRecording: () => false,
+    recordException: () => {},
+    updateName: () => {},
+    setAttributes: () => {},
+    spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
+});
 
+const mockContext = {
+    getValue: () => undefined,
+    setValue: () => mockContext,
+    deleteValue: () => mockContext,
+};
+
+// Preserve the minimal OpenTelemetry surface that downstream tests import.
 mock.module("@opentelemetry/api", () => ({
+    createContextKey: mock((name: string) => Symbol.for(name)),
+    DiagLogLevel: {
+        NONE: 0,
+        ERROR: 1,
+        WARN: 2,
+        INFO: 3,
+        DEBUG: 4,
+        VERBOSE: 5,
+        ALL: 6,
+    },
+    diag: {
+        setLogger: mock(() => {}),
+        debug: mock(() => {}),
+        error: mock(() => {}),
+        warn: mock(() => {}),
+        info: mock(() => {}),
+    },
+    ROOT_CONTEXT: mockContext,
+    SpanKind: {
+        INTERNAL: 0,
+        SERVER: 1,
+        CLIENT: 2,
+        PRODUCER: 3,
+        CONSUMER: 4,
+    },
+    context: {
+        active: () => mockContext,
+        with: <T>(
+            _context: unknown,
+            fn: (...args: unknown[]) => T,
+            thisArg?: unknown,
+            ...args: unknown[]
+        ) => fn.apply(thisArg, args),
+        bind: <T>(target: T) => target,
+    },
+    SpanStatusCode: {
+        UNSET: 0,
+        OK: 1,
+        ERROR: 2,
+    },
+    TraceFlags: { NONE: 0, SAMPLED: 1 },
     trace: {
-        getActiveSpan: () => ({
-            addEvent: mockSpanAddEvent,
+        getActiveSpan: () => mockSpan(),
+        setSpan: () => mockContext,
+        getTracer: () => ({
+            startSpan: () => mockSpan(),
+            startActiveSpan: (_name: string, fn: (span: unknown) => unknown) => fn(mockSpan()),
         }),
     },
 }));
@@ -80,6 +142,10 @@ describe("PubkeyGateService", () => {
         mockLoggerWarn.mockClear();
         mockLoggerDebug.mockClear();
         mockSpanAddEvent.mockClear();
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     describe("getInstance", () => {

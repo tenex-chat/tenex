@@ -15,47 +15,12 @@
  * - With the fix: pendingDelegationCount = 1 (correct! checks all conversation delegations)
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "fs/promises";
-
-// Mock dependencies that checkPostCompletion relies on
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        project: {
-            tagReference: () => ["a", "31933:testpubkey:test-project"],
-        },
-        agents: new Map(),
-        mcpManager: undefined,
-        agentLessons: [],
-    }),
-}));
-
-mock.module("@/prompts/utils/systemPromptBuilder", () => ({
-    buildSystemPromptMessages: async () => [],
-}));
-
-mock.module("@/services/nudge", () => ({
-    NudgeService: {
-        getInstance: () => ({
-            fetchNudges: async () => "",
-        }),
-    },
-}));
-
-mock.module("@/nostr/AgentEventDecoder", () => ({
-    AgentEventDecoder: {
-        extractNudgeEventIds: () => [],
-    },
-}));
-
-mock.module("@/tools/registry", () => ({
-    getToolsObject: () => ({}),
-}));
-
-// Import after mocks are set up
 import { checkPostCompletion, type PostCompletionCheckerConfig } from "../PostCompletionChecker";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral/RALRegistry";
+import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { supervisorOrchestrator } from "@/agents/supervision";
 import { registerDefaultHeuristics, resetRegistrationForTesting } from "@/agents/supervision/registerHeuristics";
 import type { PendingDelegation } from "@/services/ral/types";
@@ -69,6 +34,10 @@ import {
     updateReminderData,
     resetSystemReminders,
 } from "../system-reminders";
+import * as projectServices from "@/services/projects";
+import * as systemPromptBuilderModule from "@/prompts/utils/systemPromptBuilder";
+import { NudgeService } from "@/services/nudge";
+import * as toolRegistryModule from "@/tools/registry";
 
 describe("PostCompletionChecker - True Integration Test", () => {
     const TEST_DIR = "/tmp/tenex-post-completion-integration-test";
@@ -78,6 +47,10 @@ describe("PostCompletionChecker - True Integration Test", () => {
 
     let conversationStore: ConversationStore;
     let registry: RALRegistry;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let buildSystemPromptMessagesSpy: ReturnType<typeof spyOn>;
+    let getNudgeServiceInstanceSpy: ReturnType<typeof spyOn>;
+    let getToolsObjectSpy: ReturnType<typeof spyOn>;
 
     beforeAll(() => {
         // Ensure heuristics are registered for supervision to work
@@ -86,6 +59,23 @@ describe("PostCompletionChecker - True Integration Test", () => {
     });
 
     beforeEach(async () => {
+        getProjectContextSpy = spyOn(projectServices, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:testpubkey:test-project"],
+            },
+            agents: new Map(),
+            mcpManager: undefined,
+            agentLessons: [],
+        } as ReturnType<typeof projectServices.getProjectContext>);
+        buildSystemPromptMessagesSpy = spyOn(
+            systemPromptBuilderModule,
+            "buildSystemPromptMessages"
+        ).mockResolvedValue([]);
+        getNudgeServiceInstanceSpy = spyOn(NudgeService, "getInstance").mockReturnValue({
+            fetchNudges: async () => "",
+        } as ReturnType<typeof NudgeService.getInstance>);
+        getToolsObjectSpy = spyOn(toolRegistryModule, "getToolsObject").mockReturnValue({});
+        spyOn(AgentEventDecoder, "extractNudgeEventIds").mockReturnValue([]);
         await mkdir(TEST_DIR, { recursive: true });
         conversationStore = new ConversationStore(TEST_DIR);
         conversationStore.load(PROJECT_ID, CONVERSATION_ID);
@@ -101,6 +91,11 @@ describe("PostCompletionChecker - True Integration Test", () => {
         supervisorOrchestrator.clearState(`${AGENT_PUBKEY}:${CONVERSATION_ID}:2`);
         resetSystemReminders();
         await rm(TEST_DIR, { recursive: true, force: true });
+        getProjectContextSpy?.mockRestore();
+        buildSystemPromptMessagesSpy?.mockRestore();
+        getNudgeServiceInstanceSpy?.mockRestore();
+        getToolsObjectSpy?.mockRestore();
+        mock.restore();
     });
 
     /**
@@ -425,7 +420,7 @@ describe("PostCompletionChecker - True Integration Test", () => {
             updateReminderData({
                 agent: config.agent,
                 conversation: conversationStore,
-                respondingToPubkey: config.context.triggeringEnvelope.principal.linkedPubkey,
+                respondingToPrincipal: config.context.triggeringEnvelope.principal,
                 pendingDelegations: [],
                 completedDelegations: [],
             });

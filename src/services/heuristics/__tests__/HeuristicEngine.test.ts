@@ -225,7 +225,7 @@ describe("HeuristicEngine", () => {
       const violations: HeuristicViolation[] = [
         {
           id: "v1",
-          heuristicId: "h1",
+          heuristicId: "heuristic-warning",
           title: "Warning 1",
           message: "Message 1",
           severity: "warning",
@@ -233,7 +233,7 @@ describe("HeuristicEngine", () => {
         },
         {
           id: "v2",
-          heuristicId: "h2",
+          heuristicId: "heuristic-error",
           title: "Error 1",
           message: "Message 2",
           severity: "error",
@@ -244,9 +244,10 @@ describe("HeuristicEngine", () => {
       const formatted = engine.formatForInjection(violations);
 
       // Verify per-heuristic system-reminder wrappers with specific types
-      expect(formatted).toContain('<system-reminder type="h1">');
-      expect(formatted).toContain('<system-reminder type="h2">');
-      expect(formatted).toContain("</system-reminder>");
+      expect(formatted).toContain("<heuristic-warning>");
+      expect(formatted).toContain("</heuristic-warning>");
+      expect(formatted).toContain("<heuristic-error>");
+      expect(formatted).toContain("</heuristic-error>");
       expect(formatted).toContain("Warning 1");
       expect(formatted).toContain("Error 1");
     });

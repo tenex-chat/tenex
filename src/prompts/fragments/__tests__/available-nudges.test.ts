@@ -1,25 +1,15 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as nudgeModule from "@/services/nudge";
 import type { WhitelistItem } from "@/services/nudge";
 import { NDKKind } from "@/nostr/kinds";
 
-// Mock NudgeSkillWhitelistService before importing the fragment
 const mockGetWhitelistedNudges = mock(() => [] as WhitelistItem[]);
 const mockGetWhitelistedSkills = mock(() => [] as WhitelistItem[]);
-
 const mockService = {
-    getInstance: () => ({
-        getWhitelistedNudges: mockGetWhitelistedNudges,
-        getWhitelistedSkills: mockGetWhitelistedSkills,
-    }),
+    getWhitelistedNudges: mockGetWhitelistedNudges,
+    getWhitelistedSkills: mockGetWhitelistedSkills,
 };
-
-mock.module("@/services/nudge", () => ({
-    NudgeSkillWhitelistService: mockService,
-    NudgeWhitelistService: mockService,
-    NudgeService: { getInstance: () => ({}) },
-    isOnlyToolMode: () => false,
-    hasToolPermissions: () => false,
-}));
+let getInstanceSpy: ReturnType<typeof spyOn>;
 
 const { availableNudgesAndSkillsFragment } = await import("../13-available-nudges");
 
@@ -52,8 +42,17 @@ function render(nudges: WhitelistItem[] = [], skills: WhitelistItem[] = []): str
 }
 
 beforeEach(() => {
+    getInstanceSpy = spyOn(
+        nudgeModule.NudgeSkillWhitelistService,
+        "getInstance"
+    ).mockReturnValue(mockService as never);
     mockGetWhitelistedNudges.mockImplementation(() => []);
     mockGetWhitelistedSkills.mockImplementation(() => []);
+});
+
+afterEach(() => {
+    getInstanceSpy?.mockRestore();
+    mock.restore();
 });
 
 describe("availableNudgesAndSkillsFragment (combined nudges + skills)", () => {

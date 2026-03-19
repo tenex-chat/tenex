@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { config } from "@/services/ConfigService";
+import { projectContextStore } from "@/services/projects";
+import { logger } from "@/utils/logger";
+import { AgentEventEncoder } from "../AgentEventEncoder";
+import { InterventionPublisher } from "../InterventionPublisher";
+import type { InterventionReviewIntent } from "../types";
+import * as ndkClientModule from "../ndkClient";
+import * as traceContextModule from "../trace-context";
 
 /**
  * Tests for InterventionPublisher and AgentEventEncoder.encodeInterventionReview().
@@ -16,160 +24,59 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
  * (nostr layer), to avoid circular dependencies with PubkeyService.
  */
 
-// Mock dependencies before importing - must be comprehensive to avoid test-setup issues
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getBackendSigner: mock(() =>
-            Promise.resolve({
-                pubkey: "backend-signer-pubkey-123456789012345678901234567890123456",
-            })
-        ),
-        getConfigPath: mock(() => "/tmp/test"),
-        getConfig: mock(() => ({})),
+const mockProjectContext = {
+    project: {
+        id: "test-project-id",
+        pubkey: "projectpubkey",
+        tagReference: () => ["a", "31933:projectpubkey:test-project"],
+        tagValue: (tag: string) => (tag === "title" ? "Test Project" : tag === "d" ? "test-project" : undefined),
     },
-}));
+    agents: new Map(),
+    agentLessons: new Map(),
+    mcpManager: undefined,
+    projectManager: undefined,
+} as const;
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: mock(() => ["a", "31933:projectpubkey:test-project"]),
-            pubkey: "projectpubkey",
-        },
-        projectTag: "31933:projectpubkey:test-project",
-    })),
-    isProjectContextInitialized: mock(() => true),
-}));
+function withProjectContext<T>(fn: () => T): T {
+    return projectContextStore.runSync(mockProjectContext as never, fn);
+}
 
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
+async function withProjectContextAsync<T>(fn: () => Promise<T>): Promise<T> {
+    return projectContextStore.run(mockProjectContext as never, fn);
+}
 
-// Mock PubkeyService to return human-readable names
-const mockPubkeyService = {
-    getNameSync: mock((pubkey: string) => {
-        // Return readable names based on pubkey prefix for testing
-        if (pubkey.startsWith("user-pubkey")) {
-            return "Pablo";
+function installSharedSpies(): void {
+    spyOn(ndkClientModule, "getNDK").mockReturnValue({} as never);
+    spyOn(traceContextModule, "injectTraceContext").mockImplementation(
+        (event: { tags: string[][] }) => {
+            event.tags.push(["trace_context", "00-test-trace-id-test-span-id-01"]);
+            event.tags.push(["trace_context_llm", ""]);
         }
-        if (pubkey.startsWith("agent-pubkey")) {
-            return "Architect-Orchestrator";
-        }
-        return pubkey.substring(0, 12);
-    }),
-    getName: mock(async (pubkey: string) => {
-        if (pubkey.startsWith("user-pubkey")) {
-            return "Pablo";
-        }
-        if (pubkey.startsWith("agent-pubkey")) {
-            return "Architect-Orchestrator";
-        }
-        return pubkey.substring(0, 12);
-    }),
-};
-
-mock.module("@/services/PubkeyService", () => ({
-    PubkeyService: {
-        getInstance: mock(() => mockPubkeyService),
-    },
-    getPubkeyService: mock(() => mockPubkeyService),
-}));
-
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-mock.module("@/telemetry/LLMSpanRegistry", () => ({
-    getLLMSpanId: mock(() => null),
-}));
-
-// Mock OpenTelemetry
-const mockContext = {
-    getValue: () => undefined,
-    setValue: () => mockContext,
-    deleteValue: () => mockContext,
-};
-
-const mockSpan = {
-    addEvent: mock(),
-    setAttributes: mock(),
-    setAttribute: mock(),
-    setStatus: mock(),
-    recordException: mock(),
-    end: mock(),
-    isRecording: () => true,
-    updateName: mock(),
-    spanContext: () => ({ traceId: "test-trace-id", spanId: "test-span-id", traceFlags: 0 }),
-};
-
-mock.module("@opentelemetry/api", () => ({
-    createContextKey: mock((name: string) => Symbol.for(name)),
-    DiagLogLevel: {
-        NONE: 0,
-        ERROR: 1,
-        WARN: 2,
-        INFO: 3,
-        DEBUG: 4,
-        VERBOSE: 5,
-        ALL: 6,
-    },
-    diag: {
-        setLogger: mock(() => {}),
-        debug: mock(() => {}),
-        error: mock(() => {}),
-        warn: mock(() => {}),
-        info: mock(() => {}),
-    },
-    SpanKind: {
-        INTERNAL: 0,
-        SERVER: 1,
-        CLIENT: 2,
-        PRODUCER: 3,
-        CONSUMER: 4,
-    },
-    ROOT_CONTEXT: mockContext,
-    context: {
-        active: mock(() => mockContext),
-        with: mock((_ctx: unknown, fn: () => unknown) => fn()),
-    },
-    propagation: {
-        inject: mock((ctx: unknown, carrier: Record<string, string>) => {
-            carrier.traceparent = "00-test-trace-id-test-span-id-01";
-        }),
-    },
-    trace: {
-        getTracer: mock(() => ({
-            startActiveSpan: mock((_name: string, fn: (span: unknown) => unknown) =>
-                fn(mockSpan)
-            ),
-        })),
-        getActiveSpan: mock(() => mockSpan),
-        setSpan: mock(() => mockContext),
-    },
-    SpanStatusCode: {
-        OK: 1,
-        ERROR: 2,
-    },
-    TraceFlags: {
-        NONE: 0,
-        SAMPLED: 1,
-    },
-}));
-
-// Import after mocks
-import { AgentEventEncoder } from "../AgentEventEncoder";
-import { InterventionPublisher } from "../InterventionPublisher";
-import type { InterventionReviewIntent } from "../types";
+    );
+    spyOn(config, "getBackendSigner").mockResolvedValue({
+        pubkey: "backend-signer-pubkey-123456789012345678901234567890123456",
+    } as any);
+    spyOn(config, "getConfigPath").mockReturnValue("/tmp/test");
+    spyOn(config, "getGlobalPath").mockReturnValue("/tmp/test");
+    spyOn(config, "getProjectsBase").mockReturnValue("/tmp/test/projects");
+    spyOn(config, "getConfig").mockReturnValue({} as any);
+    spyOn(config, "getContextManagementConfig").mockReturnValue(undefined);
+    spyOn(logger, "debug").mockImplementation(() => {});
+    spyOn(logger, "info").mockImplementation(() => {});
+    spyOn(logger, "warn").mockImplementation(() => {});
+    spyOn(logger, "error").mockImplementation(() => {});
+}
 
 describe("AgentEventEncoder.encodeInterventionReview()", () => {
     let encoder: AgentEventEncoder;
 
     beforeEach(() => {
+        installSharedSpies();
         encoder = new AgentEventEncoder();
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("should create event with kind 1", () => {
@@ -180,7 +87,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         expect(event.kind).toBe(1);
     });
@@ -193,7 +100,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const pTag = event.tags.find((tag) => tag[0] === "p");
         expect(pTag).toBeDefined();
@@ -208,7 +115,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const eTag = event.tags.find((tag) => tag[0] === "e");
         expect(eTag).toBeDefined();
@@ -223,7 +130,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const contextTag = event.tags.find((tag) => tag[0] === "context");
         expect(contextTag).toBeDefined();
@@ -238,7 +145,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const userTag = event.tags.find((tag) => tag[0] === "user-pubkey");
         expect(userTag).toBeUndefined();
@@ -252,7 +159,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const agentTag = event.tags.find((tag) => tag[0] === "agent-pubkey");
         expect(agentTag).toBeUndefined();
@@ -266,7 +173,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const convTag = event.tags.find((tag) => tag[0] === "original-conversation");
         expect(convTag).toBeUndefined();
@@ -280,7 +187,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         const aTag = event.tags.find((tag) => tag[0] === "a");
         expect(aTag).toBeDefined();
@@ -296,7 +203,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "Architect-Orchestrator",
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         // Verify content uses the pre-resolved names from the intent
         expect(event.content).toContain("conv-id-1234"); // First 12 chars of conversation ID
@@ -315,7 +222,7 @@ describe("AgentEventEncoder.encodeInterventionReview()", () => {
             agentName: "uncached-agt", // Pre-resolved as truncated pubkey (cache miss)
         };
 
-        const event = encoder.encodeInterventionReview(intent);
+        const event = withProjectContext(() => encoder.encodeInterventionReview(intent));
 
         // When cache miss, the pre-resolved name is the truncated pubkey (first 12 chars)
         expect(event.content).toContain("uncached-usr"); // Truncated user pubkey
@@ -332,6 +239,7 @@ describe("InterventionPublisher", () => {
 
     beforeEach(async () => {
         capturedEvents = [];
+        installSharedSpies();
 
         // Mock NDKEvent.publish and sign
         mockPublish = mock(() => Promise.resolve(new Set()));
@@ -358,11 +266,13 @@ describe("InterventionPublisher", () => {
     });
 
     it("should publish event with all required tags", async () => {
-        await publisher.publishReviewRequest(
-            "target-pubkey-123456789012345678901234567890123456",
-            "conv-id-123456789012345678901234567890123456789012",
-            "Pablo", // Pre-resolved user name
-            "Architect-Orchestrator" // Pre-resolved agent name
+        await withProjectContextAsync(() =>
+            publisher.publishReviewRequest(
+                "target-pubkey-123456789012345678901234567890123456",
+                "conv-id-123456789012345678901234567890123456789012",
+                "Pablo", // Pre-resolved user name
+                "Architect-Orchestrator" // Pre-resolved agent name
+            )
         );
 
         expect(capturedEvents.length).toBe(1);
@@ -382,11 +292,13 @@ describe("InterventionPublisher", () => {
     });
 
     it("should inject trace context", async () => {
-        await publisher.publishReviewRequest(
-            "target-pubkey-123456789012345678901234567890123456",
-            "conv-id-123456789012345678901234567890123456789012",
-            "Pablo", // Pre-resolved user name
-            "Architect-Orchestrator" // Pre-resolved agent name
+        await withProjectContextAsync(() =>
+            publisher.publishReviewRequest(
+                "target-pubkey-123456789012345678901234567890123456",
+                "conv-id-123456789012345678901234567890123456789012",
+                "Pablo", // Pre-resolved user name
+                "Architect-Orchestrator" // Pre-resolved agent name
+            )
         );
 
         expect(capturedEvents.length).toBe(1);
@@ -402,11 +314,13 @@ describe("InterventionPublisher", () => {
     });
 
     it("should return event ID on success", async () => {
-        const eventId = await publisher.publishReviewRequest(
-            "target-pubkey-123456789012345678901234567890123456",
-            "conv-id-123456789012345678901234567890123456789012",
-            "Pablo", // Pre-resolved user name
-            "Architect-Orchestrator" // Pre-resolved agent name
+        const eventId = await withProjectContextAsync(() =>
+            publisher.publishReviewRequest(
+                "target-pubkey-123456789012345678901234567890123456",
+                "conv-id-123456789012345678901234567890123456789012",
+                "Pablo", // Pre-resolved user name
+                "Architect-Orchestrator" // Pre-resolved agent name
+            )
         );
 
         expect(eventId).toBe("signed-event-id-12345");
@@ -430,11 +344,13 @@ describe("InterventionPublisher", () => {
         // This avoids circular dependencies: InterventionPublisher (nostr layer) cannot import
         // PubkeyService (services layer).
 
-        await publisher.publishReviewRequest(
-            "target-pubkey-123456789012345678901234567890123456",
-            "conv-id-123456789012345678901234567890123456789012",
-            "Pablo", // Pre-resolved user name (passed directly)
-            "Architect-Orchestrator" // Pre-resolved agent name (passed directly)
+        await withProjectContextAsync(() =>
+            publisher.publishReviewRequest(
+                "target-pubkey-123456789012345678901234567890123456",
+                "conv-id-123456789012345678901234567890123456789012",
+                "Pablo", // Pre-resolved user name (passed directly)
+                "Architect-Orchestrator" // Pre-resolved agent name (passed directly)
+            )
         );
 
         // Verify the event content uses the pre-resolved names passed as parameters

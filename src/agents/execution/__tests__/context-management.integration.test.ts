@@ -18,42 +18,41 @@ describe("TENEX context management integration", () => {
     const AGENT_PUBKEY = "agent-pubkey-123";
 
     let store: ConversationStore;
-    let originalLoadedConfig: unknown;
+    let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+
+    function buildContextManagementConfig(overrides: Record<string, unknown>) {
+        return {
+            enabled: true,
+            tokenBudget: 40000,
+            scratchpadEnabled: true,
+            forceScratchpadEnabled: true,
+            forceScratchpadThresholdPercent: 70,
+            utilizationWarningEnabled: true,
+            utilizationWarningThresholdPercent: 70,
+            summarizationFallbackEnabled: true,
+            summarizationFallbackThresholdPercent: 90,
+            ...overrides,
+        };
+    }
 
     function setContextManagementConfig(overrides: Record<string, unknown>): void {
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = {
-            config: {
-                contextManagement: {
-                    enabled: true,
-                    tokenBudget: 40000,
-                    scratchpadEnabled: true,
-                    forceScratchpadEnabled: true,
-                    forceScratchpadThresholdPercent: 70,
-                    utilizationWarningEnabled: true,
-                    utilizationWarningThresholdPercent: 70,
-                    summarizationFallbackEnabled: true,
-                    summarizationFallbackThresholdPercent: 90,
-                    ...overrides,
-                },
-            },
-            llms: { configurations: {}, default: undefined },
-            mcp: { servers: {}, enabled: true },
-            providers: { providers: {} },
-        };
+        getContextManagementConfigSpy.mockReturnValue(buildContextManagementConfig(overrides) as any);
     }
 
     beforeEach(async () => {
         await mkdir(TEST_DIR, { recursive: true });
         store = new ConversationStore(TEST_DIR);
         store.load(PROJECT_ID, CONVERSATION_ID);
-        originalLoadedConfig = (configService as unknown as { loadedConfig?: unknown }).loadedConfig;
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = undefined;
+        getContextManagementConfigSpy = spyOn(
+            configService,
+            "getContextManagementConfig"
+        ).mockReturnValue(undefined);
         resetSystemReminders();
     });
 
     afterEach(async () => {
         resetSystemReminders();
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = originalLoadedConfig;
+        getContextManagementConfigSpy?.mockRestore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 

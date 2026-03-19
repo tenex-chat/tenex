@@ -7,4 +7,5 @@ export {
     IdentityBindingStore,
     getIdentityBindingStore,
 } from "./IdentityBindingStoreService";
+export { IdentityDisplayService, getIdentityDisplayService } from "./IdentityDisplayService";
 export { IdentityService, getIdentityService } from "./IdentityService";

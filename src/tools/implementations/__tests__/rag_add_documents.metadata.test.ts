@@ -1,4 +1,8 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as projectsModule from "@/services/projects";
+import { RAGService } from "@/services/rag/RAGService";
+import type { ToolExecutionContext } from "@/tools/types";
+import { createRAGAddDocumentsTool } from "../rag_add_documents";
 
 // Mock dependencies before imports
 mock.module("@/utils/logger", () => ({
@@ -10,26 +14,11 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/services/rag/RAGService", () => ({
-    RAGService: {
-        getInstance: () => ({
-            addDocuments: mock().mockResolvedValue(undefined),
-        }),
-    },
-}));
-
-mock.module("@/services/projects", () => ({
-    isProjectContextInitialized: () => false,
-    getProjectContext: () => {
-        throw new Error("Not initialized");
-    },
-}));
-
 // We need to test the coerceToDocumentMetadata function
 // Since it's internal, we'll test it through the mergeWithProvenance behavior
 // by creating documents with various metadata types
 
-import type { ToolExecutionContext } from "@/tools/types";
+let captureAddDocuments: (collection: string, docs: unknown[]) => Promise<void> = async () => {};
 
 // Create minimal mock context
 const createMockContext = (): ToolExecutionContext => ({
@@ -47,24 +36,41 @@ const createMockContext = (): ToolExecutionContext => ({
 });
 
 describe("rag_add_documents metadata handling", () => {
+    let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let getInstanceSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+        captureAddDocuments = async () => {};
+        isProjectContextInitializedSpy = spyOn(
+            projectsModule,
+            "isProjectContextInitialized"
+        ).mockReturnValue(false as never);
+        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockImplementation(
+            () => {
+                throw new Error("Not initialized");
+            }
+        );
+        getInstanceSpy = spyOn(RAGService, "getInstance").mockReturnValue({
+            addDocuments: (collection: string, docs: unknown[]) =>
+                captureAddDocuments(collection, docs),
+        } as never);
+    });
+
+    afterEach(() => {
+        isProjectContextInitializedSpy?.mockRestore();
+        getProjectContextSpy?.mockRestore();
+        getInstanceSpy?.mockRestore();
+    });
+
     describe("coerceToDocumentMetadata (through tool execution)", () => {
         it("should handle string metadata values", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            // Re-import after mock update
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with string metadata",
                 collection: "test",
@@ -82,20 +88,11 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should handle numeric metadata values", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with numeric metadata",
                 collection: "test",
@@ -113,20 +110,11 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should handle boolean metadata values", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with boolean metadata",
                 collection: "test",
@@ -144,20 +132,11 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should handle null metadata values", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with null metadata",
                 collection: "test",
@@ -174,20 +153,11 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should handle nested object metadata", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with nested metadata",
                 collection: "test",
@@ -206,20 +176,11 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should handle array metadata", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
+            const tool = createRAGAddDocumentsTool(createMockContext());
 
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
-            const tool = createTool(createMockContext());
-            
             await tool.execute({
                 description: "Add test documents with array metadata",
                 collection: "test",
@@ -238,21 +199,12 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should auto-inject agent_pubkey from context", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
-
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
             const context = createMockContext();
-            const tool = createTool(context);
-            
+            const tool = createRAGAddDocumentsTool(context);
+
             await tool.execute({
                 description: "Add test documents for agent pubkey injection",
                 collection: "test",
@@ -269,21 +221,12 @@ describe("rag_add_documents metadata handling", () => {
 
         it("should allow user metadata to override base provenance", async () => {
             const capturedDocs: any[] = [];
-            mock.module("@/services/rag/RAGService", () => ({
-                RAGService: {
-                    getInstance: () => ({
-                        addDocuments: mock((_col: string, docs: any[]) => {
-                            capturedDocs.push(...docs);
-                            return Promise.resolve();
-                        }),
-                    }),
-                },
-            }));
-
-            const { createRAGAddDocumentsTool: createTool } = await import("../rag_add_documents");
+            captureAddDocuments = async (_col: string, docs: unknown[]) => {
+                capturedDocs.push(...docs);
+            };
             const context = createMockContext();
-            const tool = createTool(context);
-            
+            const tool = createRAGAddDocumentsTool(context);
+
             // User explicitly provides their own agent_pubkey
             await tool.execute({
                 description: "Add test documents with custom pubkey",

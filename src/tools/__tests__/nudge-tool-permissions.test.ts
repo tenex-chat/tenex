@@ -107,8 +107,11 @@ describe("Nudge Tool Permissions", () => {
                 // fs_read triggers auto-injection of fs_glob + fs_grep
                 expect(toolNames).toContain("fs_glob");
                 expect(toolNames).toContain("fs_grep");
-                // Base tools (2) + all core tools + auto-injected fs tools (2) = total
-                expect(toolNames.length).toBe(2 + CORE_AGENT_TOOLS.length + 2);
+                // Lacking fs_write still injects home-scoped write fallbacks
+                expect(toolNames).toContain("home_fs_write");
+                expect(toolNames).toContain("home_fs_edit");
+                // Base tools (2) + all core tools + fs search tools (2) + home write fallbacks (2)
+                expect(toolNames.length).toBe(2 + CORE_AGENT_TOOLS.length + 4);
             });
         });
 
@@ -350,9 +353,11 @@ describe("Nudge Tool Permissions", () => {
                 // Home fs tools are also auto-injected when agent lacks fs_* tools
                 expect(toolNames).toContain("home_fs_read");
                 expect(toolNames).toContain("home_fs_write");
+                expect(toolNames).toContain("home_fs_edit");
+                expect(toolNames).toContain("home_fs_glob");
                 expect(toolNames).toContain("home_fs_grep");
-                // All core tools + home_fs tools (3)
-                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 3);
+                // All core tools + all home-scoped fs fallbacks (5)
+                expect(toolNames.length).toBe(CORE_AGENT_TOOLS.length + 5);
             });
         });
     });

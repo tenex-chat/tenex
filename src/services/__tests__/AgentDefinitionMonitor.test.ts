@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { agentStorage, createStoredAgent } from "@/agents/AgentStorage";
+import { AgentStorage, createStoredAgent } from "../../agents/AgentStorage";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { AgentDefinitionMonitor, type ActiveRuntimesProvider } from "../AgentDefinitionMonitor";
 
@@ -23,28 +23,21 @@ function createNoopRuntimesProvider(): ActiveRuntimesProvider {
 
 describe("AgentDefinitionMonitor", () => {
     let tempDir: string;
-    let originalAgentsDir: string;
-    let originalIndexPath: string;
+    let storage: AgentStorage;
 
     beforeEach(async () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "monitor-test-"));
+        storage = new AgentStorage();
 
-        // Save and override the singleton's internal paths to use temp dir
-        originalAgentsDir = (agentStorage as any).agentsDir;
-        originalIndexPath = (agentStorage as any).indexPath;
-        (agentStorage as any).agentsDir = tempDir;
-        (agentStorage as any).indexPath = path.join(tempDir, "index.json");
-        (agentStorage as any).index = null;
+        // Override the storage instance to use an isolated temp dir
+        (storage as any).agentsDir = tempDir;
+        (storage as any).indexPath = path.join(tempDir, "index.json");
+        (storage as any).index = null;
 
-        await agentStorage.initialize();
+        await storage.initialize();
     });
 
     afterEach(async () => {
-        // Restore the singleton's original paths
-        (agentStorage as any).agentsDir = originalAgentsDir;
-        (agentStorage as any).indexPath = originalIndexPath;
-        (agentStorage as any).index = null;
-
         await fs.rm(tempDir, { recursive: true, force: true });
     });
 
@@ -62,18 +55,19 @@ describe("AgentDefinitionMonitor", () => {
             // Explicitly ensure definitionDTag is missing
             delete (agent as any).definitionDTag;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             const ndk = createMockNDK();
             const monitor = new AgentDefinitionMonitor(
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             expect(saved!.definitionDTag).toBe("legacy-bot");
             expect(saved!.definitionAuthor).toBe("author-pubkey-abc");
@@ -96,7 +90,7 @@ describe("AgentDefinitionMonitor", () => {
             delete (agent as any).definitionDTag;
             delete (agent as any).definitionAuthor;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             const mockEvent = {
                 pubkey: fakeAuthorPubkey,
@@ -108,11 +102,12 @@ describe("AgentDefinitionMonitor", () => {
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             expect(saved!.definitionDTag).toBe("orphan-bot");
             expect(saved!.definitionAuthor).toBe(fakeAuthorPubkey);
@@ -135,18 +130,19 @@ describe("AgentDefinitionMonitor", () => {
             delete (agent as any).definitionAuthor;
             delete (agent as any).eventId;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             const ndk = createMockNDK();
             const monitor = new AgentDefinitionMonitor(
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             expect(saved!.definitionDTag).toBeUndefined();
             expect(saved!.definitionAuthor).toBeUndefined();
@@ -167,7 +163,7 @@ describe("AgentDefinitionMonitor", () => {
             delete (agent as any).definitionDTag;
             delete (agent as any).definitionAuthor;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             // fetchEvent returns null (event not found on relay)
             const ndk = createMockNDK(null);
@@ -176,11 +172,12 @@ describe("AgentDefinitionMonitor", () => {
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             // definitionDTag should still be inferred from slug
             expect(saved!.definitionDTag).toBe("flaky-bot");
@@ -202,7 +199,7 @@ describe("AgentDefinitionMonitor", () => {
             delete (agent as any).definitionDTag;
             delete (agent as any).definitionAuthor;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             // fetchEvent throws an error (network failure, etc.)
             const ndk = createMockNDK();
@@ -214,11 +211,12 @@ describe("AgentDefinitionMonitor", () => {
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             // definitionDTag should still be inferred from slug despite fetchEvent throwing
             expect(saved!.definitionDTag).toBe("error-bot");
@@ -243,20 +241,21 @@ describe("AgentDefinitionMonitor", () => {
                 definitionCreatedAt: 1600000000,
             });
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             const ndk = createMockNDK();
             const monitor = new AgentDefinitionMonitor(
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();
 
             expect(ndk.fetchEvent).not.toHaveBeenCalled();
 
-            const saved = await agentStorage.loadAgent(signer.pubkey);
+            const saved = await storage.loadAgent(signer.pubkey);
             expect(saved!.definitionDTag).toBe("complete-bot");
             expect(saved!.definitionAuthor).toBe("existing-author");
             expect(saved!.definitionCreatedAt).toBe(1600000000);
@@ -277,7 +276,7 @@ describe("AgentDefinitionMonitor", () => {
             delete (agent as any).definitionDTag;
             delete (agent as any).definitionAuthor;
 
-            await agentStorage.saveAgent(agent);
+            await storage.saveAgent(agent);
 
             const mockEvent = {
                 pubkey: fakeAuthorPubkey,
@@ -289,6 +288,7 @@ describe("AgentDefinitionMonitor", () => {
                 ndk,
                 { whitelistedPubkeys: [] },
                 createNoopRuntimesProvider(),
+                storage,
             );
 
             await monitor.start();

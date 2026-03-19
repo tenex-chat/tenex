@@ -1,48 +1,25 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-
-// Variables to control mock behavior
-let mockProjectContext: any = null;
-let mockProjectContextInitialized = true;
-let mockNdkFetchEvent: any = null;
-
-// Mock the modules before importing PubkeyService
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvent: async () => mockNdkFetchEvent,
-    }),
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => mockProjectContext,
-    isProjectContextInitialized: () => mockProjectContextInitialized,
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-// Import after mocking
+import type { ProjectContext } from "@/services/projects";
+import { projectContextStore } from "@/services/projects";
+import * as nostrModule from "@/nostr";
 import { PubkeyService } from "../PubkeyService";
+
+let mockProjectContext: ProjectContext;
+let mockNdkFetchEvent: any = null;
 
 describe("PubkeyService", () => {
     let service: PubkeyService;
 
     beforeEach(() => {
-        // Reset singleton
         (PubkeyService as any).instance = undefined;
         service = PubkeyService.getInstance();
 
-        // Reset mock values
         mockNdkFetchEvent = null;
-        mockProjectContextInitialized = true;
+        spyOn(nostrModule, "getNDK").mockReturnValue({
+            fetchEvent: async () => mockNdkFetchEvent,
+        } as any);
 
-        // Setup mock project context with agents
         const agentsMap = new Map<string, AgentInstance>([
             [
                 "code-writer",
@@ -70,36 +47,39 @@ describe("PubkeyService", () => {
             ],
         ]);
 
-        // Build pubkey -> agent map for getAgentByPubkey
         const agentsByPubkey = new Map<string, AgentInstance>();
         for (const agent of agentsMap.values()) {
             agentsByPubkey.set(agent.pubkey, agent);
         }
 
         mockProjectContext = {
-            pubkey: "project-pubkey",
-            agents: agentsMap,
             getAgentByPubkey: (pubkey: string) => agentsByPubkey.get(pubkey),
-        };
+        } as unknown as ProjectContext;
 
-        // Clear any cached data
         service.clearCache();
+    });
+
+    afterEach(() => {
+        mock.restore();
+        (PubkeyService as any).instance = undefined;
     });
 
     describe("Agent name resolution", () => {
         it("should return agent slug for agent pubkey", async () => {
-            const name = await service.getName("agent1-pubkey");
+            const name = await projectContextStore.run(mockProjectContext, () =>
+                service.getName("agent1-pubkey")
+            );
             expect(name).toBe("code-writer");
         });
 
         it("should return agent slug synchronously", () => {
-            const name = service.getNameSync("agent2-pubkey");
+            const name = projectContextStore.runSync(mockProjectContext, () =>
+                service.getNameSync("agent2-pubkey")
+            );
             expect(name).toBe("tester");
         });
 
         it("should handle project context not initialized", async () => {
-            mockProjectContextInitialized = false;
-
             const name = await service.getName("agent1-pubkey");
             expect(name).toBe("agent1-pubke"); // Falls back to shortened pubkey (12 chars)
         });
@@ -210,7 +190,9 @@ describe("PubkeyService", () => {
 
     describe("getNameSync", () => {
         it("should return agent slug synchronously for agents", () => {
-            const name = service.getNameSync("agent1-pubkey");
+            const name = projectContextStore.runSync(mockProjectContext, () =>
+                service.getNameSync("agent1-pubkey")
+            );
             expect(name).toBe("code-writer");
         });
 

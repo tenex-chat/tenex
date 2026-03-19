@@ -11,10 +11,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/utils/error-handler", () => ({
-    handleError: () => {},
-}));
-
 // Mock RAGService
 const ragServiceMocks = {
     listCollections: mock(),

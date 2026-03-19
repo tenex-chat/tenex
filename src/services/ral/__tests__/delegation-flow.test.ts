@@ -1,9 +1,10 @@
-import { describe, expect, it, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { RALRegistry } from "../RALRegistry";
 import { isStopExecutionSignal } from "../types";
 import type { PendingDelegation, CompletedDelegation } from "../types";
 import { handleDelegationCompletion } from "@/services/dispatch/DelegationCompletionHandler";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import * as projectsModule from "@/services/projects";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock getProjectContext
 const mockAgent = {
@@ -21,25 +22,69 @@ const mockAgent2 = {
 const CONVERSATION_ID = "conv-test-123";
 const PROJECT_ID = "31933:pubkey:test-project";
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        getAgentByPubkey: (pubkey: string) => {
-            if (pubkey === mockAgent.pubkey) return mockAgent;
-            if (pubkey === mockAgent2.pubkey) return mockAgent2;
-            return undefined;
+function createDelegationCompletionEnvelope(params: {
+    messageId: string;
+    senderPubkey: string;
+    content: string;
+    replyTargets?: string[];
+}) {
+    const { messageId, senderPubkey, content, replyTargets = [] } = params;
+
+    return createMockInboundEnvelope({
+        principal: {
+            id: senderPubkey,
+            transport: "nostr",
+            linkedPubkey: senderPubkey,
+            kind: "agent",
         },
-    }),
-    isProjectContextInitialized: () => true,
-}));
+        message: {
+            id: messageId,
+            transport: "nostr",
+            nativeId: messageId,
+        },
+        recipients: [
+            {
+                id: mockAgent.pubkey,
+                transport: "nostr",
+                linkedPubkey: mockAgent.pubkey,
+                kind: "agent",
+            },
+        ],
+        content,
+        metadata: {
+            eventKind: 1,
+            eventTagCount: replyTargets.length + 1,
+            replyTargets,
+        },
+    });
+}
 
 describe("RAL Delegation Flow", () => {
     let registry: RALRegistry;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let isProjectContextInitializedSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;
+        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            getAgentByPubkey: (pubkey: string) => {
+                if (pubkey === mockAgent.pubkey) return mockAgent;
+                if (pubkey === mockAgent2.pubkey) return mockAgent2;
+                return undefined;
+            },
+        } as never);
+        isProjectContextInitializedSpy = spyOn(
+            projectsModule,
+            "isProjectContextInitialized"
+        ).mockReturnValue(true as never);
         registry = RALRegistry.getInstance();
+    });
+
+    afterEach(() => {
+        getProjectContextSpy?.mockRestore();
+        isProjectContextInitializedSpy?.mockRestore();
     });
 
     describe("RALRegistry State Management", () => {
@@ -279,26 +324,12 @@ describe("RAL Delegation Flow", () => {
             ]);
 
             // Create mock completion event (agent2 responding)
-            const completionEvent = {
-                id: "response-event-id",
-                pubkey: mockAgent2.pubkey,
-                kind: 1,
+            const completionEvent = createDelegationCompletionEnvelope({
+                messageId: "response-event-id",
+                senderPubkey: mockAgent2.pubkey,
                 content: "Task completed! Here are the results.",
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [
-                    ["e", "original-delegation-event-id"], // e-tags the delegation
-                    ["p", mockAgent.pubkey], // p-tags the delegating agent
-                ],
-                getMatchingTags: (tag: string) => {
-                    if (tag === "e") return [["e", "original-delegation-event-id"]];
-                    if (tag === "p") return [["p", mockAgent.pubkey]];
-                    return [];
-                },
-                tagValue: (tag: string) => {
-                    if (tag === "e") return "original-delegation-event-id";
-                    return undefined;
-                },
-            } as unknown as NDKEvent;
+                replyTargets: ["original-delegation-event-id"],
+            });
 
             // Execute handler - now just records completion, routing is via p-tags
             const result = await handleDelegationCompletion(completionEvent);
@@ -330,15 +361,11 @@ describe("RAL Delegation Flow", () => {
             ]);
 
             // Create event that doesn't e-tag any delegation
-            const unrelatedEvent = {
-                id: "unrelated-event",
-                pubkey: "random-pubkey",
-                kind: 1,
+            const unrelatedEvent = createDelegationCompletionEnvelope({
+                messageId: "unrelated-event",
+                senderPubkey: "random-pubkey",
                 content: "Some random message",
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            } as unknown as NDKEvent;
+            });
 
             const result = await handleDelegationCompletion(unrelatedEvent);
 
@@ -377,25 +404,12 @@ describe("RAL Delegation Flow", () => {
             expect(registry.isDelegationKilled("killed-delegation-id")).toBe(true);
 
             // Create completion event from the delegated agent
-            const completionEvent = {
-                id: "late-completion-event",
-                pubkey: mockAgent2.pubkey,
-                kind: 1,
+            const completionEvent = createDelegationCompletionEnvelope({
+                messageId: "late-completion-event",
+                senderPubkey: mockAgent2.pubkey,
                 content: "I finished the task!",
-                tags: [
-                    ["e", "killed-delegation-id"],
-                    ["p", mockAgent.pubkey],
-                ],
-                getMatchingTags: (tag: string) => {
-                    if (tag === "e") return [["e", "killed-delegation-id"]];
-                    if (tag === "p") return [["p", mockAgent.pubkey]];
-                    return [];
-                },
-                tagValue: (tag: string) => {
-                    if (tag === "e") return "killed-delegation-id";
-                    return undefined;
-                },
-            } as unknown as NDKEvent;
+                replyTargets: ["killed-delegation-id"],
+            });
 
             // Attempt to record completion - should be ignored
             const result = await handleDelegationCompletion(completionEvent);
@@ -467,25 +481,12 @@ describe("RAL Delegation Flow", () => {
             ]);
 
             // First completion
-            const firstCompletion = {
-                id: "response-1",
-                pubkey: mockAgent2.pubkey,
-                kind: 1,
+            const firstCompletion = createDelegationCompletionEnvelope({
+                messageId: "response-1",
+                senderPubkey: mockAgent2.pubkey,
                 content: "Task 1 done",
-                tags: [
-                    ["e", "delegation-1"],
-                    ["p", mockAgent.pubkey],
-                ],
-                getMatchingTags: (tag: string) => {
-                    if (tag === "e") return [["e", "delegation-1"]];
-                    if (tag === "p") return [["p", mockAgent.pubkey]];
-                    return [];
-                },
-                tagValue: (tag: string) => {
-                    if (tag === "e") return "delegation-1";
-                    return undefined;
-                },
-            } as unknown as NDKEvent;
+                replyTargets: ["delegation-1"],
+            });
 
             const result1 = await handleDelegationCompletion(firstCompletion);
 
@@ -500,25 +501,12 @@ describe("RAL Delegation Flow", () => {
             expect(completedAfterFirst).toHaveLength(1);
 
             // Second completion
-            const secondCompletion = {
-                id: "response-2",
-                pubkey: "agent3pubkey",
-                kind: 1,
+            const secondCompletion = createDelegationCompletionEnvelope({
+                messageId: "response-2",
+                senderPubkey: "agent3pubkey",
                 content: "Task 2 done",
-                tags: [
-                    ["e", "delegation-2"],
-                    ["p", mockAgent.pubkey],
-                ],
-                getMatchingTags: (tag: string) => {
-                    if (tag === "e") return [["e", "delegation-2"]];
-                    if (tag === "p") return [["p", mockAgent.pubkey]];
-                    return [];
-                },
-                tagValue: (tag: string) => {
-                    if (tag === "e") return "delegation-2";
-                    return undefined;
-                },
-            } as unknown as NDKEvent;
+                replyTargets: ["delegation-2"],
+            });
 
             const result2 = await handleDelegationCompletion(secondCompletion);
 
@@ -558,25 +546,12 @@ describe("RAL Delegation Flow", () => {
             expect(pendingAfterDelegate).toHaveLength(1);
 
             // 4. Agent2 completes and responds
-            const completionEvent = {
-                id: "agent2-response-event",
-                pubkey: mockAgent2.pubkey,
-                kind: 1,
+            const completionEvent = createDelegationCompletionEnvelope({
+                messageId: "agent2-response-event",
+                senderPubkey: mockAgent2.pubkey,
                 content: "I have completed the subtask. Here are the results.",
-                tags: [
-                    ["e", "delegation-full-flow-test"],
-                    ["p", mockAgent.pubkey],
-                ],
-                getMatchingTags: (tag: string) => {
-                    if (tag === "e") return [["e", "delegation-full-flow-test"]];
-                    if (tag === "p") return [["p", mockAgent.pubkey]];
-                    return [];
-                },
-                tagValue: (tag: string) => {
-                    if (tag === "e") return "delegation-full-flow-test";
-                    return undefined;
-                },
-            } as unknown as NDKEvent;
+                replyTargets: ["delegation-full-flow-test"],
+            });
 
             // 5. DelegationCompletionHandler records the completion
             // (routing happens via p-tags separately)

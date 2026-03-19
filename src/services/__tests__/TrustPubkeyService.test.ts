@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
+import { config } from "@/services/ConfigService";
+import { projectContextStore } from "@/services/projects";
+import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 // Variables to control mock behavior
@@ -9,56 +12,43 @@ let mockBackendPubkey: string | null = "backend-pubkey-hex";
 let mockBackendSignerError = false;
 let mockConfigError = false;
 
-// Mock the modules before importing TrustPubkeyService
-// Note: ConfigService needs getConfigPath for AgentStorage (loaded by test-setup preload)
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: () => {
-            if (mockConfigError) {
-                throw new Error("Config not loaded");
-            }
-            return {};
-        },
-        getConfigPath: (subdir?: string) => `/mock/path/${subdir || ""}`,
-        getWhitelistedPubkeys: () => {
-            if (mockConfigError) {
-                throw new Error("Config not loaded");
-            }
-            return mockWhitelistedPubkeys;
-        },
-        getBackendSigner: async () => {
-            if (mockBackendSignerError) {
-                throw new Error("Backend signer not available");
-            }
-            return {
-                pubkey: mockBackendPubkey,
-            };
-        },
-    },
-}));
-
-mock.module("@/services/projects", () => ({
-    projectContextStore: {
-        getContext: () => mockProjectContext,
-    },
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-// Import after mocking
 import { TrustPubkeyService } from "../trust-pubkeys/TrustPubkeyService";
 
 describe("TrustPubkeyService", () => {
     let service: TrustPubkeyService;
 
     beforeEach(() => {
+        spyOn(config, "getConfig").mockImplementation(() => {
+            if (mockConfigError) {
+                throw new Error("Config not loaded");
+            }
+            return {};
+        });
+        spyOn(config, "getConfigPath").mockImplementation(
+            (subdir?: string) => `/mock/path/${subdir || ""}`
+        );
+        spyOn(config, "getWhitelistedPubkeys").mockImplementation(() => {
+            if (mockConfigError) {
+                throw new Error("Config not loaded");
+            }
+            return mockWhitelistedPubkeys;
+        });
+        spyOn(config, "getBackendSigner").mockImplementation(async () => {
+            if (mockBackendSignerError) {
+                throw new Error("Backend signer not available");
+            }
+            return {
+                pubkey: mockBackendPubkey,
+            } as any;
+        });
+        spyOn(projectContextStore, "getContext").mockImplementation(
+            () => mockProjectContext ?? undefined
+        );
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+
         // Reset singleton
         (TrustPubkeyService as any).instance = undefined;
         service = TrustPubkeyService.getInstance();
@@ -105,6 +95,10 @@ describe("TrustPubkeyService", () => {
                 return undefined;
             },
         };
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     describe("getInstance", () => {

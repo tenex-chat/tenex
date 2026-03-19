@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 
 const addEvent = mock(() => {});
@@ -77,35 +77,35 @@ describe("TENEX context management telemetry", () => {
     const AGENT_PUBKEY = "agent-pubkey-telemetry";
 
     let store: ConversationStore;
-    let originalLoadedConfig: unknown;
+    let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+
+    function buildContextManagementConfig(overrides: Record<string, unknown>) {
+        return {
+            enabled: true,
+            tokenBudget: 40000,
+            scratchpadEnabled: true,
+            forceScratchpadEnabled: true,
+            forceScratchpadThresholdPercent: 70,
+            utilizationWarningEnabled: true,
+            utilizationWarningThresholdPercent: 70,
+            summarizationFallbackEnabled: false,
+            ...overrides,
+        };
+    }
 
     beforeEach(async () => {
         addEvent.mockClear();
         await mkdir(TEST_DIR, { recursive: true });
         store = new ConversationStore(TEST_DIR);
         store.load(PROJECT_ID, CONVERSATION_ID);
-        originalLoadedConfig = (configService as unknown as { loadedConfig?: unknown }).loadedConfig;
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = {
-            config: {
-                contextManagement: {
-                    enabled: true,
-                    tokenBudget: 40000,
-                    scratchpadEnabled: true,
-                    forceScratchpadEnabled: true,
-                    forceScratchpadThresholdPercent: 70,
-                    utilizationWarningEnabled: true,
-                    utilizationWarningThresholdPercent: 70,
-                    summarizationFallbackEnabled: false,
-                },
-            },
-            llms: { configurations: {}, default: undefined },
-            mcp: { servers: {}, enabled: true },
-            providers: { providers: {} },
-        };
+        getContextManagementConfigSpy = spyOn(
+            configService,
+            "getContextManagementConfig"
+        ).mockReturnValue(buildContextManagementConfig({}) as any);
     });
 
     afterEach(async () => {
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = originalLoadedConfig;
+        getContextManagementConfigSpy?.mockRestore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
@@ -333,23 +333,12 @@ describe("TENEX context management telemetry", () => {
     });
 
     test("includes final tool choice when scratchpad forcing mutates the model call", async () => {
-        (configService as unknown as { loadedConfig?: unknown }).loadedConfig = {
-            config: {
-                contextManagement: {
-                    enabled: true,
-                    tokenBudget: 200,
-                    scratchpadEnabled: true,
-                    forceScratchpadEnabled: true,
-                    forceScratchpadThresholdPercent: 70,
-                    utilizationWarningEnabled: false,
-                    utilizationWarningThresholdPercent: 70,
-                    summarizationFallbackEnabled: false,
-                },
-            },
-            llms: { configurations: {}, default: undefined },
-            mcp: { servers: {}, enabled: true },
-            providers: { providers: {} },
-        };
+        getContextManagementConfigSpy.mockReturnValue(
+            buildContextManagementConfig({
+                tokenBudget: 200,
+                utilizationWarningEnabled: false,
+            }) as any
+        );
 
         const agent = {
             name: "executor",

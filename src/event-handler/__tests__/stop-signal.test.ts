@@ -1,11 +1,11 @@
 import { describe, expect, it, beforeEach } from "bun:test";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import type { ProjectContext } from "@/services/projects";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 /**
  * Stop Signal (kind 24134) Tests
@@ -60,16 +60,38 @@ describe("Stop Signal (kind 24134)", () => {
         } as unknown as ProjectContext;
     });
 
+    function createEnvelope(
+        senderPubkey: string,
+        recipientPubkeys: string[],
+        kind = NDKKind.GenericReply
+    ) {
+        return createMockInboundEnvelope({
+            principal: {
+                id: senderPubkey,
+                transport: "nostr",
+                linkedPubkey: senderPubkey,
+                kind: "human",
+            },
+            recipients: recipientPubkeys.map((pubkey) => ({
+                id: pubkey,
+                transport: "nostr",
+                linkedPubkey: pubkey,
+                kind: "agent",
+            })),
+            metadata: {
+                eventKind: kind,
+            },
+        });
+    }
+
     describe("Agent blocking in conversation", () => {
         it("blocks a p-tagged agent when stop signal is received", () => {
-            // Given: A stop signal event p-tagging an agent and e-tagging a conversation
-            const stopEvent = new NDKEvent();
-            stopEvent.kind = NDKKind.TenexStopCommand;
-            stopEvent.pubkey = userPubkey;
-            stopEvent.tags = [
-                ["p", agentPubkey],
-                ["e", conversationId],
-            ];
+            // Given: A stop signal envelope targeting an agent
+            const stopEvent = createEnvelope(
+                userPubkey,
+                [agentPubkey],
+                NDKKind.TenexStopCommand
+            );
 
             const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
@@ -93,10 +115,7 @@ describe("Stop Signal (kind 24134)", () => {
             const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A chat message p-tagging that agent
-            const chatEvent = new NDKEvent();
-            chatEvent.kind = NDKKind.GenericReply;
-            chatEvent.pubkey = userPubkey;
-            chatEvent.tags = [["p", agentPubkey]];
+            const chatEvent = createEnvelope(userPubkey, [agentPubkey]);
 
             // When: We resolve target agents
             const targetAgents = AgentRouter.resolveTargetAgents(
@@ -131,13 +150,7 @@ describe("Stop Signal (kind 24134)", () => {
             const mockConversation = createMockConversationStore(conversationId, blockedAgents);
 
             // And: A chat message p-tagging both agents
-            const chatEvent = new NDKEvent();
-            chatEvent.kind = NDKKind.GenericReply;
-            chatEvent.pubkey = userPubkey;
-            chatEvent.tags = [
-                ["p", agentPubkey],
-                ["p", agent2Pubkey],
-            ];
+            const chatEvent = createEnvelope(userPubkey, [agentPubkey, agent2Pubkey]);
 
             // When: We resolve target agents
             const targetAgents = AgentRouter.resolveTargetAgents(
@@ -162,10 +175,7 @@ describe("Stop Signal (kind 24134)", () => {
             const whitelist = new Set([whitelistedPubkey]);
 
             // When: A whitelisted user sends a message p-tagging the blocked agent
-            const chatEvent = new NDKEvent();
-            chatEvent.kind = NDKKind.GenericReply;
-            chatEvent.pubkey = whitelistedPubkey;
-            chatEvent.tags = [["p", agentPubkey]];
+            const chatEvent = createEnvelope(whitelistedPubkey, [agentPubkey]);
 
             // Then: The agent should be unblocked
             const result = AgentRouter.unblockAgent(
@@ -188,10 +198,7 @@ describe("Stop Signal (kind 24134)", () => {
             const whitelist = new Set([whitelistedPubkey]);
 
             // When: A non-whitelisted user sends a message p-tagging the blocked agent
-            const chatEvent = new NDKEvent();
-            chatEvent.kind = NDKKind.GenericReply;
-            chatEvent.pubkey = userPubkey; // Not in whitelist
-            chatEvent.tags = [["p", agentPubkey]];
+            const chatEvent = createEnvelope(userPubkey, [agentPubkey]);
 
             // Then: The agent should remain blocked
             const result = AgentRouter.unblockAgent(
@@ -216,10 +223,7 @@ describe("Stop Signal (kind 24134)", () => {
             const conversation2 = createMockConversationStore(conversationId2, blockedAgents2);
 
             // When: Routing in conversation 2
-            const chatEvent = new NDKEvent();
-            chatEvent.kind = NDKKind.GenericReply;
-            chatEvent.pubkey = userPubkey;
-            chatEvent.tags = [["p", agentPubkey]];
+            const chatEvent = createEnvelope(userPubkey, [agentPubkey]);
 
             const targetAgents = AgentRouter.resolveTargetAgents(
                 chatEvent,

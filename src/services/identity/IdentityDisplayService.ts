@@ -57,11 +57,16 @@ export class IdentityDisplayService {
         return IdentityDisplayService.instance;
     }
 
+    static resetInstance(): void {
+        IdentityDisplayService.instance = undefined as unknown as IdentityDisplayService;
+    }
+
     resolveDisplayNameSync(lookup: IdentityDisplayLookup): string {
         const principalName = getPrincipalDisplayName(lookup);
-        const resolvedName = lookup.linkedPubkey
-            ? this.pubkeyService.getNameSync(lookup.linkedPubkey)
-            : undefined;
+        const resolvedName =
+            lookup.linkedPubkey && typeof this.pubkeyService.getNameSync === "function"
+                ? this.pubkeyService.getNameSync(lookup.linkedPubkey)
+                : undefined;
 
         if (principalName && isFallbackPubkeyLabel(resolvedName, lookup.linkedPubkey)) {
             return principalName;

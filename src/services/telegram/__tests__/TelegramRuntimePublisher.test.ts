@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/types";
 import { TelegramRuntimePublisher } from "@/services/telegram/TelegramRuntimePublisherService";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
@@ -15,21 +16,6 @@ const nostrPublisherMethods = {
     streamTextDelta: mock(async () => undefined),
     delegationMarker: mock(async () => ({}) as any),
 };
-
-mock.module("@/nostr/AgentPublisher", () => ({
-    AgentPublisher: class {
-        complete = nostrPublisherMethods.complete;
-        conversation = nostrPublisherMethods.conversation;
-        delegate = nostrPublisherMethods.delegate;
-        ask = nostrPublisherMethods.ask;
-        delegateFollowup = nostrPublisherMethods.delegateFollowup;
-        error = nostrPublisherMethods.error;
-        lesson = nostrPublisherMethods.lesson;
-        toolUse = nostrPublisherMethods.toolUse;
-        streamTextDelta = nostrPublisherMethods.streamTextDelta;
-        delegationMarker = nostrPublisherMethods.delegationMarker;
-    },
-}));
 
 const createTelegramEnvelope = (messageId: string) =>
     createMockInboundEnvelope({
@@ -65,6 +51,29 @@ describe("TelegramRuntimePublisher", () => {
         nostrPublisherMethods.toolUse.mockImplementation(async () => ({}) as any);
         nostrPublisherMethods.streamTextDelta.mockImplementation(async () => undefined);
         nostrPublisherMethods.delegationMarker.mockImplementation(async () => ({}) as any);
+
+        spyOn(AgentPublisher.prototype, "complete").mockImplementation(nostrPublisherMethods.complete);
+        spyOn(AgentPublisher.prototype, "conversation").mockImplementation(
+            nostrPublisherMethods.conversation
+        );
+        spyOn(AgentPublisher.prototype, "delegate").mockImplementation(nostrPublisherMethods.delegate);
+        spyOn(AgentPublisher.prototype, "ask").mockImplementation(nostrPublisherMethods.ask);
+        spyOn(AgentPublisher.prototype, "delegateFollowup").mockImplementation(
+            nostrPublisherMethods.delegateFollowup
+        );
+        spyOn(AgentPublisher.prototype, "error").mockImplementation(nostrPublisherMethods.error);
+        spyOn(AgentPublisher.prototype, "lesson").mockImplementation(nostrPublisherMethods.lesson);
+        spyOn(AgentPublisher.prototype, "toolUse").mockImplementation(nostrPublisherMethods.toolUse);
+        spyOn(AgentPublisher.prototype, "streamTextDelta").mockImplementation(
+            nostrPublisherMethods.streamTextDelta
+        );
+        spyOn(AgentPublisher.prototype, "delegationMarker").mockImplementation(
+            nostrPublisherMethods.delegationMarker
+        );
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("delivers completions to Telegram when the triggering context is Telegram", async () => {

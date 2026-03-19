@@ -362,7 +362,7 @@ describe("recentConversationsFragment", () => {
                 currentConversationId: "other-conv",
             });
 
-            expect(result).toContain("Conversation abcdef12...");
+            expect(result).toContain("Conversation abcdef123456...");
         });
     });
 

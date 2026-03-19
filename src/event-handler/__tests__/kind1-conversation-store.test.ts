@@ -8,23 +8,11 @@
  * 4. User messages stored with correct pubkey
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-
-// Mock PubkeyService for attribution tests
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: async (pubkey: string) => {
-            const names: Record<string, string> = {
-                "user-pubkey-123": "User",
-                "agent-pubkey-456": "Agent",
-            };
-            return names[pubkey] ?? "Unknown";
-        },
-    }),
-}));
 
 describe("kind:1 Event Handler with ConversationStore", () => {
     const TEST_DIR = "/tmp/tenex-kind1-handler-test";
@@ -36,10 +24,20 @@ describe("kind:1 Event Handler with ConversationStore", () => {
 
     beforeEach(async () => {
         await mkdir(TEST_DIR, { recursive: true });
+        spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+            getName: async (pubkey: string) => {
+                const names: Record<string, string> = {
+                    "user-pubkey-123": "User",
+                    "agent-pubkey-456": "Agent",
+                };
+                return names[pubkey] ?? "Unknown";
+            },
+        } as any);
         store = new ConversationStore(TEST_DIR);
     });
 
     afterEach(async () => {
+        mock.restore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 

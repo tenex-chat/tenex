@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { AgentRouter } from "@/services/dispatch/AgentRouter";
+import { NDKKind } from "@/nostr/kinds";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 /**
  * Reproduction Test for Cross-Project Routing Issue
@@ -28,6 +29,35 @@ import { AgentRouter } from "@/services/dispatch/AgentRouter";
 describe("Cross-Project Delegation Routing", () => {
     let mockProjectContext: any;
     let mockConversation: any;
+
+    function createEnvelope(params: {
+        senderPubkey: string;
+        recipientPubkeys: string[];
+        replyTargets?: string[];
+        articleReferences?: string[];
+        statusValue?: string;
+    }) {
+        return createMockInboundEnvelope({
+            principal: {
+                id: params.senderPubkey,
+                transport: "nostr",
+                linkedPubkey: params.senderPubkey,
+                kind: "agent",
+            },
+            recipients: params.recipientPubkeys.map((pubkey) => ({
+                id: pubkey,
+                transport: "nostr",
+                linkedPubkey: pubkey,
+                kind: "agent",
+            })),
+            metadata: {
+                eventKind: NDKKind.Text,
+                replyTargets: params.replyTargets ?? [],
+                articleReferences: params.articleReferences ?? [],
+                statusValue: params.statusValue,
+            },
+        });
+    }
 
     beforeEach(() => {
         // Local agents in this project
@@ -89,29 +119,14 @@ describe("Cross-Project Delegation Routing", () => {
         // - a-tag: foreign project ID (should NOT affect routing)
         // - e-tag: reference to a delegation event
 
-        const completionEvent: NDKEvent = {
-            id: "completion-event-id-12345678",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B
-            content: "Task completed successfully: All tests passed.",
-            kind: 1, // Text note
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // P-tag pointing to Agent A (local agent)
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"],
-                // E-tag referencing the delegation event
-                ["e", "delegation-event-id-87654321"],
-                // A-tag with foreign project ID (crucial part of the bug)
-                // Format: "31933:pubkey:d-tag"
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const completionEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["a000000000000000000000000000000000000000000000000000000000000001"],
+            replyTargets: ["delegation-event-id-87654321"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+        });
 
         // Act: Resolve target agents for this event
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -130,28 +145,14 @@ describe("Cross-Project Delegation Routing", () => {
         // External agent B sends a question/clarification to Agent A
         // This tests normal text reply routing (not just completion events)
 
-        const clarificationEvent: NDKEvent = {
-            id: "clarification-event-id-99999999",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B (external)
-            content: "Can you clarify the requirement for the API schema? The spec is ambiguous.",
-            kind: 1, // Text note
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // P-tag pointing to Agent A (local agent)
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"],
-                // E-tag referencing Agent A's original message
-                ["e", "original-request-event-id"],
-                // A-tag with foreign project ID
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const clarificationEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["a000000000000000000000000000000000000000000000000000000000000001"],
+            replyTargets: ["original-request-event-id"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+        });
 
         // Act: Resolve target agents for this event
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -171,26 +172,13 @@ describe("Cross-Project Delegation Routing", () => {
         // Agent B is NOT in our local agents map
         // Should NOT be routed to anyone
 
-        const externalOnlyEvent: NDKEvent = {
-            id: "external-only-event-id",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B (external)
-            content: "Status update",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // P-tag pointing to some other unknown agent (not in our project)
-                ["p", "c000000000000000000000000000000000000000000000000000000000000003"],
-                // A-tag with foreign project ID
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const externalOnlyEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["c000000000000000000000000000000000000000000000000000000000000003"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+        });
 
         // Act: Resolve target agents for this event
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -215,28 +203,17 @@ describe("Cross-Project Delegation Routing", () => {
 
         mockProjectContext.agents.set("agent-c", agentC);
 
-        const multiPtagEvent: NDKEvent = {
-            id: "multi-ptag-event-id",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B (external)
-            content: "Message to multiple agents",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // Multiple p-tags: external agent, then Agent A, then Agent C
-                ["p", "external-agent-pubkey"],
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"], // Agent A
-                ["p", "c000000000000000000000000000000000000000000000000000000000000003"], // Agent C
-                // A-tag with foreign project ID
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const multiPtagEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: [
+                "external-agent-pubkey",
+                "a000000000000000000000000000000000000000000000000000000000000001",
+                "c000000000000000000000000000000000000000000000000000000000000003",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
+            ],
+        });
 
         // Act: Resolve target agents for this event
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -266,25 +243,14 @@ describe("Cross-Project Delegation Routing", () => {
             },
         };
 
-        const completionEvent: NDKEvent = {
-            id: "completion-blocked-agent",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B (external)
-            content: "Task completed",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"], // Agent A (but blocked)
-                ["e", "delegation-event-id"],
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const completionEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["a000000000000000000000000000000000000000000000000000000000000001"],
+            replyTargets: ["delegation-event-id"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+        });
 
         // Act: Resolve target agents with blocked conversation
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -301,30 +267,16 @@ describe("Cross-Project Delegation Routing", () => {
         // External agent sends to local agent with multiple foreign a-tags
         // Should still route to local agent based on p-tag
 
-        const multiAtagEvent: NDKEvent = {
-            id: "multi-atag-event",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // Agent B (external)
-            content: "Status from multiple projects",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // P-tag pointing to local Agent A
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"],
-                // E-tag
-                ["e", "event-id"],
-                // Multiple a-tags from different foreign projects
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
-                ["a", "31933:external-agent:project-c"],
-                ["a", "31933:another-agent:project-d"],
+        const multiAtagEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["a000000000000000000000000000000000000000000000000000000000000001"],
+            replyTargets: ["event-id"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
+                "31933:external-agent:project-c",
+                "31933:another-agent:project-d",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+        });
 
         // Act: Resolve target agents
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -351,28 +303,18 @@ describe("Cross-Project Delegation Routing", () => {
         mockProjectContext.agents.set("agent-d", agentD);
 
         // Event with p-tags to both local agents and external agents
-        const mixedEvent: NDKEvent = {
-            id: "mixed-ptags-event",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // External sender
-            content: "Message to mixed recipients",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // Mix of local and external p-tags
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"], // Local Agent A
-                ["p", "external-user-pubkey"], // External (not in our agents)
-                ["p", "d000000000000000000000000000000000000000000000000000000000000004"], // Local Agent D
-                ["e", "event-id"],
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
+        const mixedEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: [
+                "a000000000000000000000000000000000000000000000000000000000000001",
+                "external-user-pubkey",
+                "d000000000000000000000000000000000000000000000000000000000000004",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+            replyTargets: ["event-id"],
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
+            ],
+        });
 
         // Act: Resolve target agents
         const targetAgents = AgentRouter.resolveTargetAgents(
@@ -396,35 +338,19 @@ describe("Cross-Project Delegation Routing", () => {
         // DelegationCompletionHandler must check ALL e-tags, not just getFirstETag()
         // because the delegation ID might be in the last position
 
-        const threadedReplyEvent: NDKEvent = {
-            id: "threaded-reply-event",
-            pubkey: "b000000000000000000000000000000000000000000000000000000000000002", // External Agent B
-            content: "Task completed as delegated",
-            kind: 1,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                // NIP-10 threaded format: multiple e-tags
-                // First e-tag is the conversation root
-                ["e", "root-conversation-id-root-root-root-root-root-root-root-1"],
-                // Intermediate e-tags in the thread
-                ["e", "intermediate-event-id-in-thread-in-thread-in-thread-1"],
-                // Last e-tag is the direct reply target (the delegation event we need to match)
-                ["e", "delegation-event-id-this-is-what-we-need-to-match-12345"],
-                // P-tag to local Agent A
-                ["p", "a000000000000000000000000000000000000000000000000000000000000001"],
-                // Foreign project a-tag
-                ["a", "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b"],
-                // Status tag indicating completion
-                ["status", "completed"],
+        const threadedReplyEvent = createEnvelope({
+            senderPubkey: "b000000000000000000000000000000000000000000000000000000000000002",
+            recipientPubkeys: ["a000000000000000000000000000000000000000000000000000000000000001"],
+            replyTargets: [
+                "root-conversation-id-root-root-root-root-root-root-root-1",
+                "intermediate-event-id-in-thread-in-thread-in-thread-1",
+                "delegation-event-id-this-is-what-we-need-to-match-12345",
             ],
-            getMatchingTags: function (tagName: string) {
-                return this.tags.filter((tag) => tag[0] === tagName);
-            },
-            tagValue: function (tagName: string) {
-                const tags = this.getMatchingTags(tagName);
-                return tags.length > 0 ? tags[0][1] : undefined;
-            },
-        } as any;
+            articleReferences: [
+                "31933:b000000000000000000000000000000000000000000000000000000000000002:project-b",
+            ],
+            statusValue: "completed",
+        });
 
         // Act: Resolve target agents for this event
         const targetAgents = AgentRouter.resolveTargetAgents(
