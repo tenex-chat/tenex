@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { NudgeSkillWhitelistService, type WhitelistItem } from "../NudgeWhitelistService";
+import * as nostrModule from "@/nostr";
 import { NDKKind } from "@/nostr/kinds";
 
 // Capture the subscription event handler so tests can emit events
@@ -7,7 +8,10 @@ let capturedEventHandler: ((event: any) => void) | null = null;
 
 const mockFetchEvents = mock(() => Promise.resolve(new Set()));
 const mockSubscriptionStop = mock();
-const mockSubscribe = mock(() => {
+const mockSubscribe = mock((_: unknown, options?: { onEvent?: (event: any) => void }) => {
+    if (options?.onEvent) {
+        capturedEventHandler = options.onEvent;
+    }
     const sub = {
         on: mock((eventName: string, handler: (event: any) => void) => {
             if (eventName === "event") {
@@ -18,13 +22,6 @@ const mockSubscribe = mock(() => {
     };
     return sub;
 });
-
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvents: mockFetchEvents,
-        subscribe: mockSubscribe,
-    }),
-}));
 
 /**
  * Emit a whitelist event through the captured subscription handler
@@ -50,9 +47,14 @@ async function emitManyAndRebuild(events: any[]): Promise<void> {
 
 describe("NudgeSkillWhitelistService", () => {
     let service: NudgeSkillWhitelistService;
+    let getNDKSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         capturedEventHandler = null;
+        getNDKSpy = spyOn(nostrModule, "getNDK").mockReturnValue({
+            fetchEvents: mockFetchEvents,
+            subscribe: mockSubscribe,
+        } as never);
         service = NudgeSkillWhitelistService.getInstance();
         service.shutdown();
         mockFetchEvents.mockClear();
@@ -62,6 +64,8 @@ describe("NudgeSkillWhitelistService", () => {
 
     afterEach(() => {
         service.shutdown();
+        getNDKSpy?.mockRestore();
+        mock.restore();
     });
 
     describe("getInstance", () => {

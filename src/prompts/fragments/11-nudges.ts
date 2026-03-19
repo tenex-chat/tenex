@@ -1,5 +1,4 @@
-import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
-import { isOnlyToolMode, hasToolPermissions } from "@/services/nudge";
+import type { NudgeToolPermissions, NudgeData } from "@/services/nudge/types";
 import type { PromptFragment } from "../core/types";
 
 interface NudgesArgs {
@@ -20,6 +19,18 @@ function escapeAttrValue(value: string): string {
         .replace(/"/g, "&quot;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
+}
+
+function isOnlyToolMode(permissions: NudgeToolPermissions): boolean {
+    return Array.isArray(permissions.onlyTools) && permissions.onlyTools.length > 0;
+}
+
+function hasToolPermissions(permissions: NudgeToolPermissions): boolean {
+    return (
+        isOnlyToolMode(permissions) ||
+        (Array.isArray(permissions.allowTools) && permissions.allowTools.length > 0) ||
+        (Array.isArray(permissions.denyTools) && permissions.denyTools.length > 0)
+    );
 }
 
 /**

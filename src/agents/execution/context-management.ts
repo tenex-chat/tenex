@@ -8,6 +8,7 @@ import type {
 import type { LanguageModel, LanguageModelMiddleware } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
+    type ContextManagementReminderSink,
     SummarizationStrategy,
     ScratchpadStrategy,
     SystemPromptCachingStrategy,
@@ -1789,10 +1790,19 @@ function createConversationContextManagementRuntime(options: {
     );
 
     const telemetry = createTelemetryCallback();
+    const reminderSink: ContextManagementReminderSink = {
+        emit(reminder) {
+            getSystemReminderContext().queue({
+                type: reminder.kind,
+                content: reminder.content,
+            });
+        },
+    };
     const runtime = createContextManagementRuntime({
         strategies,
         telemetry: telemetry.emit,
         estimator: requestEstimator,
+        reminderSink,
     });
 
     const middleware: LanguageModelMiddleware = {

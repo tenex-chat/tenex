@@ -7,34 +7,13 @@
  * - Dynamically added agents are persisted in storedAgentPubkeys
  */
 
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { config } from "@/services/ConfigService";
+import { projectContextStore } from "@/services/projects";
+import { logger } from "@/utils/logger";
 
-// Mock heavy dependencies that Daemon imports but we don't need for trust tests
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
+let mockProjectContext: any = null;
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: () => ({}),
-        getConfigPath: (subdir?: string) => `/mock/path/${subdir || ""}`,
-        getWhitelistedPubkeys: () => [],
-        getBackendSigner: async () => ({ pubkey: "mock-backend-pubkey" }),
-    },
-}));
-
-mock.module("@/services/projects", () => ({
-    projectContextStore: {
-        getContext: () => null,
-    },
-}));
-
-// Import TrustPubkeyService after mocks are set up
 import { TrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { Daemon } from "../Daemon";
 
@@ -63,6 +42,23 @@ describe("Daemon trust sync (syncTrustServiceAgentPubkeys)", () => {
     let trustService: TrustPubkeyService;
 
     beforeEach(() => {
+        spyOn(config, "getConfig").mockReturnValue({});
+        spyOn(config, "getConfigPath").mockImplementation(
+            (subdir?: string) => `/mock/path/${subdir || ""}`
+        );
+        spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
+        spyOn(config, "getBackendSigner").mockResolvedValue({
+            pubkey: "mock-backend-pubkey",
+        } as any);
+        spyOn(projectContextStore, "getContext").mockImplementation(
+            () => mockProjectContext ?? undefined
+        );
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+
+        mockProjectContext = null;
         // Reset trust service singleton
         (TrustPubkeyService as any).instance = undefined;
         trustService = TrustPubkeyService.getInstance();
@@ -71,6 +67,10 @@ describe("Daemon trust sync (syncTrustServiceAgentPubkeys)", () => {
         // Create a fresh Daemon (not started — we only test trust sync internals)
         daemon = new Daemon();
         internals = getDaemonInternals(daemon);
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     test("sync unions active runtime pubkeys with stored pubkeys", () => {
@@ -142,6 +142,22 @@ describe("Daemon handleDynamicAgentAdded persists to storedAgentPubkeys", () => 
     let trustService: TrustPubkeyService;
 
     beforeEach(() => {
+        spyOn(config, "getConfig").mockReturnValue({});
+        spyOn(config, "getConfigPath").mockImplementation(
+            (subdir?: string) => `/mock/path/${subdir || ""}`
+        );
+        spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
+        spyOn(config, "getBackendSigner").mockResolvedValue({
+            pubkey: "mock-backend-pubkey",
+        } as any);
+        spyOn(projectContextStore, "getContext").mockImplementation(
+            () => mockProjectContext ?? undefined
+        );
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+
         (TrustPubkeyService as any).instance = undefined;
         trustService = TrustPubkeyService.getInstance();
         trustService.resetAll();

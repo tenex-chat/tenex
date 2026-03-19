@@ -1,46 +1,25 @@
-import { describe, expect, it, mock, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as crypto from "node:crypto";
+import * as fsPromises from "node:fs/promises";
+import * as constantsModule from "@/constants";
+import * as fsLibModule from "@/lib/fs";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 import { SkillService } from "../SkillService";
 
-// Mock NDK
 const mockFetchEvents = mock(() => Promise.resolve(new Set<NDKEvent>()));
 const mockFetchEvent = mock(() => Promise.resolve(null));
 
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvents: mockFetchEvents,
-        fetchEvent: mockFetchEvent,
-    }),
-}));
-
-// Mock constants
-mock.module("@/constants", () => ({
-    getTenexBasePath: () => "/tmp/test-tenex",
-}));
-
-// Mock fs operations
 const mockWriteFile = mock(() => Promise.resolve());
 const mockMkdir = mock(() => Promise.resolve());
 const mockAccess = mock(() => Promise.resolve());
-
-mock.module("node:fs/promises", () => ({
-    writeFile: mockWriteFile,
-    mkdir: mockMkdir,
-    access: mockAccess,
-}));
-
-// Mock fs lib
-mock.module("@/lib/fs", () => ({
-    ensureDirectory: () => Promise.resolve(),
-}));
 
 // Mock global fetch
 const originalFetch = globalThis.fetch;
 let mockFetch: ReturnType<typeof mock>;
 
 beforeEach(() => {
+    SkillService.resetInstance();
     mockFetch = mock(() =>
         Promise.resolve(
             new Response(Buffer.from("file content"), {
@@ -51,14 +30,27 @@ beforeEach(() => {
     );
     globalThis.fetch = mockFetch as unknown as typeof fetch;
 
-    // Reset mocks
     mockFetchEvents.mockClear();
     mockFetchEvent.mockClear();
     mockWriteFile.mockClear();
+    mockMkdir.mockClear();
+    mockAccess.mockClear();
+
+    SkillService.setNDKProviderForTesting(() => ({
+        fetchEvents: mockFetchEvents,
+        fetchEvent: mockFetchEvent,
+    } as any));
+    spyOn(constantsModule, "getTenexBasePath").mockReturnValue("/tmp/test-tenex");
+    spyOn(fsPromises, "writeFile").mockImplementation(mockWriteFile as any);
+    spyOn(fsPromises, "mkdir").mockImplementation(mockMkdir as any);
+    spyOn(fsPromises, "access").mockImplementation(mockAccess as any);
+    spyOn(fsLibModule, "ensureDirectory").mockResolvedValue();
 });
 
 afterEach(() => {
     globalThis.fetch = originalFetch;
+    mock.restore();
+    SkillService.resetInstance();
 });
 
 describe("SkillService", () => {

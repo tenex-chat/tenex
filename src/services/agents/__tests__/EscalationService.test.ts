@@ -1,6 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { StoredAgent } from "@/agents/AgentStorage";
+import { agentStorage } from "@/agents/AgentStorage";
+import * as agentLoaderModule from "@/agents/agent-loader";
+import * as agentResolutionModule from "@/services/agents/AgentResolution";
+import { config as configService } from "@/services/ConfigService";
+import * as projectsModule from "@/services/projects";
+import { logger } from "@/utils/logger";
+import {
+    resolveEscalationTarget,
+    getConfiguredEscalationAgent,
+    loadEscalationAgentIntoRegistry,
+} from "../EscalationService";
 
 /**
  * Integration tests for EscalationService.
@@ -16,7 +27,6 @@ import type { StoredAgent } from "@/agents/AgentStorage";
 // Create mock functions for all dependencies
 const mockGetConfig = mock(() => ({ escalation: { agent: "test-escalation-agent" } }));
 const mockResolveRecipientToPubkey = mock((_slug: string) => null as string | null);
-const mockIsProjectContextInitialized = mock(() => true);
 
 // Mock registry and project context
 const mockAddAgent = mock(() => {});
@@ -39,16 +49,9 @@ const mockProjectContext = {
 
 const mockGetProjectContext = mock(() => mockProjectContext);
 
-// Mock AgentStorage
 const mockGetAgentBySlug = mock((_slug: string) => null as StoredAgent | null);
 const mockAddAgentToProject = mock((_pubkey: string, _projectDTag: string) => Promise.resolve());
 const mockLoadAgent = mock((_pubkey: string) => null as StoredAgent | null);
-
-const mockAgentStorage = {
-    getAgentBySlug: mockGetAgentBySlug,
-    addAgentToProject: mockAddAgentToProject,
-    loadAgent: mockLoadAgent,
-};
 
 // Mock createAgentInstance
 const mockCreateAgentInstance = mock((storedAgent: StoredAgent, _registry: unknown) => ({
@@ -58,46 +61,48 @@ const mockCreateAgentInstance = mock((storedAgent: StoredAgent, _registry: unkno
     role: storedAgent.role,
 }));
 
-// Set up module mocks before importing EscalationService
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mockGetConfig,
-        getConfigPath: () => "/tmp/test",
-    },
-}));
-
-mock.module("@/services/agents/AgentResolution", () => ({
-    resolveRecipientToPubkey: mockResolveRecipientToPubkey,
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: mockGetProjectContext,
-    isProjectContextInitialized: mockIsProjectContextInitialized,
-}));
-
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: mockAgentStorage,
-}));
-
-mock.module("@/agents/agent-loader", () => ({
-    createAgentInstance: mockCreateAgentInstance,
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
-
-// Now import the service after mocks are set up
-import { resolveEscalationTarget, getConfiguredEscalationAgent, loadEscalationAgentIntoRegistry } from "../EscalationService";
+function installDependencySpies() {
+    return {
+        getConfigSpy: spyOn(configService, "getConfig").mockImplementation(mockGetConfig as never),
+        resolveRecipientToPubkeySpy: spyOn(
+            agentResolutionModule,
+            "resolveRecipientToPubkey"
+        ).mockImplementation(mockResolveRecipientToPubkey as never),
+        getProjectContextSpy: spyOn(projectsModule, "getProjectContext").mockImplementation(
+            mockGetProjectContext as never
+        ),
+        getAgentBySlugSpy: spyOn(agentStorage, "getAgentBySlug").mockImplementation(
+            mockGetAgentBySlug as never
+        ),
+        addAgentToProjectSpy: spyOn(agentStorage, "addAgentToProject").mockImplementation(
+            mockAddAgentToProject as never
+        ),
+        loadAgentSpy: spyOn(agentStorage, "loadAgent").mockImplementation(mockLoadAgent as never),
+        createAgentInstanceSpy: spyOn(
+            agentLoaderModule,
+            "createAgentInstance"
+        ).mockImplementation(mockCreateAgentInstance as never),
+        loggerDebugSpy: spyOn(logger, "debug").mockImplementation(mock(() => {}) as never),
+        loggerInfoSpy: spyOn(logger, "info").mockImplementation(mock(() => {}) as never),
+        loggerWarnSpy: spyOn(logger, "warn").mockImplementation(mock(() => {}) as never),
+        loggerErrorSpy: spyOn(logger, "error").mockImplementation(mock(() => {}) as never),
+    };
+}
 
 describe("EscalationService", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let resolveRecipientToPubkeySpy: ReturnType<typeof spyOn>;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let getAgentBySlugSpy: ReturnType<typeof spyOn>;
+    let addAgentToProjectSpy: ReturnType<typeof spyOn>;
+    let loadAgentSpy: ReturnType<typeof spyOn>;
+    let createAgentInstanceSpy: ReturnType<typeof spyOn>;
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
+    let loggerInfoSpy: ReturnType<typeof spyOn>;
+    let loggerWarnSpy: ReturnType<typeof spyOn>;
+    let loggerErrorSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Create a test signer for the escalation agent
@@ -114,7 +119,6 @@ describe("EscalationService", () => {
         // Reset all mocks
         mockGetConfig.mockClear();
         mockResolveRecipientToPubkey.mockClear();
-        mockIsProjectContextInitialized.mockClear();
         mockAddAgent.mockClear();
         mockNotifyAgentAdded.mockClear();
         mockGetProjectDTag.mockClear();
@@ -127,14 +131,38 @@ describe("EscalationService", () => {
         // Set up default mock returns
         mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
         mockResolveRecipientToPubkey.mockReturnValue(null);
-        mockIsProjectContextInitialized.mockReturnValue(true);
         mockGetProjectDTag.mockReturnValue("test-project-dtag");
         mockGetAgentBySlug.mockReturnValue(null);
         mockLoadAgent.mockReturnValue(null);
+
+        ({
+            getConfigSpy,
+            resolveRecipientToPubkeySpy,
+            getProjectContextSpy,
+            getAgentBySlugSpy,
+            addAgentToProjectSpy,
+            loadAgentSpy,
+            createAgentInstanceSpy,
+            loggerDebugSpy,
+            loggerInfoSpy,
+            loggerWarnSpy,
+            loggerErrorSpy,
+        } = installDependencySpies());
     });
 
     afterEach(() => {
-        // Clean up
+        getConfigSpy?.mockRestore();
+        resolveRecipientToPubkeySpy?.mockRestore();
+        getProjectContextSpy?.mockRestore();
+        getAgentBySlugSpy?.mockRestore();
+        addAgentToProjectSpy?.mockRestore();
+        loadAgentSpy?.mockRestore();
+        createAgentInstanceSpy?.mockRestore();
+        loggerDebugSpy?.mockRestore();
+        loggerInfoSpy?.mockRestore();
+        loggerWarnSpy?.mockRestore();
+        loggerErrorSpy?.mockRestore();
+        mock.restore();
     });
 
     describe("getConfiguredEscalationAgent", () => {
@@ -304,7 +332,6 @@ describe("EscalationService", () => {
         describe("edge cases", () => {
             it("should return null when project context is not initialized", async () => {
                 mockResolveRecipientToPubkey.mockReturnValue(null);
-                mockIsProjectContextInitialized.mockReturnValue(false);
                 mockGetAgentBySlug.mockReturnValue(testStoredAgent);
 
                 const result = await resolveEscalationTarget();
@@ -419,6 +446,17 @@ describe("EscalationService", () => {
 describe("loadEscalationAgentIntoRegistry", () => {
     let testSigner: NDKPrivateKeySigner;
     let testStoredAgent: StoredAgent;
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let resolveRecipientToPubkeySpy: ReturnType<typeof spyOn>;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let getAgentBySlugSpy: ReturnType<typeof spyOn>;
+    let addAgentToProjectSpy: ReturnType<typeof spyOn>;
+    let loadAgentSpy: ReturnType<typeof spyOn>;
+    let createAgentInstanceSpy: ReturnType<typeof spyOn>;
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
+    let loggerInfoSpy: ReturnType<typeof spyOn>;
+    let loggerWarnSpy: ReturnType<typeof spyOn>;
+    let loggerErrorSpy: ReturnType<typeof spyOn>;
     // Create typed mock functions for AgentRegistry methods
     const mockGetAgent = mock(() => undefined as ReturnType<import("@/agents/AgentRegistry").AgentRegistry["getAgent"]>);
     const mockAddAgentLocal = mock(() => {});
@@ -466,6 +504,35 @@ describe("loadEscalationAgentIntoRegistry", () => {
         mockGetConfig.mockReturnValue({ escalation: { agent: "test-escalation-agent" } });
         mockGetAgentBySlug.mockReturnValue(null);
         mockLoadAgent.mockReturnValue(null);
+
+        ({
+            getConfigSpy,
+            resolveRecipientToPubkeySpy,
+            getProjectContextSpy,
+            getAgentBySlugSpy,
+            addAgentToProjectSpy,
+            loadAgentSpy,
+            createAgentInstanceSpy,
+            loggerDebugSpy,
+            loggerInfoSpy,
+            loggerWarnSpy,
+            loggerErrorSpy,
+        } = installDependencySpies());
+    });
+
+    afterEach(() => {
+        getConfigSpy?.mockRestore();
+        resolveRecipientToPubkeySpy?.mockRestore();
+        getProjectContextSpy?.mockRestore();
+        getAgentBySlugSpy?.mockRestore();
+        addAgentToProjectSpy?.mockRestore();
+        loadAgentSpy?.mockRestore();
+        createAgentInstanceSpy?.mockRestore();
+        loggerDebugSpy?.mockRestore();
+        loggerInfoSpy?.mockRestore();
+        loggerWarnSpy?.mockRestore();
+        loggerErrorSpy?.mockRestore();
+        mock.restore();
     });
 
     describe("when no escalation agent configured", () => {

@@ -1,20 +1,16 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { config } from "@/services/ConfigService";
 import { AuthorizedIdentityService } from "@/services/identity/AuthorizedIdentityService";
 
 describe("AuthorizedIdentityService", () => {
-    const originalLoadedConfig = (config as any).loadedConfig;
-
     afterEach(() => {
-        (config as any).loadedConfig = originalLoadedConfig;
+        mock.restore();
     });
 
     it("authorizes explicitly whitelisted transport principals", () => {
-        (config as any).loadedConfig = {
-            config: {
-                whitelistedIdentities: ["telegram:user:42"],
-            },
-        };
+        spyOn(config, "getConfig").mockReturnValue({
+            whitelistedIdentities: ["telegram:user:42"],
+        } as ReturnType<typeof config.getConfig>);
         const service = new AuthorizedIdentityService();
 
         expect(
@@ -27,11 +23,9 @@ describe("AuthorizedIdentityService", () => {
 
     it("authorizes linked principals when the linked pubkey is whitelisted as a nostr principal", () => {
         const linkedPubkey = "f".repeat(64);
-        (config as any).loadedConfig = {
-            config: {
-                whitelistedPubkeys: [linkedPubkey],
-            },
-        };
+        spyOn(config, "getConfig").mockReturnValue({
+            whitelistedPubkeys: [linkedPubkey],
+        } as ReturnType<typeof config.getConfig>);
         const service = new AuthorizedIdentityService();
 
         expect(
@@ -43,9 +37,7 @@ describe("AuthorizedIdentityService", () => {
     });
 
     it("includes per-agent authorized identities in the authorization set", () => {
-        (config as any).loadedConfig = {
-            config: {},
-        };
+        spyOn(config, "getConfig").mockReturnValue({} as ReturnType<typeof config.getConfig>);
         const service = new AuthorizedIdentityService();
 
         expect(

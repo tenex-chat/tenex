@@ -1,30 +1,57 @@
 import * as fs from "node:fs/promises";
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { PromptCompilerService, type LessonComment } from "../prompt-compiler-service";
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { llmServiceFactory } from "@/llm";
+import { config } from "@/services/ConfigService";
 
-// Mock dependencies
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: () => "/tmp/test-tenex",
-        loadConfig: async () => ({ llms: { default: "test", summarization: "test" } }),
-        getLLMConfig: () => ({
+let llmCallCount = 0;
+let llmShouldFail = false;
+const originalConfigMethods = {
+    getConfigPath: (config as any).getConfigPath,
+    loadConfig: (config as any).loadConfig,
+    getLLMConfig: (config as any).getLLMConfig,
+};
+const originalCreateService = llmServiceFactory.createService;
+
+describe("PromptCompilerService", () => {
+    const agentPubkey = "abc123def456";
+    const whitelistedPubkeys = ["user123", "user456"];
+    let mockNdk: NDK;
+    let eoseCallbacks: Array<() => void> = [];
+    let eventCallbacks: Array<(event: unknown) => void> = [];
+    let mockLessons: NDKAgentLesson[] = [];
+    let createdServices: PromptCompilerService[] = [];
+
+    const createService = (pubkey = agentPubkey): PromptCompilerService => {
+        const service = new PromptCompilerService(pubkey, whitelistedPubkeys, mockNdk);
+        createdServices.push(service);
+        return service;
+    };
+
+    beforeEach(() => {
+        llmCallCount = 0;
+        llmShouldFail = false;
+        eoseCallbacks = [];
+        eventCallbacks = [];
+        mockLessons = [];
+        createdServices = [];
+
+        (config as any).getConfigPath = () => "/tmp/test-tenex";
+        (config as any).loadConfig = async () => ({
+            config: {},
+            llms: { default: "test", summarization: "test" },
+            mcp: { servers: {}, enabled: true },
+            providers: { providers: {} },
+        });
+        (config as any).getLLMConfig = () => ({
             provider: "mock",
             model: "mock-model",
             temperature: 0.7,
             maxTokens: 4096,
-        }),
-    },
-}));
-
-// Track LLM calls for testing
-let llmCallCount = 0;
-let llmShouldFail = false;
-
-mock.module("@/llm", () => ({
-    llmServiceFactory: {
-        createService: () => ({
+        });
+        llmServiceFactory.createService = (() => ({
             generateText: async () => {
                 llmCallCount++;
                 if (llmShouldFail) {
@@ -34,66 +61,51 @@ mock.module("@/llm", () => ({
                     text: "Effective Agent Instructions from LLM",
                 };
             },
-        }),
-    },
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-describe("PromptCompilerService", () => {
-    const agentPubkey = "abc123def456";
-    const whitelistedPubkeys = ["user123", "user456"];
-    let mockNdk: NDK;
-    let eoseCallbacks: Array<() => void> = [];
-    let eventCallbacks: Array<(event: unknown) => void> = [];
-    let mockLessons: NDKAgentLesson[] = [];
-
-    beforeEach(() => {
-        llmCallCount = 0;
-        llmShouldFail = false;
-        eoseCallbacks = [];
-        eventCallbacks = [];
-        mockLessons = [];
+        })) as any;
 
         mockNdk = {
-            subscribe: () => ({
-                on: (event: string, callback: () => void) => {
-                    if (event === "eose") {
-                        eoseCallbacks.push(callback);
-                    } else if (event === "event") {
-                        eventCallbacks.push(callback as (event: unknown) => void);
-                    }
-                },
-                stop: () => {},
-            }),
+            subscribe: (
+                _filters: unknown,
+                options?: {
+                    onEose?: () => void;
+                    onEvent?: (event: unknown) => void;
+                }
+            ) => {
+                if (options?.onEose) {
+                    eoseCallbacks.push(options.onEose);
+                }
+                if (options?.onEvent) {
+                    eventCallbacks.push(options.onEvent);
+                }
+
+                return {
+                    stop: () => {},
+                };
+            },
         } as unknown as NDK;
+    });
+
+    afterEach(() => {
+        for (const service of createdServices) {
+            service.stop();
+        }
+        (config as any).getConfigPath = originalConfigMethods.getConfigPath;
+        (config as any).loadConfig = originalConfigMethods.loadConfig;
+        (config as any).getLLMConfig = originalConfigMethods.getLLMConfig;
+        llmServiceFactory.createService = originalCreateService;
+        mock.restore();
     });
 
     describe("constructor", () => {
         test("creates instance with correct properties", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             expect(service).toBeDefined();
         });
     });
 
     describe("addComment", () => {
         test("adds comment to collection", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             const comment: LessonComment = {
                 id: "comment1",
@@ -111,11 +123,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("prevents duplicate comments", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             const comment: LessonComment = {
                 id: "comment1",
@@ -133,11 +141,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("groups comments by lesson event ID", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             const comment1: LessonComment = {
                 id: "c1",
@@ -166,11 +170,7 @@ describe("PromptCompilerService", () => {
 
     describe("getCommentsForLesson", () => {
         test("returns empty array for unknown lesson", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const comments = service.getCommentsForLesson("nonexistent");
             expect(comments).toEqual([]);
         });
@@ -179,11 +179,7 @@ describe("PromptCompilerService", () => {
     describe("compile", () => {
         test("returns Base Agent Instructions when no lessons exist", async () => {
             // mockLessons is empty by default
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const baseAgentInstructions = "You are a helpful assistant.";
             await service.initialize(baseAgentInstructions, []); // no lessons
 
@@ -195,16 +191,12 @@ describe("PromptCompilerService", () => {
 
         test("persists base instructions to disk when no lessons exist so restart can reload compiled cache", async () => {
             const uniqueAgentPubkey = "no-lessons-cache-agent";
-            const cachePath = PromptCompilerService.getCachePathForAgent(uniqueAgentPubkey);
+            const cachePath = `/tmp/test-tenex/agents/prompts/${uniqueAgentPubkey}.json`;
             await fs.rm(cachePath, { force: true });
 
             const baseAgentInstructions = "You are a helpful assistant.";
 
-            const firstService = new PromptCompilerService(
-                uniqueAgentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const firstService = createService(uniqueAgentPubkey);
             await firstService.initialize(baseAgentInstructions, []);
 
             const firstResult = await firstService.compile(baseAgentInstructions);
@@ -213,16 +205,16 @@ describe("PromptCompilerService", () => {
 
             const cached = JSON.parse(await fs.readFile(cachePath, "utf-8")) as {
                 effectiveAgentInstructions: string;
+                timestamp: number;
                 maxCreatedAt: number;
+                cacheInputsHash: string;
             };
             expect(cached.effectiveAgentInstructions).toBe(baseAgentInstructions);
+            expect(cached.timestamp).toBeGreaterThan(0);
             expect(cached.maxCreatedAt).toBe(0);
+            expect(cached.cacheInputsHash).toEqual(expect.any(String));
 
-            const secondService = new PromptCompilerService(
-                uniqueAgentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const secondService = createService(uniqueAgentPubkey);
             await secondService.initialize(baseAgentInstructions, []);
 
             expect(secondService.getEffectiveInstructionsSync()).toMatchObject({
@@ -249,11 +241,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const baseAgentInstructions = "You are a helpful assistant.";
             await service.initialize(baseAgentInstructions, mockLessons);
 
@@ -276,11 +264,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const baseAgentInstructions = "You are a helpful assistant.";
             await service.initialize(baseAgentInstructions, mockLessons);
 
@@ -302,11 +286,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const baseAgentInstructions = "You are a helpful assistant.";
             await service.initialize(baseAgentInstructions, mockLessons, "event123");
 
@@ -327,11 +307,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const baseAgentInstructions = "You are a helpful assistant.";
             const additionalPrompt = "Always respond in JSON format.";
             await service.initialize(baseAgentInstructions, mockLessons);
@@ -344,11 +320,7 @@ describe("PromptCompilerService", () => {
 
     describe("EOSE lifecycle", () => {
         test("waitForEOSE resolves when EOSE is received", async () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             // Simulate EOSE
@@ -359,11 +331,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("waitForEOSE returns immediately if already received", async () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             // Trigger EOSE first
@@ -374,11 +342,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("waitForEOSE throws if called before subscribe", async () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             await expect(service.waitForEOSE()).rejects.toThrow(
                 "PromptCompilerService: waitForEOSE called before subscribe()"
@@ -386,11 +350,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("EOSE state is reset on stop()", async () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             // Trigger EOSE
@@ -407,11 +367,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("EOSE state is reset on subscribe() for fresh lifecycle", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             // First subscription cycle
             service.subscribe();
@@ -431,11 +387,7 @@ describe("PromptCompilerService", () => {
 
     describe("comment routing", () => {
         test("routes comment event to addComment via handleCommentEvent", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             // Simulate a valid comment event
@@ -465,11 +417,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("ignores comment from non-whitelisted author", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             const mockEvent = {
@@ -496,11 +444,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("ignores comment without lesson reference", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             const mockEvent = {
@@ -530,11 +474,7 @@ describe("PromptCompilerService", () => {
         test("newer comment updates maxCreatedAt calculation", async () => {
             // This test verifies that comments with newer timestamps
             // affect the maxCreatedAt calculation used for cache freshness
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const now = Math.floor(Date.now() / 1000);
 
             const mockLesson = {
@@ -563,11 +503,7 @@ describe("PromptCompilerService", () => {
         });
 
         test("multiple comments are tracked by createdAt for cache freshness", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             const now = Math.floor(Date.now() / 1000);
 
             // Add older comment
@@ -609,11 +545,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             await service.initialize("Original Base Agent Instructions", mockLessons);
 
             // First compilation
@@ -647,11 +579,7 @@ describe("PromptCompilerService", () => {
                 } as unknown as NDKAgentLesson,
             ];
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             const baseAgentInstructions = "You are a helpful assistant.";
             await service.initialize(baseAgentInstructions, mockLessons);
@@ -693,11 +621,7 @@ describe("PromptCompilerService", () => {
             const eventId = "event123";
             const additionalPrompt = "Be concise.";
 
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             await service.initialize(baseAgentInstructions, mockLessons, eventId);
 
             // Compile with all three inputs - first call
@@ -724,22 +648,14 @@ describe("PromptCompilerService", () => {
 
     describe("stop", () => {
         test("stops subscription gracefully", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
 
             // Should not throw
             service.stop();
         });
 
         test("calling stop multiple times is safe", () => {
-            const service = new PromptCompilerService(
-                agentPubkey,
-                whitelistedPubkeys,
-                mockNdk
-            );
+            const service = createService();
             service.subscribe();
 
             // Should not throw when called multiple times

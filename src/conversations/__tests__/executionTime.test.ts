@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "fs/promises";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
 import {
     getTotalExecutionTimeSeconds,
     isExecutionActive,
@@ -7,13 +8,6 @@ import {
     stopExecutionTime,
 } from "../executionTime";
 import { ConversationStore } from "../ConversationStore";
-
-// Mock PubkeyService
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: async () => "User",
-    }),
-}));
 
 describe("executionTime", () => {
     const TEST_DIR = "/tmp/tenex-execution-time-test";
@@ -26,6 +20,9 @@ describe("executionTime", () => {
 
     beforeEach(async () => {
         await mkdir(TEST_DIR, { recursive: true });
+        spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+            getName: async () => "User",
+        } as any);
         store = new ConversationStore(TEST_DIR);
         store.load(PROJECT_ID, "test-conv");
         mockTime = 1000000;
@@ -34,6 +31,7 @@ describe("executionTime", () => {
 
     afterEach(async () => {
         Date.now = originalDateNow;
+        mock.restore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 

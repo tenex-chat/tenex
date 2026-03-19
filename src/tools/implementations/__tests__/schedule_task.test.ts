@@ -1,35 +1,14 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as agentsModule from "@/services/agents";
+import { logger } from "@/utils/logger";
 import type { ToolExecutionContext } from "@/tools/types";
+import { SchedulerService } from "@/services/scheduling";
 
-// Mock dependencies before imports
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-// Mock SchedulerService
 const mockSchedulerService = {
     addTask: mock().mockResolvedValue("mock-task-id"),
 };
 
-mock.module("@/services/scheduling", () => ({
-    SchedulerService: {
-        getInstance: () => mockSchedulerService,
-    },
-}));
-
-// Mock resolveAgentSlug from agents module - use holder pattern like learn.test.ts
-const agentMocks = {
-    resolveAgentSlug: mock().mockReturnValue({ pubkey: null, availableSlugs: [] }),
-};
-
-mock.module("@/services/agents", () => ({
-    resolveAgentSlug: (...args: any[]) => agentMocks.resolveAgentSlug(...args),
-}));
+const mockResolveAgentSlug = mock().mockReturnValue({ pubkey: null, availableSlugs: [] });
 
 import { createScheduleTaskTool } from "../schedule_task";
 
@@ -63,13 +42,22 @@ describe("Schedule Task Tool", () => {
 
     beforeEach(() => {
         mockSchedulerService.addTask.mockReset().mockResolvedValue("mock-task-id");
-        agentMocks.resolveAgentSlug.mockReset().mockReturnValue({ pubkey: null, availableSlugs: [] });
+        mockResolveAgentSlug.mockReset().mockReturnValue({ pubkey: null, availableSlugs: [] });
+        spyOn(agentsModule, "resolveAgentSlug").mockImplementation(
+            mockResolveAgentSlug as typeof agentsModule.resolveAgentSlug
+        );
+        spyOn(SchedulerService, "getInstance").mockReturnValue(mockSchedulerService as any);
+        spyOn(logger, "info").mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     describe("Agent slug resolution", () => {
         it("should resolve valid agent slug to pubkey", async () => {
             const availableSlugs = ["architect", "claude-code", "explore-agent"];
-            agentMocks.resolveAgentSlug.mockReturnValue({
+            mockResolveAgentSlug.mockReturnValue({
                 pubkey: mockTargetPubkey,
                 availableSlugs,
             });
@@ -85,7 +73,7 @@ describe("Schedule Task Tool", () => {
 
             expect(result.success).toBe(true);
             expect(result.taskId).toBe("mock-task-id");
-            expect(agentMocks.resolveAgentSlug).toHaveBeenCalledWith("architect");
+            expect(mockResolveAgentSlug).toHaveBeenCalledWith("architect");
             expect(mockSchedulerService.addTask).toHaveBeenCalledWith(
                 "0 9 * * *",
                 "Daily standup reminder",
@@ -98,7 +86,7 @@ describe("Schedule Task Tool", () => {
 
         it("should throw for invalid agent slug with available-slugs hint", async () => {
             const availableSlugs = ["architect", "claude-code", "explore-agent"];
-            agentMocks.resolveAgentSlug.mockReturnValue({
+            mockResolveAgentSlug.mockReturnValue({
                 pubkey: null,
                 availableSlugs,
             });
@@ -130,7 +118,7 @@ describe("Schedule Task Tool", () => {
         });
 
         it("should throw for pubkey input (only slugs accepted)", async () => {
-            agentMocks.resolveAgentSlug.mockReturnValue({
+            mockResolveAgentSlug.mockReturnValue({
                 pubkey: null, // Pubkeys aren't slugs, so resolution returns null
                 availableSlugs: ["architect", "claude-code"],
             });
@@ -158,7 +146,7 @@ describe("Schedule Task Tool", () => {
             });
 
             expect(result.success).toBe(true);
-            expect(agentMocks.resolveAgentSlug).not.toHaveBeenCalled();
+            expect(mockResolveAgentSlug).not.toHaveBeenCalled();
             expect(mockSchedulerService.addTask).toHaveBeenCalledWith(
                 "0 9 * * *",
                 "Self-reminder",

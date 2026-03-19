@@ -10,11 +10,14 @@
  * - Nostr event hydration
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { ToolCallPart, ToolResultPart } from "ai";
+import { NDKKind } from "@nostr-dev-kit/ndk";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import {
     ConversationStore,
     type ConversationEntry,
@@ -42,13 +45,6 @@ const mockGetNameSync = mock((pubkey: string) => {
     return mockPubkeyNames[pubkey] ?? "Unknown";
 });
 
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: mockGetName,
-        getNameSync: mockGetNameSync,
-    }),
-}));
-
 describe("ConversationStore", () => {
     const PROJECT_ID = "test-project";
     const CONVERSATION_ID = "conv-123";
@@ -61,10 +57,17 @@ describe("ConversationStore", () => {
 
     beforeEach(async () => {
         testDir = await mkdtemp(join(tmpdir(), "tenex-test-conversations-"));
+        mockGetName.mockClear();
+        mockGetNameSync.mockClear();
+        spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+            getName: mockGetName,
+            getNameSync: mockGetNameSync,
+        } as any);
         store = new ConversationStore(testDir);
     });
 
     afterEach(async () => {
+        mock.restore();
         await rm(testDir, { recursive: true, force: true });
     });
 
@@ -984,18 +987,37 @@ describe("ConversationStore", () => {
         });
 
         it("should preserve principal snapshots when storing event messages", () => {
-            const fakeEvent = {
-                id: "evt-principal-1",
-                kind: 1,
-                pubkey: USER_PUBKEY,
+            const fakeEnvelope = createMockInboundEnvelope({
+                principal: {
+                    id: USER_PUBKEY,
+                    transport: "nostr",
+                    linkedPubkey: USER_PUBKEY,
+                    kind: "human",
+                },
+                message: {
+                    id: "evt-principal-1",
+                    transport: "nostr",
+                    nativeId: "evt-principal-1",
+                },
                 content: "hello from telegram-linked user",
-                created_at: 123,
-                getMatchingTags: (tagName: string) =>
-                    tagName === "p" ? [["p", AGENT1_PUBKEY]] : [],
-                tagValue: () => undefined,
-            } as any;
+                occurredAt: 123,
+                metadata: {
+                    eventKind: NDKKind.Text,
+                    eventTagCount: 1,
+                    replyTargets: [],
+                    articleReferences: [],
+                    nudgeEventIds: [],
+                    skillEventIds: [],
+                },
+                recipients: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    kind: "agent",
+                }],
+            });
 
-            store.addEventMessage(fakeEvent, false, {
+            store.addEnvelopeMessage(fakeEnvelope, false, {
                 senderPrincipal: {
                     id: "telegram:user:55",
                     transport: "telegram",

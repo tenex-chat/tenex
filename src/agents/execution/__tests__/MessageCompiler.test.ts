@@ -50,6 +50,12 @@ describe("MessageCompiler", () => {
     const workingDirectory = "/tmp/test-project";
     const agentPubkey = "agent-pubkey";
     const userPubkey = "user-pubkey";
+    const respondingToPrincipal = {
+        id: `nostr:${userPubkey}`,
+        transport: "nostr" as const,
+        linkedPubkey: userPubkey,
+        kind: "human" as const,
+    };
 
     let testDir: string;
     let metadataPath: string;
@@ -70,7 +76,6 @@ describe("MessageCompiler", () => {
             agentLessons: new Map(),
             mcpManager: undefined,
             nudgeContent: "",
-            respondingToPubkey: userPubkey,
             pendingDelegations: [],
             completedDelegations: [],
             ralNumber,
@@ -155,7 +160,7 @@ describe("MessageCompiler", () => {
         updateReminderData({
             agent,
             conversation: conversationStore,
-            respondingToPubkey: userPubkey,
+            respondingToPrincipal,
             pendingDelegations: [
                 {
                     delegationConversationId: "delegation-1",

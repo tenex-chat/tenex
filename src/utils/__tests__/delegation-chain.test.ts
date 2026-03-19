@@ -1,14 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain } from "../delegation-chain";
 import { shortenConversationId } from "../conversation-id";
 import type { DelegationChainEntry } from "@/conversations/types";
-import type { ConversationStore } from "@/conversations/ConversationStore";
+import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import * as projectsModule from "@/services/projects";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
 
 // Mock functions that will be used by the mocked modules
-const mockConversationStoreGet = vi.fn();
-const mockConversationStoreGetCachedEnvelope = vi.fn();
-const mockGetNameSync = vi.fn();
+const mockConversationStoreGet = mock();
+const mockConversationStoreGetCachedEnvelope = mock();
+const mockGetNameSync = mock();
 
 function createEnvelope(
     pubkey: string,
@@ -40,43 +42,6 @@ function createEnvelope(
             : {},
     };
 }
-
-// Mock dependencies - must be before imports that use them
-vi.mock("@/conversations/ConversationStore", () => ({
-    ConversationStore: {
-        get: (...args: unknown[]) => mockConversationStoreGet(...args),
-        getCachedEnvelope: (...args: unknown[]) => mockConversationStoreGetCachedEnvelope(...args),
-    },
-}));
-
-vi.mock("@/services/projects", () => ({
-    isProjectContextInitialized: () => true,
-    getProjectContext: () => ({
-        getAgentByPubkey: (pubkey: string) => {
-            const agents: Record<string, { slug: string }> = {
-                "agent-pubkey-pm": { slug: "pm-wip" },
-                "agent-pubkey-exec": { slug: "execution-coordinator" },
-                "agent-pubkey-claude": { slug: "claude-code" },
-            };
-            return agents[pubkey];
-        },
-    }),
-}));
-
-vi.mock("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
-    }),
-}));
-
-vi.mock("@/utils/logger", () => ({
-    logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-    },
-}));
 
 describe("delegation-chain utilities", () => {
     describe("shortenConversationId", () => {
@@ -231,6 +196,25 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReset();
             mockConversationStoreGetCachedEnvelope.mockReset();
             mockGetNameSync.mockReset();
+            spyOn(ConversationStore, "get").mockImplementation(
+                mockConversationStoreGet as typeof ConversationStore.get
+            );
+            spyOn(ConversationStore, "getCachedEnvelope").mockImplementation(
+                mockConversationStoreGetCachedEnvelope as typeof ConversationStore.getCachedEnvelope
+            );
+            spyOn(projectsModule, "getProjectContext").mockReturnValue({
+                getAgentByPubkey: (pubkey: string) => {
+                    const agents: Record<string, { slug: string }> = {
+                        "agent-pubkey-pm": { slug: "pm-wip" },
+                        "agent-pubkey-exec": { slug: "execution-coordinator" },
+                        "agent-pubkey-claude": { slug: "claude-code" },
+                    };
+                    return agents[pubkey];
+                },
+            } as ReturnType<typeof projectsModule.getProjectContext>);
+            spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+                getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
+            } as ReturnType<typeof pubkeyServiceModule.getPubkeyService>);
             // Default behavior: return "User" for any pubkey (fallback behavior)
             mockGetNameSync.mockReturnValue("User");
         });
@@ -239,6 +223,7 @@ describe("delegation-chain utilities", () => {
             mockConversationStoreGet.mockReset();
             mockConversationStoreGetCachedEnvelope.mockReset();
             mockGetNameSync.mockReset();
+            mock.restore();
         });
 
         it("should return undefined for direct user messages (no delegation tag)", () => {

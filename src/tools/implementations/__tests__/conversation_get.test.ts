@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
 import { config } from "@/services/ConfigService";
+import { prefixKVStore } from "@/services/storage";
 import { nip19 } from "nostr-tools";
 
 // Mock dependencies - must be before imports
@@ -37,7 +38,6 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-// Mock PrefixKVStore
 const mockPrefixLookup = mock((prefix: string) => {
     // Return predefined mappings for test prefixes
     const mappings: Record<string, string> = {
@@ -48,13 +48,6 @@ const mockPrefixLookup = mock((prefix: string) => {
 });
 
 const mockPrefixStoreIsInitialized = mock(() => true);
-
-mock.module("@/services/storage", () => ({
-    prefixKVStore: {
-        lookup: mockPrefixLookup,
-        isInitialized: mockPrefixStoreIsInitialized,
-    },
-}));
 
 // Mock llmServiceFactory
 mock.module("@/llm", () => ({
@@ -120,6 +113,9 @@ const mockGetConversation = mock(() => mockConversationData ? {
 } : null);
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { createConversationGetTool } from "../conversation_get";
+
+const originalPrefixLookup = prefixKVStore.lookup;
+const originalPrefixStoreIsInitialized = prefixKVStore.isInitialized;
 
 interface TranscriptNode {
     tag: "message" | "tool";
@@ -212,6 +208,11 @@ describe("conversation_get Tool", () => {
     let loadConfigSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        mockPrefixLookup.mockClear();
+        mockPrefixStoreIsInitialized.mockClear();
+        prefixKVStore.lookup = mockPrefixLookup as typeof prefixKVStore.lookup;
+        prefixKVStore.isInitialized =
+            mockPrefixStoreIsInitialized as typeof prefixKVStore.isInitialized;
         loadConfigSpy = spyOn(config, "loadConfig").mockResolvedValue({
             llms: {
                 default: null,
@@ -237,6 +238,8 @@ describe("conversation_get Tool", () => {
 
     afterEach(() => {
         loadConfigSpy.mockRestore();
+        prefixKVStore.lookup = originalPrefixLookup;
+        prefixKVStore.isInitialized = originalPrefixStoreIsInitialized;
         // Reset mockGetConversation to its original implementation
         mockGetConversation.mockImplementation(() => mockConversationData ? {
             id: mockConversationData.id,

@@ -1,9 +1,13 @@
-import { describe, expect, it, mock, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import * as projectsModule from "@/services/projects";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "../types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { logger } from "@/utils/logger";
+import * as ndkClientModule from "../ndkClient";
+import * as traceContextModule from "../trace-context";
 
 const loggerMocks = {
     debug: mock(),
@@ -12,31 +16,29 @@ const loggerMocks = {
     error: mock(),
 };
 
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-mock.module("../trace-context", () => ({
-    injectTraceContext: mock(),
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: () => ["a", "31933:testpubkey:test-project"],
-            pubkey: "testpubkey",
-        },
-        agentRegistry: {
-            getAgentByPubkey: () => null,
-        },
-    })),
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: loggerMocks,
-}));
-
 describe("AgentPublisher.streamTextDelta", () => {
+    beforeEach(() => {
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:testpubkey:test-project"],
+                pubkey: "testpubkey",
+            },
+            agentRegistry: {
+                getAgentByPubkey: () => null,
+            },
+        } as any);
+        spyOn(logger, "debug").mockImplementation(loggerMocks.debug);
+        spyOn(logger, "info").mockImplementation(loggerMocks.info);
+        spyOn(logger, "warn").mockImplementation(loggerMocks.warn);
+        spyOn(logger, "error").mockImplementation(loggerMocks.error);
+    });
+
+    afterEach(() => {
+        mock.restore();
+    });
+
     it("swallows publish failures (best-effort) and does not throw", async () => {
         const publishSpy = spyOn(NDKEvent.prototype, "publish").mockRejectedValue(
             new Error("relay rejected")

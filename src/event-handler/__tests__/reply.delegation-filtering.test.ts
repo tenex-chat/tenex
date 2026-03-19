@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { AgentExecutor } from "../../agents/execution/AgentExecutor";
 import * as executionContextFactoryModule from "@/agents/execution/ExecutionContextFactory";
+import { ConversationResolver } from "@/conversations/services/ConversationResolver";
+import { metadataDebounceManager } from "@/conversations/services/MetadataDebounceManager";
+import { ConversationSummarizer } from "@/conversations/services/ConversationSummarizer";
 import * as delegationCompletionHandlerModule from "@/services/dispatch/DelegationCompletionHandler";
+import { AgentRouter } from "@/services/dispatch/AgentRouter";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
 import { config } from "@/services/ConfigService";
 import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
 import { createWorktree, listWorktrees } from "@/utils/git/worktree";
+import { logger } from "@/utils/logger";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock dependencies
 const loggerMocks = {
@@ -14,98 +20,16 @@ const loggerMocks = {
     error: mock((msg: string, ...args: any[]) => console.error("LOG ERROR:", msg, ...args)),
     warn: mock(() => {}),
     debug: mock(() => {}),
+    writeToWarnLog: mock(() => {}),
 };
-
-mock.module("@/utils/logger", () => ({
-    logger: loggerMocks,
-}));
-
-// Mock AgentEventDecoder
-mock.module("@/nostr/AgentEventDecoder", () => ({
-    AgentEventDecoder: {
-        isDirectedToSystem: mock((event: any, systemAgents: any) => {
-            const pTags = event.tags?.filter((tag: any) => tag[0] === "p") || [];
-            if (pTags.length === 0) return false;
-            const mentionedPubkeys = pTags.map((tag: any) => tag[1]);
-            const systemPubkeys = new Set([...Array.from(systemAgents.values()).map((a: any) => a.pubkey)]);
-            return mentionedPubkeys.some((pubkey: string) => systemPubkeys.has(pubkey));
-        }),
-        isEventFromAgent: mock((event: any, systemAgents: any) => {
-            const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a: any) => a.pubkey));
-            return agentPubkeys.has(event.pubkey);
-        }),
-        isDelegationCompletion: mock(() => false),
-        isAgentInternalMessage: mock(() => false),
-        getMentionedPubkeys: mock(() => []),
-        getReplyTarget: mock(() => undefined),
-    },
-}));
-
-// Mock ConversationResolver and ConversationStore
-mock.module("@/conversations/services/ConversationResolver", () => ({
-    ConversationResolver: class {
-        async resolveConversationForEvent(event: any) {
-            return {
-                conversation: {
-                    id: "conv-root",
-                    history: [],
-                    phase: "chat",
-                    agentStates: new Map(),
-                    agentTodos: new Map(),
-                    hasEventId: () => false,
-                    isAgentBlocked: () => false, // No agents blocked in filtering test
-                },
-                isNew: false,
-            };
-        }
-    },
-}));
 
 // NOTE: We intentionally do NOT mock ConversationStore at the module level
 // because it pollutes other tests. Instead, we use spyOn for specific methods
 // or work with the real implementation.
 
-// Mock AgentRouter
-mock.module("@/services/dispatch/AgentRouter", () => ({
-    AgentRouter: {
-        resolveDelegationTarget: mock(() => null),
-        unblockAgent: mock(() => ({ unblocked: false })),
-        resolveTargetAgents: mock((envelope: any, projectCtx: any, conversation: any) => {
-            const recipientPubkeys = (envelope.recipients || [])
-                .map((recipient: any) => recipient.linkedPubkey)
-                .filter(Boolean);
-            const agents: any[] = [];
-            for (const pubkey of recipientPubkeys) {
-                const agent = projectCtx.getAgentByPubkey(pubkey);
-                if (agent && !(conversation?.isAgentBlocked(pubkey))) {
-                    agents.push(agent);
-                }
-            }
-            return agents;
-        }),
-    },
-}));
-
 // NOTE: We intentionally do NOT mock RALRegistry at the module level
 // because it pollutes other tests. The real implementation is used
 // with the test-setup.ts preload resetting it before each test.
-
-// Mock MetadataDebounceManager
-mock.module("@/conversations/services/MetadataDebounceManager", () => ({
-    metadataDebounceManager: {
-        markFirstPublishDone: mock(() => {}),
-        onAgentStart: mock(() => {}),
-        schedulePublish: mock(() => {}),
-    },
-}));
-
-// Mock ConversationSummarizer
-mock.module("@/conversations/services/ConversationSummarizer", () => ({
-    ConversationSummarizer: class {
-        constructor(projectCtx: any) {}
-        async summarizeAndPublish(conversation: any) {}
-    },
-}));
 
 // Mock ConfigService
 const createExecutionContextMock = async (params: any) => {
@@ -158,11 +82,80 @@ describe("Delegation Event Filtering Bug", () => {
     let createExecutionContextSpy: ReturnType<typeof spyOn>;
     let getConfigSpy: ReturnType<typeof spyOn>;
     let handleDelegationCompletionSpy: ReturnType<typeof spyOn>;
+    let resolveConversationSpy: ReturnType<typeof spyOn>;
+    let resolveDelegationTargetSpy: ReturnType<typeof spyOn>;
+    let unblockAgentSpy: ReturnType<typeof spyOn>;
+    let resolveTargetAgentsSpy: ReturnType<typeof spyOn>;
+    let markFirstPublishDoneSpy: ReturnType<typeof spyOn>;
+    let onAgentStartSpy: ReturnType<typeof spyOn>;
+    let schedulePublishSpy: ReturnType<typeof spyOn>;
+    let summarizeAndPublishSpy: ReturnType<typeof spyOn>;
+    let loggerInfoSpy: ReturnType<typeof spyOn>;
+    let loggerErrorSpy: ReturnType<typeof spyOn>;
+    let loggerWarnSpy: ReturnType<typeof spyOn>;
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
+    let loggerWriteToWarnLogSpy: ReturnType<typeof spyOn>;
+    let inboundAdapter: { toEnvelope: ReturnType<typeof mock> };
 
     beforeEach(async () => {
-        if (!handleChatMessage) {
-            ({ handleChatMessage } = await import("../reply"));
-        }
+        const cacheBuster = `delegation-filtering-${Date.now()}-${Math.random()}`;
+        loggerInfoSpy = spyOn(logger, "info").mockImplementation(loggerMocks.info);
+        loggerErrorSpy = spyOn(logger, "error").mockImplementation(loggerMocks.error);
+        loggerWarnSpy = spyOn(logger, "warn").mockImplementation(loggerMocks.warn);
+        loggerDebugSpy = spyOn(logger, "debug").mockImplementation(loggerMocks.debug);
+        loggerWriteToWarnLogSpy = spyOn(logger, "writeToWarnLog").mockImplementation(
+            loggerMocks.writeToWarnLog
+        );
+        resolveConversationSpy = spyOn(
+            ConversationResolver.prototype,
+            "resolveConversationForEvent"
+        ).mockResolvedValue({
+            conversation: {
+                id: "conv-root",
+                history: [],
+                phase: "chat",
+                agentStates: new Map(),
+                agentTodos: new Map(),
+                hasEventId: () => false,
+                isAgentBlocked: () => false,
+            } as any,
+            isNew: false,
+        });
+        resolveDelegationTargetSpy = spyOn(AgentRouter, "resolveDelegationTarget").mockReturnValue(
+            null
+        );
+        unblockAgentSpy = spyOn(AgentRouter, "unblockAgent").mockReturnValue({ unblocked: false });
+        resolveTargetAgentsSpy = spyOn(AgentRouter, "resolveTargetAgents").mockImplementation(
+            (envelope: any, projectCtx: any, conversation: any) => {
+                const recipientPubkeys = (envelope.recipients || [])
+                    .map((recipient: any) => recipient.linkedPubkey)
+                    .filter(Boolean);
+                const agents: any[] = [];
+                for (const pubkey of recipientPubkeys) {
+                    const agent = projectCtx.getAgentByPubkey(pubkey);
+                    if (agent && !(conversation?.isAgentBlocked(pubkey))) {
+                        agents.push(agent);
+                    }
+                }
+                return agents;
+            }
+        );
+        markFirstPublishDoneSpy = spyOn(
+            metadataDebounceManager,
+            "markFirstPublishDone"
+        ).mockImplementation(() => undefined);
+        onAgentStartSpy = spyOn(metadataDebounceManager, "onAgentStart").mockImplementation(
+            () => undefined
+        );
+        schedulePublishSpy = spyOn(metadataDebounceManager, "schedulePublish").mockImplementation(
+            () => undefined
+        );
+        summarizeAndPublishSpy = spyOn(
+            ConversationSummarizer.prototype,
+            "summarizeAndPublish"
+        ).mockResolvedValue(undefined);
+
+        ({ handleChatMessage } = await import(`../reply?${cacheBuster}`));
         if (!ConversationStore) {
             ({ ConversationStore } = await import("@/conversations/ConversationStore"));
         }
@@ -177,6 +170,9 @@ describe("Delegation Event Filtering Bug", () => {
         });
         handleDelegationCompletionSpy = spyOn(delegationCompletionHandlerModule, "handleDelegationCompletion")
             .mockResolvedValue({ recorded: false });
+        inboundAdapter = {
+            toEnvelope: mock(() => createMockInboundEnvelope()),
+        };
 
         // Create mock agent executor
         mockAgentExecutor = {
@@ -218,6 +214,7 @@ describe("Delegation Event Filtering Bug", () => {
                 getBasePath: () => "/test/path",
             },
             getAgentSlugs: () => Array.from(mockProjectContext.agents.keys()),
+            projectManager: execCoordAgent,
             project: {
                 dTag: "test-project",
                 tagValue: (tag: string) => (tag === "d" ? "test-project" : undefined),
@@ -230,6 +227,20 @@ describe("Delegation Event Filtering Bug", () => {
         createExecutionContextSpy?.mockRestore();
         getConfigSpy?.mockRestore();
         handleDelegationCompletionSpy?.mockRestore();
+        resolveConversationSpy?.mockRestore();
+        resolveDelegationTargetSpy?.mockRestore();
+        unblockAgentSpy?.mockRestore();
+        resolveTargetAgentsSpy?.mockRestore();
+        markFirstPublishDoneSpy?.mockRestore();
+        onAgentStartSpy?.mockRestore();
+        schedulePublishSpy?.mockRestore();
+        summarizeAndPublishSpy?.mockRestore();
+        loggerInfoSpy?.mockRestore();
+        loggerErrorSpy?.mockRestore();
+        loggerWarnSpy?.mockRestore();
+        loggerDebugSpy?.mockRestore();
+        loggerWriteToWarnLogSpy?.mockRestore();
+        mock.restore();
     });
 
     it("delegation event from Execution Coordinator to claude-code DOES trigger claude-code execution", async () => {
@@ -244,35 +255,37 @@ describe("Delegation Event Filtering Bug", () => {
             // 6. Expected: claude-code should be executed
             // 7. Actual: Event is only added to history, no execution happens
 
-            const delegationEvent: NDKEvent = {
-                id: "delegation-event-id",
-                pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
-                content: "Delegating task to claude-code",
-                kind: 1,
-                tags: [
-                    ["E", "conv-root"],
-                    ["K", "11"],
-                    ["p", "ca884a53843ad13d057207686b52b341874c0fa37a28df202f9cf817d81d7f83"], // claude-code
-                ],
-                tagValue: (tag: string) => {
-                    if (tag === "E") return "conv-root";
-                    if (tag === "K") return "11";
-                    return undefined;
-                },
-                getMatchingTags: (tag: string) => {
-                    if (tag === "p") {
-                        return [
-                            ["p", "ca884a53843ad13d057207686b52b341874c0fa37a28df202f9cf817d81d7f83"],
-                        ];
-                    }
-                    if (tag === "E") return [["E", "conv-root"]];
-                    return [];
-                },
-            } as any;
+            const delegationEvent: NDKEvent = { id: "delegation-event-id" } as any;
+            inboundAdapter.toEnvelope.mockReturnValue(
+                createMockInboundEnvelope({
+                    channel: {
+                        id: "conv-root",
+                        transport: "nostr",
+                        kind: "conversation",
+                    },
+                    principal: {
+                        id: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        transport: "nostr",
+                        linkedPubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        kind: "agent",
+                    },
+                    recipients: [{
+                        id: "ca884a53843ad13d057207686b52b341874c0fa37a28df202f9cf817d81d7f83",
+                        transport: "nostr",
+                        linkedPubkey: "ca884a53843ad13d057207686b52b341874c0fa37a28df202f9cf817d81d7f83",
+                        kind: "agent",
+                    }],
+                    content: "Delegating task to claude-code",
+                    metadata: {
+                        eventKind: 1,
+                    },
+                })
+            );
 
             // Handle the event
             await handleChatMessage(delegationEvent, {
                 agentExecutor: mockAgentExecutor,
+                inboundAdapter,
             });
 
             // ASSERTION: Agent executor should be called for claude-code
@@ -287,31 +300,32 @@ describe("Delegation Event Filtering Bug", () => {
     it("EXPECTED: agent event WITHOUT p-tags should be filtered out", async () => {
         await projectContextStore.run(mockProjectContext, async () => {
             // This is the CORRECT behavior - agent events without p-tags should not trigger execution
-            const agentEventNoPtags: NDKEvent = {
-                id: "agent-event-no-ptags",
-                pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
-                content: "Agent status update",
-                kind: 1,
-                tags: [
-                    ["E", "conv-root"],
-                    ["K", "11"],
-                    // NO p-tags
-                ],
-                tagValue: (tag: string) => {
-                    if (tag === "E") return "conv-root";
-                    if (tag === "K") return "11";
-                    return undefined;
-                },
-                getMatchingTags: (tag: string) => {
-                    if (tag === "p") return []; // No p-tags
-                    if (tag === "E") return [["E", "conv-root"]];
-                    return [];
-                },
-            } as any;
+            const agentEventNoPtags: NDKEvent = { id: "agent-event-no-ptags" } as any;
+            inboundAdapter.toEnvelope.mockReturnValue(
+                createMockInboundEnvelope({
+                    channel: {
+                        id: "conv-root",
+                        transport: "nostr",
+                        kind: "conversation",
+                    },
+                    principal: {
+                        id: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        transport: "nostr",
+                        linkedPubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        kind: "agent",
+                    },
+                    recipients: [],
+                    content: "Agent status update",
+                    metadata: {
+                        eventKind: 1,
+                    },
+                })
+            );
 
             // Handle the event
             await handleChatMessage(agentEventNoPtags, {
                 agentExecutor: mockAgentExecutor,
+                inboundAdapter,
             });
 
             // CORRECT: Agent executor should NOT be called
@@ -322,31 +336,37 @@ describe("Delegation Event Filtering Bug", () => {
     it("EXPECTED: agent event p-tagging NON-system agent should be filtered out", async () => {
         await projectContextStore.run(mockProjectContext, async () => {
             // This is the CORRECT behavior - agent events p-tagging non-system agents should not trigger execution
-            const agentEventNonSystem: NDKEvent = {
-                id: "agent-event-non-system",
-                pubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d", // Exec Coordinator
-                content: "Message to external user",
-                kind: 1,
-                tags: [
-                    ["E", "conv-root"],
-                    ["K", "11"],
-                    ["p", "external-user-pubkey"], // Not a system agent
-                ],
-                tagValue: (tag: string) => {
-                    if (tag === "E") return "conv-root";
-                    if (tag === "K") return "11";
-                    return undefined;
-                },
-                getMatchingTags: (tag: string) => {
-                    if (tag === "p") return [["p", "external-user-pubkey"]];
-                    if (tag === "E") return [["E", "conv-root"]];
-                    return [];
-                },
-            } as any;
+            const agentEventNonSystem: NDKEvent = { id: "agent-event-non-system" } as any;
+            inboundAdapter.toEnvelope.mockReturnValue(
+                createMockInboundEnvelope({
+                    channel: {
+                        id: "conv-root",
+                        transport: "nostr",
+                        kind: "conversation",
+                    },
+                    principal: {
+                        id: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        transport: "nostr",
+                        linkedPubkey: "f8db92d0442d62ea954d55398bc3fa76fcbcde85adafdc266c908322f59f179d",
+                        kind: "agent",
+                    },
+                    recipients: [{
+                        id: "external-user-pubkey",
+                        transport: "nostr",
+                        linkedPubkey: "external-user-pubkey",
+                        kind: "human",
+                    }],
+                    content: "Message to external user",
+                    metadata: {
+                        eventKind: 1,
+                    },
+                })
+            );
 
             // Handle the event
             await handleChatMessage(agentEventNonSystem, {
                 agentExecutor: mockAgentExecutor,
+                inboundAdapter,
             });
 
             // CORRECT: Agent executor should NOT be called

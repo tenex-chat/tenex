@@ -2,6 +2,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } fr
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
+import { InterventionPublisher } from "@/nostr/InterventionPublisher";
+import { config } from "@/services/ConfigService";
+import { PubkeyService } from "@/services/PubkeyService";
+import * as trustPubkeyServiceModule from "@/services/trust-pubkeys/TrustPubkeyService";
+import { logger } from "@/utils/logger";
 
 /**
  * Tests for InterventionService.
@@ -22,7 +27,6 @@ import { tmpdir } from "node:os";
  * - Config whitespace trimming
  */
 
-// Mock dependencies before importing the service
 const mockGetConfig = mock(() => ({
     intervention: {
         enabled: true,
@@ -45,30 +49,6 @@ const mockPublisherInitialize = mock(() => Promise.resolve());
 const defaultTestAgents = [
     { slug: "test-intervention-agent", pubkey: "test-intervention-pubkey" },
 ];
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mockGetConfig,
-        getConfigPath: mockGetConfigPath,
-        getBackendSigner: mock(() => Promise.resolve({ pubkey: "backend-pubkey" })),
-    },
-}));
-
-mock.module("@/nostr/InterventionPublisher", () => ({
-    InterventionPublisher: class {
-        async initialize() {
-            return mockPublisherInitialize();
-        }
-        async publishReviewRequest(
-            target: string,
-            convId: string,
-            user: string,
-            agent: string
-        ) {
-            return mockPublishReviewRequest(target, convId, user, agent);
-        }
-    },
-}));
 
 // Import type for resolver function
 import type { AgentResolverFn, AgentResolutionResult } from "../InterventionService";
@@ -111,37 +91,11 @@ const createDefaultProjectAgents = () => new Map([
     ["catchup-project", defaultTestAgents],
 ]);
 
-// Mock PubkeyService - getNameSync calls getProjectContext() which throws in tests
-mock.module("@/services/PubkeyService", () => ({
-    PubkeyService: {
-        getInstance: () => ({
-            getNameSync: (pubkey: string) => pubkey,
-        }),
-    },
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
-
 // Mock TrustPubkeyService - default to whitelisted user
 const mockIsTrustedSync = mock((_pubkey: string) => ({
     trusted: true,
     reason: "whitelisted" as const,
 }));
-
-mock.module("@/services/trust-pubkeys/TrustPubkeyService", () => ({
-    getTrustPubkeyService: () => ({
-        isTrustedSync: mockIsTrustedSync,
-    }),
-}));
-
-// Import after mocks are set up
 import { InterventionService } from "../InterventionService";
 
 /** Fixed timestamp for deterministic tests (avoids Date.now() non-determinism). */
@@ -174,6 +128,32 @@ describe("InterventionService", () => {
         );
         mockPublisherInitialize.mockClear();
         mockIsTrustedSync.mockClear();
+
+        spyOn(config, "getConfig").mockImplementation(mockGetConfig);
+        spyOn(config, "getConfigPath").mockImplementation(mockGetConfigPath);
+        spyOn(config, "getGlobalPath").mockImplementation(mockGetConfigPath);
+        spyOn(config, "getProjectsBase").mockImplementation(() => "/tmp/test-intervention/projects");
+        spyOn(config, "getContextManagementConfig").mockImplementation(() => undefined);
+        spyOn(config as any, "getBackendSigner").mockImplementation(() =>
+            Promise.resolve({ pubkey: "backend-pubkey" })
+        );
+        spyOn(InterventionPublisher.prototype, "initialize").mockImplementation(async () =>
+            mockPublisherInitialize()
+        );
+        spyOn(InterventionPublisher.prototype, "publishReviewRequest").mockImplementation(
+            async (target: string, convId: string, user: string, agent: string) =>
+                mockPublishReviewRequest(target, convId, user, agent)
+        );
+        spyOn(PubkeyService, "getInstance").mockReturnValue({
+            getNameSync: (pubkey: string) => pubkey,
+        } as any);
+        spyOn(trustPubkeyServiceModule, "getTrustPubkeyService").mockReturnValue({
+            isTrustedSync: mockIsTrustedSync,
+        } as any);
+        spyOn(logger, "debug").mockImplementation(() => undefined);
+        spyOn(logger, "info").mockImplementation(() => undefined);
+        spyOn(logger, "warn").mockImplementation(() => undefined);
+        spyOn(logger, "error").mockImplementation(() => undefined);
 
         // Set default mock returns
         mockGetConfig.mockReturnValue({
@@ -210,16 +190,12 @@ describe("InterventionService", () => {
         // Cleanup - wait a bit for any pending async operations
         await new Promise(resolve => setTimeout(resolve, 50));
         await InterventionService.resetInstance();
+        mock.restore();
         try {
             await fs.rm(tempDir, { recursive: true, force: true });
         } catch {
             // Ignore cleanup errors
         }
-    });
-
-    afterAll(() => {
-        // Restore all mocked modules to prevent test pollution
-        mock.restore();
     });
 
     describe("initialization", () => {

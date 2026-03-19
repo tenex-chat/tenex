@@ -28,6 +28,7 @@ describe("scratchpad-practice fragment", () => {
     test("includes guidance on pruning tool calls", () => {
         const result = scratchpadPracticeFragment.template({});
 
+        expect(result).toContain("Prefer compact current state over a long running log");
         expect(result).toContain("prune the tool calls that produced the information");
         expect(result).toContain("read something twice");
     });

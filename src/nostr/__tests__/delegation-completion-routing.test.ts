@@ -1,45 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import * as projectsModule from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
+import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
-
-// Mock PubkeyService
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: async () => "User",
-        getNameSync: () => "User",
-    }),
-}));
-
-// Mock NDK client
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-// Mock project context
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: () => ["a", "31933:pubkey:d-tag"],
-            pubkey: "project-owner-pubkey",
-        },
-        agentRegistry: {
-            getAgentByPubkey: () => null,
-        },
-    })),
-}));
-
-// Mock logger
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
 
 /**
  * Delegation Completion Routing Tests
@@ -70,6 +37,20 @@ describe("Delegation Completion Routing", () => {
     beforeEach(async () => {
         await mkdir(TEST_DIR, { recursive: true });
         ConversationStore.initialize(TEST_DIR);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:pubkey:d-tag"],
+                pubkey: "project-owner-pubkey",
+            },
+            agentRegistry: {
+                getAgentByPubkey: () => null,
+            },
+        } as any);
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
     });
 
     const createTriggeringEnvelope = (pubkey: string, eventId: string) =>
@@ -90,6 +71,7 @@ describe("Delegation Completion Routing", () => {
     afterEach(async () => {
         ConversationStore.reset();
         await rm(TEST_DIR, { recursive: true, force: true });
+        mock.restore();
     });
 
     describe("Encoder completion p-tag routing (unit tests)", () => {
