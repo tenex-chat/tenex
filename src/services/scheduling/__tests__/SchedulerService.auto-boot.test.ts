@@ -8,12 +8,6 @@ import {
     type TargetPubkeyResolver,
 } from "../SchedulerService";
 
-vi.mock("node:fs/promises", () => ({
-    readFile: vi.fn().mockResolvedValue("[]"),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    mkdir: vi.fn().mockResolvedValue(undefined),
-}));
-
 /**
  * Tests for the auto-boot feature in SchedulerService.
  *

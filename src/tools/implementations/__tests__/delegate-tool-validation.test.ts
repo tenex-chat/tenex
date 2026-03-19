@@ -1,13 +1,9 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, spyOn, mock, type Mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn, mock, type Mock } from "bun:test";
 import type { ToolExecutionContext } from "@/tools/types";
+import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
-
-// Mock NDK before importing modules that use it
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvent: async () => null,
-    }),
-}));
+import type { ProjectContext } from "@/services/projects";
+import * as nostrModule from "@/nostr";
 
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
@@ -16,25 +12,56 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { projectContextStore } from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
-// Mock the resolution function to return pubkeys for our test agents (slug-only)
-import * as agentResolution from "@/services/agents";
-const mockResolve = spyOn(agentResolution, "resolveAgentSlug");
-mockResolve.mockImplementation((slug: string) => {
-    const availableSlugs = ["self-agent", "other-agent", "third-agent"];
-    if (slug === "self-agent") {
-        return { pubkey: "agent-pubkey-123", availableSlugs };
+const createTriggeringEnvelope = () => createMockInboundEnvelope();
+const mockFetchEvent = mock(() => Promise.resolve(null));
+
+function createTestAgent(slug: string, pubkey: string): AgentInstance {
+    return {
+        slug,
+        pubkey,
+        name: slug,
+        role: "developer",
+        llmConfig: "default",
+        tools: [],
+        signer: {} as any,
+    } as AgentInstance;
+}
+
+const createMockProjectContext = (): ProjectContext => {
+    const agents = new Map<string, AgentInstance>([
+        ["self-agent", createTestAgent("self-agent", "agent-pubkey-123")],
+        ["other-agent", createTestAgent("other-agent", "other-pubkey-456")],
+        ["third-agent", createTestAgent("third-agent", "third-pubkey-789")],
+    ]);
+
+    const agentsByPubkey = new Map<string, AgentInstance>();
+    for (const agent of agents.values()) {
+        agentsByPubkey.set(agent.pubkey, agent);
     }
-    if (slug === "other-agent") {
-        return { pubkey: "other-pubkey-456", availableSlugs };
-    }
-    if (slug === "third-agent") {
-        return { pubkey: "third-pubkey-789", availableSlugs };
-    }
-    // Only slugs are accepted - pubkeys and other formats should fail
-    return { pubkey: null, availableSlugs };
+
+    return {
+        agents,
+        agentRegistry: {
+            getAllAgentsMap: () => agents,
+        } as unknown as AgentRegistry,
+        getAgentByPubkey: (pubkey: string) => agentsByPubkey.get(pubkey),
+    } as unknown as ProjectContext;
+};
+
+const runWithProjectContext = <T>(fn: () => Promise<T>): Promise<T> =>
+    projectContextStore.run(createMockProjectContext(), fn);
+
+beforeEach(() => {
+    mockFetchEvent.mockReset();
+    mockFetchEvent.mockResolvedValue(null);
+    spyOn(nostrModule, "getNDK").mockReturnValue({
+        fetchEvent: mockFetchEvent,
+    } as any);
 });
 
-const createTriggeringEnvelope = () => createMockInboundEnvelope();
+afterEach(() => {
+    mock.restore();
+});
 
 describe("Delegation tools - Self-delegation validation", () => {
     const conversationId = "test-conversation-id";
@@ -107,7 +134,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             };
 
             // Self-delegation is allowed - now returns normal result (no stop signal)
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
@@ -130,7 +157,7 @@ describe("Delegation tools - Self-delegation validation", () => {
 
             // Pubkeys are no longer accepted - should throw with helpful error
             try {
-                await delegateTool.execute(input);
+                await runWithProjectContext(() => delegateTool.execute(input));
                 expect(true).toBe(false); // Should not reach here
             } catch (error: any) {
                 expect(error.message).toContain("Invalid agent slug");
@@ -154,7 +181,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
             expect(result.message).toContain("delegation-todo-nudge");
@@ -180,7 +207,7 @@ describe("Delegation tools - Self-delegation validation", () => {
                 ],
             };
 
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
@@ -205,7 +232,7 @@ describe("Delegation tools - Self-delegation validation", () => {
             };
 
             // Self-delegation is allowed - now returns normal result (no stop signal)
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(2);
@@ -318,7 +345,7 @@ describe("Delegation tools - RAL isolation", () => {
             // This should NOT throw an error - the bug was that it would check RAL 1
             // (because getState() returns highest RAL) and block the delegation
             // Now returns normal result (no stop signal) - agent continues without blocking
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
@@ -351,7 +378,7 @@ describe("Delegation tools - RAL isolation", () => {
 
             // Should succeed - multiple pending delegations are now allowed
             // Now returns normal result (no stop signal) - agent continues without blocking
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result).toBeDefined();
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(1);
@@ -411,7 +438,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
             };
 
             // Execute the delegation
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result.success).toBe(true);
 
             // Verify RALRegistry state
@@ -439,7 +466,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
                 ],
             };
 
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result.success).toBe(true);
             expect(result.delegationConversationIds).toHaveLength(2);
 
@@ -477,7 +504,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
                 ],
             };
 
-            const result = await delegateTool.execute(input);
+            const result = await runWithProjectContext(() => delegateTool.execute(input));
             expect(result.success).toBe(true);
 
             // Verify both delegations exist (atomic merge didn't drop the pre-existing one)
@@ -579,22 +606,6 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         };
     };
 
-    // Create a minimal mock ProjectContext
-    const createMockProjectContext = () => ({
-        getAgentByPubkey: (pubkey: string) => {
-            if (pubkey === "other-pubkey-456") {
-                return { slug: "other-agent", name: "Other Agent", pubkey };
-            }
-            if (pubkey === "agent-pubkey-123") {
-                return { slug: "self-agent", name: "Self Agent", pubkey };
-            }
-            if (pubkey === "third-pubkey-789") {
-                return { slug: "third-agent", name: "Third Agent", pubkey };
-            }
-            return undefined;
-        },
-    });
-
     beforeEach(() => {
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
@@ -638,10 +649,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             ],
         };
 
-        // Run within projectContextStore to provide ProjectContext
-        const result = await projectContextStore.run(createMockProjectContext(), async () => {
-            return await delegateTool.execute(input);
-        });
+        const result = await runWithProjectContext(() => delegateTool.execute(input));
 
         // Should return a soft warning, not throw
         expect(result.success).toBe(false);
@@ -679,10 +687,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             ],
         };
 
-        // Run within projectContextStore to provide ProjectContext
-        const result = await projectContextStore.run(createMockProjectContext(), async () => {
-            return await delegateTool.execute(input);
-        });
+        const result = await runWithProjectContext(() => delegateTool.execute(input));
 
         // Should succeed with force flag, but still include the warning
         expect(result.success).toBe(true);
@@ -717,7 +722,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             ],
         };
 
-        const result = await delegateTool.execute(input);
+        const result = await runWithProjectContext(() => delegateTool.execute(input));
 
         // Should succeed normally
         expect(result.success).toBe(true);
@@ -753,10 +758,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             ],
         };
 
-        // Run within projectContextStore to provide ProjectContext
-        const result = await projectContextStore.run(createMockProjectContext(), async () => {
-            return await delegateTool.execute(input);
-        });
+        const result = await runWithProjectContext(() => delegateTool.execute(input));
 
         // Should succeed with the non-circular delegation
         expect(result.success).toBe(true);
@@ -991,9 +993,4 @@ describe("delegate_followup - Full ID canonicalization", () => {
         expect(result.success).toBe(true);
         expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
     });
-});
-
-// Restore mocks
-afterAll(() => {
-    mockResolve.mockRestore();
 });

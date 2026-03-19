@@ -12,7 +12,8 @@ describe("scratchpad-practice fragment", () => {
 
         expect(result).toContain("Your scratchpad is your primary working state for this run.");
         expect(result).toContain("Use `scratchpad(...)` proactively");
-        expect(result).toContain("You may choose any entry names that fit the task.");
+        expect(result).toContain("Keep it current by rewriting it in place.");
+        expect(result).toContain("Prefer compact current state:");
         expect(result).toContain("remove stale tool calls from active context");
     });
 });

@@ -30,7 +30,7 @@
  * }
  * ```
  */
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, test, expect, mock } from "bun:test";
 
 // ===== Mock CJS-only modules that cause bun ESM hang =====
 class MockEventEmitter {
@@ -63,10 +63,65 @@ class MockEventEmitter {
 
 mock.module("tseep", () => ({ EventEmitter: MockEventEmitter }));
 
+const mockSpan = {
+    addEvent: () => {},
+    setAttribute: () => {},
+    setStatus: () => {},
+    end: () => {},
+    isRecording: () => false,
+    recordException: () => {},
+    updateName: () => {},
+    setAttributes: () => {},
+    spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
+};
+const mockContext = {
+    getValue: () => undefined,
+    setValue: () => mockContext,
+    deleteValue: () => mockContext,
+};
+
 mock.module("@opentelemetry/api", () => ({
-    trace: { getActiveSpan: () => null },
-    SpanStatusCode: { ERROR: 2, OK: 1 },
     createContextKey: mock((name: string) => Symbol.for(name)),
+    DiagLogLevel: {
+        NONE: 0,
+        ERROR: 1,
+        WARN: 2,
+        INFO: 3,
+        DEBUG: 4,
+        VERBOSE: 5,
+        ALL: 6,
+    },
+    diag: {
+        setLogger: mock(() => {}),
+        debug: mock(() => {}),
+        error: mock(() => {}),
+        warn: mock(() => {}),
+        info: mock(() => {}),
+    },
+    SpanKind: {
+        INTERNAL: 0,
+        SERVER: 1,
+        CLIENT: 2,
+        PRODUCER: 3,
+        CONSUMER: 4,
+    },
+    ROOT_CONTEXT: mockContext,
+    trace: {
+        getActiveSpan: () => mockSpan,
+        getTracer: () => ({
+            startSpan: () => mockSpan,
+            startActiveSpan: (_name: string, fn: (span: typeof mockSpan) => unknown) =>
+                fn(mockSpan),
+        }),
+        setSpan: () => mockContext,
+    },
+    SpanStatusCode: { ERROR: 2, OK: 1 },
+    TraceFlags: { NONE: 0, SAMPLED: 1 },
+    context: {
+        active: () => mockContext,
+        with: (_ctx: unknown, fn: () => unknown) => fn(),
+        bind: (_ctx: unknown, target: unknown) => target,
+    },
 }));
 
 mock.module("@/utils/logger", () => ({
@@ -124,6 +179,10 @@ describe("Finish chunk routing (regression guard)", () => {
             getModelContextWindow: () => undefined,
         };
         chunkHandler = new ChunkHandler(emitter as any, state);
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     test("finish chunk emits raw-chunk event (via direct emit)", () => {

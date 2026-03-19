@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { config } from "@/services/ConfigService";
+import { RAGCollectionRegistry } from "@/services/rag/RAGCollectionRegistry";
+import { RAGService } from "@/services/rag/RAGService";
 
 // Mock logger
 mock.module("@/utils/logger", () => ({
@@ -10,48 +13,16 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-// Mock ConfigService
 let mockSearchModelName: string | undefined;
 let mockCreateLLMServiceResult: any;
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getSearchModelName: () => mockSearchModelName,
-        createLLMService: () => mockCreateLLMServiceResult,
-    },
-}));
 
 // Mock RAGService for dynamic collection discovery
 let mockListCollections: () => Promise<string[]> = async () => [];
 let mockQueryWithFilter: (name: string, query: string, topK: number, filter?: string) => Promise<any[]> =
     async () => [];
 
-mock.module("@/services/rag/RAGService", () => ({
-    RAGService: {
-        getInstance: () => ({
-            listCollections: () => mockListCollections(),
-            queryWithFilter: (name: string, query: string, topK: number, filter?: string) =>
-                mockQueryWithFilter(name, query, topK, filter),
-        }),
-    },
-}));
-
 // Mock RAGCollectionRegistry for scope-aware tests
 let mockGetMatchingCollections: ((allCollections: string[], projectId: string, agentPubkey?: string) => string[]) | null = null;
-
-mock.module("@/services/rag/RAGCollectionRegistry", () => ({
-    RAGCollectionRegistry: {
-        getInstance: () => ({
-            getMatchingCollections: (allCollections: string[], projectId: string, agentPubkey?: string) => {
-                if (mockGetMatchingCollections) {
-                    return mockGetMatchingCollections(allCollections, projectId, agentPubkey);
-                }
-                // Default: return all (no scope filtering)
-                return allCollections;
-            },
-        }),
-    },
-}));
 
 import { SearchProviderRegistry } from "../SearchProviderRegistry";
 import { UnifiedSearchService } from "../UnifiedSearchService";
@@ -95,6 +66,11 @@ function createFailingProvider(name: string): SearchProvider {
 }
 
 describe("UnifiedSearchService", () => {
+    let getSearchModelNameSpy: ReturnType<typeof spyOn>;
+    let createLLMServiceSpy: ReturnType<typeof spyOn>;
+    let ragServiceGetInstanceSpy: ReturnType<typeof spyOn>;
+    let ragCollectionRegistryGetInstanceSpy: ReturnType<typeof spyOn>;
+
     beforeEach(() => {
         SearchProviderRegistry.resetInstance();
         UnifiedSearchService.resetInstance();
@@ -103,11 +79,41 @@ describe("UnifiedSearchService", () => {
         mockListCollections = async () => [];
         mockQueryWithFilter = async () => [];
         mockGetMatchingCollections = null;
+        getSearchModelNameSpy = spyOn(config, "getSearchModelName").mockImplementation(
+            () => mockSearchModelName
+        );
+        createLLMServiceSpy = spyOn(config, "createLLMService").mockImplementation(
+            (..._args: any[]) => mockCreateLLMServiceResult
+        );
+        ragServiceGetInstanceSpy = spyOn(RAGService, "getInstance").mockReturnValue({
+            listCollections: () => mockListCollections(),
+            queryWithFilter: (name: string, query: string, topK: number, filter?: string) =>
+                mockQueryWithFilter(name, query, topK, filter),
+        } as never);
+        ragCollectionRegistryGetInstanceSpy = spyOn(
+            RAGCollectionRegistry,
+            "getInstance"
+        ).mockReturnValue({
+            getMatchingCollections: (
+                allCollections: string[],
+                projectId: string,
+                agentPubkey?: string
+            ) => {
+                if (mockGetMatchingCollections) {
+                    return mockGetMatchingCollections(allCollections, projectId, agentPubkey);
+                }
+                return allCollections;
+            },
+        } as never);
     });
 
     afterEach(() => {
         SearchProviderRegistry.resetInstance();
         UnifiedSearchService.resetInstance();
+        getSearchModelNameSpy?.mockRestore();
+        createLLMServiceSpy?.mockRestore();
+        ragServiceGetInstanceSpy?.mockRestore();
+        ragCollectionRegistryGetInstanceSpy?.mockRestore();
     });
 
     it("returns empty results when no providers are registered", async () => {

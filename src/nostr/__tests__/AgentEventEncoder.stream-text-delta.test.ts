@@ -1,35 +1,34 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKKind } from "@/nostr/kinds";
+import * as projectsModule from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { logger } from "@/utils/logger";
 import { AgentEventEncoder } from "../AgentEventEncoder";
+import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
 
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: () => ["a", "31933:testpubkey:test-project"],
-            pubkey: "testpubkey",
-        },
-        agentRegistry: {
-            getAgentByPubkey: () => null,
-        },
-    })),
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
-
 describe("AgentEventEncoder.encodeStreamTextDelta", () => {
+    beforeEach(() => {
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:testpubkey:test-project"],
+                pubkey: "testpubkey",
+            },
+            agentRegistry: {
+                getAgentByPubkey: () => null,
+            },
+        } as any);
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        mock.restore();
+    });
+
     it("encodes ephemeral stream-delta events with required tags and no completion routing tags", () => {
         const encoder = new AgentEventEncoder();
         const triggeringEnvelope = createMockInboundEnvelope({

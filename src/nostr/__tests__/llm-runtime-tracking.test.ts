@@ -7,44 +7,11 @@ import {
     stopExecutionTime,
 } from "@/conversations/executionTime";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import * as projectsModule from "@/services/projects";
 import { AgentEventEncoder } from "../AgentEventEncoder";
+import * as ndkClientModule from "../ndkClient";
 import type { EventContext } from "../types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
-
-// Mock PubkeyService
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: async () => "User",
-    }),
-}));
-
-// Mock NDK client
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-// Mock project context
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: () => ["a", "31933:pubkey:d-tag"],
-            pubkey: "project-owner-pubkey",
-        },
-        agentRegistry: {
-            getAgentByPubkey: () => null,
-        },
-    })),
-}));
-
-// Mock logger
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
 
 /**
  * LLM Runtime Tracking Tests
@@ -67,11 +34,22 @@ describe("LLM Runtime Tracking", () => {
         await mkdir(TEST_DIR, { recursive: true });
         mockTime = 1000000;
         Date.now = () => mockTime;
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:pubkey:d-tag"],
+                pubkey: "project-owner-pubkey",
+            },
+            agentRegistry: {
+                getAgentByPubkey: () => null,
+            },
+        } as any);
     });
 
     afterEach(async () => {
         Date.now = originalDateNow;
         await rm(TEST_DIR, { recursive: true, force: true });
+        mock.restore();
     });
 
     const createTriggeringEnvelope = (pubkey: string, eventId: string) =>

@@ -1,7 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { agentStorage } from "@/agents/AgentStorage";
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 
 let mockTenexBaseDir = "";
 let mockWhitelistedPubkeys: string[] = [];
@@ -9,39 +12,22 @@ let mockBackendPubkey = "backend-pubkey";
 let mockBackendSignerShouldFail = false;
 let mockKnownAgentPubkeys = new Set<string>();
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: (subdir?: string) =>
-            subdir ? path.join(mockTenexBaseDir, subdir) : mockTenexBaseDir,
-        getConfig: () => ({ whitelistedPubkeys: mockWhitelistedPubkeys }),
-        getWhitelistedPubkeys: () => mockWhitelistedPubkeys,
-        getBackendSigner: async () => {
-            if (mockBackendSignerShouldFail) {
-                throw new Error("Backend signer unavailable");
-            }
-            return { pubkey: mockBackendPubkey };
-        },
-    },
-}));
-
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getAllKnownPubkeys: async () => new Set(mockKnownAgentPubkeys),
-    },
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: () => {},
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
 import { SystemPubkeyListService } from "../trust-pubkeys/SystemPubkeyListService";
 
 describe("SystemPubkeyListService", () => {
+    let getConfigPathSpy: ReturnType<typeof spyOn>;
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let getGlobalPathSpy: ReturnType<typeof spyOn>;
+    let getProjectsBaseSpy: ReturnType<typeof spyOn>;
+    let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+    let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
+    let getBackendSignerSpy: ReturnType<typeof spyOn>;
+    let getAllKnownPubkeysSpy: ReturnType<typeof spyOn>;
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
+    let loggerInfoSpy: ReturnType<typeof spyOn>;
+    let loggerWarnSpy: ReturnType<typeof spyOn>;
+    let loggerErrorSpy: ReturnType<typeof spyOn>;
+
     beforeEach(async () => {
         (SystemPubkeyListService as any).instance = undefined;
 
@@ -50,9 +36,56 @@ describe("SystemPubkeyListService", () => {
         mockBackendPubkey = "backend-pubkey";
         mockBackendSignerShouldFail = false;
         mockKnownAgentPubkeys = new Set<string>();
+
+        getConfigPathSpy = spyOn(config, "getConfigPath").mockImplementation(
+            (subdir?: string) =>
+                subdir ? path.join(mockTenexBaseDir, subdir) : mockTenexBaseDir
+        );
+        getConfigSpy = spyOn(config, "getConfig").mockImplementation(
+            () => ({ whitelistedPubkeys: mockWhitelistedPubkeys }) as never
+        );
+        getGlobalPathSpy = spyOn(config, "getGlobalPath").mockImplementation(
+            () => mockTenexBaseDir
+        );
+        getProjectsBaseSpy = spyOn(config, "getProjectsBase").mockImplementation(
+            () => path.join(mockTenexBaseDir, "projects")
+        );
+        getContextManagementConfigSpy = spyOn(
+            config,
+            "getContextManagementConfig"
+        ).mockImplementation(() => undefined);
+        getWhitelistedPubkeysSpy = spyOn(config, "getWhitelistedPubkeys").mockImplementation(
+            () => mockWhitelistedPubkeys
+        );
+        getBackendSignerSpy = spyOn(config, "getBackendSigner").mockImplementation(async () => {
+            if (mockBackendSignerShouldFail) {
+                throw new Error("Backend signer unavailable");
+            }
+            return { pubkey: mockBackendPubkey } as never;
+        });
+        getAllKnownPubkeysSpy = spyOn(agentStorage, "getAllKnownPubkeys").mockImplementation(
+            async () => new Set(mockKnownAgentPubkeys)
+        );
+        loggerDebugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+        loggerInfoSpy = spyOn(logger, "info").mockImplementation(() => {});
+        loggerWarnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        loggerErrorSpy = spyOn(logger, "error").mockImplementation(() => {});
     });
 
     afterEach(async () => {
+        getConfigPathSpy?.mockRestore();
+        getConfigSpy?.mockRestore();
+        getGlobalPathSpy?.mockRestore();
+        getProjectsBaseSpy?.mockRestore();
+        getContextManagementConfigSpy?.mockRestore();
+        getWhitelistedPubkeysSpy?.mockRestore();
+        getBackendSignerSpy?.mockRestore();
+        getAllKnownPubkeysSpy?.mockRestore();
+        loggerDebugSpy?.mockRestore();
+        loggerInfoSpy?.mockRestore();
+        loggerWarnSpy?.mockRestore();
+        loggerErrorSpy?.mockRestore();
+        mock.restore();
         await fs.rm(mockTenexBaseDir, { recursive: true, force: true });
     });
 

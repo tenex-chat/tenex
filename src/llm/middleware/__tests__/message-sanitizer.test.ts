@@ -1,28 +1,11 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import * as constantsModule from "@/constants";
 import { existsSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 
 const testBaseDir = join(import.meta.dir, ".test-tenex-base");
-
-mock.module("@/constants", () => ({
-    getTenexBasePath: () => testBaseDir,
-    TENEX_DIR: ".tenex",
-    CONFIG_FILE: "config.json",
-    MCP_CONFIG_FILE: "mcp.json",
-    LLMS_FILE: "llms.json",
-    PROVIDERS_FILE: "providers.json",
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: mock(() => {}),
-        error: mock(() => {}),
-        warn: mock(() => {}),
-        debug: mock(() => {}),
-    },
-}));
 
 import { createMessageSanitizerMiddleware } from "../message-sanitizer";
 
@@ -40,16 +23,18 @@ function makeParams(prompt: LanguageModelV3Message[]) {
 }
 
 describe("message-sanitizer TENEX wrapper", () => {
+    let transformParams: NonNullable<ReturnType<typeof createMessageSanitizerMiddleware>["transformParams"]>;
+
     beforeEach(() => {
         if (existsSync(testBaseDir)) rmSync(testBaseDir, { recursive: true });
+        spyOn(constantsModule, "getTenexBasePath").mockReturnValue(testBaseDir);
+        transformParams = createMessageSanitizerMiddleware().transformParams!;
     });
 
     afterEach(() => {
         if (existsSync(testBaseDir)) rmSync(testBaseDir, { recursive: true });
+        mock.restore();
     });
-
-    const middleware = createMessageSanitizerMiddleware();
-    const transformParams = middleware.transformParams!;
 
     test("writes structured JSON to warn.log when fix is applied", async () => {
         const prompt: LanguageModelV3Message[] = [

@@ -1,111 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
+import * as projectsModule from "@/services/projects";
 import { AgentPublisher } from "../AgentPublisher";
 import type { AskConfig, DelegateConfig } from "../types";
 import type { AgentInstance } from "@/agents/types";
 import type { EventContext } from "../types";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { logger } from "@/utils/logger";
+import * as ndkClientModule from "../ndkClient";
+import * as traceContextModule from "../trace-context";
 
 // Minimal mocks - only mock what's necessary for these specific tests
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({})),
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
-
-// Mock ProjectContextStore for aTagProject
-mock.module("@/services/projects", () => ({
-    getProjectContext: mock(() => ({
-        project: {
-            tagReference: mock(() => ["a", "31933:testpubkey:test-project"]),
-            pubkey: "testpubkey",
-        },
-        projectTag: "31933:testpubkey:test-project",
-    })),
-    isProjectContextInitialized: mock(() => true),
-}));
-
-// Mock OpenTelemetry - needed for trace context injection
-const mockContext = {
-    getValue: () => undefined,
-    setValue: () => mockContext,
-    deleteValue: () => mockContext,
-};
-
-const mockSpan = {
-    addEvent: mock(),
-    setAttributes: mock(),
-    setAttribute: mock(),
-    setStatus: mock(),
-    recordException: mock(),
-    end: mock(),
-    isRecording: () => true,
-    updateName: mock(),
-    spanContext: () => ({ traceId: "test", spanId: "test", traceFlags: 0 }),
-};
-
-mock.module("@opentelemetry/api", () => ({
-    createContextKey: mock((name: string) => Symbol.for(name)),
-    DiagLogLevel: {
-        NONE: 0,
-        ERROR: 1,
-        WARN: 2,
-        INFO: 3,
-        DEBUG: 4,
-        VERBOSE: 5,
-        ALL: 6,
-    },
-    diag: {
-        setLogger: mock(() => {}),
-        debug: mock(() => {}),
-        error: mock(() => {}),
-        warn: mock(() => {}),
-        info: mock(() => {}),
-    },
-    SpanKind: {
-        INTERNAL: 0,
-        SERVER: 1,
-        CLIENT: 2,
-        PRODUCER: 3,
-        CONSUMER: 4,
-    },
-    ROOT_CONTEXT: mockContext,
-    context: {
-        active: mock(() => mockContext),
-        with: mock((_ctx: unknown, fn: () => unknown) => fn()),
-    },
-    propagation: {
-        inject: mock(),
-    },
-    trace: {
-        getTracer: mock(() => ({
-            startActiveSpan: mock((_name: string, fn: (span: unknown) => unknown) =>
-                fn(mockSpan)
-            ),
-        })),
-        getActiveSpan: mock(() => null),
-        setSpan: mock(() => mockContext),
-    },
-    SpanStatusCode: {
-        OK: 1,
-        ERROR: 2,
-    },
-    TraceFlags: {
-        NONE: 0,
-        SAMPLED: 1,
-    },
-}));
-
-mock.module("@/telemetry/LLMSpanRegistry", () => ({
-    getLLMSpanId: mock(() => null),
-}));
 
 describe("AgentPublisher - Delegation Tag", () => {
     let mockPublish: ReturnType<typeof mock>;
@@ -116,6 +21,20 @@ describe("AgentPublisher - Delegation Tag", () => {
 
     beforeEach(() => {
         capturedEvents = [];
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({} as any);
+        spyOn(traceContextModule, "injectTraceContext").mockImplementation(() => {});
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                tagReference: () => ["a", "31933:testpubkey:test-project"],
+                pubkey: "testpubkey",
+            },
+            projectTag: "31933:testpubkey:test-project",
+        } as any);
+        spyOn(projectsModule, "isProjectContextInitialized").mockReturnValue(true);
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
 
         // Mock NDKEvent.publish to capture events
         mockPublish = mock(() =>
@@ -141,6 +60,7 @@ describe("AgentPublisher - Delegation Tag", () => {
     afterEach(() => {
         capturedEvents = [];
         publishSpy?.mockRestore();
+        mock.restore();
     });
 
     /**

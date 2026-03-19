@@ -1,6 +1,8 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
+import * as agentResolutionModule from "@/services/agents/AgentResolution";
+import * as nostrEntityParserModule from "@/utils/nostr-entity-parser";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -27,28 +29,11 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-// Mock AgentResolution
 const mockResolveAgentSlug = mock((slug: string) => {
     if (slug === "agent-1") return { pubkey: "agent-pubkey-1", availableSlugs: ["agent-1", "agent-2"] };
     if (slug === "agent-2") return { pubkey: "agent-pubkey-2", availableSlugs: ["agent-1", "agent-2"] };
     return { pubkey: null, availableSlugs: ["agent-1", "agent-2"] };
 });
-
-mock.module("@/services/agents/AgentResolution", () => ({
-    resolveAgentSlug: mockResolveAgentSlug,
-}));
-
-// Mock parseNostrUser
-mock.module("@/utils/nostr-entity-parser", () => ({
-    PREFIX_LENGTH: 12,
-    parseNostrUser: (input: string) => {
-        // Accept valid 64-char hex pubkeys
-        if (/^[0-9a-fA-F]{64}$/.test(input.trim())) {
-            return input.trim().toLowerCase();
-        }
-        return null;
-    },
-}));
 
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
@@ -208,11 +193,38 @@ afterAll(() => {
     ConversationStore.prototype.load = originalLoad;
 });
 
+afterEach(() => {
+    ConversationStore.getProjectId = originalGetProjectId;
+    ConversationStore.getBasePath = originalGetBasePath;
+    ConversationStore.listProjectIdsFromDisk = originalListProjectIdsFromDisk;
+    ConversationStore.listConversationIdsFromDisk = originalListConversationIdsFromDisk;
+    ConversationStore.listConversationIdsFromDiskForProject = originalListConversationIdsFromDiskForProject;
+    ConversationStore.getOrLoad = originalGetOrLoad;
+    ConversationStore.prototype.load = originalLoad;
+});
+
 describe("conversation_list Tool", () => {
     let mockContext: ExecutionContext;
     let mockAgent: AgentInstance;
+    let resolveAgentSlugSpy: ReturnType<typeof spyOn>;
+    let parseNostrUserSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        resolveAgentSlugSpy = spyOn(agentResolutionModule, "resolveAgentSlug").mockImplementation(
+            mockResolveAgentSlug
+        );
+        parseNostrUserSpy = spyOn(nostrEntityParserModule, "parseNostrUser").mockImplementation(
+            (input: string | undefined) => {
+                if (!input) {
+                    return null;
+                }
+                const trimmed = input.trim();
+                if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+                    return trimmed.toLowerCase();
+                }
+                return null;
+            }
+        );
         // Reset all mocks
         (logger.info as ReturnType<typeof mock>).mockReset();
         (logger.warn as ReturnType<typeof mock>).mockReset();
@@ -271,6 +283,8 @@ describe("conversation_list Tool", () => {
     });
 
     afterEach(() => {
+        resolveAgentSlugSpy?.mockRestore();
+        parseNostrUserSpy?.mockRestore();
         // Clear instantiated stores
         instantiatedStores.length = 0;
     });

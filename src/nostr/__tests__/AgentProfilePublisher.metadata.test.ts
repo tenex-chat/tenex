@@ -1,51 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { agentStorage } from "@/agents/AgentStorage";
 import { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
 import { AgentProfilePublisher } from "../AgentProfilePublisher";
+import * as ndkClientModule from "../ndkClient";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
+import * as systemPubkeyListModule from "@/services/trust-pubkeys/SystemPubkeyListService";
+import { logger } from "@/utils/logger";
 
 const mockSyncWhitelistFile = mock(() => Promise.resolve());
-
-// Mock the NDK client
-mock.module("../ndkClient", () => ({
-    getNDK: mock(() => ({
-        // Mock NDK instance
-    })),
-}));
-
-// Mock logger
-mock.module("@/utils/logger", () => ({
-    logger: {
-        debug: mock(),
-        info: mock(),
-        warn: mock(),
-        error: mock(),
-    },
-}));
-
-// Mock AgentsRegistryService
-mock.module("@/services/AgentsRegistryService", () => ({
-    agentsRegistryService: {
-        getProjectsForAgent: mock(() => Promise.resolve([])),
-        addAgent: mock(() => Promise.resolve()),
-    },
-}));
-
-// Mock agentStorage
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getAgentProjects: mock(() => Promise.resolve([])),
-        getProjectAgents: mock(() => Promise.resolve([])),
-        loadAgent: mock(() => Promise.resolve(null)),
-        getAgentBySlugForProject: mock(() => Promise.resolve(null)),
-    },
-}));
-
-mock.module("@/services/trust-pubkeys/SystemPubkeyListService", () => ({
-    getSystemPubkeyListService: () => ({
-        syncWhitelistFile: mockSyncWhitelistFile,
-    }),
-}));
 
 describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let mockPublish: any;
@@ -56,10 +19,21 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
     let capturedEvents: NDKEvent[] = [];
+    const clearSnapshotTimers = () => {
+        const timers = (AgentProfilePublisher as any).snapshotDebounceTimers as Map<
+            string,
+            ReturnType<typeof setTimeout>
+        >;
+        for (const timer of timers.values()) {
+            clearTimeout(timer);
+        }
+        timers.clear();
+    };
 
     beforeEach(() => {
         capturedEvents = [];
         mockSyncWhitelistFile.mockClear();
+        clearSnapshotTimers();
 
         // Mock NDKEvent to capture all published events
         mockPublish = mock();
@@ -75,14 +49,29 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
         getConfigSpy = spyOn(config, "getConfig").mockReturnValue({});
         getWhitelistedPubkeysSpy = spyOn(config, "getWhitelistedPubkeys").mockReturnValue([]);
         ensureBackendPrivateKeySpy = spyOn(config, "ensureBackendPrivateKey").mockResolvedValue("a".repeat(64));
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({
+            fetchEvents: mock(() => Promise.resolve(new Set())),
+        } as any);
+        spyOn(systemPubkeyListModule, "getSystemPubkeyListService").mockReturnValue({
+            syncWhitelistFile: mockSyncWhitelistFile,
+        } as any);
+        spyOn(agentStorage, "getProjectAgents").mockResolvedValue([]);
+        spyOn(agentStorage, "loadAgent").mockResolvedValue(null);
+        spyOn(agentStorage, "getAgentBySlugForProject").mockResolvedValue(null);
+        spyOn(logger, "debug").mockImplementation(() => undefined);
+        spyOn(logger, "info").mockImplementation(() => undefined);
+        spyOn(logger, "warn").mockImplementation(() => undefined);
+        spyOn(logger, "error").mockImplementation(() => undefined);
     });
 
     afterEach(() => {
+        clearSnapshotTimers();
         publishSpy.mockRestore();
         signSpy.mockRestore();
         getConfigSpy.mockRestore();
         getWhitelistedPubkeysSpy.mockRestore();
         ensureBackendPrivateKeySpy.mockRestore();
+        mock.restore();
     });
 
     // Helper to get the kind:0 event from captured events

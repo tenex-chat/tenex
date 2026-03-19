@@ -1,41 +1,14 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-
-// --- Mocks (must be set up before dynamic imports) ---
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as nostrModule from "@/nostr";
+import * as projectsModule from "@/services/projects";
+import * as reportEmbeddingModule from "@/services/reports/ReportEmbeddingService";
+import * as reportsModule from "@/services/reports";
+import { logger } from "@/utils/logger";
+import { createReportDeleteTool } from "../report_delete";
 
 const mockDeleteReport = mock(() => Promise.resolve("naddr1deleted"));
-
-mock.module("@/services/reports", () => ({
-    ReportService: class {
-        deleteReport = mockDeleteReport;
-    },
-}));
-
 const mockRemoveReport = mock(() => Promise.resolve());
-
-mock.module("@/services/reports/ReportEmbeddingService", () => ({
-    getReportEmbeddingService: () => ({
-        removeReport: mockRemoveReport,
-    }),
-}));
-
 const mockTagId = mock(() => "31933:owner:test-project");
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        project: { tagId: mockTagId },
-    }),
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        warn: () => {},
-        debug: () => {},
-        error: () => {},
-    },
-}));
-
-// Dynamic import after mocks
-const { createReportDeleteTool } = await import("../report_delete");
 
 describe("report_delete tool", () => {
     const mockContext = {
@@ -59,6 +32,26 @@ describe("report_delete tool", () => {
     beforeEach(() => {
         mockDeleteReport.mockClear();
         mockRemoveReport.mockClear();
+        mockTagId.mockClear();
+
+        spyOn(nostrModule, "getNDK").mockReturnValue({} as ReturnType<typeof nostrModule.getNDK>);
+        spyOn(reportsModule.ReportService.prototype, "deleteReport").mockImplementation(
+            mockDeleteReport as typeof reportsModule.ReportService.prototype.deleteReport
+        );
+        spyOn(reportEmbeddingModule, "getReportEmbeddingService").mockReturnValue({
+            removeReport: mockRemoveReport,
+        } as ReturnType<typeof reportEmbeddingModule.getReportEmbeddingService>);
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: { tagId: mockTagId },
+        } as ReturnType<typeof projectsModule.getProjectContext>);
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("should call removeReport after a successful delete", async () => {
@@ -69,7 +62,6 @@ describe("report_delete tool", () => {
         expect(result.success).toBe(true);
         expect(result.slug).toBe("test-slug");
 
-        // Verify removeReport was called with correct args
         expect(mockRemoveReport).toHaveBeenCalledTimes(1);
         const [slugArg, projectIdArg] = mockRemoveReport.mock.calls[0];
         expect(slugArg).toBe("test-slug");
@@ -85,7 +77,6 @@ describe("report_delete tool", () => {
 
         const result = await (tool as any).execute({ slug: "test-slug" });
 
-        // Delete should still succeed despite RAG failure
         expect(result.success).toBe(true);
         expect(mockRemoveReport).toHaveBeenCalledTimes(1);
     });

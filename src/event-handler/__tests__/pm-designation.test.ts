@@ -1,6 +1,11 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
+import { TagExtractor } from "@/nostr/TagExtractor";
+import * as projectsModule from "@/services/projects";
+import * as pubkeyGateModule from "@/services/pubkey-gate";
+import { logger } from "@/utils/logger";
 
 /**
  * Tests for PM designation via kind 24020 TenexAgentConfigUpdate events.
@@ -13,57 +18,6 @@ import { NDKKind } from "@/nostr/kinds";
 let updateIsPMCalls: Array<{ pubkey: string; isPM: boolean | undefined }> = [];
 let reloadAgentCalls: string[] = [];
 
-// Mock modules before importing
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        updateDefaultConfig: async () => true,
-        updateAgentIsPM: async (pubkey: string, isPM: boolean | undefined) => {
-            updateIsPMCalls.push({ pubkey, isPM });
-            return true;
-        },
-        updateProjectOverride: async () => true,
-        updateProjectScopedIsPM: async () => true,
-    },
-}));
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        getAgentByPubkey: (pubkey: string) => ({
-            slug: "test-agent",
-            pubkey,
-            name: "Test Agent",
-        }),
-        agentRegistry: {
-            reloadAgent: async (pubkey: string) => {
-                reloadAgentCalls.push(pubkey);
-            },
-        },
-        statusPublisher: null,
-        project: {
-            dTag: "my-project",
-            tagValue: (tag: string) => {
-                if (tag === "d") return "my-project";
-                return undefined;
-            },
-        },
-    }),
-}));
-
-mock.module("@/nostr/TagExtractor", () => ({
-    TagExtractor: {
-        getToolTags: () => [],
-    },
-}));
-
 // Now import the EventHandler
 import { EventHandler } from "../index";
 
@@ -75,8 +29,55 @@ describe("PM Designation via Kind 24020", () => {
         updateIsPMCalls = [];
         reloadAgentCalls = [];
 
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+
+        spyOn(pubkeyGateModule, "getPubkeyGateService").mockReturnValue({
+            shouldAllowEvent: () => true,
+        } as any);
+
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            agents: new Map(),
+            getAgentByPubkey: (pubkey: string) => ({
+                slug: "test-agent",
+                pubkey,
+                name: "Test Agent",
+            }),
+            getAgentSlugs: () => ["test-agent"],
+            agentRegistry: {
+                reloadAgent: async (pubkey: string) => {
+                    reloadAgentCalls.push(pubkey);
+                },
+            },
+            statusPublisher: null,
+            project: {
+                dTag: "my-project",
+                tagValue: (tag: string) => {
+                    if (tag === "d") return "my-project";
+                    return undefined;
+                },
+            },
+        } as any);
+
+        spyOn(TagExtractor, "getToolTags").mockReturnValue([]);
+        spyOn(agentStorage, "updateDefaultConfig").mockResolvedValue(true);
+        spyOn(agentStorage, "updateProjectOverride").mockResolvedValue(true);
+        spyOn(agentStorage, "updateProjectScopedIsPM").mockResolvedValue(true);
+        spyOn(agentStorage, "updateAgentIsPM").mockImplementation(
+            async (pubkey: string, isPM: boolean | undefined) => {
+                updateIsPMCalls.push({ pubkey, isPM });
+                return true;
+            }
+        );
+
         eventHandler = new EventHandler();
         await eventHandler.initialize();
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("should set isPM flag when event contains ['pm'] tag", async () => {

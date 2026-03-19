@@ -3,48 +3,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as constantsModule from "@/constants";
+import * as conversationEmbeddingServiceModule from "../ConversationEmbeddingService";
+import { RAGService } from "@/services/rag/RAGService";
 import { join } from "path";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 
-// Mock everything BEFORE imports
-vi.mock("@/constants", () => ({
-    getTenexBasePath: () => "/tmp/tenex-test-indexing",
-}));
-
-vi.mock("@/utils/logger", () => ({
-    logger: {
-        info: vi.fn(),
-        debug: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-    },
-}));
-
-// Mock ConversationEmbeddingService — must match actual exports
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
 const mockBuildDocument = vi.fn().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
 const mockGetCollectionName = vi.fn().mockReturnValue("conversation_embeddings");
-
-vi.mock("../ConversationEmbeddingService", () => ({
-    getConversationEmbeddingService: () => ({
-        initialize: mockInitialize,
-        buildDocument: mockBuildDocument,
-        getCollectionName: mockGetCollectionName,
-    }),
-}));
-
-// Mock RAGService
 const mockBulkUpsert = vi.fn().mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
-
-vi.mock("@/services/rag/RAGService", () => ({
-    RAGService: {
-        getInstance: () => ({
-            bulkUpsert: mockBulkUpsert,
-        }),
-    },
-}));
-
-// Now import after mocks are set up
 import { ConversationIndexingJob } from "../ConversationIndexingJob";
 import * as conversationDiskReader from "@/conversations/ConversationDiskReader";
 
@@ -57,10 +25,25 @@ describe("ConversationIndexingJob", () => {
             rmSync(testBasePath, { recursive: true, force: true });
         }
 
+        vi.restoreAllMocks();
+        vi.spyOn(constantsModule, "getTenexBasePath").mockReturnValue("/tmp/tenex-test-indexing");
+        vi.spyOn(
+            conversationEmbeddingServiceModule,
+            "getConversationEmbeddingService"
+        ).mockReturnValue({
+            initialize: mockInitialize,
+            buildDocument: mockBuildDocument,
+            getCollectionName: mockGetCollectionName,
+        } as any);
+        vi.spyOn(RAGService, "getInstance").mockReturnValue({
+            bulkUpsert: mockBulkUpsert,
+        } as any);
+
         // Reset mocks
-        vi.clearAllMocks();
-        mockBuildDocument.mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
-        mockBulkUpsert.mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
+        mockInitialize.mockReset().mockResolvedValue(undefined);
+        mockBuildDocument.mockReset().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });
+        mockGetCollectionName.mockReset().mockReturnValue("conversation_embeddings");
+        mockBulkUpsert.mockReset().mockResolvedValue({ upsertedCount: 1, failedIndices: [] });
 
         // Reset singleton
         ConversationIndexingJob.resetInstance();
@@ -74,6 +57,7 @@ describe("ConversationIndexingJob", () => {
 
         // Reset singleton
         ConversationIndexingJob.resetInstance();
+        vi.restoreAllMocks();
     });
 
     describe("Multi-project discovery", () => {

@@ -57,6 +57,12 @@ describe("MessageCompiler and TENEX system reminders", () => {
     const workingDirectory = "/tmp/test-project";
     const agentPubkey = "agent-pubkey";
     const userPubkey = "user-pubkey";
+    const respondingToPrincipal = {
+        id: `nostr:${userPubkey}`,
+        transport: "nostr" as const,
+        linkedPubkey: userPubkey,
+        kind: "human" as const,
+    };
 
     let testDir: string;
     let metadataPath: string;
@@ -77,7 +83,6 @@ describe("MessageCompiler and TENEX system reminders", () => {
             agentLessons: new Map(),
             mcpManager: undefined,
             nudgeContent: "",
-            respondingToPubkey: userPubkey,
             pendingDelegations: [],
             completedDelegations: [],
             ralNumber,
@@ -156,7 +161,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         updateReminderData({
             agent,
             conversation: conversationStore,
-            respondingToPubkey: userPubkey,
+            respondingToPrincipal,
             pendingDelegations: [
                 {
                     delegationConversationId: "delegation-1",
@@ -207,7 +212,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         updateReminderData({
             agent,
             conversation: conversationStore,
-            respondingToPubkey: userPubkey,
+            respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [],
         });
@@ -229,7 +234,7 @@ describe("MessageCompiler and TENEX system reminders", () => {
         updateReminderData({
             agent,
             conversation: conversationStore,
-            respondingToPubkey: userPubkey,
+            respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [
                 {

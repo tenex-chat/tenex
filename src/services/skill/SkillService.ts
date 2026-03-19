@@ -25,6 +25,7 @@ const MAX_DOWNLOAD_SIZE_BYTES = 10 * 1024 * 1024;
  */
 export class SkillService {
     private static instance: SkillService;
+    private static ndkProvider: typeof getNDK = getNDK;
 
     private constructor() {}
 
@@ -33,6 +34,27 @@ export class SkillService {
             SkillService.instance = new SkillService();
         }
         return SkillService.instance;
+    }
+
+    /**
+     * Reset singleton state and restore default dependencies.
+     * Test-only hook to keep suite-level module mocks from leaking into SkillService.
+     */
+    static resetInstance(): void {
+        SkillService.instance = undefined as unknown as SkillService;
+        SkillService.ndkProvider = getNDK;
+    }
+
+    /**
+     * Override the NDK provider for tests.
+     */
+    static setNDKProviderForTesting(provider: typeof getNDK): void {
+        SkillService.ndkProvider = provider;
+        SkillService.instance = undefined as unknown as SkillService;
+    }
+
+    private getNDK() {
+        return SkillService.ndkProvider();
     }
 
     /**
@@ -82,7 +104,7 @@ export class SkillService {
 
         return otelContext.with(trace.setSpan(otelContext.active(), span), async () => {
             try {
-                const ndk = getNDK();
+                const ndk = this.getNDK();
                 const skillEvents = await ndk.fetchEvents({
                     ids: eventIds,
                 });
@@ -203,7 +225,7 @@ export class SkillService {
         }
 
         const results: SkillFileInstallResult[] = [];
-        const ndk = getNDK();
+        const ndk = this.getNDK();
         const skillDir = await this.getSkillDir(shortId);
 
         for (const eventId of fileEventIds) {
@@ -467,7 +489,7 @@ export class SkillService {
      */
     async fetchSkill(eventId: string): Promise<NDKEvent | null> {
         try {
-            const ndk = getNDK();
+            const ndk = this.getNDK();
             const events = await ndk.fetchEvents({
                 ids: [eventId],
             });
