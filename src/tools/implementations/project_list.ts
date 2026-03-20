@@ -48,50 +48,42 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
     const projects: ProjectInfo[] = [];
     let totalAgents = 0;
 
-    for (const [projectId, project] of knownProjects) {
-        // projectId format is "31933:pubkey:id"
-        const id = projectId.split(":")[2];
+    // Track which projects we've processed (by d-tag)
+    const processedDTags = new Set<string>();
+
+    // First, process all RUNNING projects from activeRuntimes (source of truth for running state)
+    // This handles the case where a project is running but not in knownProjects
+    // (e.g., kind:31933 event hasn't arrived yet from subscription)
+    for (const [projectId, runtime] of activeRuntimes) {
+        // projectId format is "31933:pubkey:id" or just the d-tag
+        const id = projectId.includes(":") ? projectId.split(":")[2] : projectId;
         if (!id) {
-            logger.warn("⚠️ Project missing id, skipping", { projectId });
+            logger.warn("⚠️ Running project missing id, skipping", { projectId });
             continue;
         }
 
-        const title = project.tagValue("title") || project.tagValue("name");
-        const description = project.tagValue("description");
-        const repository = project.tagValue("repository");
-        // Check if this project is running
-        const runtime = activeRuntimes.get(projectId);
-        const isRunning = !!runtime;
+        processedDTags.add(id);
 
-        // Get agents - from running context if available, otherwise from storage
+        // Try to get project metadata from knownProjects, fall back to runtime
+        const project = knownProjects.get(projectId);
+        const runtimeContext = runtime.getContext();
+
+        const title = project?.tagValue("title") || project?.tagValue("name") || runtimeContext?.project?.tagValue("title") || id;
+        const description = project?.tagValue("description");
+        const repository = project?.tagValue("repository");
+
+        // Get agents from runtime context (authoritative for running projects)
         const agents: ProjectAgent[] = [];
-
-        if (runtime) {
-            // Running project - get agents from runtime context
-            const runtimeContext = runtime.getContext();
-            const pmPubkey = runtimeContext?.projectManager?.pubkey;
-            const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap() || new Map();
-            for (const agent of agentMap.values()) {
-                const isPM = agent.pubkey === pmPubkey;
-                agents.push({
-                    slug: agent.slug,
-                    pubkey: agent.pubkey.substring(0, PREFIX_LENGTH),
-                    role: agent.role,
-                    ...(isPM && { isPM: true }),
-                });
-            }
-        } else {
-            // Not running - get agents from storage
-            const storedAgents = await agentStorage.getProjectAgents(id);
-            for (const storedAgent of storedAgents) {
-                const signer = new NDKPrivateKeySigner(storedAgent.nsec);
-                const pubkey = (await signer.user()).pubkey;
-                agents.push({
-                    slug: storedAgent.slug,
-                    pubkey: pubkey.substring(0, PREFIX_LENGTH),
-                    role: storedAgent.role,
-                });
-            }
+        const pmPubkey = runtimeContext?.projectManager?.pubkey;
+        const agentMap = runtimeContext?.agentRegistry.getAllAgentsMap() || new Map();
+        for (const agent of agentMap.values()) {
+            const isPM = agent.pubkey === pmPubkey;
+            agents.push({
+                slug: agent.slug,
+                pubkey: agent.pubkey.substring(0, PREFIX_LENGTH),
+                role: agent.role,
+                ...(isPM && { isPM: true }),
+            });
         }
 
         totalAgents += agents.length;
@@ -101,7 +93,50 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
             title,
             description,
             repository,
-            isRunning,
+            isRunning: true,
+            agents,
+        });
+    }
+
+    // Then, process NON-RUNNING projects from knownProjects (discovered but not booted)
+    for (const [projectId, project] of knownProjects) {
+        // projectId format is "31933:pubkey:id"
+        const id = projectId.split(":")[2];
+        if (!id) {
+            logger.warn("⚠️ Project missing id, skipping", { projectId });
+            continue;
+        }
+
+        // Skip if already processed as a running project
+        if (processedDTags.has(id)) {
+            continue;
+        }
+
+        const title = project.tagValue("title") || project.tagValue("name");
+        const description = project.tagValue("description");
+        const repository = project.tagValue("repository");
+
+        // Not running - get agents from storage
+        const agents: ProjectAgent[] = [];
+        const storedAgents = await agentStorage.getProjectAgents(id);
+        for (const storedAgent of storedAgents) {
+            const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+            const pubkey = (await signer.user()).pubkey;
+            agents.push({
+                slug: storedAgent.slug,
+                pubkey: pubkey.substring(0, PREFIX_LENGTH),
+                role: storedAgent.role,
+            });
+        }
+
+        totalAgents += agents.length;
+
+        projects.push({
+            id,
+            title,
+            description,
+            repository,
+            isRunning: false,
             agents,
         });
     }

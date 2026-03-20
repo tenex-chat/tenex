@@ -7,12 +7,28 @@ describe("scratchpad-practice fragment", () => {
         expect(scratchpadPracticeFragment.priority).toBe(4);
     });
 
-    test("describes proactive scratchpad usage and flexible key names", () => {
+    test("describes proactive scratchpad usage with working memory framing", () => {
         const result = scratchpadPracticeFragment.template({});
 
-        expect(result).toContain("Your scratchpad is your primary working state for this run.");
-        expect(result).toContain("Use `scratchpad(...)` proactively");
-        expect(result).toContain("You may choose any entry names that fit the task.");
-        expect(result).toContain("remove stale tool calls from active context");
+        expect(result).toContain("Your scratchpad is your working memory.");
+        expect(result).toContain("Anything not in it will eventually disappear.");
+        expect(result).toContain("Default to capturing.");
+    });
+
+    test("includes suggested entry types for coding workflows", () => {
+        const result = scratchpadPracticeFragment.template({});
+
+        expect(result).toContain("**errors**");
+        expect(result).toContain("**types**");
+        expect(result).toContain("**code**");
+        expect(result).toContain("**commands**");
+        expect(result).toContain("**patterns**");
+    });
+
+    test("includes guidance on pruning tool calls", () => {
+        const result = scratchpadPracticeFragment.template({});
+
+        expect(result).toContain("prune the tool calls that produced the information");
+        expect(result).toContain("read something twice");
     });
 });

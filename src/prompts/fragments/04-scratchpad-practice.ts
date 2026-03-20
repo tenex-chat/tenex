@@ -9,25 +9,31 @@ export const scratchpadPracticeFragment: PromptFragment<Record<string, never>> =
     priority: 4,
     template: () => `## Scratchpad Practice
 
-Your scratchpad is your primary working state for this run.
+Your scratchpad is your working memory. Anything not in it will eventually disappear.
 
-Use \`scratchpad(...)\` proactively, not only when context is tight.
+**Default to capturing.** When you read a file and see type definitions you might need - capture them. When a build fails with specific errors - capture them. When you notice a pattern you'll want to follow - capture it. Don't wait to see if you'll need it later; by then it may be gone.
 
-Update it whenever:
-- you finish an information-gathering burst
-- your understanding of the task changes
-- you take any side-effecting action
-- you hand work off or receive delegated results
-- you are about to prune stale context
+Think of it as: "If I had to continue this task with only my scratchpad and no tool history, would I have what I need?"
 
-Keep it current by rewriting it in place.
-Do not maintain a chronological log unless the sequence itself matters.
+### Suggested entries
 
-Prefer compact current state:
-- key/value entries for the current objective, thesis, findings, side effects, open questions, or next steps
-- freeform notes only when structure would get in the way
+Use any key names that fit your task. Common patterns:
 
-You may choose any entry names that fit the task.
+- **objective** - what you're trying to accomplish
+- **findings** - what you've learned
+- **next-steps** - what's left to do
+- **errors** - exact error messages (build, lint, runtime)
+- **types** - interfaces, type definitions, key signatures you need to reference
+- **patterns** - code patterns, import styles, naming conventions from the codebase
+- **files** - file paths and their purpose, or small file contents you need
+- **commands** - shell commands that work, build scripts, test invocations
+- **code** - working code samples, snippets to reuse, templates to follow
 
-Once important tool results are captured in the scratchpad, remove stale tool calls from active context.`,
+### How to use it
+
+- Rewrite entries to reflect current state, don't append chronologically
+- Once captured, prune the tool calls that produced the information
+- If you've read something twice, that's a sign you should have captured it the first time
+
+Update after every information-gathering burst, every side-effect, every shift in understanding.`,
 };
