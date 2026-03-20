@@ -357,7 +357,7 @@ describe("EventContextService", () => {
             expect(eventContext.conversationId).toBe(conversationId);
         });
 
-        it("should support string options for model", async () => {
+        it("should support object options for model", async () => {
             const conversationId = "conv-model-string";
             const store = ConversationStore.getOrLoad(conversationId);
             store.addMessage({
@@ -369,7 +369,7 @@ describe("EventContextService", () => {
             await store.save();
 
             const toolContext = createMockToolContext(store, USER_PUBKEY, conversationId);
-            const eventContext = createEventContext(toolContext, "custom-model");
+            const eventContext = createEventContext(toolContext, { model: "custom-model" });
 
             expect(eventContext.model).toBe("custom-model");
         });
@@ -476,6 +476,65 @@ describe("EventContextService", () => {
                 id: "local:user:99",
                 transport: "local",
                 linkedPubkey: USER_PUBKEY,
+            });
+        });
+
+        it("reuses the stored delegator principal when the delegation chain only has a linked pubkey", async () => {
+            const conversationId = "conv-transport-aware-delegator";
+            const store = ConversationStore.getOrLoad(conversationId);
+            store.addMessage({
+                pubkey: EXEC_COORD_PUBKEY,
+                senderPrincipal: {
+                    id: "telegram:user:77",
+                    transport: "telegram",
+                    linkedPubkey: EXEC_COORD_PUBKEY,
+                    displayName: "Exec Coord Telegram",
+                    kind: "agent",
+                },
+                content: "please handle this",
+                messageType: "text",
+                eventId: "delegator-telegram-msg",
+                timestamp: Math.floor(Date.now() / 1000),
+            });
+            store.updateMetadata({
+                delegationChain: [
+                    { pubkey: USER_PUBKEY, displayName: "Pablo", isUser: true },
+                    { pubkey: EXEC_COORD_PUBKEY, displayName: "exec-coord", isUser: false },
+                    { pubkey: CLAUDE_CODE_PUBKEY, displayName: "claude-code", isUser: false },
+                ],
+            });
+            await store.save();
+
+            const triggeringEnvelope: InboundEnvelope = {
+                transport: "nostr",
+                principal: {
+                    id: `nostr:${EXEC_COORD_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: EXEC_COORD_PUBKEY,
+                },
+                channel: {
+                    id: `nostr:conversation:${conversationId}`,
+                    transport: "nostr",
+                    kind: "conversation",
+                },
+                message: {
+                    id: "nostr:delegator-telegram-msg",
+                    transport: "nostr",
+                    nativeId: "delegator-telegram-msg",
+                },
+                recipients: [],
+                content: "resume",
+                occurredAt: Math.floor(Date.now() / 1000),
+                capabilities: [],
+                metadata: {},
+            };
+
+            expect(resolveCompletionRecipientPrincipal(store, triggeringEnvelope)).toEqual({
+                id: "telegram:user:77",
+                transport: "telegram",
+                linkedPubkey: EXEC_COORD_PUBKEY,
+                displayName: "Exec Coord Telegram",
+                kind: "agent",
             });
         });
     });

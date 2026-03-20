@@ -463,7 +463,7 @@ export class StreamExecutionHandler {
      */
     private createEventContext(): EventContext {
         const { context, llmService } = this.config;
-        const eventContext = createEventContext(context, llmService.model);
+        const eventContext = createEventContext(context, { model: llmService.model });
 
         // DIAGNOSTIC: Track event context creation to debug llm-ral=0 issues
         this.executionSpan?.addEvent("executor.event_context_created", {

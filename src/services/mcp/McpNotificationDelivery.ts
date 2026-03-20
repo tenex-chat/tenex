@@ -35,6 +35,8 @@ export async function deliverMcpNotification(
     content: string
 ): Promise<void> {
     const projectCtx = getProjectContext();
+    const notificationTimestamp = Date.now();
+    const notificationEventId = `mcp-notification:${subscription.id}:${notificationTimestamp}`;
 
     // Look up the subscribing agent
     const agent = projectCtx.getAgentByPubkey(subscription.agentPubkey);
@@ -56,6 +58,20 @@ export async function deliverMcpNotification(
 
     // Get or load the conversation store
     const store = ConversationStore.getOrLoad(subscription.conversationId);
+    const metadata = store.getMetadata();
+    const senderPrincipal: InboundEnvelope["principal"] = {
+        id: `mcp:subscription:${subscription.id}`,
+        transport: "mcp",
+        displayName: subscription.serverName,
+        kind: "system",
+    };
+    const recipientPrincipal: InboundEnvelope["principal"] = {
+        id: `nostr:${subscription.agentPubkey}`,
+        transport: "nostr",
+        linkedPubkey: subscription.agentPubkey,
+        displayName: agent.slug,
+        kind: "agent",
+    };
 
     // Check if the agent already has an active streaming RAL in this conversation.
     // If so, queue the message as an injection rather than starting a new execution.
@@ -68,7 +84,12 @@ export async function deliverMcpNotification(
             agent.pubkey,
             subscription.conversationId,
             activeRal.ralNumber,
-            formattedContent
+            formattedContent,
+            {
+                senderPrincipal,
+                targetedPrincipals: [recipientPrincipal],
+                eventId: notificationEventId,
+            }
         );
 
         logger.info("MCP notification queued for active streaming execution", {
@@ -87,25 +108,21 @@ export async function deliverMcpNotification(
 
     // Add the notification as a user-role message in the conversation
     store.addMessage({
-        pubkey: subscription.agentPubkey,
+        pubkey: "",
         content: formattedContent,
         messageType: "text",
+        eventId: notificationEventId,
         role: "user",
         timestamp: Math.floor(Date.now() / 1000),
         targetedPubkeys: [subscription.agentPubkey],
+        targetedPrincipals: [recipientPrincipal],
+        senderPrincipal,
     });
     await store.save();
 
-    const metadata = store.getMetadata();
-    const notificationTimestamp = Date.now();
     const syntheticEnvelope: InboundEnvelope = {
         transport: "mcp",
-        principal: {
-            id: `mcp:subscription:${subscription.id}`,
-            transport: "mcp",
-            displayName: subscription.serverName,
-            kind: "system",
-        },
+        principal: senderPrincipal,
         channel: {
             id: `mcp:conversation:${subscription.conversationId}`,
             transport: "mcp",
@@ -113,19 +130,11 @@ export async function deliverMcpNotification(
             projectBinding: subscription.projectId,
         },
         message: {
-            id: `mcp:${subscription.rootEventId}`,
+            id: `mcp:${notificationEventId}`,
             transport: "mcp",
-            nativeId: subscription.rootEventId,
+            nativeId: notificationEventId,
         },
-        recipients: [
-            {
-                id: `nostr:${subscription.agentPubkey}`,
-                transport: "nostr",
-                linkedPubkey: subscription.agentPubkey,
-                displayName: agent.slug,
-                kind: "agent",
-            },
-        ],
+        recipients: [recipientPrincipal],
         content: formattedContent,
         occurredAt: Math.floor(notificationTimestamp / 1000),
         capabilities: ["mcp-subscription-notification", "direct-agent-execution"],
