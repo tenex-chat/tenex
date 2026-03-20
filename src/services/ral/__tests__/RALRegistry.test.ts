@@ -155,6 +155,35 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("silent completion requests", () => {
+    it("should request and clear silent completion for a specific RAL", () => {
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
+
+      expect(registry.requestSilentCompletion(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber2)).toBe(false);
+
+      expect(registry.clearSilentCompletionRequest(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber1)).toBe(false);
+    });
+
+    it("should clear silent completion state when a RAL or conversation is cleared", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.requestSilentCompletion(agentPubkey, conversationId, ralNumber);
+      registry.clearRAL(agentPubkey, conversationId, ralNumber);
+
+      const recreatedRal = registry.create(agentPubkey, conversationId, projectId);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, recreatedRal)).toBe(false);
+
+      registry.requestSilentCompletion(agentPubkey, conversationId, recreatedRal);
+      registry.clear(agentPubkey, conversationId);
+
+      const afterConversationClear = registry.create(agentPubkey, conversationId, projectId);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, afterConversationClear)).toBe(false);
+    });
+  });
+
   describe("setPendingDelegations", () => {
     it("should set pending delegations", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);

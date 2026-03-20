@@ -110,6 +110,131 @@ describe("TelegramRuntimePublisher", () => {
         );
     });
 
+    it("delivers conversation updates to Telegram as they are published", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisher(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-1b",
+            ralNumber: 1,
+            rootEvent: { id: "root-1b" },
+            triggeringEnvelope: createTelegramEnvelope("1011"),
+        };
+
+        await publisher.conversation({ content: "working on it" }, context);
+
+        expect(nostrPublisherMethods.conversation).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledWith(expect.anything(), context, "working on it");
+    });
+
+    it("delivers allowlisted todo_write tool updates to Telegram", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisher(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-tools",
+            ralNumber: 1,
+            rootEvent: { id: "root-tools" },
+            triggeringEnvelope: createTelegramEnvelope("103"),
+        };
+
+        await publisher.toolUse(
+            {
+                toolName: "todo_write",
+                content: "Executing todo_write",
+                args: {
+                    todos: [
+                        {
+                            title: "Read file one",
+                            status: "in_progress",
+                        },
+                        {
+                            title: "Read file two",
+                            status: "pending",
+                        },
+                    ],
+                },
+            },
+            context
+        );
+
+        expect(nostrPublisherMethods.toolUse).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledTimes(1);
+        expect(sendReply).toHaveBeenCalledWith(
+            expect.anything(),
+            context,
+            [
+                "**Updating todo list**",
+                "",
+                "2 items: 1 in progress, 1 pending",
+                "",
+                "- In progress: Read file one",
+                "- Pending: Read file two",
+            ].join("\n")
+        );
+    });
+
+    it("does not deliver non-allowlisted tool updates to Telegram", async () => {
+        const sendReply = mock(async () => undefined);
+        const publisher = new TelegramRuntimePublisher(
+            {
+                slug: "telegram-agent",
+                pubkey: "a".repeat(64),
+                telegram: {
+                    botToken: "token",
+                },
+            } as any,
+            {
+                canHandle: () => true,
+                sendReply,
+            } as any
+        );
+
+        const context: EventContext = {
+            conversationId: "conversation-tools-2",
+            ralNumber: 1,
+            rootEvent: { id: "root-tools-2" },
+            triggeringEnvelope: createTelegramEnvelope("104"),
+        };
+
+        await publisher.toolUse(
+            {
+                toolName: "shell_execute",
+                content: "Executing shell_execute",
+                args: { command: "pwd" },
+            },
+            context
+        );
+
+        expect(nostrPublisherMethods.toolUse).toHaveBeenCalledTimes(1);
+        expect(sendReply).not.toHaveBeenCalled();
+    });
+
     it("returns the generated event when Telegram recovery succeeds after a Nostr publish failure", async () => {
         const recoveredEvent = {
             id: "event-1",

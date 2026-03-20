@@ -33,6 +33,10 @@ function nostrIdToSpanId(nostrId: string): string {
     return nostrId.substring(0, 16);
 }
 
+function isHexNostrId(value: string | null | undefined): value is string {
+    return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
 /**
  * Create a trace context from Nostr event threading.
  *
@@ -48,7 +52,7 @@ function createContextFromNostrEvent(event: NDKEvent): {
     // 1. Determine conversationId (becomes traceID)
     // For root events (no e tag), use the event's own ID as conversation root
     const conversationId = AgentEventDecoder.getReplyTarget(event) || event.id;
-    if (!conversationId) {
+    if (!conversationId || !isHexNostrId(conversationId)) {
         return { context: ROOT_CONTEXT, parentSpanId: undefined, traceId: "" };
     }
 
@@ -56,7 +60,7 @@ function createContextFromNostrEvent(event: NDKEvent): {
 
     // 2. Determine parent event ID from e-tag (the event this is replying to)
     const parentEventId = TagExtractor.getFirstETag(event);
-    const parentSpanId = parentEventId ? nostrIdToSpanId(parentEventId) : undefined;
+    const parentSpanId = isHexNostrId(parentEventId) ? nostrIdToSpanId(parentEventId) : undefined;
 
     // 3. Create span context - if we have a parent, use its spanId; otherwise this is root
     const spanContext: SpanContext = {
@@ -125,6 +129,7 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.tag_count": event.tags.length,
                 "event.has_trace_context": !!traceContextTag,
                 "event.reply_to": replyToEventId || "",
+                "event.reply_to_is_hex": isHexNostrId(replyToEventId),
                 "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
                 "conversation.is_root": !AgentEventDecoder.getReplyTarget(event),
                 "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,

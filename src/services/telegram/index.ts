@@ -1,5 +1,22 @@
 export { TelegramBotClient } from "./TelegramBotClient";
 export {
+    TelegramBindingPersistenceService,
+    buildTelegramChatBinding,
+    upsertTelegramChatBindings,
+} from "./TelegramBindingPersistenceService";
+export { TelegramChatContextService } from "./TelegramChatContextService";
+export {
+    TelegramChatContextStore,
+    getTelegramChatContextStore,
+} from "./TelegramChatContextStoreService";
+export {
+    TelegramConfigCommandService,
+} from "./TelegramConfigCommandService";
+export {
+    TelegramConfigSessionStore,
+    getTelegramConfigSessionStore,
+} from "./TelegramConfigSessionStoreService";
+export {
     TelegramChannelBindingStore,
     getTelegramChannelBindingStore,
 } from "./TelegramChannelBindingStoreService";

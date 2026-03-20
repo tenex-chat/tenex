@@ -72,6 +72,7 @@ export type ToolName =
     | "nostr_publish_as_user"
     | "change_model"
     | "kill"
+    | "no_response"
     | "generate_image";
 
 /**

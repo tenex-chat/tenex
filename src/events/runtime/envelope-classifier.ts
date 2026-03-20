@@ -1,6 +1,5 @@
 import type { AgentInstance } from "@/agents/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import { getProjectContext } from "@/services/projects";
 
 /**
  * Strip transport prefix from a qualified ID.
@@ -13,7 +12,8 @@ export function toNativeId(qualifiedId: string): string {
 
 export function isDirectedToSystem(
     envelope: InboundEnvelope,
-    systemAgents: Map<string, AgentInstance>
+    systemAgents: Map<string, AgentInstance>,
+    projectManagerPubkey?: string
 ): boolean {
     if (envelope.recipients.length === 0) return false;
 
@@ -22,10 +22,8 @@ export function isDirectedToSystem(
         .filter((pk): pk is string => !!pk);
 
     const systemPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
-
-    const projectCtx = getProjectContext();
-    if (projectCtx.projectManager?.pubkey) {
-        systemPubkeys.add(projectCtx.projectManager.pubkey);
+    if (projectManagerPubkey) {
+        systemPubkeys.add(projectManagerPubkey);
     }
 
     return recipientPubkeys.some((pk) => systemPubkeys.has(pk));

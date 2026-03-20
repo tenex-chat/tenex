@@ -95,7 +95,7 @@ export function createMockInboundEnvelope(overrides?: Partial<InboundEnvelope>):
         },
         recipients: [],
         content: "Mock event content",
-        occurredAt: Date.now(),
+        occurredAt: Math.floor(Date.now() / 1000),
         capabilities: [],
         metadata: {
             eventKind: NDKKind.GenericReply,
@@ -132,76 +132,9 @@ export function createMockInboundEnvelope(overrides?: Partial<InboundEnvelope>):
 }
 
 function normalizeMockInboundEnvelope(
-    triggeringEnvelope?: ToolRegistryContext["triggeringEnvelope"] | Partial<NDKEvent>
+    triggeringEnvelope?: ToolRegistryContext["triggeringEnvelope"] | Partial<InboundEnvelope>
 ): InboundEnvelope {
-    if (
-        triggeringEnvelope &&
-        typeof triggeringEnvelope === "object" &&
-        "transport" in triggeringEnvelope &&
-        "principal" in triggeringEnvelope &&
-        "channel" in triggeringEnvelope &&
-        "message" in triggeringEnvelope
-    ) {
-        return createMockInboundEnvelope(triggeringEnvelope as Partial<InboundEnvelope>);
-    }
-
-    const legacyEvent = triggeringEnvelope as Partial<NDKEvent> | undefined;
-    const branchName = legacyEvent?.tags?.find((tag) => tag[0] === "branch")?.[1];
-    const replyTargets = legacyEvent?.tags
-        ?.filter((tag) => tag[0] === "e" || tag[0] === "E")
-        .map((tag) => tag[1]) ?? [];
-    const nudgeEventIds = legacyEvent?.tags
-        ?.filter((tag) => tag[0] === "nudge")
-        .map((tag) => tag[1]) ?? [];
-    const skillEventIds = legacyEvent?.tags
-        ?.filter((tag) => tag[0] === "skill")
-        .map((tag) => tag[1]) ?? [];
-    const articleReferences = legacyEvent?.tags
-        ?.filter((tag) => tag[0] === "a")
-        .map((tag) => tag[1]) ?? [];
-    const statusValue = legacyEvent?.tags?.find((tag) => tag[0] === "status")?.[1];
-    const toolName = legacyEvent?.tags?.find((tag) => tag[0] === "tool")?.[1];
-    const delegationParentConversationId = legacyEvent?.tags?.find(
-        (tag) => tag[0] === "delegation"
-    )?.[1];
-    const recipients = legacyEvent?.tags
-        ?.filter((tag) => tag[0] === "p" && Boolean(tag[1]))
-        .map((tag) => ({
-            id: tag[1],
-            transport: "nostr" as const,
-            linkedPubkey: tag[1],
-            kind: "agent" as const,
-        })) ?? [];
-    const messageId = legacyEvent?.id ?? `mock-event-${Math.random().toString(36).slice(2, 11)}`;
-    const pubkey = legacyEvent?.pubkey ?? "mock-pubkey";
-
-    return createMockInboundEnvelope({
-        principal: {
-            id: pubkey,
-            transport: "nostr",
-            linkedPubkey: pubkey,
-            kind: "human",
-        },
-        message: {
-            id: messageId,
-            transport: "nostr",
-            nativeId: messageId,
-        },
-        recipients,
-        content: legacyEvent?.content ?? "Mock event content",
-        metadata: {
-            eventKind: legacyEvent?.kind ?? NDKKind.GenericReply,
-            eventTagCount: legacyEvent?.tags?.length ?? 0,
-            branchName,
-            articleReferences,
-            replyTargets,
-            delegationParentConversationId,
-            nudgeEventIds,
-            skillEventIds,
-            statusValue,
-            toolName,
-        },
-    });
+    return createMockInboundEnvelope(triggeringEnvelope);
 }
 
 export function createMockAgent(overrides?: Partial<AgentInstance>): AgentInstance {

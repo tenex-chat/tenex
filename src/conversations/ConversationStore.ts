@@ -18,6 +18,7 @@ import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { TodoItem } from "@/services/ral/types";
 import { buildPromptMessagesFromRecords } from "./PromptBuilder";
+import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
 import type {
@@ -416,7 +417,8 @@ export class ConversationStore {
     }
 
     getRootAuthorPubkey(): string | undefined {
-        return this.state.messages[0]?.pubkey;
+        const rootMessage = this.state.messages[0];
+        return rootMessage ? getConversationRecordAuthorPubkey(rootMessage) : undefined;
     }
 
     async save(): Promise<void> {
@@ -519,7 +521,11 @@ export class ConversationStore {
     getFirstUserMessage(): (ConversationRecord & { index: number }) | undefined {
         for (let i = 0; i < this.state.messages.length; i++) {
             const msg = this.state.messages[i];
-            if (msg.messageType === "text" && !ConversationStore.agentPubkeys.has(msg.pubkey)) {
+            const authorPubkey = getConversationRecordAuthorPubkey(msg);
+            if (
+                msg.messageType === "text" &&
+                (!authorPubkey || !ConversationStore.agentPubkeys.has(authorPubkey))
+            ) {
                 return { ...msg, index: i };
             }
         }
@@ -848,15 +854,17 @@ export class ConversationStore {
             transport: envelope.principal.transport,
             linkedPubkey: envelope.principal.linkedPubkey,
         };
+        const senderPubkey = senderPrincipal.linkedPubkey ?? envelope.principal.linkedPubkey;
 
         this.addMessage({
-            pubkey: envelope.principal.linkedPubkey ?? envelope.principal.id,
+            pubkey: senderPubkey ?? "",
             content: envelope.content,
             messageType: "text",
             eventId: nativeId,
             timestamp: envelope.occurredAt,
             targetedPubkeys: targetedPubkeys.length > 0 ? targetedPubkeys : undefined,
             targetedPrincipals,
+            senderPubkey,
             senderPrincipal,
         });
 

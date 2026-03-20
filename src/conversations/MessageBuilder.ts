@@ -12,6 +12,7 @@
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
 import { buildConversationRecordId } from "./record-id";
+import { getConversationRecordAuthorPubkey } from "./record-author";
 import type { ConversationRecord, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
 import { getIdentityService } from "@/services/identity";
@@ -141,7 +142,7 @@ function deriveRole(
     if (entry.messageType === "tool-result") return "tool";
 
     // Text messages - assistant for own, user for everything else
-    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
     if (senderPubkey === viewingAgentPubkey) {
         return "assistant"; // Own messages
     }
@@ -166,9 +167,9 @@ function resolveDisplayNameSyncForEntry(
     entry: ConversationRecord,
     resolveDisplayName?: (pubkey: string) => string
 ): string {
-    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
 
-    if (resolveDisplayName) {
+    if (resolveDisplayName && senderPubkey) {
         return resolveDisplayName(senderPubkey);
     }
 
@@ -230,10 +231,11 @@ export function computeAttributionPrefix(
     entry: ConversationRecord,
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
-    resolveDisplayName?: (pubkey: string) => string
+    resolveDisplayName?: (pubkey: string) => string,
+    multipleHumanSenders: boolean = false
 ): string {
     // Determine the actual sender (injected messages track original sender via senderPubkey)
-    const senderPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
 
     // Rule 1: Self message → no prefix
     if (senderPubkey === viewingAgentPubkey) return "";
@@ -251,13 +253,45 @@ export function computeAttributionPrefix(
     }
 
     // Rule 4: Sender is agent → attribution prefix
-    if (agentPubkeys.has(senderPubkey)) {
+    if (senderPubkey && agentPubkeys.has(senderPubkey)) {
         const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
         return `[@${senderName}] `;
     }
 
-    // Rule 5: Otherwise (user message targeted to me, or no targeting) → no prefix
+    // Rule 5: Multiple visible human senders → explicit human attribution
+    if (multipleHumanSenders && entry.senderPrincipal?.kind === "human") {
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
+        return `[@${senderName}] `;
+    }
+
+    // Rule 6: Otherwise (user message targeted to me, or no targeting) → no prefix
     return "";
+}
+
+function hasMultipleHumanSenders(
+    entries: ConversationRecord[],
+    viewingAgentPubkey: string,
+    agentPubkeys: Set<string>
+): boolean {
+    const humanSenderIds = new Set<string>();
+
+    for (const entry of entries) {
+        if (entry.messageType !== "text" || entry.role || entry.senderPrincipal?.kind !== "human") {
+            continue;
+        }
+
+        const senderPubkey = getConversationRecordAuthorPubkey(entry);
+        if (senderPubkey === viewingAgentPubkey || (senderPubkey && agentPubkeys.has(senderPubkey))) {
+            continue;
+        }
+
+        humanSenderIds.add(entry.senderPrincipal.id);
+        if (humanSenderIds.size > 1) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -280,6 +314,7 @@ async function entryToMessage(
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
+    multipleHumanSenders: boolean,
     enableMultimodal: boolean = true
 ): Promise<ModelMessage> {
     const role = deriveRole(entry, viewingAgentPubkey);
@@ -307,7 +342,13 @@ async function entryToMessage(
     }
 
     // Text message - compute attribution prefix for multi-agent conversations
-    const prefix = computeAttributionPrefix(entry, viewingAgentPubkey, agentPubkeys);
+    const prefix = computeAttributionPrefix(
+        entry,
+        viewingAgentPubkey,
+        agentPubkeys,
+        undefined,
+        multipleHumanSenders
+    );
     let messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
 
     // Track any images in text messages (but don't replace them - user content)
@@ -512,6 +553,12 @@ export async function buildMessagesFromEntries(
         }
     }
 
+    const multipleHumanSenders = hasMultipleHumanSenders(
+        entries,
+        viewingAgentPubkey,
+        agentPubkeys
+    );
+
     let prunedDelegationCompletions = 0;
 
     // ============================================================================
@@ -584,7 +631,7 @@ export async function buildMessagesFromEntries(
             if (!entry.ral) return true;
 
             // Same agent
-            if (entry.pubkey === viewingAgentPubkey) {
+            if (getConversationRecordAuthorPubkey(entry) === viewingAgentPubkey) {
                 if (entry.ral === ralNumber) return true; // Current RAL
                 if (activeRals.has(entry.ral)) return false; // Other active RAL - skip
                 return true; // Completed RAL
@@ -600,7 +647,13 @@ export async function buildMessagesFromEntries(
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
             result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
+                await entryToMessage(
+                    entry,
+                    viewingAgentPubkey,
+                    agentPubkeys,
+                    imageTracker,
+                    multipleHumanSenders
+                ),
                 entry,
                 absoluteIndex,
                 includeMessageIds
@@ -631,7 +684,13 @@ export async function buildMessagesFromEntries(
             }
 
             result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
+                await entryToMessage(
+                    entry,
+                    viewingAgentPubkey,
+                    agentPubkeys,
+                    imageTracker,
+                    multipleHumanSenders
+                ),
                 entry,
                 absoluteIndex,
                 includeMessageIds
@@ -650,6 +709,7 @@ export async function buildMessagesFromEntries(
                             viewingAgentPubkey,
                             agentPubkeys,
                             imageTracker,
+                            multipleHumanSenders,
                             deferred.enableMultimodal
                         ),
                         deferred.entry,
@@ -769,6 +829,7 @@ export async function buildMessagesFromEntries(
                     viewingAgentPubkey,
                     agentPubkeys,
                     imageTracker,
+                    multipleHumanSenders,
                     enableMultimodal
                 ),
                 entry,
@@ -838,6 +899,7 @@ export async function buildMessagesFromEntries(
                 viewingAgentPubkey,
                 agentPubkeys,
                 imageTracker,
+                multipleHumanSenders,
                 deferred.enableMultimodal
             ),
             deferred.entry,

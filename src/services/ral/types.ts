@@ -168,6 +168,8 @@ export interface RALRegistryEntry {
   llmStreamStartTime?: number;
   /** Checkpoint timestamp for incremental runtime reporting mid-stream (resets on each consume) */
   lastRuntimeCheckpointAt?: number;
+  /** Explicit request from the agent to complete this RAL without a visible assistant reply */
+  silentCompletionRequestedAt?: number;
   /** Heuristic state - namespaced under 'heuristics' */
   heuristics?: {
     /** Pending violations waiting to be injected */

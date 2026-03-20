@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
+import { getConversationRecordAuthorPubkey } from "./record-author";
 import type { ConversationEntry } from "./types";
 
 /**
@@ -95,7 +96,9 @@ export function readConversationPreviewForProject(
         const messages: ConversationEntry[] = parsed.messages ?? [];
         const lastMessage = messages[messages.length - 1];
         const lastActivity = lastMessage?.timestamp || 0;
-        const agentParticipated = messages.some(msg => msg.pubkey === agentPubkey);
+        const agentParticipated = messages.some(
+            (msg) => getConversationRecordAuthorPubkey(msg) === agentPubkey
+        );
 
         return {
             id: conversationId,

@@ -56,6 +56,18 @@ describe("SilentAgentHeuristic", () => {
             expect(result.triggered).toBe(false);
         });
 
+        it("should NOT trigger when silent completion was explicitly requested", async () => {
+            const context = createContext({
+                silentCompletionRequested: true,
+                messageContent: "",
+                toolCallsMade: ["no_response"],
+            });
+
+            const result = await heuristic.detect(context);
+
+            expect(result.triggered).toBe(false);
+        });
+
         it("should NOT trigger when agent only called delegate", async () => {
             const context = createContext({
                 messageContent: "",

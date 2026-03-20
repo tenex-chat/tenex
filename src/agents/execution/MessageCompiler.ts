@@ -28,6 +28,7 @@ export interface MessageCompilerContext {
     agent: AgentInstance;
     project: NDKProject;
     conversation: ConversationStore;
+    triggeringEnvelope?: import("@/events/runtime/InboundEnvelope").InboundEnvelope;
     projectBasePath?: string;
     workingDirectory?: string;
     currentBranch?: string;

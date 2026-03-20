@@ -1,15 +1,13 @@
 // Status publishing interval
 const STATUS_INTERVAL_MS = 30_000; // 30 seconds
 
-import { DELEGATE_TOOLS, CORE_AGENT_TOOLS, CONTEXT_INJECTED_TOOLS } from "@/agents/constants";
 import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { type ProjectContext, projectContextStore } from "@/services/projects";
-import { getAllToolNames } from "@/tools/registry";
-import type { ToolName } from "@/tools/types";
 import { SchedulerService } from "@/services/scheduling/SchedulerService";
+import { ProjectConfigOptionsService } from "@/services/status/ProjectConfigOptionsService";
 import { formatAnyError } from "@/lib/error-formatter";
 import { getDefaultBranchName } from "@/utils/git/initializeGitRepo";
 import { listWorktrees } from "@/utils/git/worktree";
@@ -41,6 +39,7 @@ import { join } from "path";
 export class ProjectStatusService {
     private statusInterval?: NodeJS.Timeout;
     private projectContext!: ProjectContext;
+    private readonly configOptionsService = new ProjectConfigOptionsService();
 
     async startPublishing(projectPath: string, projectContext: ProjectContext): Promise<void> {
         // Store the project context (required for daemon mode)
@@ -272,7 +271,8 @@ export class ProjectStatusService {
             const configToAgents = new Map<string, Set<string>>();
 
             // First, add ALL configured models (even if not used by any agent)
-            for (const configSlug of Object.keys(llms.configurations)) {
+            const availableModels = await this.configOptionsService.getAvailableModels();
+            for (const configSlug of availableModels) {
                 configToAgents.set(configSlug, new Set());
             }
 
@@ -344,41 +344,9 @@ export class ProjectStatusService {
             const projectCtx = this.projectContext;
             const toolAgentMap = new Map<string, Set<string>>();
 
-            // First, add ALL tool names from the registry (except excluded tools)
-            const allToolNames = getAllToolNames();
-            for (const toolName of allToolNames) {
-                // Skip delegate tools, core tools, and context-injected tools from TenexProjectStatus events
-                // These are handled automatically by the system and not configurable per-agent
-                if (
-                    !DELEGATE_TOOLS.includes(toolName) &&
-                    !CORE_AGENT_TOOLS.includes(toolName) &&
-                    !CONTEXT_INJECTED_TOOLS.includes(toolName)
-                ) {
-                    toolAgentMap.set(toolName, new Set());
-                }
-            }
-
-            // Add all MCP tools from running servers (with empty agent sets initially)
-            // Agents will be added to their MCP tools in the loop below
-            // Note: mcp__tenex__* tools are filtered out - these are internal TENEX tools
-            // wrapped through MCP and should not be announced in status events
-            // We also track valid MCP tools to filter agent definitions later
-            const validMcpToolNames = new Set<string>();
-            if (projectCtx.mcpManager) {
-                try {
-                    const mcpTools = projectCtx.mcpManager.getCachedTools();
-                    for (const toolName of Object.keys(mcpTools)) {
-                        // Filter out mcp__tenex__* tools - internal TENEX MCP wrapper tools
-                        if (toolName && !toolName.startsWith("mcp__tenex__")) {
-                            validMcpToolNames.add(toolName);
-                            if (!toolAgentMap.has(toolName)) {
-                                toolAgentMap.set(toolName, new Set());
-                            }
-                        }
-                    }
-                } catch {
-                    // MCP tools might not be available yet, that's okay
-                }
+            const availableTools = this.configOptionsService.getAvailableTools(projectCtx);
+            for (const toolName of availableTools) {
+                toolAgentMap.set(toolName, new Set());
             }
 
             // Then build a map of tool name -> set of agent slugs that have access
@@ -390,21 +358,6 @@ export class ProjectStatusService {
                     // Skip invalid tool names
                     if (!toolName) {
                         logger.warn(`Agent ${agentSlug} has invalid tool name: ${toolName}`);
-                        continue;
-                    }
-                    // Skip delegate tools, core tools, and context-injected tools - they're not included in TenexProjectStatus events
-                    // These are handled automatically by the system
-                    if (
-                        DELEGATE_TOOLS.includes(toolName as ToolName) ||
-                        CORE_AGENT_TOOLS.includes(toolName as ToolName) ||
-                        CONTEXT_INJECTED_TOOLS.includes(toolName as ToolName)
-                    ) {
-                        continue;
-                    }
-                    // For MCP tools, only include if they exist in running MCP servers
-                    // This prevents announcing MCP tools in agent definitions that aren't actually available
-                    // Note: mcp__tenex__* tools are already excluded from validMcpToolNames
-                    if (toolName.startsWith("mcp__") && !validMcpToolNames.has(toolName)) {
                         continue;
                     }
                     const toolAgents = toolAgentMap.get(toolName);

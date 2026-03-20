@@ -1,5 +1,8 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type {
+    TelegramChatAdministratorMetadata,
+} from "@/events/runtime/InboundEnvelope";
+import type {
     RuntimeAgentRef,
     TelegramAgentConfig,
     TelegramChatBinding,
@@ -35,10 +38,32 @@ export interface TelegramMessage {
     };
 }
 
+export interface TelegramInlineKeyboardButton {
+    text: string;
+    callback_data?: string;
+}
+
+export interface TelegramInlineKeyboardMarkup {
+    inline_keyboard: TelegramInlineKeyboardButton[][];
+}
+
+export interface TelegramBotCommand {
+    command: string;
+    description: string;
+}
+
+export interface TelegramCallbackQuery {
+    id: string;
+    from: TelegramUser;
+    message?: TelegramMessage;
+    data?: string;
+}
+
 export interface TelegramUpdate {
     update_id: number;
     message?: TelegramMessage;
     edited_message?: TelegramMessage;
+    callback_query?: TelegramCallbackQuery;
 }
 
 export interface TelegramGetUpdatesResponse {
@@ -58,9 +83,32 @@ export interface TelegramBotIdentity {
     username?: string;
 }
 
+export interface TelegramChatFullInfo extends TelegramChat {}
+
+export interface TelegramChatMemberAdministrator {
+    status: "administrator" | "creator" | (string & {});
+    user: TelegramUser;
+    custom_title?: string;
+}
+
 export interface TelegramGetMeResponse {
     ok: boolean;
     result: TelegramBotIdentity;
+}
+
+export interface TelegramGetChatResponse {
+    ok: boolean;
+    result: TelegramChatFullInfo;
+}
+
+export interface TelegramGetChatAdministratorsResponse {
+    ok: boolean;
+    result: TelegramChatMemberAdministrator[];
+}
+
+export interface TelegramGetChatMemberCountResponse {
+    ok: boolean;
+    result: number;
 }
 
 export interface TelegramSendMessageParams {
@@ -69,6 +117,7 @@ export interface TelegramSendMessageParams {
     parseMode?: "HTML" | "MarkdownV2";
     replyToMessageId?: string;
     messageThreadId?: string;
+    replyMarkup?: TelegramInlineKeyboardMarkup;
 }
 
 export interface TelegramSendChatActionParams {
@@ -77,10 +126,31 @@ export interface TelegramSendChatActionParams {
     messageThreadId?: string;
 }
 
+export interface TelegramEditMessageTextParams {
+    chatId: string;
+    messageId: string;
+    text: string;
+    parseMode?: "HTML" | "MarkdownV2";
+    replyMarkup?: TelegramInlineKeyboardMarkup;
+}
+
+export interface TelegramAnswerCallbackQueryParams {
+    callbackQueryId: string;
+    text?: string;
+    showAlert?: boolean;
+}
+
 export interface TelegramGatewayBinding {
     agent: RuntimeAgentRef;
     config: TelegramAgentConfig;
     chatBindings: TelegramChatBinding[];
+}
+
+export interface TelegramChatContextSnapshot {
+    chatTitle?: string;
+    chatUsername?: string;
+    memberCount?: number;
+    administrators?: TelegramChatAdministratorMetadata[];
 }
 
 export interface TelegramInboundEnvelopeResult {

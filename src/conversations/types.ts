@@ -35,6 +35,7 @@ export interface DelegationMarker {
 }
 
 interface ConversationRecordFields {
+    /** Canonical Nostr pubkey when available; empty string for transport-only authors. */
     pubkey: string;
     ral?: number; // Only for agent messages
     content: string; // Text content (for text messages) or empty for tool messages

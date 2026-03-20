@@ -131,13 +131,22 @@ export interface ToolEventHandlersConfig {
     toolsObject: Record<string, AISdkTool>;
     eventContext: EventContext;
     ralNumber: number;
+    onNoResponseRequested?: () => void;
 }
 
 /**
  * Setup tool-will-execute and tool-did-execute event handlers
  */
 export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
-    const { context, llmService, toolTracker, toolsObject, eventContext, ralNumber } = config;
+    const {
+        context,
+        llmService,
+        toolTracker,
+        toolsObject,
+        eventContext,
+        ralNumber,
+        onNoResponseRequested,
+    } = config;
     const conversationStore = context.conversationStore;
     const agentPublisher = context.agentPublisher;
     const ralRegistry = RALRegistry.getInstance();
@@ -327,6 +336,23 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             });
         }
 
+        ralRegistry.setToolActive(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber,
+            event.toolCallId,
+            false,
+            event.toolName
+        );
+
+        if (event.toolName === "no_response") {
+            trace.getActiveSpan()?.addEvent("executor.no_response_tool_result_received", {
+                "ral.number": ralNumber,
+                "tool.call_id": event.toolCallId,
+            });
+            onNoResponseRequested?.();
+        }
+
         const toolEventId = await toolTracker.completeExecution({
             toolCallId: event.toolCallId,
             result: event.result,
@@ -338,14 +364,5 @@ export function setupToolEventHandlers(config: ToolEventHandlersConfig): void {
             conversationStore.setEventId(toolResultMessageIndex, toolEventId);
             setToolCallEventIdFromToolCallId(conversationStore, event.toolCallId, toolEventId);
         }
-
-        ralRegistry.setToolActive(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber,
-            event.toolCallId,
-            false,
-            event.toolName
-        );
     });
 }

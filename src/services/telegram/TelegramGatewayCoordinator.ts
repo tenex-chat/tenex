@@ -1,3 +1,4 @@
+import type { AgentInstance } from "@/agents/types";
 import type { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RuntimeIngressService } from "@/services/ingress/RuntimeIngressService";
@@ -16,12 +17,26 @@ import {
     type TelegramMessage,
     type TelegramUpdate,
 } from "@/services/telegram/types";
+import { projectContextStore } from "@/services/projects";
+import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
+import { TelegramChatContextService } from "@/services/telegram/TelegramChatContextService";
 import { getTelegramChannelBindingStore } from "@/services/telegram/TelegramChannelBindingStoreService";
 import { getTelegramPendingBindingStore } from "@/services/telegram/TelegramPendingBindingStoreService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
+import {
+    TELEGRAM_CONFIG_BOT_COMMANDS,
+    TelegramConfigCommandService,
+} from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
 import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import {
+    buildTelegramTransportMetadata,
+    getTelegramUpdateContent,
+    runWithTelegramUpdateSpan,
+    withActiveTraceLogFields,
+} from "@/telemetry/TelegramTelemetry";
 import { logger } from "@/utils/logger";
+import { trace } from "@opentelemetry/api";
 
 interface TelegramRuntimeRegistration {
     projectId: string;
@@ -134,6 +149,23 @@ function parseProjectSelection(
     );
 }
 
+function recordTelegramOutcome(
+    outcome: "dropped" | "pending-binding" | "routed",
+    reason: string,
+    attributes: Record<string, boolean | number | string> = {}
+): void {
+    const activeSpan = trace.getActiveSpan();
+    activeSpan?.setAttributes({
+        "telegram.update.outcome": outcome,
+        "telegram.update.reason": reason,
+        ...attributes,
+    });
+    activeSpan?.addEvent(`telegram.update.${outcome}`, {
+        "telegram.update.reason": reason,
+        ...attributes,
+    });
+}
+
 export class TelegramGatewayCoordinator {
     private static instance: TelegramGatewayCoordinator;
 
@@ -144,6 +176,9 @@ export class TelegramGatewayCoordinator {
     private readonly channelSessionStore: ChannelSessionStore = getChannelSessionStore();
     private readonly channelBindingStore = getTelegramChannelBindingStore();
     private readonly pendingBindingStore = getTelegramPendingBindingStore();
+    private readonly bindingPersistenceService = new TelegramBindingPersistenceService();
+    private readonly chatContextService = new TelegramChatContextService();
+    private readonly configCommandService = new TelegramConfigCommandService();
     private readonly authorizedIdentityService: AuthorizedIdentityService =
         getAuthorizedIdentityService();
     private readonly pollTimeoutSeconds = 20;
@@ -256,6 +291,7 @@ export class TelegramGatewayCoordinator {
             apiBaseUrl: registration.binding.config.apiBaseUrl,
         });
         const botIdentity = await client.getMe();
+        await this.registerBotCommands(client, registration);
         const nextOffset = await this.skipBacklog(client);
         const poller: TelegramPollerState = {
             token,
@@ -275,6 +311,24 @@ export class TelegramGatewayCoordinator {
         });
     }
 
+    private async registerBotCommands(
+        client: TelegramBotClient,
+        registration: TelegramRuntimeRegistration
+    ): Promise<void> {
+        try {
+            await client.setMyCommands({
+                commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+            });
+        } catch (error) {
+            logger.warn("[TelegramGatewayCoordinator] Failed to register Telegram bot commands", {
+                tokenSuffix: registration.binding.config.botToken.slice(-6),
+                agentSlug: registration.binding.agent.slug,
+                projectId: registration.projectId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
     private async skipBacklog(client: TelegramBotClient): Promise<number | undefined> {
         let offset: number | undefined;
 
@@ -283,6 +337,7 @@ export class TelegramGatewayCoordinator {
                 offset,
                 timeoutSeconds: 0,
                 limit: this.pollLimit,
+                allowedUpdates: ["message", "edited_message", "callback_query"],
             });
             if (updates.length === 0) {
                 return offset;
@@ -302,6 +357,7 @@ export class TelegramGatewayCoordinator {
                     offset: poller.nextOffset,
                     timeoutSeconds: this.pollTimeoutSeconds,
                     limit: this.pollLimit,
+                    allowedUpdates: ["message", "edited_message", "callback_query"],
                     signal: abortController.signal,
                 });
 
@@ -338,121 +394,408 @@ export class TelegramGatewayCoordinator {
 
     private async processUpdate(poller: TelegramPollerState, update: TelegramUpdate): Promise<void> {
         const registrations = deduplicateRegistrations(this.registrations.get(poller.token) ?? []);
-        if (registrations.length === 0) {
-            return;
-        }
-
-        const message = normalizeMessage(update);
-        if (!message?.from || message.from.is_bot || !isSupportedChatType(message) || !isTextualMessage(message)) {
-            return;
-        }
-
         const primaryRegistration = registrations[0];
-        if (!primaryRegistration) {
-            return;
-        }
 
-        const chatId = normalizeChatId(message.chat.id);
-        const topicId = normalizeTopicId(message.message_thread_id);
-        const channelId = createTelegramChannelId(chatId, topicId);
-        const agentPubkey = primaryRegistration.binding.agent.pubkey;
-        const principalId = `telegram:user:${message.from.id}`;
-        const identityBinding = getIdentityBindingStore().getBinding(principalId);
-        const pending = this.pendingBindingStore.getPending(agentPubkey, channelId);
+        await runWithTelegramUpdateSpan({
+            update,
+            source: "gateway-coordinator",
+            projectId: registrations.length === 1 ? primaryRegistration?.projectId : undefined,
+            projectTitle: registrations.length === 1 ? primaryRegistration?.projectTitle : undefined,
+            agentSlug: primaryRegistration?.binding.agent.slug,
+            agentPubkey: primaryRegistration?.binding.agent.pubkey ?? poller.agentPubkey,
+            botIdentity: poller.botIdentity,
+        }, async () => {
+            const activeSpan = trace.getActiveSpan();
+            const callbackContext = this.configCommandService.getCallbackContext(update);
 
-        if (pending) {
-            const selected = parseProjectSelection(message.text?.trim() || message.caption?.trim() || "", registrations
-                .filter((registration) => pending.projects.some((project) => project.projectId === registration.projectId)));
-            if (!selected) {
-                await this.sendProjectSelectionPrompt(poller, registrations, message, true);
+            if (update.callback_query) {
+                if (!callbackContext) {
+                    recordTelegramOutcome("dropped", "unsupported_callback_query");
+                    return;
+                }
+
+                if (
+                    callbackContext.session &&
+                    !registrations.some((registration) =>
+                        registration.projectId === callbackContext.session?.projectId &&
+                        registration.binding.agent.pubkey === callbackContext.session?.agentPubkey
+                    )
+                ) {
+                    callbackContext.session = undefined;
+                }
+
+                await this.configCommandService.handleCallback({
+                    callbackContext,
+                    client: poller.client,
+                    update,
+                });
+                recordTelegramOutcome(
+                    callbackContext.session ? "routed" : "dropped",
+                    callbackContext.session ? "config_callback_handled" : "config_callback_expired"
+                );
                 return;
             }
 
-            this.channelBindingStore.rememberBinding({
-                agentPubkey,
-                channelId,
-                projectId: selected.projectId,
-            });
-            this.pendingBindingStore.clearPending(agentPubkey, channelId);
+            const message = normalizeMessage(update);
 
-            await poller.client.sendMessage({
+            activeSpan?.addEvent("telegram.registrations_resolved", {
+                "telegram.registration.count": registrations.length,
+            });
+
+            if (registrations.length === 0) {
+                recordTelegramOutcome("dropped", "no_registrations");
+                return;
+            }
+
+            if (!message?.from) {
+                recordTelegramOutcome("dropped", "missing_sender");
+                return;
+            }
+
+            if (message.from.is_bot) {
+                recordTelegramOutcome("dropped", "bot_authored_update", {
+                    "telegram.sender.id": String(message.from.id),
+                });
+                return;
+            }
+
+            if (!isSupportedChatType(message)) {
+                recordTelegramOutcome("dropped", "unsupported_chat_type", {
+                    "telegram.chat.type": message.chat.type,
+                });
+                return;
+            }
+
+            if (!isTextualMessage(message)) {
+                recordTelegramOutcome("dropped", "non_text_message", {
+                    "telegram.message.id": String(message.message_id),
+                });
+                return;
+            }
+
+            if (!primaryRegistration) {
+                recordTelegramOutcome("dropped", "missing_primary_registration");
+                return;
+            }
+
+            const chatId = normalizeChatId(message.chat.id);
+            const topicId = normalizeTopicId(message.message_thread_id);
+            const channelId = createTelegramChannelId(chatId, topicId);
+            const agentPubkey = primaryRegistration.binding.agent.pubkey;
+            const principalId = `telegram:user:${message.from.id}`;
+            const identityBinding = getIdentityBindingStore().getBinding(principalId);
+            const pending = this.pendingBindingStore.getPending(agentPubkey, channelId);
+            const content = getTelegramUpdateContent(update);
+            const commandKind = this.configCommandService.getCommandKind(
+                update,
+                poller.botIdentity.username
+            );
+            const commandUsage = commandKind
+                ? this.configCommandService.getCommandUsage(update, poller.botIdentity.username)
+                : undefined;
+
+            logger.info("[TelegramGatewayCoordinator] Received Telegram update", withActiveTraceLogFields({
+                updateId: update.update_id,
+                agentSlug: primaryRegistration.binding.agent.slug,
+                agentPubkey,
                 chatId,
-                text: `Bound this chat to project "${selected.projectTitle}". Send your next message to continue.`,
-                replyToMessageId: String(message.message_id),
-                messageThreadId: topicId,
+                topicId,
+                principalId,
+                registrationCount: registrations.length,
+                content,
+            }));
+
+            if (pending) {
+                activeSpan?.addEvent("telegram.project_binding.pending_found", {
+                    "telegram.channel.id": channelId,
+                    "telegram.pending.project_count": pending.projects.length,
+                });
+                const selected = parseProjectSelection(content, registrations
+                    .filter((registration) => pending.projects.some((project) => project.projectId === registration.projectId)));
+                if (!selected) {
+                    recordTelegramOutcome("pending-binding", "project_selection_reminder", {
+                        "telegram.pending.project_count": pending.projects.length,
+                    });
+                    await this.sendProjectSelectionPrompt(poller, registrations, message, true);
+                    return;
+                }
+
+                activeSpan?.setAttributes({
+                    "project.id": selected.projectId,
+                    "project.title": selected.projectTitle,
+                });
+
+                await this.bindChannelToRegistration(selected, channelId, message);
+                this.pendingBindingStore.clearPending(agentPubkey, channelId);
+
+                await poller.client.sendMessage({
+                    chatId,
+                    text: `Bound this chat to project "${selected.projectTitle}". Send your next message to continue.`,
+                    replyToMessageId: String(message.message_id),
+                    messageThreadId: topicId,
+                });
+                recordTelegramOutcome("routed", "project_bound_via_reply", {
+                    "project.id": selected.projectId,
+                    "telegram.channel.id": channelId,
+                });
+                return;
+            }
+
+            const session = this.channelSessionStore.findSessionByAgentChannel(agentPubkey, channelId);
+            activeSpan?.addEvent("telegram.session_lookup", {
+                "telegram.channel.id": channelId,
+                "telegram.session.found": Boolean(session),
+                "telegram.session.conversation_id": session?.conversationId ?? "",
+                "project.id": session?.projectId ?? "",
             });
-            return;
-        }
+            if (session) {
+                const selected = registrations.find((registration) => registration.projectId === session.projectId);
+                if (selected) {
+                    if (
+                        commandKind &&
+                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
+                    ) {
+                        await this.sendUnauthorizedConfigReply(poller.client, message);
+                        recordTelegramOutcome("dropped", "unauthorized_config_command");
+                        return;
+                    }
 
-        const session = this.channelSessionStore.findSessionByAgentChannel(agentPubkey, channelId);
-        if (session) {
-            const selected = registrations.find((registration) => registration.projectId === session.projectId);
-            if (selected) {
-                await this.routeUpdateToRegistration(selected, update, channelId, poller.client);
-                return;
-            }
-        }
-
-        const dynamicBinding = this.channelBindingStore.getBinding(agentPubkey, channelId);
-        if (dynamicBinding) {
-            const selected = registrations.find(
-                (registration) => registration.projectId === dynamicBinding.projectId
-            );
-            if (selected) {
-                await this.routeUpdateToRegistration(selected, update, channelId, poller.client);
-                return;
-            }
-        }
-
-        const isPrivateChat = message.chat.type === "private";
-        let candidates: TelegramRuntimeRegistration[];
-
-        if (isPrivateChat) {
-            candidates = registrations.filter((registration) =>
-                registration.binding.config.allowDMs !== false &&
-                this.authorizedIdentityService.isAuthorizedPrincipal(
-                    {
-                        id: principalId,
-                        linkedPubkey: identityBinding?.linkedPubkey,
-                    },
-                    registration.binding.config.authorizedIdentityIds
-                )
-            );
-        } else {
-            const exactMatches = registrations.filter((registration) =>
-                matchesStaticBinding(registration.binding, chatId, topicId)
-            );
-            candidates = exactMatches.length > 0 ? exactMatches : registrations;
-        }
-
-        if (candidates.length === 0) {
-            return;
-        }
-
-        if (candidates.length === 1) {
-            const selectedCandidate = candidates[0];
-            if (!selectedCandidate) {
-                return;
+                    activeSpan?.setAttributes({
+                        "project.id": selected.projectId,
+                        "project.title": selected.projectTitle,
+                    });
+                    await this.handleSelectedRegistration({
+                        botIdentity: poller.botIdentity,
+                        channelId,
+                        client: poller.client,
+                        commandKind,
+                        commandUsage,
+                        message,
+                        principalId,
+                        registration: selected,
+                        update,
+                    });
+                    return;
+                }
             }
 
-            this.channelBindingStore.rememberBinding({
+            const dynamicBinding = this.channelBindingStore.getBinding(agentPubkey, channelId);
+            activeSpan?.addEvent("telegram.channel_binding_lookup", {
+                "telegram.channel.id": channelId,
+                "telegram.binding.found": Boolean(dynamicBinding),
+                "project.id": dynamicBinding?.projectId ?? "",
+            });
+            if (dynamicBinding) {
+                const selected = registrations.find(
+                    (registration) => registration.projectId === dynamicBinding.projectId
+                );
+                if (selected) {
+                    if (
+                        commandKind &&
+                        !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
+                    ) {
+                        await this.sendUnauthorizedConfigReply(poller.client, message);
+                        recordTelegramOutcome("dropped", "unauthorized_config_command");
+                        return;
+                    }
+
+                    activeSpan?.setAttributes({
+                        "project.id": selected.projectId,
+                        "project.title": selected.projectTitle,
+                    });
+                    await this.handleSelectedRegistration({
+                        botIdentity: poller.botIdentity,
+                        channelId,
+                        client: poller.client,
+                        commandKind,
+                        commandUsage,
+                        message,
+                        principalId,
+                        registration: selected,
+                        update,
+                    });
+                    return;
+                }
+            }
+
+            const isPrivateChat = message.chat.type === "private";
+            let candidates: TelegramRuntimeRegistration[];
+
+            if (isPrivateChat) {
+                candidates = registrations.filter((registration) =>
+                    registration.binding.config.allowDMs !== false &&
+                    this.authorizedIdentityService.isAuthorizedPrincipal(
+                        {
+                            id: principalId,
+                            linkedPubkey: identityBinding?.linkedPubkey,
+                        },
+                        registration.binding.config.authorizedIdentityIds
+                    )
+                );
+            } else {
+                const exactMatches = registrations.filter((registration) =>
+                    matchesStaticBinding(registration.binding, chatId, topicId)
+                );
+                candidates = exactMatches.length > 0 ? exactMatches : registrations;
+                if (commandKind) {
+                    candidates = candidates.filter((registration) =>
+                        this.isAuthorizedConfigPrincipal(
+                            principalId,
+                            identityBinding?.linkedPubkey,
+                            registration
+                        )
+                    );
+                }
+            }
+
+            activeSpan?.addEvent("telegram.candidate_resolution", {
+                "telegram.candidate.count": candidates.length,
+                "telegram.chat.is_private": isPrivateChat,
+            });
+
+            if (candidates.length === 0) {
+                if (commandKind) {
+                    await this.sendUnauthorizedConfigReply(poller.client, message);
+                    recordTelegramOutcome("dropped", "unauthorized_config_command", {
+                        "telegram.chat.is_private": isPrivateChat,
+                    });
+                    return;
+                }
+                recordTelegramOutcome("dropped", "no_matching_candidate", {
+                    "telegram.chat.is_private": isPrivateChat,
+                });
+                return;
+            }
+
+            if (candidates.length === 1) {
+                const selectedCandidate = candidates[0];
+                if (!selectedCandidate) {
+                    recordTelegramOutcome("dropped", "missing_selected_candidate");
+                    return;
+                }
+
+                activeSpan?.setAttributes({
+                    "project.id": selectedCandidate.projectId,
+                    "project.title": selectedCandidate.projectTitle,
+                });
+
+                await this.bindChannelToRegistration(selectedCandidate, channelId, message);
+                await this.handleSelectedRegistration({
+                    botIdentity: poller.botIdentity,
+                    channelId,
+                    client: poller.client,
+                    commandKind,
+                    commandUsage,
+                    message,
+                    principalId,
+                    registration: selectedCandidate,
+                    update,
+                });
+                return;
+            }
+
+            recordTelegramOutcome("pending-binding", "project_selection_required", {
+                "telegram.candidate.count": candidates.length,
+            });
+            await this.sendProjectSelectionPrompt(poller, candidates, message, false);
+            this.pendingBindingStore.rememberPending({
                 agentPubkey,
                 channelId,
-                projectId: selectedCandidate.projectId,
+                projects: candidates.map((registration) => ({
+                    projectId: registration.projectId,
+                    title: registration.projectTitle,
+                })),
+                requestedAt: Date.now(),
             });
-            await this.routeUpdateToRegistration(selectedCandidate, update, channelId, poller.client);
+        });
+    }
+
+    private async handleSelectedRegistration(params: {
+        botIdentity?: TelegramBotIdentity;
+        channelId: string;
+        client: TelegramBotClient;
+        commandKind?: "model" | "tools";
+        commandUsage?: string;
+        message: TelegramMessage;
+        principalId: string;
+        registration: TelegramRuntimeRegistration;
+        update: TelegramUpdate;
+    }): Promise<void> {
+        if (params.commandKind) {
+            if (params.commandUsage) {
+                await params.client.sendMessage({
+                    chatId: String(params.message.chat.id),
+                    text: params.commandUsage,
+                    replyToMessageId: String(params.message.message_id),
+                    messageThreadId: params.message.message_thread_id !== undefined
+                        ? String(params.message.message_thread_id)
+                        : undefined,
+                });
+                return;
+        }
+
+        await params.registration.runInProjectContext(async () => {
+            const commandKind = params.commandKind;
+            if (!commandKind) {
+                return;
+            }
+            const projectContext = projectContextStore.getContextOrThrow();
+            const agent = params.registration.binding.agent as AgentInstance;
+            await this.configCommandService.openCommandMenu({
+                binding: params.registration.binding,
+                client: params.client,
+                commandKind,
+                currentModel: agent.llmConfig,
+                currentTools: agent.tools,
+                message: params.message,
+                    principalId: params.principalId,
+                    projectBinding: params.registration.projectBinding,
+                    projectContext,
+                    projectId: params.registration.projectId,
+                    projectTitle: params.registration.projectTitle,
+                });
+            });
+            recordTelegramOutcome("routed", "config_command_opened", {
+                "project.id": params.registration.projectId,
+                "telegram.channel.id": params.channelId,
+            });
             return;
         }
 
-        await this.sendProjectSelectionPrompt(poller, candidates, message, false);
-        this.pendingBindingStore.rememberPending({
-            agentPubkey,
-            channelId,
-            projects: candidates.map((registration) => ({
-                projectId: registration.projectId,
-                title: registration.projectTitle,
-            })),
-            requestedAt: Date.now(),
+        await this.routeUpdateToRegistration(
+            params.registration,
+            params.update,
+            params.channelId,
+            params.client,
+            params.botIdentity
+        );
+    }
+
+    private isAuthorizedConfigPrincipal(
+        principalId: string,
+        linkedPubkey: string | undefined,
+        registration: TelegramRuntimeRegistration
+    ): boolean {
+        return this.authorizedIdentityService.isAuthorizedPrincipal(
+            {
+                id: principalId,
+                linkedPubkey,
+            },
+            registration.binding.config.authorizedIdentityIds
+        );
+    }
+
+    private async sendUnauthorizedConfigReply(
+        client: TelegramBotClient,
+        message: TelegramMessage
+    ): Promise<void> {
+        await client.sendMessage({
+            chatId: String(message.chat.id),
+            text: "You are not allowed to change this agent's Telegram config.",
+            replyToMessageId: String(message.message_id),
+            messageThreadId: message.message_thread_id !== undefined
+                ? String(message.message_thread_id)
+                : undefined,
         });
     }
 
@@ -460,7 +803,8 @@ export class TelegramGatewayCoordinator {
         registration: TelegramRuntimeRegistration,
         update: TelegramUpdate,
         channelId: string,
-        client: TelegramBotClient
+        client: TelegramBotClient,
+        botIdentity?: TelegramBotIdentity
     ): Promise<void> {
         const message = normalizeMessage(update);
         if (!message) {
@@ -471,14 +815,40 @@ export class TelegramGatewayCoordinator {
             registration.binding.agent.pubkey,
             channelId
         );
+        const transportMetadata = await this.buildTransportMetadata({
+            registration,
+            channelId,
+            client,
+            message,
+            update,
+            botIdentity,
+        });
         const { envelope } = this.inboundAdapter.toEnvelope({
             update,
             binding: registration.binding,
             projectBinding: registration.projectBinding,
             replyToNativeMessageId: session?.lastMessageId,
+            botIdentity,
+            transportMetadata,
         });
 
         await registration.runInProjectContext(async () => {
+            const activeSpan = trace.getActiveSpan();
+            activeSpan?.setAttributes({
+                "project.id": registration.projectId,
+                "project.title": registration.projectTitle,
+                "agent.slug": registration.binding.agent.slug,
+                "agent.pubkey": registration.binding.agent.pubkey,
+                "telegram.channel.id": channelId,
+                "telegram.message.content": envelope.content,
+                "telegram.session.conversation_id": session?.conversationId ?? "",
+            });
+            activeSpan?.addEvent("telegram.envelope.created", {
+                "telegram.channel.id": channelId,
+                "runtime.message.id": envelope.message.id,
+                "runtime.reply_to_id": envelope.message.replyToId ?? "",
+            });
+
             await this.sendTypingIndicator(client, registration, message);
 
             if (session?.conversationId) {
@@ -498,6 +868,14 @@ export class TelegramGatewayCoordinator {
                 );
             }
 
+            activeSpan?.setAttributes({
+                "conversation.id": conversation.id,
+            });
+            activeSpan?.addEvent("telegram.conversation.resolved", {
+                "conversation.id": conversation.id,
+                "project.id": registration.projectId,
+            });
+
             this.channelSessionStore.rememberSession({
                 projectId: registration.projectId,
                 agentPubkey: registration.binding.agent.pubkey,
@@ -512,7 +890,12 @@ export class TelegramGatewayCoordinator {
             });
             this.pendingBindingStore.clearPending(registration.binding.agent.pubkey, channelId);
 
-            logger.info("[TelegramGatewayCoordinator] Routed Telegram update", {
+            recordTelegramOutcome("routed", "routed_to_runtime", {
+                "conversation.id": conversation.id,
+                "project.id": registration.projectId,
+            });
+
+            logger.info("[TelegramGatewayCoordinator] Routed Telegram update", withActiveTraceLogFields({
                 projectId: registration.projectId,
                 projectTitle: registration.projectTitle,
                 agentSlug: registration.binding.agent.slug,
@@ -520,6 +903,57 @@ export class TelegramGatewayCoordinator {
                 principalId: envelope.principal.id,
                 channelId,
                 conversationId: conversation.id,
+                content: envelope.content,
+            }));
+        });
+    }
+
+    private async buildTransportMetadata(params: {
+        registration: TelegramRuntimeRegistration;
+        channelId: string;
+        client: TelegramBotClient;
+        message: TelegramMessage;
+        update: TelegramUpdate;
+        botIdentity?: TelegramBotIdentity;
+    }) {
+        const chatContext = params.message.chat.type === "private"
+            ? undefined
+            : await this.chatContextService.rememberChatContext({
+                projectId: params.registration.projectId,
+                agentPubkey: params.registration.binding.agent.pubkey,
+                channelId: params.channelId,
+                message: params.message,
+                client: params.client,
+            });
+
+        return buildTelegramTransportMetadata(
+            params.update,
+            params.botIdentity,
+            chatContext
+                ? {
+                    chatTitle: chatContext.chatTitle,
+                    chatUsername: chatContext.chatUsername,
+                    memberCount: chatContext.memberCount,
+                    administrators: chatContext.administrators,
+                    seenParticipants: chatContext.seenParticipants,
+                }
+                : undefined
+        );
+    }
+
+    private async bindChannelToRegistration(
+        registration: TelegramRuntimeRegistration,
+        channelId: string,
+        message: TelegramMessage
+    ): Promise<void> {
+        await registration.runInProjectContext(async () => {
+            const projectContext = projectContextStore.getContextOrThrow();
+            await this.bindingPersistenceService.rememberProjectBinding({
+                projectId: registration.projectId,
+                binding: registration.binding,
+                channelId,
+                message,
+                projectContext,
             });
         });
     }
@@ -529,21 +963,32 @@ export class TelegramGatewayCoordinator {
         registration: TelegramRuntimeRegistration,
         message: TelegramMessage
     ): Promise<void> {
+        const activeSpan = trace.getActiveSpan();
+        activeSpan?.addEvent("telegram.typing_indicator.requested", {
+            "project.id": registration.projectId,
+            "agent.slug": registration.binding.agent.slug,
+            "telegram.chat.id": String(message.chat.id),
+            "telegram.message.id": String(message.message_id),
+        });
         try {
             await client.sendChatAction({
                 chatId: String(message.chat.id),
                 action: "typing",
                 messageThreadId: normalizeTopicId(message.message_thread_id),
             });
+            activeSpan?.addEvent("telegram.typing_indicator.sent", {
+                "telegram.chat.id": String(message.chat.id),
+                "telegram.message.id": String(message.message_id),
+            });
         } catch (error) {
-            logger.warn("[TelegramGatewayCoordinator] Failed to send typing indicator", {
+            logger.warn("[TelegramGatewayCoordinator] Failed to send typing indicator", withActiveTraceLogFields({
                 projectId: registration.projectId,
                 projectTitle: registration.projectTitle,
                 agentSlug: registration.binding.agent.slug,
                 chatId: String(message.chat.id),
                 messageId: message.message_id,
                 error: error instanceof Error ? error.message : String(error),
-            });
+            }));
         }
     }
 
@@ -562,6 +1007,11 @@ export class TelegramGatewayCoordinator {
                 (registration, index) => `${index + 1}. ${registration.projectTitle} (${registration.projectId})`
             ),
         ];
+
+        trace.getActiveSpan()?.addEvent("telegram.project_selection_prompt", {
+            "telegram.project_selection.is_reminder": isReminder,
+            "telegram.project_selection.candidate_count": registrations.length,
+        });
 
         await poller.client.sendMessage({
             chatId: String(message.chat.id),

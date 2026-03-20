@@ -126,6 +126,7 @@ export class AgentExecutor {
      * Execute an agent's assignment for a conversation with streaming
      */
     async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
+        const telegramMetadata = context.triggeringEnvelope.metadata.transport?.telegram;
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
                 "agent.slug": context.agent.slug,
@@ -134,6 +135,12 @@ export class AgentExecutor {
                 "conversation.id": shortenConversationId(context.conversationId),
                 "triggering_event.id": context.triggeringEnvelope.message.nativeId,
                 "triggering_event.kind": context.triggeringEnvelope.metadata.eventKind || 0,
+                "triggering_event.transport": context.triggeringEnvelope.transport,
+                "telegram.update.id": telegramMetadata?.updateId ?? 0,
+                "telegram.chat.id": telegramMetadata?.chatId ?? "",
+                "telegram.message.id": telegramMetadata?.messageId ?? "",
+                "telegram.chat.thread_id": telegramMetadata?.threadId ?? "",
+                "telegram.sender.id": telegramMetadata?.senderUserId ?? "",
             },
         }, otelContext.active());
 
@@ -421,6 +428,11 @@ export class AgentExecutor {
 
         const completionEvent = result.event;
         const ralRegistry = RALRegistry.getInstance();
+        const silentCompletionRequested = ralRegistry.isSilentCompletionRequested(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
 
         // =====================================================================
         // RACE CONDITION FIX: Check for ANY outstanding work, not just pending delegations
@@ -460,8 +472,21 @@ export class AgentExecutor {
 
         // INVARIANT GUARD: If there's outstanding work (queued injections, pending delegations,
         // or completed delegations not yet consumed), we should NOT finalize.
+        const trimmedCompletionMessage = completionEvent?.message?.trim() ?? "";
         const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
         if (!hasMessageContent && outstandingWork.hasWork) {
+            if (silentCompletionRequested) {
+                ralRegistry.clearSilentCompletionRequest(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+                trace.getActiveSpan()?.addEvent("executor.silent_completion_cleared_outstanding_work", {
+                    "ral.number": ralNumber,
+                    "agent.slug": context.agent.slug,
+                    "conversation.id": shortenConversationId(context.conversationId),
+                });
+            }
             trace.getActiveSpan()?.addEvent("executor.awaiting_outstanding_work", {
                 "ral.number": ralNumber,
                 "outstanding.queued_injections": outstandingWork.details.queuedInjections,
@@ -498,6 +523,54 @@ export class AgentExecutor {
             throw new Error("LLM execution completed without producing a completion event");
         }
 
+        if (silentCompletionRequested && trimmedCompletionMessage.length === 0) {
+            ralRegistry.clearSilentCompletionRequest(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+
+            await this.cleanupRalAfterTurn({
+                context,
+                ralNumber,
+                startedWithPendingDelegations,
+                supervisionExecuted: false,
+                supervisionHadViolation: false,
+            });
+
+            trace.getActiveSpan()?.addEvent("executor.silent_completion_honored", {
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+                "conversation.id": shortenConversationId(context.conversationId),
+            });
+            logger.info("[AgentExecutor] Honored explicit silent completion", {
+                agent: context.agent.slug,
+                conversationId: shortenConversationId(context.conversationId),
+                ralNumber,
+            });
+            return undefined;
+        }
+
+        if (silentCompletionRequested && trimmedCompletionMessage.length > 0) {
+            ralRegistry.clearSilentCompletionRequest(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+            trace.getActiveSpan()?.addEvent("executor.silent_completion_conflict", {
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+                "conversation.id": shortenConversationId(context.conversationId),
+                "message.length": completionEvent.message.length,
+            });
+            logger.info("[AgentExecutor] Ignoring silent completion request because visible text was produced", {
+                agent: context.agent.slug,
+                conversationId: shortenConversationId(context.conversationId),
+                ralNumber,
+                messageLength: completionEvent.message.length,
+            });
+        }
+
         // Post-completion supervision check
         const supervisionCheckResult = await checkPostCompletion({
             agent: context.agent,
@@ -511,30 +584,13 @@ export class AgentExecutor {
             return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
         }
 
-        // RAL cleanup - use hasOutstandingWork for comprehensive check
-        const conversationStore = context.conversationStore;
-        const cleanupOutstandingWork = ralRegistry.hasOutstandingWork(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        if (!cleanupOutstandingWork.hasWork && !startedWithPendingDelegations) {
-            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
-            conversationStore.completeRal(context.agent.pubkey, ralNumber);
-            await conversationStore.save();
-
-            trace.getActiveSpan()?.addEvent("executor.ral_cleared_post_supervision_check", {
-                "ral.number": ralNumber,
-                "supervision.executed": true,
-                "supervision.had_violation": supervisionCheckResult.shouldReEngage,
-            });
-        } else if (!cleanupOutstandingWork.hasWork && startedWithPendingDelegations) {
-            trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
-                "ral.number": ralNumber,
-                "supervision.executed": true,
-            });
-        }
+        await this.cleanupRalAfterTurn({
+            context,
+            ralNumber,
+            startedWithPendingDelegations,
+            supervisionExecuted: true,
+            supervisionHadViolation: supervisionCheckResult.shouldReEngage,
+        });
 
         const eventContext = createEventContext(context, {
             model: completionEvent?.usage?.model,
@@ -559,7 +615,7 @@ export class AgentExecutor {
 
         if (finalOutstandingWork.hasWork) {
             // If there's outstanding work, publish as conversation (not completion)
-            if (completionEvent.message.trim().length > 0) {
+            if (trimmedCompletionMessage.length > 0) {
                 responseEvent = await agentPublisher.conversation(
                     { content: completionEvent.message, usage: completionEvent.usage },
                     eventContext
@@ -586,6 +642,51 @@ export class AgentExecutor {
         }
 
         return responseEvent;
+    }
+
+    private async cleanupRalAfterTurn(params: {
+        context: FullRuntimeContext;
+        ralNumber: number;
+        startedWithPendingDelegations: boolean;
+        supervisionExecuted: boolean;
+        supervisionHadViolation: boolean;
+    }): Promise<void> {
+        const { context, ralNumber, startedWithPendingDelegations, supervisionExecuted, supervisionHadViolation } =
+            params;
+        const ralRegistry = RALRegistry.getInstance();
+        const conversationStore = context.conversationStore;
+        const cleanupOutstandingWork = ralRegistry.hasOutstandingWork(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
+        if (!cleanupOutstandingWork.hasWork && !startedWithPendingDelegations) {
+            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
+            conversationStore.completeRal(context.agent.pubkey, ralNumber);
+            await conversationStore.save();
+
+            trace.getActiveSpan()?.addEvent(
+                supervisionExecuted
+                    ? "executor.ral_cleared_post_supervision_check"
+                    : "executor.ral_cleared_without_supervision",
+                {
+                    "ral.number": ralNumber,
+                    "supervision.executed": supervisionExecuted,
+                    "supervision.had_violation": supervisionHadViolation,
+                }
+            );
+        } else if (!cleanupOutstandingWork.hasWork && startedWithPendingDelegations) {
+            trace.getActiveSpan()?.addEvent(
+                supervisionExecuted
+                    ? "executor.ral_clear_skipped_pending_at_start"
+                    : "executor.ral_clear_skipped_pending_at_start_without_supervision",
+                {
+                    "ral.number": ralNumber,
+                    "supervision.executed": supervisionExecuted,
+                }
+            );
+        }
     }
 
     /**

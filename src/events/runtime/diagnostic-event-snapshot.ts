@@ -3,33 +3,23 @@ import {
     parseTelegramChannelId,
     parseTelegramNativeMessageId,
 } from "@/services/telegram/telegram-identifiers";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
-export interface LegacyEventSnapshot {
+export interface DiagnosticEventSnapshot {
     id: string;
-    pubkey: string;
+    senderId: string;
+    senderLinkedPubkey?: string;
     content: string;
     tags: string[][];
 }
 
-function unwrapExternalMessageId(messageId: string): string {
+function unwrapQualifiedMessageId(messageId: string): string {
     const separatorIndex = messageId.indexOf(":");
     return separatorIndex === -1 ? messageId : messageId.substring(separatorIndex + 1);
 }
 
-export function buildLegacyEventSnapshot(
-    envelope: InboundEnvelope,
-    legacyEvent?: Pick<NDKEvent, "id" | "pubkey" | "content" | "tags">
-): LegacyEventSnapshot {
-    if (legacyEvent) {
-        return {
-            id: legacyEvent.id ?? "",
-            pubkey: legacyEvent.pubkey,
-            content: legacyEvent.content,
-            tags: [...legacyEvent.tags],
-        };
-    }
-
+export function buildDiagnosticEventSnapshot(
+    envelope: InboundEnvelope
+): DiagnosticEventSnapshot {
     const tags: string[][] = [];
 
     if (envelope.channel.projectBinding) {
@@ -37,7 +27,7 @@ export function buildLegacyEventSnapshot(
     }
 
     if (envelope.message.replyToId) {
-        tags.push(["e", unwrapExternalMessageId(envelope.message.replyToId)]);
+        tags.push(["e", unwrapQualifiedMessageId(envelope.message.replyToId)]);
     }
 
     for (const recipient of envelope.recipients) {
@@ -67,14 +57,15 @@ export function buildLegacyEventSnapshot(
 
     return {
         id: envelope.message.nativeId,
-        pubkey: envelope.principal.linkedPubkey ?? envelope.principal.id,
+        senderId: envelope.principal.id,
+        senderLinkedPubkey: envelope.principal.linkedPubkey,
         content: envelope.content,
         tags,
     };
 }
 
-export function getLegacyTagValue(
-    snapshot: LegacyEventSnapshot,
+export function getDiagnosticTagValue(
+    snapshot: DiagnosticEventSnapshot,
     tagName: string
 ): string | undefined {
     return snapshot.tags.find((tag) => tag[0] === tagName)?.[1];

@@ -40,7 +40,27 @@ import { logger } from "@/utils/logger";
 import { createConversationListTool } from "../conversation_list";
 
 type StoreOverrides = {
-    messages?: Array<{ timestamp: number; pubkey?: string; messageType?: string; delegationMarker?: { delegationConversationId: string; recipientPubkey: string; parentConversationId: string; completedAt: number; status: string } }>;
+    messages?: Array<{
+        timestamp: number;
+        pubkey?: string;
+        senderPubkey?: string;
+        senderPrincipal?: {
+            id: string;
+            transport: string;
+            linkedPubkey?: string;
+            displayName?: string;
+            username?: string;
+            kind?: "agent" | "human" | "system";
+        };
+        messageType?: string;
+        delegationMarker?: {
+            delegationConversationId: string;
+            recipientPubkey: string;
+            parentConversationId: string;
+            completedAt: number;
+            status: string;
+        };
+    }>;
     metadata?: Record<string, unknown>;
     lastActivityTime?: number;
 };
@@ -66,6 +86,8 @@ const buildMessages = (overrides: StoreOverrides) => {
     if (overrides.messages && overrides.messages.length > 0) {
         return overrides.messages.map(msg => ({
             pubkey: msg.pubkey ?? "user-pubkey",
+            senderPubkey: msg.senderPubkey,
+            senderPrincipal: msg.senderPrincipal,
             content: "",
             messageType: msg.messageType ?? "text",
             timestamp: msg.timestamp,
@@ -112,6 +134,8 @@ const applyStateToStore = (
             messageType: (message as any).messageType ?? "text",
             timestamp: message.timestamp,
             eventId: `event-${projectId}-${conversationId}-${index}`,
+            senderPubkey: (message as any).senderPubkey,
+            senderPrincipal: (message as any).senderPrincipal,
             delegationMarker: (message as any).delegationMarker,
         })),
         metadata,
@@ -732,6 +756,35 @@ describe("conversation_list Tool", () => {
             // Should have unique participants (agent-1 and agent-2)
             expect(summary.participants).toContain("agent-1");
             expect(summary.participants).toContain("agent-2");
+            expect(summary.participants).toHaveLength(2);
+        });
+
+        it("should include transport-only participants without treating their principal id as a pubkey", async () => {
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    {
+                        timestamp: 1700000000,
+                        pubkey: "",
+                        senderPrincipal: {
+                            id: "telegram:user:42",
+                            transport: "telegram",
+                            displayName: "Pablo Telegram",
+                            kind: "human",
+                        },
+                    },
+                    { timestamp: 1700001000, pubkey: "agent-pubkey-1" },
+                ],
+                metadata: { title: "Telegram conversation" },
+                lastActivityTime: 1700001000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            const summary = result.conversations[0];
+            expect(summary.participants).toContain("Pablo Telegram");
+            expect(summary.participants).toContain("agent-1");
             expect(summary.participants).toHaveLength(2);
         });
 

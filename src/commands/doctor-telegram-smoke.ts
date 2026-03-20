@@ -1,3 +1,4 @@
+import { AgentStorage, createStoredAgent } from "@/agents/AgentStorage";
 import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
@@ -32,6 +33,7 @@ import { RALRegistry } from "@/services/ral";
 import {
     TelegramDeliveryService,
     TelegramChannelBindingStore,
+    TelegramChatContextStore,
     TelegramGatewayCoordinator,
     TelegramPendingBindingStore,
     getTelegramGatewayCoordinator,
@@ -79,6 +81,18 @@ interface TelegramSmokeArtifact {
         channelId: string;
         projectId: string;
     }>;
+    storedProjectTelegramBindings: Array<{
+        projectId: string;
+        chatBindings: Array<{ chatId: string; topicId?: string; title?: string }>;
+    }>;
+    chatContexts: Array<{
+        projectId: string;
+        channelId: string;
+        chatTitle?: string;
+        memberCount?: number;
+        administratorIds: string[];
+        seenParticipantIds: string[];
+    }>;
     pendingBindings: Array<{
         channelId: string;
         projectIds: string[];
@@ -118,6 +132,8 @@ interface TelegramSmokeArtifact {
         groupSessionStored: boolean;
         groupConversationCaptured: boolean;
         groupBindingStored: boolean;
+        groupBindingPersistedToAgentConfig: boolean;
+        groupChatContextStored: boolean;
         groupCompletionRecorded: boolean;
     };
 }
@@ -295,6 +311,68 @@ class MockTelegramServer {
                 result: queue
                     .filter((update) => offset === undefined || update.update_id >= offset)
                     .slice(0, limit),
+            });
+            return;
+        }
+
+        if (method === "getChat") {
+            const chatId = Number(url.searchParams.get("chat_id"));
+            if (chatId === -2001) {
+                sendJson(res, {
+                    ok: true,
+                    result: {
+                        id: -2001,
+                        type: "supergroup",
+                        title: "Telegram Smoke Group",
+                        username: "telegram_smoke_group",
+                    },
+                });
+                return;
+            }
+
+            sendJson(res, {
+                ok: true,
+                result: {
+                    id: chatId,
+                    type: "private",
+                    first_name: "DM User",
+                },
+            });
+            return;
+        }
+
+        if (method === "getChatAdministrators") {
+            const chatId = Number(url.searchParams.get("chat_id"));
+            if (chatId === -2001) {
+                sendJson(res, {
+                    ok: true,
+                    result: [{
+                        status: "administrator",
+                        user: {
+                            id: 7001,
+                            is_bot: false,
+                            first_name: "Group",
+                            last_name: "Admin",
+                            username: "group_admin",
+                        },
+                        custom_title: "Owner",
+                    }],
+                });
+                return;
+            }
+
+            sendJson(res, {
+                ok: true,
+                result: [],
+            });
+            return;
+        }
+
+        if (method === "getChatMemberCount") {
+            const chatId = Number(url.searchParams.get("chat_id"));
+            sendJson(res, {
+                ok: true,
+                result: chatId === -2001 ? 14 : 2,
             });
             return;
         }
@@ -558,6 +636,29 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
             await mockServer.start();
 
             const sharedSigner = NDKPrivateKeySigner.generate();
+            if (!sharedSigner.nsec) {
+                throw new Error("Failed to generate shared signer for Telegram smoke agent");
+            }
+            const persistedAgentStorage = new AgentStorage();
+            await persistedAgentStorage.initialize();
+            await persistedAgentStorage.saveAgent(createStoredAgent({
+                nsec: sharedSigner.nsec,
+                slug: "telegram-shared-agent",
+                name: "telegram-shared-agent",
+                role: "Telegram smoke validation agent",
+                instructions: "Reply briefly and confirm the Telegram message reached TENEX.",
+                defaultConfig: {
+                    model: "telegram-smoke-model",
+                    tools: [],
+                    telegram: {
+                        botToken: "shared-token",
+                        apiBaseUrl: mockServer.baseUrl,
+                        allowDMs: true,
+                    },
+                },
+            }));
+            await persistedAgentStorage.addAgentToProject(sharedSigner.pubkey, "telegram-alpha-project");
+            await persistedAgentStorage.addAgentToProject(sharedSigner.pubkey, "telegram-beta-project");
             const alphaAgent = buildAgent({
                 slug: "telegram-shared-agent",
                 projectPath: projectAlphaPath,
@@ -744,6 +845,9 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
             const channelBindingStore = new TelegramChannelBindingStore(
                 join(tenexBasePath, "data", "telegram-channel-bindings.json")
             );
+            const chatContextStore = new TelegramChatContextStore(
+                join(tenexBasePath, "data", "telegram-chat-contexts.json")
+            );
             const pendingBindingStore = new TelegramPendingBindingStore(
                 join(tenexBasePath, "data", "telegram-pending-bindings.json")
             );
@@ -761,6 +865,14 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
                 alphaAgent.pubkey,
                 groupChannelId
             );
+            const storedAgent = await persistedAgentStorage.loadAgent(alphaAgent.pubkey);
+            const storedProjectTelegramBindings = [
+                "telegram-alpha-project",
+                "telegram-beta-project",
+            ].map((projectId) => ({
+                projectId,
+                chatBindings: storedAgent?.projectOverrides?.[projectId]?.telegram?.chatBindings ?? [],
+            }));
 
             const conversations = [
                 dmSession
@@ -783,6 +895,14 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
 
             const publishedRecords = collector.list();
             const chatActions = mockServer.listChatActions();
+            const chatContexts = chatContextStore.listContexts().map((context) => ({
+                projectId: context.projectId,
+                channelId: context.channelId,
+                chatTitle: context.chatTitle,
+                memberCount: context.memberCount,
+                administratorIds: context.administrators.map((administrator) => administrator.userId),
+                seenParticipantIds: context.seenParticipants.map((participant) => participant.userId),
+            }));
             const artifact: TelegramSmokeArtifact = {
                 tempRoot,
                 projectPaths: [projectAlphaPath, projectBetaPath],
@@ -795,6 +915,8 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
                     channelId: binding.channelId,
                     projectId: binding.projectId,
                 })),
+                storedProjectTelegramBindings,
+                chatContexts,
                 pendingBindings: [dmChannelId, groupChannelId]
                     .map((channelId) => pendingBindingStore.getPending(alphaAgent.pubkey, channelId))
                     .filter((binding): binding is NonNullable<typeof binding> => Boolean(binding))
@@ -891,6 +1013,24 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
                             ?.messages.some((message) => message.senderPrincipalId === "telegram:user:77")
                     ),
                     groupBindingStored: groupBinding?.projectId === "telegram-alpha-project",
+                    groupBindingPersistedToAgentConfig: storedProjectTelegramBindings.some(
+                        (entry) =>
+                            entry.projectId === "telegram-alpha-project" &&
+                            entry.chatBindings.some(
+                                (binding) =>
+                                    binding.chatId === "-2001" &&
+                                    binding.title === "Telegram Smoke Group"
+                            )
+                    ),
+                    groupChatContextStored: chatContexts.some(
+                        (context) =>
+                            context.projectId === "telegram-alpha-project" &&
+                            context.channelId === groupChannelId &&
+                            context.chatTitle === "Telegram Smoke Group" &&
+                            context.memberCount === 14 &&
+                            context.administratorIds.includes("7001") &&
+                            context.seenParticipantIds.includes("77")
+                    ),
                     groupCompletionRecorded: publishedRecords.some(
                         (record) =>
                             record.agentSlug === alphaAgent.slug &&
@@ -935,6 +1075,7 @@ export const telegramSmokeCommand = new Command("telegram-smoke")
             TelegramGatewayCoordinator.resetInstance();
             ChannelSessionStore.resetInstance();
             TelegramChannelBindingStore.resetInstance();
+            TelegramChatContextStore.resetInstance();
             TelegramPendingBindingStore.resetInstance();
             IdentityBindingStore.resetInstance();
             llmServiceFactory.reset();
