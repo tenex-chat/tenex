@@ -7,6 +7,12 @@ export class SilentAgentHeuristic implements Heuristic<PostCompletionContext> {
   timing = "post-completion" as const;
 
   async detect(context: PostCompletionContext): Promise<HeuristicDetection> {
+    if (context.silentCompletionRequested) {
+      return {
+        triggered: false,
+      };
+    }
+
     const content = context.messageContent?.trim() || "";
     const hasMeaningfulContent = content.length > 0;
     const hasToolCalls = context.toolCallsMade.length > 0;

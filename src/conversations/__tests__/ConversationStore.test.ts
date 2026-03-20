@@ -1039,6 +1039,54 @@ describe("ConversationStore", () => {
             expect(message.targetedPrincipals?.[0]?.displayName).toBe("agent-one");
         });
 
+        it("does not persist transport principal ids into pubkey for transport-only senders", () => {
+            const fakeEnvelope = createMockInboundEnvelope({
+                principal: {
+                    id: "telegram:user:88",
+                    transport: "telegram",
+                    linkedPubkey: undefined,
+                    kind: "human",
+                },
+                message: {
+                    id: "evt-transport-user-1",
+                    transport: "telegram",
+                    nativeId: "evt-transport-user-1",
+                },
+                content: "hello from telegram-only user",
+                occurredAt: 456,
+                metadata: {
+                    eventKind: NDKKind.Text,
+                    eventTagCount: 1,
+                    replyTargets: [],
+                    articleReferences: [],
+                    nudgeEventIds: [],
+                    skillEventIds: [],
+                },
+                recipients: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    kind: "agent",
+                }],
+            });
+
+            store.addEnvelopeMessage(fakeEnvelope, false, {
+                senderPrincipal: {
+                    id: "telegram:user:88",
+                    transport: "telegram",
+                    displayName: "Telegram User",
+                },
+            });
+
+            const [message] = store.getAllMessages();
+            expect(message.pubkey).toBe("");
+            expect(message.senderPubkey).toBeUndefined();
+            expect(message.senderPrincipal?.id).toBe("telegram:user:88");
+            expect(message.senderPrincipal?.displayName).toBe("Telegram User");
+            expect(store.getRootAuthorPubkey()).toBeUndefined();
+            expect(store.getFirstUserMessage()?.senderPrincipal?.id).toBe("telegram:user:88");
+        });
+
         it("should return false when eventId is not found", () => {
             store.addMessage({
                 pubkey: USER_PUBKEY,

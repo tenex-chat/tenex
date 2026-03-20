@@ -2,11 +2,11 @@ import { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import {
-    buildLegacyEventSnapshot,
-    getLegacyTagValue,
-} from "@/events/runtime/legacy-event-snapshot";
+    buildDiagnosticEventSnapshot,
+    getDiagnosticTagValue,
+} from "@/events/runtime/diagnostic-event-snapshot";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { LocalInboundAdapter } from "@/events/runtime/LocalInboundAdapter";
 import {
     RuntimePublishCollector,
@@ -41,9 +41,10 @@ interface TransportSmokeArtifact {
     metadataPath: string;
     conversationId: string;
     canonicalEnvelope: InboundEnvelope;
-    legacyEvent: {
+    diagnosticSnapshot: {
         id: string;
-        pubkey: string;
+        senderId: string;
+        senderLinkedPubkey?: string;
         content: string;
         tags: string[][];
     };
@@ -60,9 +61,9 @@ interface TransportSmokeArtifact {
     }>;
     publishedRecords: ReturnType<RuntimePublishCollector["list"]>;
     validations: {
-        legacyEventIdMatchesNativeMessageId: boolean;
-        legacyEventPrincipalMatchesEnvelope: boolean;
-        legacyEventRecipientMatchesEnvelope: boolean;
+        snapshotIdMatchesNativeMessageId: boolean;
+        snapshotSenderMatchesEnvelope: boolean;
+        snapshotRecipientMatchesEnvelope: boolean;
         inboundMessagePrincipalPersisted: boolean;
         inboundMessageRecipientPersisted: boolean;
         completionIntentRecorded: boolean;
@@ -79,12 +80,11 @@ function buildArtifact(
         projectPath: string;
         metadataPath: string;
         conversationId: string;
-        legacyEvent?: NDKEvent;
         canonicalEnvelope: InboundEnvelope;
         collector: RuntimePublishCollector;
     }
 ): TransportSmokeArtifact {
-    const legacyEvent = buildLegacyEventSnapshot(params.canonicalEnvelope, params.legacyEvent);
+    const diagnosticSnapshot = buildDiagnosticEventSnapshot(params.canonicalEnvelope);
     const conversation = ConversationStore.get(params.conversationId);
     const conversationMessages = (conversation?.getAllMessages() ?? []).map((message) => ({
         role: message.role,
@@ -103,8 +103,8 @@ function buildArtifact(
     const completionRecord = params.collector
         .list()
         .find((record) => record.intent === "complete");
-    const expectedLegacyPrincipalPubkey =
-        params.canonicalEnvelope.principal.linkedPubkey ?? legacyEvent.pubkey;
+    const expectedSnapshotSender =
+        params.canonicalEnvelope.principal.linkedPubkey ?? params.canonicalEnvelope.principal.id;
     const expectedCompletionRecipientPubkey =
         params.canonicalEnvelope.principal.linkedPubkey;
 
@@ -116,16 +116,18 @@ function buildArtifact(
         metadataPath: params.metadataPath,
         conversationId: params.conversationId,
         canonicalEnvelope: params.canonicalEnvelope,
-        legacyEvent,
+        diagnosticSnapshot,
         conversationMessages,
         publishedRecords: params.collector.list(),
         validations: {
-            legacyEventIdMatchesNativeMessageId:
-                legacyEvent.id === params.canonicalEnvelope.message.nativeId,
-            legacyEventPrincipalMatchesEnvelope:
-                legacyEvent.pubkey === expectedLegacyPrincipalPubkey,
-            legacyEventRecipientMatchesEnvelope:
-                params.canonicalEnvelope.recipients[0]?.linkedPubkey === getLegacyTagValue(legacyEvent, "p"),
+            snapshotIdMatchesNativeMessageId:
+                diagnosticSnapshot.id === params.canonicalEnvelope.message.nativeId,
+            snapshotSenderMatchesEnvelope:
+                (diagnosticSnapshot.senderLinkedPubkey ?? diagnosticSnapshot.senderId) ===
+                expectedSnapshotSender,
+            snapshotRecipientMatchesEnvelope:
+                params.canonicalEnvelope.recipients[0]?.linkedPubkey ===
+                getDiagnosticTagValue(diagnosticSnapshot, "p"),
             inboundMessagePrincipalPersisted:
                 inboundMessage?.senderPrincipalId === params.canonicalEnvelope.principal.id,
             inboundMessageRecipientPersisted:
@@ -274,7 +276,6 @@ export const transportSmokeCommand = new Command("transport-smoke")
             const localInboundAdapter = new LocalInboundAdapter();
 
             let canonicalEnvelope: InboundEnvelope;
-            let legacyEvent: NDKEvent | undefined;
             const inboundMessageId = `transport-smoke-${Date.now()}`;
 
             if (transport === "nostr") {
@@ -289,7 +290,6 @@ export const transportSmokeCommand = new Command("transport-smoke")
                 inboundEvent.created_at = Math.floor(Date.now() / 1000);
                 inboundEvent.id = inboundMessageId;
                 canonicalEnvelope = nostrInboundAdapter.toEnvelope(inboundEvent);
-                legacyEvent = inboundEvent;
 
                 await projectContextStore.run(projectContext, async () =>
                     runtimeIngressService.handleChatMessage({
@@ -346,7 +346,6 @@ export const transportSmokeCommand = new Command("transport-smoke")
                 projectPath,
                 metadataPath,
                 conversationId: conversation.id,
-                legacyEvent,
                 canonicalEnvelope,
                 collector,
             });

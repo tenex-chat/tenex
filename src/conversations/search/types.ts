@@ -61,7 +61,7 @@ export interface MessageIndexEntry {
     content: string;
     /** Message timestamp (Unix seconds) */
     timestamp?: number;
-    /** Sender identifier (pubkey or agent slug) */
+    /** Sender identifier (pubkey or principal id) */
     from?: string;
     /** Target recipient identifier */
     to?: string;

@@ -67,6 +67,30 @@ describe("TelegramInboundAdapter", () => {
             },
             projectBinding: `31933:${"c".repeat(64)}:telegram-project`,
             replyToNativeMessageId: "tg_n2001_98",
+            transportMetadata: {
+                updateId: 1,
+                chatId: "-2001",
+                messageId: "99",
+                threadId: "55",
+                chatType: "supergroup",
+                isEditedMessage: false,
+                senderUserId: "42",
+                chatTitle: "Operators",
+                chatUsername: "operators_hq",
+                memberCount: 14,
+                administrators: [{
+                    userId: "7",
+                    displayName: "Ada",
+                    username: "ada_admin",
+                    customTitle: "Owner",
+                }],
+                seenParticipants: [{
+                    userId: "42",
+                    displayName: "Alice",
+                    username: "alice_tg",
+                    lastSeenAt: 123,
+                }],
+            },
         });
 
         expect(result.envelope.principal).toMatchObject({
@@ -97,5 +121,29 @@ describe("TelegramInboundAdapter", () => {
                 kind: "agent",
             },
         ]);
+        expect(result.envelope.metadata.transport?.telegram).toEqual({
+            updateId: 1,
+            chatId: "-2001",
+            messageId: "99",
+            threadId: "55",
+            chatType: "supergroup",
+            isEditedMessage: false,
+            senderUserId: "42",
+            chatTitle: "Operators",
+            chatUsername: "operators_hq",
+            memberCount: 14,
+            administrators: [{
+                userId: "7",
+                displayName: "Ada",
+                username: "ada_admin",
+                customTitle: "Owner",
+            }],
+            seenParticipants: [{
+                userId: "42",
+                displayName: "Alice",
+                username: "alice_tg",
+                lastSeenAt: 123,
+            }],
+        });
     });
 });

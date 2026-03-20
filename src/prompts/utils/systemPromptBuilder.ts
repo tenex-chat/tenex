@@ -2,6 +2,7 @@ import { getRootAgentsMdContent, hasRootAgentsMd as hasProjectRootAgentsMd } fro
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { PromptBuilder } from "@/prompts/core/PromptBuilder";
 import type { MCPManager } from "@/services/mcp/MCPManager";
 import { isOnlyToolMode, type NudgeToolPermissions, type NudgeData } from "@/services/nudge";
@@ -74,6 +75,7 @@ export interface BuildSystemPromptOptions {
     agent: AgentInstance;
     project: NDKProject;
     conversation: ConversationStore;
+    triggeringEnvelope?: InboundEnvelope;
 
     /**
      * Project directory (normal git repository root).
@@ -371,6 +373,9 @@ function addAgentFragments(
 
     // Add todo-before-delegation requirement (priority 17, after stay-in-your-lane)
     builder.add("todo-before-delegation", {});
+
+    // Add explicit guidance for turns where the user wants no reply.
+    builder.add("no-response-guidance", {});
 }
 
 /**
@@ -538,6 +543,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
     const {
         agent,
         project,
+        triggeringEnvelope,
         projectBasePath,
         workingDirectory,
         currentBranch,
@@ -654,6 +660,10 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     // Add environment context (relay, PID, uptime, CPU/memory usage)
     systemPromptBuilder.add("environment-context", {});
+
+    systemPromptBuilder.add("telegram-chat-context", {
+        triggeringEnvelope,
+    });
 
     // Add meta-project context (other projects this agent belongs to)
     // This gives agents cross-project awareness without overwhelming them

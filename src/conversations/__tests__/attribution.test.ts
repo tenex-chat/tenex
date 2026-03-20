@@ -415,6 +415,43 @@ describe("Multi-agent attribution integration", () => {
         expect(messages[1].content).toBe("I will do it");
     });
 
+    test("multiple visible Telegram humans get explicit sender attribution", async () => {
+        const entries: ConversationEntry[] = [
+            {
+                pubkey: pabloPubkey,
+                content: "First human message",
+                messageType: "text",
+                senderPrincipal: {
+                    id: "telegram:user:42",
+                    transport: "telegram",
+                    displayName: "Alice",
+                    username: "alice_tg",
+                    kind: "human",
+                },
+                targetedPubkeys: [viewingAgentPubkey],
+            },
+            {
+                pubkey: pabloPubkey,
+                content: "Second human message",
+                messageType: "text",
+                senderPrincipal: {
+                    id: "telegram:user:55",
+                    transport: "telegram",
+                    displayName: "Bob",
+                    username: "bob_tg",
+                    kind: "human",
+                },
+                targetedPubkeys: [viewingAgentPubkey],
+            },
+        ];
+
+        const ctx = createContext({});
+        const messages = await buildMessagesFromEntries(entries, ctx);
+
+        expect(messages[0].content).toBe("[@Alice] First human message");
+        expect(messages[1].content).toBe("[@Bob] Second human message");
+    });
+
     test("empty agentPubkeys set treats all non-self as users (no attribution)", async () => {
         const entries: ConversationEntry[] = [
             {

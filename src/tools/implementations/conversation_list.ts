@@ -1,5 +1,10 @@
 import type { ToolExecutionContext } from "@/tools/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type { ConversationRecord } from "@/conversations/types";
+import {
+    getConversationRecordAuthorPrincipalId,
+    getConversationRecordAuthorPubkey,
+} from "@/conversations/record-author";
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import { tool } from "ai";
@@ -51,7 +56,7 @@ interface ConversationSummary {
     messageCount: number;
     createdAt?: number;
     lastActivity?: number;
-    /** Names of participants in this conversation (resolved via PubkeyService) */
+    /** Names of participants in this conversation (resolved via stored identity or PubkeyService) */
     participants: string[];
     /** Shortened event IDs of delegations that occurred in this conversation */
     delegations: string[];
@@ -71,21 +76,6 @@ function shortenEventId(fullId: string): string {
 }
 
 /**
- * Extract unique participant pubkeys from conversation messages (direct participants only)
- */
-function extractParticipantPubkeys(conversation: ConversationStore): string[] {
-    const messages = conversation.getAllMessages();
-    const pubkeys = new Set<string>();
-
-    for (const message of messages) {
-        // Add the message author
-        pubkeys.add(message.pubkey);
-    }
-
-    return Array.from(pubkeys);
-}
-
-/**
  * Extract delegation conversation IDs from delegation markers
  */
 function extractDelegationIds(conversation: ConversationStore): string[] {
@@ -101,12 +91,53 @@ function extractDelegationIds(conversation: ConversationStore): string[] {
     return delegationIds;
 }
 
-/**
- * Resolve pubkeys to display names using PubkeyService (sync version for performance)
- */
-function resolveParticipantNames(pubkeys: string[]): string[] {
-    const pubkeyService = getPubkeyService();
-    return pubkeys.map(pk => pubkeyService.getNameSync(pk));
+function shortenPrincipalId(principalId: string): string {
+    const terminalSegment = principalId.split(":").pop();
+    if (terminalSegment?.trim()) {
+        return terminalSegment.substring(0, PREFIX_LENGTH);
+    }
+    return principalId.substring(0, PREFIX_LENGTH);
+}
+
+function resolveParticipantName(message: ConversationRecord): string {
+    const authorPubkey = getConversationRecordAuthorPubkey(message);
+    if (authorPubkey) {
+        return getPubkeyService().getNameSync(authorPubkey);
+    }
+
+    const displayName = message.senderPrincipal?.displayName?.trim();
+    if (displayName) {
+        return displayName;
+    }
+
+    const username = message.senderPrincipal?.username?.trim();
+    if (username) {
+        return username;
+    }
+
+    const principalId = getConversationRecordAuthorPrincipalId(message);
+    if (principalId) {
+        return shortenPrincipalId(principalId);
+    }
+
+    return "Unknown";
+}
+
+function extractParticipantNames(conversation: ConversationStore): string[] {
+    const participants = new Map<string, string>();
+
+    for (const message of conversation.getAllMessages()) {
+        const participantKey =
+            getConversationRecordAuthorPrincipalId(message)
+            ?? getConversationRecordAuthorPubkey(message);
+        if (!participantKey || participants.has(participantKey)) {
+            continue;
+        }
+
+        participants.set(participantKey, resolveParticipantName(message));
+    }
+
+    return Array.from(participants.values());
 }
 
 function summarizeConversation(conversation: ConversationStore, projectId?: string): ConversationSummary {
@@ -116,8 +147,7 @@ function summarizeConversation(conversation: ConversationStore, projectId?: stri
     const metadata = conversation.metadata;
 
     // Extract participants and delegations
-    const participantPubkeys = extractParticipantPubkeys(conversation);
-    const participantNames = resolveParticipantNames(participantPubkeys);
+    const participantNames = extractParticipantNames(conversation);
     const delegationIds = extractDelegationIds(conversation);
 
     return {
@@ -239,7 +269,7 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
 function conversationHasParticipant(conversation: ConversationStore, pubkey: string): boolean {
     const messages = conversation.getAllMessages();
     for (const message of messages) {
-        if (message.pubkey === pubkey) {
+        if (getConversationRecordAuthorPubkey(message) === pubkey) {
             return true;
         }
     }

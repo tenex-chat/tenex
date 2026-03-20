@@ -3,8 +3,8 @@ import type { AgentInstance } from "@/agents/types";
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ConversationRecord } from "@/conversations/types";
+import { buildDiagnosticEventSnapshot } from "@/events/runtime/diagnostic-event-snapshot";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import { buildLegacyEventSnapshot } from "@/events/runtime/legacy-event-snapshot";
 import { LocalInboundAdapter } from "@/events/runtime/LocalInboundAdapter";
 import {
     RuntimePublishCollector,
@@ -67,9 +67,10 @@ interface TransportChatArtifact {
     turnNumber: number;
     conversationId: string;
     canonicalEnvelope: InboundEnvelope;
-    legacyEvent: {
+    diagnosticSnapshot: {
         id: string;
-        pubkey: string;
+        senderId: string;
+        senderLinkedPubkey?: string;
         content: string;
         tags: string[][];
     };
@@ -392,7 +393,6 @@ function buildArtifact(params: {
     artifactPath: string;
     turnNumber: number;
     canonicalEnvelope: InboundEnvelope;
-    legacyEvent?: NDKEvent;
     collector: RuntimePublishCollector;
     conversationId: string;
     agentPubkey: string;
@@ -403,7 +403,7 @@ function buildArtifact(params: {
     const conversationRecords = conversation?.getAllMessages() ?? [];
     const conversationMessages = buildConversationMessages(params.conversationId);
     const completionRecord = findLatestRecord(records, "complete");
-    const legacyEvent = buildLegacyEventSnapshot(params.canonicalEnvelope, params.legacyEvent);
+    const diagnosticSnapshot = buildDiagnosticEventSnapshot(params.canonicalEnvelope);
     const expectedCompletionRecipientPubkey =
         params.canonicalEnvelope.principal.linkedPubkey;
     const responseContent = extractReplyContent(records, conversationRecords, params.agentPubkey);
@@ -421,7 +421,7 @@ function buildArtifact(params: {
         turnNumber: params.turnNumber,
         conversationId: params.conversationId,
         canonicalEnvelope: params.canonicalEnvelope,
-        legacyEvent,
+        diagnosticSnapshot,
         response: {
             content: responseContent,
             completionRecord,
@@ -465,7 +465,7 @@ async function buildInbound(params: {
     previousInboundMessageId?: string;
     nostrInboundAdapter: NostrInboundAdapter;
     localInboundAdapter: LocalInboundAdapter;
-}): Promise<{ canonicalEnvelope: InboundEnvelope; legacyEvent?: NDKEvent }> {
+}): Promise<{ canonicalEnvelope: InboundEnvelope }> {
     const messageId = nextMessageId(params.turnNumber);
     const projectBinding = `31933:${params.userPubkey}:${params.state.projectDTag}`;
 
@@ -486,7 +486,6 @@ async function buildInbound(params: {
 
         return {
             canonicalEnvelope: params.nostrInboundAdapter.toEnvelope(inboundEvent),
-            legacyEvent: inboundEvent,
         };
     }
 
@@ -576,7 +575,7 @@ export const transportChatCommand = new Command("transport-chat")
                 ConversationStore.getOrLoad(sessionState.conversationId);
             }
 
-            const { canonicalEnvelope, legacyEvent } = await buildInbound({
+            const { canonicalEnvelope } = await buildInbound({
                 state: sessionState,
                 transport,
                 message: String(options.message),
@@ -594,9 +593,10 @@ export const transportChatCommand = new Command("transport-chat")
                     harness.runtimeIngressService.handleChatMessage({
                         envelope: canonicalEnvelope,
                         agentExecutor,
-                        adapter: legacyEvent
-                            ? harness.nostrInboundAdapter.constructor.name
-                            : harness.localInboundAdapter.constructor.name,
+                        adapter:
+                            transport === "nostr"
+                                ? harness.nostrInboundAdapter.constructor.name
+                                : harness.localInboundAdapter.constructor.name,
                     })
             );
 
@@ -620,7 +620,6 @@ export const transportChatCommand = new Command("transport-chat")
                 artifactPath,
                 turnNumber,
                 canonicalEnvelope,
-                legacyEvent,
                 collector,
                 conversationId: conversation.id,
                 agentPubkey: harness.agentPubkey,

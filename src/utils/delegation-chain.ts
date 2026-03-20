@@ -72,6 +72,11 @@ export function buildDelegationChain(
 
     const senderPubkey = envelope.principal.linkedPubkey;
     if (!senderPubkey) {
+        logger.warn("Delegation chain skipped for transport-only principal", {
+            conversationId: shortenConversationId(currentConversationId),
+            principalId: envelope.principal.id,
+            transport: envelope.principal.transport,
+        });
         return undefined;
     }
 

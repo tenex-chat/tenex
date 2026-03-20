@@ -1,4 +1,5 @@
 import type { ConversationEntry } from "@/conversations/types";
+import { getConversationRecordAuthorPubkey } from "@/conversations/record-author";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getIdentityDisplayService } from "@/services/identity/IdentityDisplayService";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
@@ -299,7 +300,7 @@ export function buildConversationTimeline(
       continue;
     }
 
-    const authorPubkey = entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey;
+    const authorPubkey = getConversationRecordAuthorPubkey(entry);
     const author = resolveEntryDisplayName(authorPubkey, entry.senderPrincipal, identityDisplayService);
     const recipients = (entry.targetedPubkeys ?? []).map((pubkey, index) =>
       resolveEntryDisplayName(

@@ -113,6 +113,12 @@ export class AgentEventEncoder {
         const recipientPubkey = this.getCompletionRecipientPubkey(context);
         if (recipientPubkey) {
             event.tag(["p", recipientPubkey]);
+        } else {
+            logger.warn("Completion event published without recipient p-tag", {
+                conversationId: context.conversationId?.substring(0, 12),
+                triggeringPrincipalId: context.triggeringEnvelope.principal.id,
+                transport: context.triggeringEnvelope.transport,
+            });
         }
         event.tag(["status", "completed"]);
 
@@ -378,6 +384,12 @@ export class AgentEventEncoder {
         const recipientPubkey = context.triggeringEnvelope.principal.linkedPubkey;
         if (recipientPubkey) {
             event.tag(["p", recipientPubkey]);
+        } else {
+            logger.warn("Error event published without recipient p-tag", {
+                conversationId: context.conversationId?.substring(0, 12),
+                triggeringPrincipalId: context.triggeringEnvelope.principal.id,
+                transport: context.triggeringEnvelope.transport,
+            });
         }
         event.tag(["status", "completed"]);
 

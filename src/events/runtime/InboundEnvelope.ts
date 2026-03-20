@@ -1,5 +1,36 @@
 export type RuntimeTransport = "local" | "nostr" | "telegram" | (string & {});
 
+export interface TelegramChatAdministratorMetadata {
+    userId: string;
+    displayName?: string;
+    username?: string;
+    customTitle?: string;
+}
+
+export interface TelegramSeenParticipantMetadata {
+    userId: string;
+    displayName?: string;
+    username?: string;
+    lastSeenAt: number;
+}
+
+export interface TelegramTransportMetadata {
+    updateId: number;
+    chatId: string;
+    messageId: string;
+    threadId?: string;
+    chatType: "private" | "group" | "supergroup" | "channel";
+    isEditedMessage: boolean;
+    senderUserId: string;
+    chatTitle?: string;
+    chatUsername?: string;
+    memberCount?: number;
+    administrators?: TelegramChatAdministratorMetadata[];
+    seenParticipants?: TelegramSeenParticipantMetadata[];
+    botId?: string;
+    botUsername?: string;
+}
+
 export interface PrincipalRef {
     id: string;
     transport: RuntimeTransport;
@@ -43,5 +74,8 @@ export interface InboundEnvelope {
         delegationParentConversationId?: string;
         nudgeEventIds?: string[];
         skillEventIds?: string[];
+        transport?: {
+            telegram?: TelegramTransportMetadata;
+        };
     };
 }

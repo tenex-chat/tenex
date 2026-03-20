@@ -17,6 +17,7 @@ export class RuntimeIngressService {
     async handleChatMessage(params: RuntimeIngressParams): Promise<void> {
         const { envelope, agentExecutor, adapter } = params;
         const activeSpan = trace.getActiveSpan();
+        const telegramMetadata = envelope.metadata.transport?.telegram;
 
         try {
             const identityService = getIdentityService();
@@ -61,6 +62,26 @@ export class RuntimeIngressService {
                 "runtime.recipient_count": envelope.recipients.length,
                 "runtime.event_kind": envelope.metadata.eventKind ?? 0,
             });
+            if (telegramMetadata) {
+                activeSpan?.setAttributes({
+                    "telegram.update.id": telegramMetadata.updateId,
+                    "telegram.chat.id": telegramMetadata.chatId,
+                    "telegram.message.id": telegramMetadata.messageId,
+                    "telegram.chat.thread_id": telegramMetadata.threadId ?? "",
+                    "telegram.chat.type": telegramMetadata.chatType,
+                    "telegram.sender.id": telegramMetadata.senderUserId,
+                    "telegram.bot.id": telegramMetadata.botId ?? "",
+                    "telegram.bot.username": telegramMetadata.botUsername ?? "",
+                    "telegram.message.is_edited": telegramMetadata.isEditedMessage,
+                    "telegram.message.content": envelope.content,
+                });
+                activeSpan?.addEvent("runtime.ingress.telegram", {
+                    "telegram.update.id": telegramMetadata.updateId,
+                    "telegram.chat.id": telegramMetadata.chatId,
+                    "telegram.message.id": telegramMetadata.messageId,
+                    "telegram.chat.thread_id": telegramMetadata.threadId ?? "",
+                });
+            }
 
             await this.dispatcher.dispatch(envelope, {
                 agentExecutor,

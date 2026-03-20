@@ -13,6 +13,12 @@ describe("Tool Registry", () => {
             expect(tool?.description).toContain("Read a file");
         });
 
+        it("should expose the no_response tool", () => {
+            const tool = getTool("no_response", mockContext);
+            expect(tool).toBeDefined();
+            expect(tool?.description).toContain("silent completion");
+        });
+
         it("should return undefined for non-existent tool", () => {
             // @ts-expect-error Testing invalid tool name
             const tool = getTool("non_existent_tool" as ToolName, mockContext);

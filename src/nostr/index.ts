@@ -15,6 +15,7 @@ export type {
     EventContext,
 } from "./types";
 export { AgentEventEncoder } from "./AgentEventEncoder";
+export { AgentConfigPublisher } from "./AgentConfigPublisher";
 export { AgentProfilePublisher } from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
 export { InterventionPublisher } from "./InterventionPublisher";

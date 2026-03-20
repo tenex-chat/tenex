@@ -496,6 +496,58 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Request that the current RAL complete without a visible assistant response.
+   */
+  requestSilentCompletion(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral) {
+      return false;
+    }
+
+    const requestedAt = Date.now();
+    ral.silentCompletionRequestedAt = requestedAt;
+    ral.lastActivityAt = requestedAt;
+
+    trace.getActiveSpan()?.addEvent("ral.silent_completion_requested", {
+      "ral.number": ralNumber,
+      "agent.pubkey": agentPubkey,
+      "conversation.id": shortenConversationId(conversationId),
+    });
+
+    this.emitUpdated(ral.projectId, conversationId);
+    return true;
+  }
+
+  /**
+   * Check whether the current RAL has an outstanding silent-completion request.
+   */
+  isSilentCompletionRequested(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    return this.getRAL(agentPubkey, conversationId, ralNumber)?.silentCompletionRequestedAt !== undefined;
+  }
+
+  /**
+   * Clear a silent-completion request for the current RAL.
+   */
+  clearSilentCompletionRequest(agentPubkey: string, conversationId: string, ralNumber: number): boolean {
+    const ral = this.getRAL(agentPubkey, conversationId, ralNumber);
+    if (!ral || ral.silentCompletionRequestedAt === undefined) {
+      return false;
+    }
+
+    delete ral.silentCompletionRequestedAt;
+    ral.lastActivityAt = Date.now();
+
+    trace.getActiveSpan()?.addEvent("ral.silent_completion_cleared", {
+      "ral.number": ralNumber,
+      "agent.pubkey": agentPubkey,
+      "conversation.id": shortenConversationId(conversationId),
+    });
+
+    this.emitUpdated(ral.projectId, conversationId);
+    return true;
+  }
+
+  /**
    * Mark the start of an LLM streaming session.
    * Call this immediately before llmService.stream() to begin timing.
    *

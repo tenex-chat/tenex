@@ -15,9 +15,14 @@ import type {
     ToolUseIntent,
 } from "@/nostr/types";
 import { PendingDelegationsRegistry } from "@/services/ral";
+import { withActiveTraceLogFields } from "@/telemetry/TelegramTelemetry";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { trace } from "@opentelemetry/api";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
+import { renderTelegramToolPublication } from "@/services/telegram/telegram-runtime-tool-publications";
+
+type TelegramPublishReason = "ask" | "complete" | "conversation" | "error" | "toolUse";
 
 export class TelegramRuntimePublisher implements AgentRuntimePublisher {
     private readonly nostrPublisher: AgentPublisher;
@@ -32,7 +37,11 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
     async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
         try {
             const event = await this.nostrPublisher.complete(intent, context);
-            await this.deliverTelegramReply(context, intent.content, "complete");
+            trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
+                "telegram.publish.reason": "complete",
+                "nostr.event.id": event?.id ?? "",
+            });
+            await this.deliverTelegramMessage(context, intent.content, "complete");
             return event;
         } catch (error) {
             const recoveredEvent = await this.recoverPublishFailure(
@@ -49,7 +58,26 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
     }
 
     async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
-        return this.nostrPublisher.conversation(intent, context);
+        try {
+            const event = await this.nostrPublisher.conversation(intent, context);
+            trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
+                "telegram.publish.reason": "conversation",
+                "nostr.event.id": event.id,
+            });
+            await this.deliverTelegramMessage(context, intent.content, "conversation");
+            return event;
+        } catch (error) {
+            const recoveredEvent = await this.recoverPublishFailure(
+                error,
+                context,
+                intent.content,
+                "conversation"
+            );
+            if (recoveredEvent) {
+                return recoveredEvent;
+            }
+            throw error;
+        }
     }
 
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
@@ -60,7 +88,11 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         const content = `${config.title}\n\n${config.context}`;
         try {
             const event = await this.nostrPublisher.ask(config, context);
-            await this.deliverTelegramReply(context, content, "ask");
+            trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
+                "telegram.publish.reason": "ask",
+                "nostr.event.id": event.id,
+            });
+            await this.deliverTelegramMessage(context, content, "ask");
             return event;
         } catch (error) {
             const recoveredEvent = await this.recoverPublishFailure(error, context, content, "ask");
@@ -87,7 +119,11 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
     async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
         try {
             const event = await this.nostrPublisher.error(intent, context);
-            await this.deliverTelegramReply(context, intent.message, "error");
+            trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
+                "telegram.publish.reason": "error",
+                "nostr.event.id": event.id,
+            });
+            await this.deliverTelegramMessage(context, intent.message, "error");
             return event;
         } catch (error) {
             const recoveredEvent = await this.recoverPublishFailure(
@@ -108,7 +144,35 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
     }
 
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
-        return this.nostrPublisher.toolUse(intent, context);
+        const telegramContent = renderTelegramToolPublication(intent);
+
+        try {
+            const event = await this.nostrPublisher.toolUse(intent, context);
+            trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
+                "telegram.publish.reason": "toolUse",
+                "nostr.event.id": event.id,
+                "tool.name": intent.toolName,
+            });
+            if (telegramContent) {
+                await this.deliverTelegramMessage(context, telegramContent, "toolUse");
+            }
+            return event;
+        } catch (error) {
+            if (!telegramContent) {
+                throw error;
+            }
+
+            const recoveredEvent = await this.recoverPublishFailure(
+                error,
+                context,
+                telegramContent,
+                "toolUse"
+            );
+            if (recoveredEvent) {
+                return recoveredEvent;
+            }
+            throw error;
+        }
     }
 
     async streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void> {
@@ -119,25 +183,36 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.nostrPublisher.delegationMarker(intent);
     }
 
-    private async deliverTelegramReply(
+    private async deliverTelegramMessage(
         context: EventContext,
         content: string,
-        reason: "ask" | "complete" | "error"
+        reason: TelegramPublishReason
     ): Promise<boolean> {
         if (!this.telegramDeliveryService.canHandle(this.agent, context)) {
             return false;
         }
 
         try {
+            trace.getActiveSpan()?.addEvent("telegram.delivery.requested", {
+                "telegram.delivery.reason": reason,
+                "conversation.id": context.conversationId,
+            });
             await this.telegramDeliveryService.sendReply(this.agent, context, content);
-            return true;
-        } catch (error) {
-            logger.warn("[TelegramRuntimePublisher] Failed to deliver Telegram reply", {
+            logger.info("[TelegramRuntimePublisher] Delivered Telegram reply", withActiveTraceLogFields({
                 agentSlug: this.agent.slug,
                 conversationId: context.conversationId,
                 reason,
+                content,
+            }));
+            return true;
+        } catch (error) {
+            logger.warn("[TelegramRuntimePublisher] Failed to deliver Telegram reply", withActiveTraceLogFields({
+                agentSlug: this.agent.slug,
+                conversationId: context.conversationId,
+                reason,
+                content,
                 error: error instanceof Error ? error.message : String(error),
-            });
+            }));
             return false;
         }
     }
@@ -146,25 +221,25 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         error: unknown,
         context: EventContext,
         content: string,
-        reason: "ask" | "complete" | "error"
+        reason: TelegramPublishReason
     ): Promise<NDKEvent | undefined> {
         if (!isAgentPublishError(error)) {
             return undefined;
         }
 
-        const delivered = await this.deliverTelegramReply(context, content, reason);
+        const delivered = await this.deliverTelegramMessage(context, content, reason);
         if (!delivered) {
             return undefined;
         }
 
-        logger.warn("[TelegramRuntimePublisher] Recovered Telegram delivery after Nostr publish failure", {
+        logger.warn("[TelegramRuntimePublisher] Recovered Telegram delivery after Nostr publish failure", withActiveTraceLogFields({
             agentSlug: this.agent.slug,
             conversationId: context.conversationId,
             reason,
             eventType: error.eventType,
             eventId: error.event.id,
             error: error.message,
-        });
+        }));
 
         return error.event;
     }

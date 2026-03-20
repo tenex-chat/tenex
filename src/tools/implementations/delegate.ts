@@ -195,27 +195,20 @@ async function executeDelegate(
             status: "pending",
         };
 
-        if (
-            typeof parentStore.addDelegationMarker === "function" &&
-            typeof parentStore.save === "function"
-        ) {
-            parentStore.addDelegationMarker(
-                marker,
-                context.agent.pubkey,
-                context.ralNumber
-            );
-            await parentStore.save();
-        }
+        parentStore.addDelegationMarker(
+            marker,
+            context.agent.pubkey,
+            context.ralNumber
+        );
+        await parentStore.save();
 
-        if (typeof context.agentPublisher.delegationMarker === "function") {
-            await context.agentPublisher.delegationMarker({
-                delegationConversationId: eventId,
-                recipientPubkey: pubkey,
-                parentConversationId: context.conversationId,
-                status: "pending",
-                initiatedAt,
-            });
-        }
+        await context.agentPublisher.delegationMarker({
+            delegationConversationId: eventId,
+            recipientPubkey: pubkey,
+            parentConversationId: context.conversationId,
+            status: "pending",
+            initiatedAt,
+        });
     }
   }
 

@@ -102,6 +102,7 @@ export async function checkPostCompletion(
         agent,
         project: projectContext.project,
         conversation,
+        triggeringEnvelope: context.triggeringEnvelope,
         projectBasePath: context.projectBasePath,
         workingDirectory: context.workingDirectory,
         currentBranch: context.currentBranch,
@@ -130,6 +131,11 @@ export async function checkPostCompletion(
     const hasBeenNudgedAboutTodos = conversationStore
         ? conversationStore.hasBeenNudgedAboutTodos(agent.pubkey)
         : false;
+    const silentCompletionRequested = ralRegistry.isSilentCompletionRequested(
+        agent.pubkey,
+        context.conversationId,
+        ralNumber
+    );
 
     // Get pending delegation count from RALRegistry (conversation-wide, not RAL-scoped)
     // We check ALL pending delegations for this conversation because a delegation from
@@ -170,6 +176,7 @@ export async function checkPostCompletion(
     const supervisionContext: PostCompletionContext = {
         agentSlug: agent.slug,
         agentPubkey: agent.pubkey,
+        silentCompletionRequested,
         messageContent: completionEvent.message || "",
         toolCallsMade,
         systemPrompt,
