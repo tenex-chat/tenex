@@ -1,5 +1,6 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { isProjectAddress } from "@/types/project-ids";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 function toPrincipalId(pubkey: string): string {
@@ -34,12 +35,16 @@ function getTagValues(event: NDKEvent, tagName: string): string[] {
         .filter((value): value is string => !!value);
 }
 
+function getProjectBinding(event: NDKEvent): string | undefined {
+    return getTagValues(event, "a").find((value) => isProjectAddress(value));
+}
+
 export class NostrInboundAdapter {
     toEnvelope(event: NDKEvent): InboundEnvelope {
         const replyTarget = AgentEventDecoder.getReplyTarget(event) ?? getTagValue(event, "e");
         const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
         const recipients = mentionedPubkeys.length > 0 ? mentionedPubkeys : getTagValues(event, "p");
-        const projectBinding = getTagValue(event, "a");
+        const projectBinding = getProjectBinding(event);
         const nativeMessageId = event.id ?? buildFallbackMessageId(event);
         const messageId = toMessageId(nativeMessageId);
         const conversationAnchor = replyTarget ?? nativeMessageId;

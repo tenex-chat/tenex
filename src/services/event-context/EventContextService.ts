@@ -22,6 +22,31 @@ function fallbackPrincipalFromTriggeringEnvelope(
     };
 }
 
+function findMostRecentPrincipalByPubkey(
+    conversationStore: ConversationStore,
+    pubkey: string
+): PrincipalRef | undefined {
+    const messages = conversationStore.getAllMessages();
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const senderPrincipal = messages[index].senderPrincipal;
+        if (senderPrincipal?.linkedPubkey !== pubkey) {
+            continue;
+        }
+
+        return {
+            id: senderPrincipal.id,
+            transport: senderPrincipal.transport,
+            linkedPubkey: senderPrincipal.linkedPubkey,
+            displayName: senderPrincipal.displayName,
+            username: senderPrincipal.username,
+            kind: senderPrincipal.kind,
+        };
+    }
+
+    return undefined;
+}
+
 /**
  * Resolve the correct recipient pubkey for a completion event from the delegation chain.
  *
@@ -100,6 +125,14 @@ export function resolveCompletionRecipientPrincipal(
         const origin = delegationChain[0];
 
         if (triggeringEnvelope.principal.linkedPubkey !== origin.pubkey) {
+            const storedPrincipal = findMostRecentPrincipalByPubkey(
+                conversationStore,
+                immediateDelegator.pubkey
+            );
+            if (storedPrincipal) {
+                return storedPrincipal;
+            }
+
             return {
                 id: `nostr:${immediateDelegator.pubkey}`,
                 transport: "nostr",
@@ -144,12 +177,9 @@ export function resolveCompletionRecipientPrincipal(
  */
 export function createEventContext(
     context: ToolExecutionContext,
-    options?: CreateEventContextOptions | string
+    options?: CreateEventContextOptions
 ): EventContext {
-    // Support legacy call signature: createEventContext(context, model)
-    const opts: CreateEventContextOptions = typeof options === "string"
-        ? { model: options }
-        : options ?? {};
+    const opts: CreateEventContextOptions = options ?? {};
 
     const conversation = context.getConversation?.();
     const rootEventId = conversation?.getRootEventId() ?? context.triggeringEnvelope.message.nativeId;

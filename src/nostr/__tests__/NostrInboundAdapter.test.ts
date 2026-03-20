@@ -4,6 +4,7 @@ import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 
 describe("NostrInboundAdapter", () => {
     it("normalizes a project-routed reply into the canonical inbound envelope", () => {
+        const projectBinding = `31933:${"f".repeat(64)}:demo-project`;
         const event = new NDKEvent();
         event.id = "a".repeat(64);
         event.kind = 1;
@@ -14,7 +15,7 @@ describe("NostrInboundAdapter", () => {
             ["p", "c".repeat(64)],
             ["p", "d".repeat(64)],
             ["e", "e".repeat(64)],
-            ["a", "31933:owner-pubkey:demo-project"],
+            ["a", projectBinding],
         ];
 
         const adapter = new NostrInboundAdapter();
@@ -27,10 +28,10 @@ describe("NostrInboundAdapter", () => {
             linkedPubkey: event.pubkey,
         });
         expect(envelope.channel).toEqual({
-            id: "nostr:project:31933:owner-pubkey:demo-project",
+            id: `nostr:project:${projectBinding}`,
             transport: "nostr",
             kind: "project",
-            projectBinding: "31933:owner-pubkey:demo-project",
+            projectBinding,
         });
         expect(envelope.message).toEqual({
             id: `nostr:${event.id}`,
@@ -65,5 +66,30 @@ describe("NostrInboundAdapter", () => {
             nudgeEventIds: undefined,
             skillEventIds: undefined,
         });
+    });
+
+    it("selects the project a-tag when addressable references are also present", () => {
+        const event = new NDKEvent();
+        event.id = "f".repeat(64);
+        event.kind = 1;
+        event.pubkey = "b".repeat(64);
+        event.content = "tool output";
+        event.tags = [
+            ["a", "30023:owner-pubkey:weekly-report"],
+            ["a", `31933:${"c".repeat(64)}:demo-project`],
+        ];
+
+        const adapter = new NostrInboundAdapter();
+        const envelope = adapter.toEnvelope(event);
+
+        expect(envelope.channel).toEqual({
+            id: `nostr:project:31933:${"c".repeat(64)}:demo-project`,
+            transport: "nostr",
+            kind: "project",
+            projectBinding: `31933:${"c".repeat(64)}:demo-project`,
+        });
+        expect(envelope.metadata.articleReferences).toEqual([
+            "30023:owner-pubkey:weekly-report",
+        ]);
     });
 });
