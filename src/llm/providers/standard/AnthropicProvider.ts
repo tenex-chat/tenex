@@ -59,7 +59,7 @@ const oauthFetch: typeof globalThis.fetch = Object.assign(
         }
         return globalThis.fetch(url, init);
     },
-    { preconnect: globalThis.fetch.preconnect },
+    { preconnect: (globalThis.fetch as { preconnect?: unknown }).preconnect },
 );
 
 function isOAuthToken(key: string): boolean {

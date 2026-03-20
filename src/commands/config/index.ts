@@ -72,12 +72,12 @@ async function runConfigMenu(): Promise<void> {
     while (true) {
         console.log();
 
-        const choices: Array<{ name: string; value: number } | { type: "separator"; line: string }> = [];
+        const choices: Array<{ name: string; value: number } | InstanceType<typeof inquirer.Separator>> = [];
         const commandMap: Command[] = [];
         let idx = 0;
 
         for (const section of MENU_SECTIONS) {
-            choices.push({ type: "separator", line: chalk.dim(`── ${section.header} ──`) });
+            choices.push(new inquirer.Separator(chalk.dim(`── ${section.header} ──`)));
 
             for (const entry of section.entries) {
                 const label = entry.label.padEnd(16);
@@ -90,7 +90,7 @@ async function runConfigMenu(): Promise<void> {
             }
         }
 
-        choices.push({ type: "separator", line: "" });
+        choices.push(new inquirer.Separator());
         choices.push({ name: chalk.dim("  Back"), value: -1 });
 
         try {
