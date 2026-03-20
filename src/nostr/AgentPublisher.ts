@@ -1,4 +1,7 @@
-import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
@@ -8,6 +11,7 @@ import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentPublishError } from "./AgentPublishError";
 import { AgentEventEncoder } from "./AgentEventEncoder";
+import { NostrInboundAdapter } from "./NostrInboundAdapter";
 import { injectTraceContext } from "./trace-context";
 import type {
     AskConfig,
@@ -29,10 +33,22 @@ import type {
 export class AgentPublisher implements AgentRuntimePublisher {
     private agent: RuntimePublishAgent;
     private encoder: AgentEventEncoder;
+    private readonly inboundAdapter = new NostrInboundAdapter();
 
     constructor(agent: RuntimePublishAgent) {
         this.agent = agent;
         this.encoder = new AgentEventEncoder();
+    }
+
+    private toPublishedMessageRef(event: NDKEvent): PublishedMessageRef {
+        const envelope = this.inboundAdapter.toEnvelope(event);
+
+        return {
+            id: event.id ?? envelope.message.nativeId,
+            transport: envelope.transport,
+            envelope,
+            encodedId: event.encode(),
+        };
     }
 
     /**
@@ -131,7 +147,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
                 `Failed to publish ${eventType}: ${message}`,
                 {
                     cause: error,
-                    event,
+                    event: this.toPublishedMessageRef(event),
                     eventType,
                 }
             );
@@ -182,7 +198,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
      * where an agent continues running (e.g., in a long tool execution) after being
      * killed and then publishes a completion that triggers the parent to process it.
      */
-    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
+    async complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined> {
         const ralRegistry = RALRegistry.getInstance();
 
         // RACE CONDITION GUARD: Check if this agent+conversation was killed
@@ -230,14 +246,14 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "completion");
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 
     /**
      * Publish a conversation event (mid-loop response without p-tag).
      * Used when agent has text output but delegations are still pending.
      */
-    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef> {
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const event = this.encoder.encodeConversation(intent, enhancedContext);
 
@@ -245,7 +261,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "conversation");
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 
     /**
@@ -301,7 +317,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
      * Publish an ask event using the multi-question format.
      * Returns the published NDKEvent so callers can create a ConversationStore.
      */
-    async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
+    async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         this.assertConversationId(context, "delegation");
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const ndk = getNDK();
@@ -354,7 +370,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
         // Register with PendingDelegationsRegistry for q-tag correlation
         PendingDelegationsRegistry.register(this.agent.pubkey, enhancedContext.conversationId, event.id);
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 
     /**
@@ -403,7 +419,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
      * Publish an error event.
      * Creates and publishes an error notification event.
      */
-    async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+    async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const event = this.encoder.encodeError(intent, enhancedContext);
 
@@ -411,13 +427,13 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(event);
         await this.safePublish(event, "error");
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 
     /**
      * Publish a lesson learned event.
      */
-    async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+    async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const lessonEvent = this.encoder.encodeLesson(intent, enhancedContext, this.agent);
 
@@ -425,14 +441,14 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(lessonEvent);
         await this.safePublish(lessonEvent, "lesson");
 
-        return lessonEvent;
+        return this.toPublishedMessageRef(lessonEvent);
     }
 
     /**
      * Publish a tool usage event.
      * Creates and publishes an event with tool name and output tags.
      */
-    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
         const enhancedContext = this.consumeAndEnhanceContext(context);
         const event = this.encoder.encodeToolUse(intent, enhancedContext);
 
@@ -440,7 +456,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
         await this.agent.sign(event);
         await this.safePublish(event, `tool:${intent.toolName}`);
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 
     /**
@@ -475,13 +491,13 @@ export class AgentPublisher implements AgentRuntimePublisher {
      * Note: This does NOT consume runtime from RAL since markers are not part of
      * the agent's reasoning/action loop. They are metadata events for tracking.
      */
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent> {
+    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
         const event = this.encoder.encodeDelegationMarker(intent);
 
         injectTraceContext(event);
         await this.agent.sign(event);
         await this.safePublish(event, `delegation-marker:${intent.status}`);
 
-        return event;
+        return this.toPublishedMessageRef(event);
     }
 }

@@ -88,7 +88,7 @@ async function executeLessonLearn(
 
     await ragService.addDocuments("lessons", [
         {
-            id: lessonEvent.encode(),
+            id: lessonEvent.encodedId ?? lessonEvent.id,
             content: lessonContent,
             metadata: {
                 title,
@@ -106,12 +106,12 @@ async function executeLessonLearn(
 
     logger.info("Lesson added to RAG collection", {
         title,
-        eventId: lessonEvent.encode(),
+        eventId: lessonEvent.encodedId ?? lessonEvent.id,
         agentName: context.agent.name,
     });
 
     return {
-        eventId: lessonEvent.encode(),
+        eventId: lessonEvent.encodedId ?? lessonEvent.id,
         hasDetailed: !!detailed,
     };
 }

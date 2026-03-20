@@ -8,7 +8,10 @@ import {
     RuntimePublishCollector,
     type PublishedRuntimeRecord,
 } from "@/events/runtime/RecordingRuntimePublisher";
-import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
 import type {
@@ -468,7 +471,7 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         this.recordingPublisher = new RecordingRuntimePublisher(agent, collector);
     }
 
-    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
+    async complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined> {
         const event = await this.recordingPublisher.complete(intent, context);
         if (this.telegramDeliveryService.canHandle(this.agent, context)) {
             await this.telegramDeliveryService.sendReply(this.agent, context, intent.content);
@@ -476,7 +479,7 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         return event;
     }
 
-    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.recordingPublisher.conversation(intent, context);
     }
 
@@ -484,7 +487,7 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.recordingPublisher.delegate(config, context);
     }
 
-    async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
+    async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         const event = await this.recordingPublisher.ask(config, context);
         if (this.telegramDeliveryService.canHandle(this.agent, context)) {
             await this.telegramDeliveryService.sendReply(
@@ -508,7 +511,7 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.recordingPublisher.delegateFollowup(params, context);
     }
 
-    async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+    async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
         const event = await this.recordingPublisher.error(intent, context);
         if (this.telegramDeliveryService.canHandle(this.agent, context)) {
             await this.telegramDeliveryService.sendReply(this.agent, context, intent.message);
@@ -516,11 +519,11 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         return event;
     }
 
-    async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+    async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.recordingPublisher.lesson(intent, context);
     }
 
-    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.recordingPublisher.toolUse(intent, context);
     }
 
@@ -528,7 +531,7 @@ class SmokeTelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.recordingPublisher.streamTextDelta(intent, context);
     }
 
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent> {
+    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
         return this.recordingPublisher.delegationMarker(intent);
     }
 }

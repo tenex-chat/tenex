@@ -261,9 +261,9 @@ describe("delegation-chain utilities", () => {
             // pm-wip: from stored chain, conversationId = userconv1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
         });
 
         it("should not have duplicate entries when merging stored chain with walked ancestors", () => {
@@ -349,8 +349,8 @@ describe("delegation-chain utilities", () => {
             // User: origin, no conversationId
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(2);
-            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
         });
 
         it("should use PubkeyService to resolve user display name from Nostr profile", () => {
@@ -366,8 +366,8 @@ describe("delegation-chain utilities", () => {
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
             // Should use "Pablo" from PubkeyService instead of hardcoded "User"
-            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
             // Verify PubkeyService was called with the project owner pubkey
             expect(mockGetNameSync).toHaveBeenCalledWith("project-owner-pubkey");
         });
@@ -422,10 +422,10 @@ describe("delegation-chain utilities", () => {
             // exec: delegated to in pm-conv-id-1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(4);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
+            expect(result![3]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -467,9 +467,9 @@ describe("delegation-chain utilities", () => {
             // exec: delegated to in legacy-parent-conv-id-1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -619,10 +619,10 @@ describe("delegation-chain utilities", () => {
             // Chain: User -> pm-wip -> exec(delegator) -> exec(current)
             // exec MUST appear twice
             expect(result).toHaveLength(4);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" });
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "self-deleg-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" });
+            expect(result![3]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "self-deleg-conv-id-1234567890" });
 
             // Verify resolveCompletionRecipient logic: chain[length-2] should be the delegator (exec)
             expect(result![result!.length - 2].pubkey).toBe("agent-pubkey-exec");
@@ -831,6 +831,86 @@ describe("delegation-chain utilities", () => {
             expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
             // claude: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result![3].conversationId).toBe("claude-conv-id-1234567890");
+        });
+
+        it("preserves transport-aware principals from stored messages and the triggering envelope", () => {
+            const event: InboundEnvelope = {
+                ...createEnvelope("agent-pubkey-pm", "parent-conv-id-transport"),
+                principal: {
+                    id: "telegram:user:22",
+                    transport: "telegram",
+                    linkedPubkey: "agent-pubkey-pm",
+                    displayName: "PM Telegram",
+                    kind: "agent",
+                },
+            };
+
+            const mockParentStore = {
+                metadata: {},
+                getAllMessages: () => [
+                    {
+                        pubkey: "user-pubkey",
+                        senderPrincipal: {
+                            id: "local:user:42",
+                            transport: "local",
+                            linkedPubkey: "user-pubkey",
+                            displayName: "Local User",
+                            kind: "human",
+                        },
+                    },
+                ],
+                getRootEventId: () => undefined,
+            };
+            mockConversationStoreGet.mockReturnValue(mockParentStore);
+
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "current-conv-id"
+            );
+
+            expect(result).toEqual([
+                {
+                    pubkey: "user-pubkey",
+                    displayName: "User",
+                    isUser: true,
+                    conversationId: undefined,
+                    principal: {
+                        id: "local:user:42",
+                        transport: "local",
+                        linkedPubkey: "user-pubkey",
+                        displayName: "Local User",
+                        kind: "human",
+                    },
+                },
+                {
+                    pubkey: "agent-pubkey-pm",
+                    displayName: "pm-wip",
+                    isUser: false,
+                    conversationId: "parent-conv-id-transport",
+                    principal: {
+                        id: "telegram:user:22",
+                        transport: "telegram",
+                        linkedPubkey: "agent-pubkey-pm",
+                        displayName: "PM Telegram",
+                        kind: "agent",
+                    },
+                },
+                {
+                    pubkey: "agent-pubkey-claude",
+                    displayName: "claude-code",
+                    isUser: false,
+                    conversationId: "current-conv-id",
+                    principal: {
+                        id: "nostr:agent-pubkey-claude",
+                        transport: "nostr",
+                        linkedPubkey: "agent-pubkey-claude",
+                        displayName: "claude-code",
+                        kind: "agent",
+                    },
+                },
+            ]);
         });
     });
 });

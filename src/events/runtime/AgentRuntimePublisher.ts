@@ -1,4 +1,4 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { InboundEnvelope, RuntimeTransport } from "@/events/runtime/InboundEnvelope";
 import type {
     AskConfig,
     CompletionIntent,
@@ -12,6 +12,13 @@ import type {
     ToolUseIntent,
 } from "@/nostr/types";
 
+export interface PublishedMessageRef {
+    id: string;
+    transport: RuntimeTransport;
+    envelope: InboundEnvelope;
+    encodedId?: string;
+}
+
 /**
  * Phase-1 transport-neutral publishing contract for the conversation/runtime plane.
  *
@@ -20,10 +27,10 @@ import type {
  * `AgentPublisher` implementation. The wire format is still Nostr-shaped for now.
  */
 export interface AgentRuntimePublisher {
-    complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined>;
-    conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent>;
+    complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined>;
+    conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef>;
     delegate(config: DelegateConfig, context: EventContext): Promise<string>;
-    ask(config: AskConfig, context: EventContext): Promise<NDKEvent>;
+    ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef>;
     delegateFollowup(
         params: {
             recipient: string;
@@ -33,9 +40,9 @@ export interface AgentRuntimePublisher {
         },
         context: EventContext
     ): Promise<string>;
-    error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent>;
-    lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent>;
-    toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent>;
+    error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef>;
+    lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef>;
+    toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef>;
     streamTextDelta(intent: StreamTextDeltaIntent, context: EventContext): Promise<void>;
-    delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent>;
+    delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef>;
 }

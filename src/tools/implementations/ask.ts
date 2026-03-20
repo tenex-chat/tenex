@@ -12,7 +12,6 @@ import { z } from "zod";
 import { RALRegistry } from "@/services/ral";
 import type { PendingDelegation } from "@/services/ral/types";
 import { APNsService } from "@/services/apns";
-import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 
 /**
  * Schema for a single-select question.
@@ -289,7 +288,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   // Bug fix: Create ConversationStore for ask conversations to enable transcript retrieval
   // See: naddr1qvzqqqr4gupzqkmm302xww6uyne99rnhl5kjj53wthjypm2qaem9uz9fdf3hzcf0qyghwumn8ghj7ar9dejhstnrdpshgtcqye382emxd9uz6ctndvkhgmm0dskhgunpdeekxunfwp6z6atwv9mxz6tvv93xceg8tzuz2
   try {
-    await ConversationStore.create(new NostrInboundAdapter().toEnvelope(askEvent));
+    await ConversationStore.create(askEvent.envelope);
   } catch (error) {
     // Don't fail the ask tool if transcript storage fails.
     // The ask functionality still works - the delegation is already registered

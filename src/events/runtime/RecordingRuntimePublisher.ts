@@ -1,7 +1,10 @@
-import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
-import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
+import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";
 import type {
     AskConfig,
@@ -15,7 +18,6 @@ import type {
     StreamTextDeltaIntent,
     ToolUseIntent,
 } from "@/nostr/types";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { randomBytes } from "node:crypto";
 
 export interface PublishedRuntimeRecord {
@@ -77,16 +79,54 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         kind: number,
         content: string,
         tags: string[][]
-    ): NDKEvent {
-        const event = new NDKEvent();
-        event.id = createEventId();
-        event.kind = kind;
-        event.pubkey = this.agent.pubkey;
-        event.created_at = Math.floor(Date.now() / 1000);
-        event.content = content;
-        event.tags = tags;
+    ): PublishedMessageRef {
+        const id = createEventId();
+        const replyTarget = tags.find((tag) => tag[0] === "e")?.[1];
+        const envelope: InboundEnvelope = {
+            transport: "local",
+            principal: {
+                id: `local:${this.agent.pubkey}`,
+                transport: "local",
+                linkedPubkey: this.agent.pubkey,
+                displayName: this.agent.slug,
+                kind: "agent",
+            },
+            channel: {
+                id: `local:conversation:${id}`,
+                transport: "local",
+                kind: "conversation",
+            },
+            message: {
+                id: `local:${id}`,
+                transport: "local",
+                nativeId: id,
+                replyToId: replyTarget ? `local:${replyTarget}` : undefined,
+            },
+            recipients: tags
+                .filter((tag) => tag[0] === "p" && typeof tag[1] === "string")
+                .map((tag) => ({
+                    id: `nostr:${tag[1]}`,
+                    transport: "nostr" as const,
+                    linkedPubkey: tag[1],
+                })),
+            content,
+            occurredAt: Math.floor(Date.now() / 1000),
+            capabilities: [],
+            metadata: {
+                eventKind: kind,
+                eventTagCount: tags.length,
+                toolName: tags.find((tag) => tag[0] === "tool")?.[1],
+                statusValue: tags.find((tag) => tag[0] === "status")?.[1],
+                delegationParentConversationId: tags.find((tag) => tag[0] === "delegation")?.[1],
+            },
+        };
 
-        return event;
+        return {
+            id,
+            transport: envelope.transport,
+            envelope,
+            encodedId: `local:${id}`,
+        };
     }
 
     private record(
@@ -102,7 +142,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         });
     }
 
-    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
+    async complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined> {
         const recipientPrincipal =
             context.completionRecipientPrincipal ?? fallbackRecipientPrincipal(context);
         const recipient =
@@ -131,7 +171,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         return event;
     }
 
-    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef> {
         const rootEventId = context.rootEvent.id ?? context.conversationId;
         const event = this.createEvent(NDKKind.Text, intent.content, [["e", rootEventId]]);
 
@@ -154,7 +194,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         return delegationConversationId;
     }
 
-    async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
+    async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         const content = `${config.title}\n\n${config.context}`;
         const tags: string[][] = [["p", config.recipient]];
         const event = this.createEvent(NDKKind.Text, content, tags);
@@ -191,7 +231,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         return eventId;
     }
 
-    async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+    async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
         const rootEventId = context.rootEvent.id ?? context.conversationId;
         const event = this.createEvent(
             NDKKind.Text,
@@ -211,7 +251,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         return event;
     }
 
-    async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+    async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
         const content = `${intent.title}\n\n${intent.lesson}`;
         const rootEventId = context.rootEvent.id ?? context.conversationId;
         const event = this.createEvent(
@@ -229,7 +269,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         return event;
     }
 
-    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
         const event = this.createEvent(NDKKind.Text, intent.content, [["tool", intent.toolName]]);
 
         this.record("toolUse", context, {
@@ -249,7 +289,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         });
     }
 
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent> {
+    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
         const event = this.createEvent(
             NDKKind.Text,
             "",
