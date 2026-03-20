@@ -537,5 +537,63 @@ describe("EventContextService", () => {
                 kind: "agent",
             });
         });
+
+        it("prefers the principal snapshot stored on the delegation chain", async () => {
+            const conversationId = "conv-chain-principal";
+            const store = ConversationStore.getOrLoad(conversationId);
+            store.updateMetadata({
+                delegationChain: [
+                    { pubkey: USER_PUBKEY, displayName: "Pablo", isUser: true },
+                    {
+                        pubkey: EXEC_COORD_PUBKEY,
+                        displayName: "exec-coord",
+                        isUser: false,
+                        principal: {
+                            id: "telegram:user:88",
+                            transport: "telegram",
+                            linkedPubkey: EXEC_COORD_PUBKEY,
+                            displayName: "Exec Coord Telegram",
+                            username: "exec_coord",
+                            kind: "agent",
+                        },
+                    },
+                    { pubkey: CLAUDE_CODE_PUBKEY, displayName: "claude-code", isUser: false },
+                ],
+            });
+            await store.save();
+
+            const triggeringEnvelope: InboundEnvelope = {
+                transport: "nostr",
+                principal: {
+                    id: `nostr:${EXEC_COORD_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: EXEC_COORD_PUBKEY,
+                },
+                channel: {
+                    id: `nostr:conversation:${conversationId}`,
+                    transport: "nostr",
+                    kind: "conversation",
+                },
+                message: {
+                    id: "nostr:chain-principal-msg",
+                    transport: "nostr",
+                    nativeId: "chain-principal-msg",
+                },
+                recipients: [],
+                content: "resume",
+                occurredAt: Math.floor(Date.now() / 1000),
+                capabilities: [],
+                metadata: {},
+            };
+
+            expect(resolveCompletionRecipientPrincipal(store, triggeringEnvelope)).toEqual({
+                id: "telegram:user:88",
+                transport: "telegram",
+                linkedPubkey: EXEC_COORD_PUBKEY,
+                displayName: "Exec Coord Telegram",
+                username: "exec_coord",
+                kind: "agent",
+            });
+        });
     });
 });

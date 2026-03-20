@@ -18,7 +18,10 @@ import { assertSupervisionHealth } from "@/agents/supervision";
 import { checkPostCompletion } from "./PostCompletionChecker";
 import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError } from "@/lib/error-formatter";
@@ -125,7 +128,7 @@ export class AgentExecutor {
     /**
      * Execute an agent's assignment for a conversation with streaming
      */
-    async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
+    async execute(context: ExecutionContext): Promise<PublishedMessageRef | undefined> {
         const telegramMetadata = context.triggeringEnvelope.metadata.transport?.telegram;
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
@@ -369,7 +372,7 @@ export class AgentExecutor {
         toolTracker: ToolExecutionTracker,
         agentPublisher: AgentRuntimePublisher,
         ralNumber: number
-    ): Promise<NDKEvent | undefined> {
+    ): Promise<PublishedMessageRef | undefined> {
         let result: StreamExecutionResult;
 
         try {
@@ -418,10 +421,7 @@ export class AgentExecutor {
             );
             // Handle case where completion was skipped (conversation was killed)
             if (responseEvent) {
-                await ConversationStore.addEnvelope(
-                    context.conversationId,
-                    new NostrInboundAdapter().toEnvelope(responseEvent)
-                );
+                await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
             }
             return responseEvent;
         }
@@ -611,7 +611,7 @@ export class AgentExecutor {
             "outstanding.completed_delegations": finalOutstandingWork.details.completedDelegations,
         });
 
-        let responseEvent: NDKEvent | undefined;
+        let responseEvent: PublishedMessageRef | undefined;
 
         if (finalOutstandingWork.hasWork) {
             // If there's outstanding work, publish as conversation (not completion)
@@ -638,10 +638,7 @@ export class AgentExecutor {
         }
 
         if (responseEvent) {
-            await ConversationStore.addEnvelope(
-                context.conversationId,
-                new NostrInboundAdapter().toEnvelope(responseEvent)
-            );
+            await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
 
             trace.getActiveSpan()?.addEvent("executor.published", {
                 "event.id": responseEvent.id || "",

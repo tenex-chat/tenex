@@ -22,6 +22,17 @@ function fallbackPrincipalFromTriggeringEnvelope(
     };
 }
 
+function clonePrincipal(principal: PrincipalRef): PrincipalRef {
+    return {
+        id: principal.id,
+        transport: principal.transport,
+        linkedPubkey: principal.linkedPubkey,
+        displayName: principal.displayName,
+        username: principal.username,
+        kind: principal.kind,
+    };
+}
+
 function findMostRecentPrincipalByPubkey(
     conversationStore: ConversationStore,
     pubkey: string
@@ -125,6 +136,10 @@ export function resolveCompletionRecipientPrincipal(
         const origin = delegationChain[0];
 
         if (triggeringEnvelope.principal.linkedPubkey !== origin.pubkey) {
+            if (immediateDelegator.principal) {
+                return clonePrincipal(immediateDelegator.principal);
+            }
+
             const storedPrincipal = findMostRecentPrincipalByPubkey(
                 conversationStore,
                 immediateDelegator.pubkey

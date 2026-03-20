@@ -1,4 +1,7 @@
-import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { isAgentPublishError } from "@/nostr/AgentPublishError";
@@ -17,7 +20,6 @@ import type {
 import { PendingDelegationsRegistry } from "@/services/ral";
 import { withActiveTraceLogFields } from "@/telemetry/TelegramTelemetry";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
 import { renderTelegramToolPublication } from "@/services/telegram/telegram-runtime-tool-publications";
@@ -34,7 +36,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         this.nostrPublisher = new AgentPublisher(agent);
     }
 
-    async complete(intent: CompletionIntent, context: EventContext): Promise<NDKEvent | undefined> {
+    async complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined> {
         try {
             const event = await this.nostrPublisher.complete(intent, context);
             trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
@@ -57,7 +59,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         }
     }
 
-    async conversation(intent: ConversationIntent, context: EventContext): Promise<NDKEvent> {
+    async conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef> {
         try {
             const event = await this.nostrPublisher.conversation(intent, context);
             trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
@@ -84,7 +86,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.nostrPublisher.delegate(config, context);
     }
 
-    async ask(config: AskConfig, context: EventContext): Promise<NDKEvent> {
+    async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         const content = `${config.title}\n\n${config.context}`;
         try {
             const event = await this.nostrPublisher.ask(config, context);
@@ -116,7 +118,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.nostrPublisher.delegateFollowup(params, context);
     }
 
-    async error(intent: ErrorIntent, context: EventContext): Promise<NDKEvent> {
+    async error(intent: ErrorIntent, context: EventContext): Promise<PublishedMessageRef> {
         try {
             const event = await this.nostrPublisher.error(intent, context);
             trace.getActiveSpan()?.addEvent("telegram.runtime_published", {
@@ -139,11 +141,11 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         }
     }
 
-    async lesson(intent: LessonIntent, context: EventContext): Promise<NDKEvent> {
+    async lesson(intent: LessonIntent, context: EventContext): Promise<PublishedMessageRef> {
         return this.nostrPublisher.lesson(intent, context);
     }
 
-    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<NDKEvent> {
+    async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
         const telegramContent = renderTelegramToolPublication(intent);
 
         try {
@@ -179,7 +181,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         return this.nostrPublisher.streamTextDelta(intent, context);
     }
 
-    async delegationMarker(intent: DelegationMarkerIntent): Promise<NDKEvent> {
+    async delegationMarker(intent: DelegationMarkerIntent): Promise<PublishedMessageRef> {
         return this.nostrPublisher.delegationMarker(intent);
     }
 
@@ -222,7 +224,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
         context: EventContext,
         content: string,
         reason: TelegramPublishReason
-    ): Promise<NDKEvent | undefined> {
+    ): Promise<PublishedMessageRef | undefined> {
         if (!isAgentPublishError(error)) {
             return undefined;
         }

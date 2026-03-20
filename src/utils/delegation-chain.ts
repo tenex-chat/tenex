@@ -30,13 +30,50 @@
  */
 
 import { ConversationStore } from "@/conversations/ConversationStore";
-import type { DelegationChainEntry } from "@/conversations/types";
+import type { DelegationChainEntry, PrincipalSnapshot } from "@/conversations/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { getPubkeyService } from "@/services/PubkeyService";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import { shortenConversationId } from "@/utils/conversation-id";
+
+function clonePrincipalSnapshot(
+    principal: PrincipalSnapshot | undefined
+): PrincipalSnapshot | undefined {
+    if (!principal) {
+        return undefined;
+    }
+
+    return {
+        id: principal.id,
+        transport: principal.transport,
+        linkedPubkey: principal.linkedPubkey,
+        displayName: principal.displayName,
+        username: principal.username,
+        kind: principal.kind,
+    };
+}
+
+function toPrincipalSnapshot(params: {
+    pubkey: string;
+    displayName: string;
+    isUser: boolean;
+    principal?: PrincipalSnapshot;
+}): PrincipalSnapshot {
+    const existing = clonePrincipalSnapshot(params.principal);
+    if (existing) {
+        return existing;
+    }
+
+    return {
+        id: `nostr:${params.pubkey}`,
+        transport: "nostr",
+        linkedPubkey: params.pubkey,
+        displayName: params.displayName,
+        kind: params.isUser ? "human" : "agent",
+    };
+}
 
 /**
  * Build a delegation chain from a triggering event.
@@ -130,6 +167,7 @@ export function buildDelegationChain(
         displayName: string;
         isUser: boolean;
         delegatedToInConvId?: string; // The conversation where this agent received delegation
+        principal?: PrincipalSnapshot;
     }
     const collectedAncestors: CollectedEntry[] = [];
 
@@ -164,7 +202,15 @@ export function buildDelegationChain(
             for (const entry of parentChain) {
                 if (!seenPubkeys.has(entry.pubkey)) {
                     seenPubkeys.add(entry.pubkey);
-                    chain.push({ ...entry });
+                    chain.push({
+                        ...entry,
+                        principal: toPrincipalSnapshot({
+                            pubkey: entry.pubkey,
+                            displayName: entry.displayName,
+                            isUser: entry.isUser,
+                            principal: entry.principal,
+                        }),
+                    });
                 }
             }
 
@@ -206,6 +252,7 @@ export function buildDelegationChain(
                 displayName,
                 isUser,
                 delegatedToInConvId: nextParentId, // Where this agent was delegated TO (or undefined for origin)
+                principal: clonePrincipalSnapshot(firstMessage.senderPrincipal),
             });
         }
 
@@ -236,6 +283,12 @@ export function buildDelegationChain(
                 displayName: ancestor.displayName,
                 isUser: ancestor.isUser,
                 conversationId: ancestor.delegatedToInConvId, // Store full ID
+                principal: toPrincipalSnapshot({
+                    pubkey: ancestor.pubkey,
+                    displayName: ancestor.displayName,
+                    isUser: ancestor.isUser,
+                    principal: ancestor.principal,
+                }),
             });
         }
     }
@@ -258,6 +311,12 @@ export function buildDelegationChain(
             displayName,
             isUser,
             conversationId: delegatorConvId, // Store full ID
+            principal: toPrincipalSnapshot({
+                pubkey: senderPubkey,
+                displayName,
+                isUser,
+                principal: envelope.principal,
+            }),
         });
     }
 
@@ -273,6 +332,11 @@ export function buildDelegationChain(
             displayName: currentAgentInfo.displayName,
             isUser: false,
             conversationId: currentConversationId,
+            principal: toPrincipalSnapshot({
+                pubkey: currentAgentPubkey,
+                displayName: currentAgentInfo.displayName,
+                isUser: false,
+            }),
         });
     }
 

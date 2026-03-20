@@ -1,14 +1,14 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { PublishedMessageRef } from "@/events/runtime/AgentRuntimePublisher";
 
 interface AgentPublishErrorOptions {
     cause?: unknown;
-    event: NDKEvent;
+    event: PublishedMessageRef;
     eventType: string;
 }
 
 export class AgentPublishError extends Error {
     readonly cause?: unknown;
-    readonly event: NDKEvent;
+    readonly event: PublishedMessageRef;
     readonly eventType: string;
 
     constructor(message: string, options: AgentPublishErrorOptions) {
@@ -30,14 +30,14 @@ export function isAgentPublishError(error: unknown): error is AgentPublishError 
     }
 
     const candidate = error as {
-        event?: { content?: unknown; tags?: unknown; rawEvent?: unknown };
+        event?: { id?: unknown; transport?: unknown };
         eventType?: unknown;
     };
 
     return Boolean(
         candidate.event &&
         typeof candidate.eventType === "string" &&
-        typeof candidate.event.content === "string" &&
-        Array.isArray(candidate.event.tags)
+        typeof candidate.event.id === "string" &&
+        typeof candidate.event.transport === "string"
     );
 }

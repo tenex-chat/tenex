@@ -108,6 +108,8 @@ export interface DelegationChainEntry {
     isUser: boolean;
     /** The conversation ID where this delegation occurred (full ID, truncated only at display time) */
     conversationId?: string;
+    /** Optional transport-aware principal snapshot for routing/persistence fidelity. */
+    principal?: PrincipalSnapshot;
 }
 
 export interface ConversationMetadata {
