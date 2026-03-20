@@ -10,7 +10,6 @@ import {
     ScratchpadStrategy,
     SummarizationStrategy,
     SystemPromptCachingStrategy,
-    ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
     type ContextManagementRequestContext,
@@ -19,25 +18,21 @@ import {
     type ContextManagementStrategyExecution,
     type ContextManagementStrategyState,
     type ContextManagementTelemetryEvent,
-    type DecayedToolContext,
     type PromptTokenEstimator,
 } from "ai-sdk-context-management";
 import { createSystemReminderSink } from "ai-sdk-system-reminders";
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
 import { config as configService } from "@/services/ConfigService";
 import { isOnlyToolMode, type NudgeToolPermissions } from "@/services/nudge";
-import { isFullEventId, shortenEventId } from "@/types/event-ids";
 import type { AISdkTool } from "@/tools/types";
 
-const DEFAULT_WORKING_TOKEN_BUDGET = 40000;
+const DEFAULT_WORKING_TOKEN_BUDGET = 72000;
 const DEFAULT_WARNING_THRESHOLD_PERCENT = 70;
 const DEFAULT_SUMMARIZATION_THRESHOLD_PERCENT = 90;
 const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
-const MAX_DESCRIPTION_LENGTH = 120;
 const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
 
 interface ContextManagementSettings {
@@ -50,33 +45,6 @@ interface ContextManagementSettings {
     utilizationWarningThresholdPercent: number;
     summarizationFallbackEnabled: boolean;
     summarizationFallbackThresholdPercent: number;
-}
-
-function sanitizeDescription(raw: string): string {
-    // eslint-disable-next-line no-control-regex
-    const cleaned = raw.replace(/[\x00-\x1f\x7f"[\]]/g, "").trim();
-    return cleaned.length <= MAX_DESCRIPTION_LENGTH
-        ? cleaned
-        : cleaned.slice(0, MAX_DESCRIPTION_LENGTH);
-}
-
-function buildDecayPlaceholder(
-    context: DecayedToolContext,
-    toolCallEventIdMap: Map<string, string>,
-): string {
-    const desc = typeof (context.input as Record<string, unknown>)?.description === "string"
-        ? sanitizeDescription((context.input as Record<string, unknown>).description as string)
-        : undefined;
-    const eventId = toolCallEventIdMap.get(context.toolCallId);
-    const rawId = eventId ?? context.toolCallId;
-    const id = isFullEventId(rawId) ? shortenEventId(rawId) : rawId;
-    const descPart = desc ? ` -- "${desc}"` : "";
-
-    if (context.action === "placeholder") {
-        return `[${context.toolName} was used, id: ${id}${descPart} -- use fs_read(tool: "${id}") to retrieve]`;
-    }
-
-    return `[truncated, use fs_read(tool: "${id}") for full result]\n`;
 }
 
 export interface ExecutionContextManagement {
@@ -599,60 +567,7 @@ function buildSystemPromptCachingSummary(
     );
 }
 
-function buildToolResultDecaySummary(
-    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
-    strategyPayload: Record<string, unknown> | undefined
-): string {
-    const currentPromptTokens = getNumber(strategyPayload, "currentPromptTokens");
-    const toolContextTokens = getNumber(strategyPayload, "toolContextTokens");
-    const forecastToolContextTokens = getNumber(strategyPayload, "forecastToolContextTokens");
-    const warningForecastExtraTokens = getNumber(strategyPayload, "warningForecastExtraTokens");
-    const truncatedCount = getNumber(strategyPayload, "truncatedCount") ?? 0;
-    const placeholderCount = getNumber(strategyPayload, "placeholderCount") ?? 0;
-    const inputTruncatedCount = getNumber(strategyPayload, "inputTruncatedCount") ?? 0;
-    const inputPlaceholderCount = getNumber(strategyPayload, "inputPlaceholderCount") ?? 0;
-    const tokensSaved = Math.max(0, event.estimatedTokensBefore - event.estimatedTokensAfter);
 
-    if (event.reason === "below-token-threshold") {
-        return clipTelemetrySummary(
-            `Skipped tool-result decay because the prompt is within budget at ~${formatTelemetryNumber(currentPromptTokens ?? event.estimatedTokensBefore)} tokens.`
-        );
-    }
-
-    if (event.reason === "no-tool-exchanges") {
-        return "Skipped tool-result decay because there were no tool exchanges to compress.";
-    }
-
-    const parts: string[] = [];
-    if (truncatedCount > 0) {
-        parts.push(`truncated ${formatCount(truncatedCount, "tool result")}`);
-    }
-    if (placeholderCount > 0) {
-        parts.push(`replaced ${formatCount(placeholderCount, "older tool result")} with placeholders`);
-    }
-    if (inputTruncatedCount > 0) {
-        parts.push(`truncated ${formatCount(inputTruncatedCount, "tool input")}`);
-    }
-    if (inputPlaceholderCount > 0) {
-        parts.push(`omitted ${formatCount(inputPlaceholderCount, "tool input")}`);
-    }
-
-    if (parts.length === 0) {
-        parts.push("compressed stale tool results");
-    }
-
-    const warningCount = getNumber(strategyPayload, "warningCount") ?? 0;
-    const warningSuffix = warningCount > 0
-        ? `, warned about ${formatCount(warningCount, "at-risk result")}${warningForecastExtraTokens !== undefined ? ` under a +${formatTelemetryNumber(warningForecastExtraTokens)} tool-token forecast` : ""}`
-        : "";
-    const toolContextSuffix = toolContextTokens !== undefined
-        ? ` at ~${formatTelemetryNumber(toolContextTokens)} tool-context tokens${forecastToolContextTokens !== undefined ? ` (forecast ~${formatTelemetryNumber(forecastToolContextTokens)})` : ""}`
-        : "";
-
-    return clipTelemetrySummary(
-        `${parts.join(" and ")}${toolContextSuffix}, saving ~${formatTelemetryNumber(tokensSaved)} tokens (${formatTelemetryNumber(event.estimatedTokensBefore)} -> ${formatTelemetryNumber(event.estimatedTokensAfter)})${warningSuffix}.`
-    );
-}
 
 function buildScratchpadSummary(
     event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
@@ -808,8 +723,6 @@ function buildStrategyCompleteSummary(
     switch (event.strategyName) {
         case "system-prompt-caching":
             return buildSystemPromptCachingSummary(event, strategyPayload);
-        case "tool-result-decay":
-            return buildToolResultDecaySummary(event, strategyPayload);
         case "scratchpad":
             return buildScratchpadSummary(event, strategyPayload);
         case "context-utilization-reminder":
@@ -908,68 +821,6 @@ function buildDerivedTelemetryAttributes(
                         attributes,
                         "context_management.tagged_system_message_count",
                         getNumber(strategyPayload, "taggedSystemMessageCount")
-                    );
-                    break;
-                case "tool-result-decay":
-                    addAttribute(
-                        attributes,
-                        "context_management.current_prompt_tokens",
-                        getNumber(strategyPayload, "currentPromptTokens")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.tool_context_tokens",
-                        getNumber(strategyPayload, "toolContextTokens")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.forecast_tool_context_tokens",
-                        getNumber(strategyPayload, "forecastToolContextTokens")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.warning_forecast_extra_tokens",
-                        getNumber(strategyPayload, "warningForecastExtraTokens")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.depth_factor",
-                        getNumber(strategyPayload, "depthFactor")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.forecast_depth_factor",
-                        getNumber(strategyPayload, "forecastDepthFactor")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.truncated_tool_result_count",
-                        getNumber(strategyPayload, "truncatedCount")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.placeholder_tool_result_count",
-                        getNumber(strategyPayload, "placeholderCount")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.truncated_tool_input_count",
-                        getNumber(strategyPayload, "inputTruncatedCount")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.placeholder_tool_input_count",
-                        getNumber(strategyPayload, "inputPlaceholderCount")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.total_tool_exchanges",
-                        getNumber(strategyPayload, "totalToolExchanges")
-                    );
-                    addAttribute(
-                        attributes,
-                        "context_management.warning_count",
-                        getNumber(strategyPayload, "warningCount")
                     );
                     break;
                 case "scratchpad": {
@@ -1389,15 +1240,6 @@ function createConversationContextManagementRuntime(options: {
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
-        new ToolResultDecayStrategy({
-            estimator: requestEstimator,
-            placeholder: (context) => {
-                const toolCallEventIdMap = resolveToolCallEventIdMap(
-                    options.conversationStore.getAllMessages()
-                );
-                return buildDecayPlaceholder(context, toolCallEventIdMap);
-            },
-        }),
     ];
 
     const summarizationModel = createSummarizationModel({
