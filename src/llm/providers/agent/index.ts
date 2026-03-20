@@ -6,3 +6,5 @@
 
 export { CodexProvider } from "./CodexProvider";
 export { CodexToolsAdapter } from "./CodexToolsAdapter";
+export { ClaudeProvider } from "./ClaudeProvider";
+export { ClaudeToolsAdapter } from "./ClaudeToolsAdapter";

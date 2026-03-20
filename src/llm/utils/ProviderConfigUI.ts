@@ -21,6 +21,7 @@ export class ProviderConfigUI {
             [PROVIDER_IDS.ANTHROPIC]: "Anthropic (Claude)",
             [PROVIDER_IDS.OPENAI]: "OpenAI (GPT)",
             [PROVIDER_IDS.OLLAMA]: "Ollama (Local models)",
+            [PROVIDER_IDS.CLAUDE]: "Claude Code",
             [PROVIDER_IDS.CODEX]: "Codex",
         };
         return names[provider] || provider;

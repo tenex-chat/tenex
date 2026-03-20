@@ -28,6 +28,7 @@ export const AI_SDK_PROVIDERS = [
     PROVIDER_IDS.ANTHROPIC,
     PROVIDER_IDS.OPENAI,
     PROVIDER_IDS.OLLAMA,
+    PROVIDER_IDS.CLAUDE,
     PROVIDER_IDS.CODEX,
 ] as const;
 export type AISdkProvider = (typeof AI_SDK_PROVIDERS)[number];

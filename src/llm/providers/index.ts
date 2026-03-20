@@ -47,7 +47,7 @@ export {
 } from "./standard";
 
 // Export agent providers
-export { CodexProvider } from "./agent";
+export { CodexProvider, ClaudeProvider } from "./agent";
 
 // Import for registration
 import type { ProviderRegistration } from "./types";
@@ -56,6 +56,7 @@ import { AnthropicProvider } from "./standard/AnthropicProvider";
 import { OpenAIProvider } from "./standard/OpenAIProvider";
 import { OllamaProvider } from "./standard/OllamaProvider";
 import { CodexProvider } from "./agent/CodexProvider";
+import { ClaudeProvider } from "./agent/ClaudeProvider";
 import { providerRegistry } from "./registry";
 
 /**
@@ -86,6 +87,10 @@ export const ALL_PROVIDER_REGISTRATIONS: ProviderRegistration[] = [
     {
         Provider: CodexProvider,
         metadata: CodexProvider.METADATA,
+    },
+    {
+        Provider: ClaudeProvider,
+        metadata: ClaudeProvider.METADATA,
     },
 ];
 

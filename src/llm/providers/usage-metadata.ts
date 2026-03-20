@@ -9,6 +9,7 @@ import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "../types";
 import { PROVIDER_IDS } from "./provider-ids";
 import { OpenRouterProvider } from "./standard/OpenRouterProvider";
 import { CodexProvider } from "./agent/CodexProvider";
+import { ClaudeProvider } from "./agent/ClaudeProvider";
 
 /**
  * AI SDK usage with optional extended fields (for standard providers)
@@ -58,6 +59,8 @@ export function extractUsageMetadata(
     switch (provider) {
         case PROVIDER_IDS.OPENROUTER:
             return OpenRouterProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
+        case PROVIDER_IDS.CLAUDE:
+            return ClaudeProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
         case PROVIDER_IDS.CODEX:
             return CodexProvider.extractUsageMetadata(model, totalUsage, providerMetadata);
         default:
@@ -70,6 +73,8 @@ export function extractLLMMetadata(
     providerMetadata: Record<string, unknown> | undefined
 ): LLMMetadata | undefined {
     switch (provider) {
+        case PROVIDER_IDS.CLAUDE:
+            return ClaudeProvider.extractMetadata(providerMetadata);
         case PROVIDER_IDS.CODEX:
             return CodexProvider.extractMetadata(providerMetadata);
         default:
