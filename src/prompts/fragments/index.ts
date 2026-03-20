@@ -23,6 +23,7 @@ import "./10-referenced-article";
 import { availableAgentsFragment } from "./15-available-agents";
 import { stayInYourLaneFragment } from "./16-stay-in-your-lane";
 import { TodoUsageFragment } from "./17-todo-before-delegation";
+import { noResponseGuidanceFragment } from "./18-no-response-guidance";
 // 20-voice-mode doesn't export the fragment, it's registered inline
 import "./20-voice-mode";
 import { nudgesFragment } from "./11-nudges";
@@ -38,6 +39,7 @@ import { ragCollectionsFragment } from "./29-rag-collections";
 import { worktreeContextFragment } from "./30-worktree-context";
 import { agentsMdGuidanceFragment } from "./31-agents-md-guidance";
 import { environmentContextFragment } from "./32-environment-context";
+import { telegramChatContextFragment } from "./33-telegram-chat-context";
 import { debugModeFragment } from "./debug-mode";
 import { delegationCompletionFragment } from "./delegation-completion";
 
@@ -67,6 +69,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(availableAgentsFragment);
     fragmentRegistry.register(stayInYourLaneFragment);
     fragmentRegistry.register(TodoUsageFragment);
+    fragmentRegistry.register(noResponseGuidanceFragment);
 
     // Behavioral guidance
     // voice-mode and referenced-article are registered via side effects
@@ -87,6 +90,7 @@ export function registerAllFragments(): void {
     fragmentRegistry.register(worktreeContextFragment);
     fragmentRegistry.register(agentsMdGuidanceFragment);
     fragmentRegistry.register(environmentContextFragment);
+    fragmentRegistry.register(telegramChatContextFragment);
 }
 
 // Auto-register all fragments on import

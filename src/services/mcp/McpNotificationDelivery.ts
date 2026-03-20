@@ -113,9 +113,9 @@ export async function deliverMcpNotification(
             projectBinding: subscription.projectId,
         },
         message: {
-            id: `mcp:notification:${subscription.id}:${notificationTimestamp}`,
+            id: `mcp:${subscription.rootEventId}`,
             transport: "mcp",
-            nativeId: `mcp-notification:${subscription.id}:${notificationTimestamp}`,
+            nativeId: subscription.rootEventId,
         },
         recipients: [
             {

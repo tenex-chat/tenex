@@ -31,6 +31,7 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     "rag_subscription_delete", // All agents should be able to delete RAG subscriptions
     // Process control
     "kill", // All agents should be able to terminate processes
+    "no_response", // All agents can explicitly complete a turn without replying when the user asks for silence
     // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)
     "mcp_resource_read", // All agents can read MCP resources from servers they have tools for
     "mcp_subscribe", // All agents can subscribe to MCP resource notifications

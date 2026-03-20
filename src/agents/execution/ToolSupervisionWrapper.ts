@@ -70,6 +70,7 @@ export function wrapToolsWithSupervision(
                         agent: context.agent,
                         project: projectContext.project,
                         conversation,
+                        triggeringEnvelope: context.triggeringEnvelope,
                         projectBasePath: context.projectBasePath,
                         workingDirectory: context.workingDirectory,
                         currentBranch: context.currentBranch,

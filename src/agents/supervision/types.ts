@@ -85,6 +85,8 @@ export interface PostCompletionContext {
     agentSlug: string;
     /** Agent's Nostr public key */
     agentPubkey: string;
+    /** Whether the agent explicitly requested silent completion for this RAL */
+    silentCompletionRequested?: boolean;
     /** The final message content from the agent */
     messageContent: string;
     /** Names of tools that were called during execution */

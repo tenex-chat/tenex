@@ -1,16 +1,22 @@
-import type { InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
+import type {
+    InboundEnvelope,
+    PrincipalRef,
+    TelegramTransportMetadata,
+} from "@/events/runtime/InboundEnvelope";
 import { getIdentityBindingStore } from "@/services/identity";
 import {
     createTelegramChannelId,
     createTelegramNativeMessageId,
 } from "@/services/telegram/telegram-identifiers";
 import type {
+    TelegramBotIdentity,
     TelegramGatewayBinding,
     TelegramInboundEnvelopeResult,
     TelegramMessage,
     TelegramUpdate,
 } from "@/services/telegram/types";
 import { NDKKind } from "@/nostr/kinds";
+import { buildTelegramTransportMetadata } from "@/telemetry/TelegramTelemetry";
 
 function normalizeMessage(update: TelegramUpdate): TelegramMessage | undefined {
     return update.message ?? update.edited_message;
@@ -42,6 +48,8 @@ export class TelegramInboundAdapter {
         binding: TelegramGatewayBinding;
         projectBinding: string;
         replyToNativeMessageId?: string;
+        botIdentity?: TelegramBotIdentity;
+        transportMetadata?: TelegramTransportMetadata;
     }): TelegramInboundEnvelopeResult {
         const message = normalizeMessage(params.update);
         if (!message?.from) {
@@ -54,6 +62,11 @@ export class TelegramInboundAdapter {
         if (!content) {
             throw new Error("Telegram update does not contain textual content");
         }
+        const transportMetadata = params.transportMetadata ??
+            buildTelegramTransportMetadata(
+                params.update,
+                params.botIdentity
+            );
 
         const envelope: InboundEnvelope = {
             transport: "telegram",
@@ -93,6 +106,7 @@ export class TelegramInboundAdapter {
             metadata: {
                 eventKind: NDKKind.Text,
                 eventTagCount: 4,
+                transport: transportMetadata ? { telegram: transportMetadata } : undefined,
             },
         };
 

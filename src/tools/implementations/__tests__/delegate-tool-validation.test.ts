@@ -597,6 +597,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             triggeringEnvelope: createTriggeringEnvelope(),
             agentPublisher: {
                 delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
+                delegationMarker: async () => ({ id: "mock-marker-id" }),
             } as any,
             ralNumber,
             projectBasePath: "/tmp/test",
@@ -639,6 +640,8 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         // Update the spy mock for this specific test
         conversationStoreSpy.mockReturnValue({
             metadata: { delegationChain },
+            addDelegationMarker: () => {},
+            save: async () => {},
         } as any);
 
         const delegateTool = createDelegateTool(context);
@@ -677,6 +680,8 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         // Update the spy mock for this specific test
         conversationStoreSpy.mockReturnValue({
             metadata: { delegationChain },
+            addDelegationMarker: () => {},
+            save: async () => {},
         } as any);
 
         const delegateTool = createDelegateTool(context);
@@ -712,6 +717,8 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         // Update the spy mock for this specific test
         conversationStoreSpy.mockReturnValue({
             metadata: { delegationChain },
+            addDelegationMarker: () => {},
+            save: async () => {},
         } as any);
 
         const delegateTool = createDelegateTool(context);
@@ -746,6 +753,8 @@ describe("Delegation tools - Circular delegation soft warning", () => {
         // Update the spy mock for this specific test
         conversationStoreSpy.mockReturnValue({
             metadata: { delegationChain },
+            addDelegationMarker: () => {},
+            save: async () => {},
         } as any);
 
         const delegateTool = createDelegateTool(context);

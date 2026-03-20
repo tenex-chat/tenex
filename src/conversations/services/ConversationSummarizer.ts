@@ -1,4 +1,5 @@
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import { getConversationRecordAuthorPubkey } from "@/conversations/record-author";
 import { CategoryManager } from "@/conversations/services";
 import { NDKEventMetadata } from "@/events/NDKEventMetadata";
 import { llmServiceFactory } from "@/llm";
@@ -65,7 +66,7 @@ export class ConversationSummarizer {
                     textMessages.map(async (entry) => {
                         const name = await identityService.getDisplayName({
                             principalId: entry.senderPrincipal?.id,
-                            linkedPubkey: entry.senderPrincipal?.linkedPubkey ?? entry.senderPubkey ?? entry.pubkey,
+                            linkedPubkey: getConversationRecordAuthorPubkey(entry),
                             displayName: entry.senderPrincipal?.displayName,
                             username: entry.senderPrincipal?.username,
                             kind: entry.senderPrincipal?.kind,

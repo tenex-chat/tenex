@@ -74,6 +74,7 @@ export class AgentDispatchService {
 
     async dispatch(envelope: InboundEnvelope, context: DispatchContext): Promise<void> {
         const senderId = envelope.principal.linkedPubkey ?? envelope.principal.id;
+        const telegramMetadata = envelope.metadata.transport?.telegram;
         const span = tracer.startSpan(
             "tenex.dispatch.chat_message",
             {
@@ -82,6 +83,12 @@ export class AgentDispatchService {
                     "event.pubkey": senderId,
                     "event.kind": envelope.metadata.eventKind ?? 0,
                     "event.content_length": envelope.content.length,
+                    "runtime.transport": envelope.transport,
+                    "telegram.update.id": telegramMetadata?.updateId ?? 0,
+                    "telegram.chat.id": telegramMetadata?.chatId ?? "",
+                    "telegram.message.id": telegramMetadata?.messageId ?? "",
+                    "telegram.chat.thread_id": telegramMetadata?.threadId ?? "",
+                    "telegram.sender.id": telegramMetadata?.senderUserId ?? "",
                 },
             },
             getSafeContext()
@@ -127,7 +134,11 @@ export class AgentDispatchService {
         const principalContext = this.toMessagePrincipalContext(envelope);
         const senderId = envelope.principal.linkedPubkey ?? envelope.principal.id;
 
-        const directedToSystem = isDirectedToSystem(envelope, projectCtx.agents);
+        const directedToSystem = isDirectedToSystem(
+            envelope,
+            projectCtx.agents,
+            projectCtx.projectManager?.pubkey
+        );
         const authoredByAgent = isFromAgent(envelope, projectCtx.agents);
 
         span.setAttributes({
