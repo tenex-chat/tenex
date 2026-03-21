@@ -49,23 +49,6 @@ export interface AgentProjectConfig {
 }
 
 /**
- * Project-scoped configuration for an agent (legacy schema).
- * Used by agents written before the new `default`/`projectOverrides` schema.
- *
- * @deprecated Prefer `AgentProjectConfig` with `projectOverrides` field.
- */
-export interface ProjectScopedConfig {
-    /** Project-scoped LLM configuration string. */
-    llmConfig?: string;
-    /** Project-scoped tools list. */
-    tools?: string[];
-    /** Project-scoped Telegram transport configuration. */
-    telegram?: TelegramAgentConfig;
-    /** Project-scoped PM designation. */
-    isPM?: boolean;
-}
-
-/**
  * Agent data stored in JSON files (.tenex/agents/*.json).
  */
 export interface StoredAgentData {
@@ -107,21 +90,11 @@ export interface StoredAgentData {
      */
     definitionCreatedAt?: number;
 
-    /**
-     * Legacy top-level LLM config field.
-     * @deprecated Use `default.model` instead.
-     */
+    /** Top-level LLM config field. Resolved via ConfigResolver alongside `default.model`. */
     llmConfig?: string;
-
-    /**
-     * Legacy top-level tools field.
-     * @deprecated Use `default.tools` instead.
-     */
+    /** Top-level tools field. Resolved via ConfigResolver alongside `default.tools`. */
     tools?: string[];
-    /**
-     * Legacy top-level Telegram transport configuration.
-     * @deprecated Use `default.telegram` instead.
-     */
+    /** Top-level Telegram transport configuration. Resolved via ConfigResolver alongside `default.telegram`. */
     telegram?: TelegramAgentConfig;
 
     /**
@@ -141,11 +114,6 @@ export interface StoredAgentData {
      */
     projectOverrides?: Record<string, AgentProjectConfig>;
 
-    /**
-     * Legacy project-scoped configurations (old schema).
-     * @deprecated Use `projectOverrides` instead.
-     */
-    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**

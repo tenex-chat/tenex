@@ -19,7 +19,7 @@
  * @example
  * const resolver = new ConfigResolver({
  *   defaultConfig: { model: 'modelA', tools: ['tool1', 'tool2'] },
- *   projectConfigs: {
+ *   projectOverrides: {
  *     projectA: { model: 'modelB', tools: ['-tool1', '+tool4'] },
  *     projectB: { tools: ['+tool5'] }
  *   }

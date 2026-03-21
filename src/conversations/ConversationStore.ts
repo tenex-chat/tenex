@@ -97,11 +97,11 @@ function normalizeContextManagementScratchpadState(
         return undefined;
     }
 
-    const legacyNotes = typeof state.notes === "string" ? state.notes.trim() : "";
+    const rawNotes = typeof state.notes === "string" ? state.notes.trim() : "";
     const entries = normalizeScratchpadEntries({
         ...(state.entries ?? {}),
-        ...(legacyNotes.length > 0 && state.entries?.notes === undefined
-            ? { notes: legacyNotes }
+        ...(rawNotes.length > 0 && state.entries?.notes === undefined
+            ? { notes: rawNotes }
             : {}),
     });
     const keepLastMessages = typeof state.keepLastMessages === "number"

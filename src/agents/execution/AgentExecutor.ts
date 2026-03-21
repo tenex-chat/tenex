@@ -109,10 +109,14 @@ export class AgentExecutor {
             projectBasePath: projectPath || "",
             workingDirectory: projectPath || "",
             currentBranch: "main",
-            agentPublisher: {} as AgentRuntimePublisher,
+            agentPublisher: new Proxy({} as AgentRuntimePublisher, {
+                get: (_, prop) => { throw new Error(`agentPublisher.${String(prop)} called in schema-only context`); },
+            }),
             ralNumber: 0,
-            conversationStore: {} as ConversationStore,
-            getConversation: () => ({} as ConversationStore),
+            conversationStore: new Proxy({} as ConversationStore, {
+                get: (_, prop) => { throw new Error(`conversationStore.${String(prop)} called in schema-only context`); },
+            }),
+            getConversation: () => { throw new Error("getConversation() called in schema-only context"); },
         };
 
         const messages: ModelMessage[] = conversationHistory.length > 0

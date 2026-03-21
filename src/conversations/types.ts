@@ -78,14 +78,13 @@ export interface ConversationRecord extends ConversationRecordFields {
 }
 
 /**
- * Transitional input shape accepted by write paths while legacy callers migrate to
- * explicit ConversationRecord creation.
+ * Input shape for write paths where the caller may not yet have an id assigned.
  */
 export interface ConversationRecordInput extends ConversationRecordFields {
     id?: string;
 }
 
-/** @deprecated Use ConversationRecord for canonical stored records. */
+/** Alias for ConversationRecordInput used by write paths that accept optional id. */
 export type ConversationEntry = ConversationRecordInput;
 
 export interface Injection {
@@ -137,7 +136,7 @@ export interface ConversationMetadata {
 
 export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
-    /** @deprecated Legacy field normalized into entries.notes on load/save. */
+    /** Raw notes field normalized into entries.notes on load/save. */
     notes?: string;
     keepLastMessages?: number | null;
     omitToolCallIds: string[];

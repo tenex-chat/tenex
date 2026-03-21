@@ -1,4 +1,4 @@
-export type RuntimeTransport = "local" | "nostr" | "telegram" | (string & {});
+export type RuntimeTransport = "local" | "mcp" | "nostr" | "telegram";
 
 export interface TelegramChatAdministratorMetadata {
     userId: string;

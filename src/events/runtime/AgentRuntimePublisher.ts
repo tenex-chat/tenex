@@ -20,11 +20,11 @@ export interface PublishedMessageRef {
 }
 
 /**
- * Phase-1 transport-neutral publishing contract for the conversation/runtime plane.
+ * Transport-neutral publishing contract for the conversation/runtime plane.
  *
- * This contract deliberately preserves the current runtime message intents and event
- * context while removing the executor/tool layers' dependency on the concrete
- * `AgentPublisher` implementation. The wire format is still Nostr-shaped for now.
+ * This contract preserves the current runtime message intents and event context
+ * while removing the executor/tool layers' dependency on the concrete
+ * `AgentPublisher` implementation.
  */
 export interface AgentRuntimePublisher {
     complete(intent: CompletionIntent, context: EventContext): Promise<PublishedMessageRef | undefined>;

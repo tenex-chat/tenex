@@ -66,7 +66,7 @@ export class LocalInboundAdapter {
             content: payload.content,
             occurredAt: payload.occurredAt ?? Math.floor(Date.now() / 1000),
             capabilities: payload.capabilities ?? [
-                "local-test-gateway",
+                "local-gateway",
                 "project-routing",
                 "linked-nostr-identity",
             ],

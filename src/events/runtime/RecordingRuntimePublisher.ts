@@ -299,16 +299,10 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
             ]
         );
 
-        this.collector.push({
-            agentSlug: this.agent.slug,
-            conversationId: intent.parentConversationId,
-            eventId: event.id,
-            intent: "delegationMarker",
-            payload: {
-                delegationConversationId: intent.delegationConversationId,
-                parentConversationId: intent.parentConversationId,
-                status: intent.status,
-            },
+        this.record("delegationMarker", undefined, {
+            delegationConversationId: intent.delegationConversationId,
+            parentConversationId: intent.parentConversationId,
+            status: intent.status,
         });
 
         return event;

@@ -2,7 +2,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type {
     StoredAgentData,
-    ProjectScopedConfig,
     AgentDefaultConfig,
     AgentProjectConfig,
     TelegramAgentConfig,
@@ -56,11 +55,6 @@ export interface StoredAgent extends StoredAgentData {
      */
     status?: "active" | "inactive";
     /**
-     * @deprecated Use pmOverrides instead. Kept for backward compatibility.
-     * Will be migrated to pmOverrides on first save.
-     */
-    isPMOverride?: boolean;
-    /**
      * Project-scoped PM override flags.
      * Key is project dTag, value is true if this agent is PM for that project.
      * Only one agent per project should have this set to true.
@@ -79,12 +73,11 @@ export interface StoredAgent extends StoredAgentData {
      * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
      *
      * ## Priority (highest to lowest)
-     * 1. projectConfigs[projectDTag].* (project-scoped from kind 24020 with a-tag)
+     * 1. projectOverrides[projectDTag].* (project-scoped from kind 24020 with a-tag)
      * 2. Global fields (llmConfig, tools, isPM) (global from kind 24020 without a-tag)
-     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
+     * 3. pmOverrides[projectDTag]
      * 4. Project tag designations (from kind 31933)
      */
-    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**
