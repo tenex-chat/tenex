@@ -17,7 +17,7 @@ This file is the canonical architecture reference for TENEX. Update it the momen
 - **`agent/`**: User-facing subcommands for listing/removing/operating agents. Orchestrates `agents/` runtimes, `services/ConfigService`, and `nostr` publishers; no business logic should remain inside command handlers.
 - **`config/`**: Interactive settings editors for backend and transport configuration. `config/telegram.ts` is the operator-facing UI for per-agent Telegram bot tokens, DM allowlists, and chat/topic bindings backed by `AgentStorage` plus global `whitelistedIdentities`.
 - **`daemon.ts` + `daemon/`**: Starts the long-running orchestrator and UI loop by delegating to `src/daemon`.
-- **`doctor.ts` + `doctor-transport-chat.ts` + `doctor-transport-smoke.ts` + `doctor-telegram-smoke.ts`**: Diagnostics and local runtime harnesses. `doctor transport-smoke` is the branch-safe validation path for transport-neutral ingress plus injected publishers without relays, `doctor transport-chat` is the reusable session harness for exercising the same seams across multiple turns with persisted artifacts and either `local` or `nostr` simulated ingress, and `doctor telegram-smoke` boots a mock Bot API server so the Telegram gateway can be exercised end to end, including first-contact project binding for shared bots across multiple projects, without live relays or a live bot token.
+- **`doctor.ts`**: Diagnostics — agent refetch, orphan detection/purge.
 - **`setup/`**: Guided onboarding flows for LLM and embed providers (ties into `ConfigService` and `llm/LLMServiceFactory`).
 
 ### Agents Runtime (`src/agents`)

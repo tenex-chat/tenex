@@ -1,9 +1,6 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { agentStorage, type StoredAgent } from "@/agents/AgentStorage";
-import { telegramSmokeCommand } from "@/commands/doctor-telegram-smoke";
-import { transportChatCommand } from "@/commands/doctor-transport-chat";
-import { transportSmokeCommand } from "@/commands/doctor-transport-smoke";
 import { NDKAgentDefinition } from "@/events/NDKAgentDefinition";
 import { initNDK, getNDK } from "@/nostr/ndkClient";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -26,10 +23,7 @@ const agentsCommand = new Command("agents")
 
 export const doctorCommand = new Command("doctor")
     .description("Diagnose and repair TENEX state")
-    .addCommand(agentsCommand)
-    .addCommand(telegramSmokeCommand)
-    .addCommand(transportChatCommand)
-    .addCommand(transportSmokeCommand);
+    .addCommand(agentsCommand);
 
 function agentChanged(before: StoredAgent, after: StoredAgent): boolean {
     if (before.name !== after.name) return true;
