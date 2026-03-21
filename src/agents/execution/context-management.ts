@@ -774,13 +774,8 @@ function stripScratchpadReminderFromPrompt(
 function normalizeScratchpadToolInput(
     input: unknown
 ): ScratchpadToolInput {
-    const rawNotes = getString(input, "notes")?.trim();
     const setEntries = normalizeScratchpadEntries(
-        isRecord(input) && isRecord(input.setEntries)
-            ? input.setEntries
-            : rawNotes
-                ? { notes: rawNotes }
-                : undefined
+        isRecord(input) && isRecord(input.setEntries) ? input.setEntries : undefined
     );
     const replaceEntries = normalizeScratchpadEntries(
         isRecord(input) && isRecord(input.replaceEntries) ? input.replaceEntries : undefined

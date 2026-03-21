@@ -25,7 +25,7 @@ import {
     getConversationRecordAuthorPrincipalId,
     getConversationRecordAuthorPubkey,
 } from "../record-author";
-import type { ConversationEntry } from "../types";
+import type { ConversationRecordInput } from "../types";
 import type { ProjectDTag } from "@/types/project-ids";
 
 /** Current index format version */
@@ -164,7 +164,7 @@ export class ConversationIndexManager {
             // Index messages (only text messages with content)
             const indexedMessages: MessageIndexEntry[] = [];
             for (let i = 0; i < messages.length; i++) {
-                const msg = messages[i] as ConversationEntry;
+                const msg = messages[i] as ConversationRecordInput;
                 if (msg.messageType === "text" && msg.content && msg.content.trim().length > 0) {
                     const authorPubkey = getConversationRecordAuthorPubkey(msg);
                     indexedMessages.push({

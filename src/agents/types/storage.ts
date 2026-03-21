@@ -90,13 +90,6 @@ export interface StoredAgentData {
      */
     definitionCreatedAt?: number;
 
-    /** Top-level LLM config field. Resolved via ConfigResolver alongside `default.model`. */
-    llmConfig?: string;
-    /** Top-level tools field. Resolved via ConfigResolver alongside `default.tools`. */
-    tools?: string[];
-    /** Top-level Telegram transport configuration. Resolved via ConfigResolver alongside `default.telegram`. */
-    telegram?: TelegramAgentConfig;
-
     /**
      * Default configuration block.
      * Written by kind 24020 events WITHOUT an a-tag.

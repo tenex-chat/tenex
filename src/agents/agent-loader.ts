@@ -41,7 +41,7 @@ export function createAgentInstance(
     const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent, projectDTag);
     const effectiveLLMConfig = resolvedConfig.model;
     const effectiveTools = resolvedConfig.tools;
-    const effectiveTelegram = resolvedConfig.telegram ?? storedAgent.telegram;
+    const effectiveTelegram = resolvedConfig.telegram;
 
     // Process tools using pure functions
     const normalizedTools = processAgentTools(effectiveTools || [], storedAgent.slug);

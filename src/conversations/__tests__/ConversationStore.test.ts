@@ -20,7 +20,7 @@ import * as pubkeyServiceModule from "@/services/PubkeyService";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import {
     ConversationStore,
-    type ConversationEntry,
+    type ConversationRecordInput,
     type Injection,
 } from "../ConversationStore";
 
@@ -74,7 +74,7 @@ describe("ConversationStore", () => {
     describe("File Operations", () => {
         it("should create conversation file on first save", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
-            const entry: ConversationEntry = {
+            const entry: ConversationRecordInput = {
                 pubkey: USER_PUBKEY,
                 content: "hello",
                 messageType: "text",

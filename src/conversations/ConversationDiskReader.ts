@@ -7,7 +7,7 @@ import { join } from "path";
 import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import { getConversationRecordAuthorPubkey } from "./record-author";
-import type { ConversationEntry } from "./types";
+import type { ConversationRecordInput } from "./types";
 
 /**
  * Read lightweight metadata without loading full conversation store.
@@ -53,7 +53,7 @@ export function readMessagesFromDisk(
     basePath: string,
     projectId: ProjectDTag,
     conversationId: string
-): ConversationEntry[] | null {
+): ConversationRecordInput[] | null {
     const filePath = join(basePath, projectId, "conversations", `${conversationId}.json`);
 
     try {
@@ -93,7 +93,7 @@ export function readConversationPreviewForProject(
         const content = readFileSync(filePath, "utf-8");
         const parsed = JSON.parse(content);
 
-        const messages: ConversationEntry[] = parsed.messages ?? [];
+        const messages: ConversationRecordInput[] = parsed.messages ?? [];
         const lastMessage = messages[messages.length - 1];
         const lastActivity = lastMessage?.timestamp || 0;
         const agentParticipated = messages.some(

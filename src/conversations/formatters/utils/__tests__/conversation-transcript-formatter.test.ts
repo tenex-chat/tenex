@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { ConversationEntry } from "@/conversations/types";
+import type { ConversationRecordInput } from "@/conversations/types";
 import { renderConversationXml } from "../conversation-transcript-formatter";
 
 describe("conversation-transcript-formatter", () => {
-  const baseEntries: ConversationEntry[] = [
+  const baseEntries: ConversationRecordInput[] = [
     {
       pubkey: "author-1-pubkey",
       content: "untargeted text",
@@ -96,7 +96,7 @@ describe("conversation-transcript-formatter", () => {
   });
 
   it("prefers principal snapshots for author and recipient labels", () => {
-    const entries: ConversationEntry[] = [
+    const entries: ConversationRecordInput[] = [
       {
         pubkey: "linked-user-pubkey",
         senderPrincipal: {
@@ -123,7 +123,7 @@ describe("conversation-transcript-formatter", () => {
   });
 
   it("falls back to truncated raw args for MCP tools without transcript attrs", () => {
-    const entries: ConversationEntry[] = [
+    const entries: ConversationRecordInput[] = [
       {
         pubkey: "author-1-pubkey",
         content: "",

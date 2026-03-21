@@ -133,7 +133,7 @@ function maskToken(token: string): string {
 }
 
 function getDefaultTelegramConfig(agent: StoredAgent): TelegramAgentConfig | undefined {
-    return agent.default?.telegram ?? agent.telegram;
+    return agent.default?.telegram;
 }
 
 function getScopedTelegramConfig(agent: StoredAgent, scope: TelegramScope): TelegramAgentConfig | undefined {

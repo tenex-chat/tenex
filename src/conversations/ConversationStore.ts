@@ -22,9 +22,8 @@ import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
 import type {
-    ConversationEntry,
-    ConversationRecord,
     ConversationRecordInput,
+    ConversationRecord,
     ConversationMetadata,
     ConversationState,
     ContextManagementScratchpadEntry,
@@ -52,9 +51,8 @@ export type ConversationIdInput = string | FullEventId;
 
 // Re-export types for convenience
 export type {
-    ConversationEntry,
-    ConversationRecord,
     ConversationRecordInput,
+    ConversationRecord,
     ConversationMetadata,
     Injection,
 } from "./types";
@@ -97,13 +95,7 @@ function normalizeContextManagementScratchpadState(
         return undefined;
     }
 
-    const rawNotes = typeof state.notes === "string" ? state.notes.trim() : "";
-    const entries = normalizeScratchpadEntries({
-        ...(state.entries ?? {}),
-        ...(rawNotes.length > 0 && state.entries?.notes === undefined
-            ? { notes: rawNotes }
-            : {}),
-    });
+    const entries = normalizeScratchpadEntries(state.entries ?? {});
     const keepLastMessages = typeof state.keepLastMessages === "number"
         && Number.isFinite(state.keepLastMessages)
         ? Math.max(0, Math.floor(state.keepLastMessages))
@@ -265,7 +257,7 @@ export class ConversationStore {
         return conversationRegistry.readLightweightMetadata(conversationId);
     }
 
-    static readMessagesFromDisk(conversationId: string): ConversationEntry[] | null {
+    static readMessagesFromDisk(conversationId: string): ConversationRecordInput[] | null {
         return conversationRegistry.readMessagesFromDisk(conversationId);
     }
 
@@ -493,7 +485,7 @@ export class ConversationStore {
         return index;
     }
 
-    relocateToEnd(eventId: string, updates: Partial<ConversationEntry>): boolean {
+    relocateToEnd(eventId: string, updates: Partial<ConversationRecordInput>): boolean {
         const index = this.state.messages.findIndex(m => m.eventId === eventId);
         if (index === -1) return false;
 
@@ -622,7 +614,7 @@ export class ConversationStore {
         agentPubkey: string,
         ralNumber?: number
     ): number {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agentPubkey,
             ral: ralNumber,
             content: "", // Markers have no text content

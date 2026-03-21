@@ -137,9 +137,10 @@ export function createStoredAgent(config: {
         status: "active",
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
-        default: config.defaultConfig,
+        default: config.telegram
+            ? { ...config.defaultConfig, telegram: config.defaultConfig?.telegram ?? config.telegram }
+            : config.defaultConfig,
         projectOverrides: config.projectOverrides,
-        telegram: config.telegram,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
         definitionCreatedAt: config.definitionCreatedAt,
@@ -928,7 +929,7 @@ export class AgentStorage {
         const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model,
             tools: agent.default?.tools,
-            telegram: agent.default?.telegram ?? agent.telegram,
+            telegram: agent.default?.telegram,
         };
 
         const projectConfig = projectDTag
@@ -984,8 +985,6 @@ export class AgentStorage {
                 delete agent.default.telegram;
             }
 
-            // Migrate off the legacy top-level field whenever Telegram is updated explicitly.
-            delete agent.telegram;
         }
 
         // Clean up empty default block
@@ -1045,7 +1044,7 @@ export class AgentStorage {
             const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
-                telegram: agent.default?.telegram ?? agent.telegram,
+                telegram: agent.default?.telegram,
             };
 
             const deduplicated = stripUndefinedValues(

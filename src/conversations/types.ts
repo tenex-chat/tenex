@@ -84,9 +84,6 @@ export interface ConversationRecordInput extends ConversationRecordFields {
     id?: string;
 }
 
-/** Alias for ConversationRecordInput used by write paths that accept optional id. */
-export type ConversationEntry = ConversationRecordInput;
-
 export interface Injection {
     targetRal: { pubkey: string; ral: number };
     role: "user" | "system";
@@ -136,8 +133,6 @@ export interface ConversationMetadata {
 
 export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
-    /** Raw notes field normalized into entries.notes on load/save. */
-    notes?: string;
     keepLastMessages?: number | null;
     omitToolCallIds: string[];
     updatedAt?: number;

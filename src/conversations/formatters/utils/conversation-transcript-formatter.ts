@@ -1,4 +1,4 @@
-import type { ConversationEntry } from "@/conversations/types";
+import type { ConversationRecordInput } from "@/conversations/types";
 import { getConversationRecordAuthorPubkey } from "@/conversations/record-author";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getIdentityDisplayService } from "@/services/identity/IdentityDisplayService";
@@ -12,7 +12,7 @@ const DEFAULT_MAX_TOOL_INPUT_JSON_LENGTH = 200;
 const FULL_HEX_EVENT_ID_REGEX = /^[0-9a-f]{64}$/i;
 
 export interface ConversationTimelineEntry {
-  entry: ConversationEntry;
+  entry: ConversationRecordInput;
   relativeSeconds: number;
   author: string;
   recipients: string[];
@@ -24,14 +24,14 @@ export interface ConversationTimeline {
 }
 
 export interface ConversationTimelineOptions {
-  includeMessageTypes?: Array<ConversationEntry["messageType"]>;
+  includeMessageTypes?: Array<ConversationRecordInput["messageType"]>;
   requireTargetedPubkeys?: boolean;
   includeToolCalls?: boolean;
 }
 
 export interface ConversationXmlRenderOptions {
   conversationId?: string;
-  includeMessageTypes?: Array<ConversationEntry["messageType"]>;
+  includeMessageTypes?: Array<ConversationRecordInput["messageType"]>;
   requireTargetedPubkeys?: boolean;
   includeToolCalls?: boolean;
   shortIdLength?: number;
@@ -47,8 +47,8 @@ export interface ConversationXmlRenderResult {
 }
 
 type ConversationPrincipal =
-  | ConversationEntry["senderPrincipal"]
-  | NonNullable<ConversationEntry["targetedPrincipals"]>[number]
+  | ConversationRecordInput["senderPrincipal"]
+  | NonNullable<ConversationRecordInput["targetedPrincipals"]>[number]
   | undefined;
 
 function escapeXml(value: string): string {
@@ -60,7 +60,7 @@ function escapeXml(value: string): string {
     .replaceAll("'", "&apos;");
 }
 
-function computeBaselineTimestamp(entries: ConversationEntry[]): number {
+function computeBaselineTimestamp(entries: ConversationRecordInput[]): number {
   for (const entry of entries) {
     if (entry.timestamp !== undefined) {
       return entry.timestamp;
@@ -70,7 +70,7 @@ function computeBaselineTimestamp(entries: ConversationEntry[]): number {
 }
 
 function shouldIncludeEntry(
-  entry: ConversationEntry,
+  entry: ConversationRecordInput,
   options: ConversationTimelineOptions
 ): boolean {
   const includeToolCalls = options.includeToolCalls ?? true;
@@ -112,7 +112,7 @@ function getShortEventId(
   return candidate;
 }
 
-function formatDelegationMarkerContent(entry: ConversationEntry): string | null {
+function formatDelegationMarkerContent(entry: ConversationRecordInput): string | null {
   const marker = entry.delegationMarker;
   if (!marker?.delegationConversationId || !marker?.recipientPubkey || !marker?.status) {
     return null;
@@ -173,7 +173,7 @@ function truncateWithSuffix(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength)}... [truncated ${truncatedChars} chars]`;
 }
 
-function extractToolCallParts(entry: ConversationEntry): ToolCallPart[] {
+function extractToolCallParts(entry: ConversationRecordInput): ToolCallPart[] {
   if (!entry.toolData || entry.toolData.length === 0) {
     return [];
   }
@@ -203,7 +203,7 @@ function extractToolCallParts(entry: ConversationEntry): ToolCallPart[] {
 }
 
 function resolveConversationRootEventId(
-  entries: ConversationEntry[],
+  entries: ConversationRecordInput[],
   conversationId?: string
 ): string | null {
   if (conversationId && conversationId.length > 0) {
@@ -220,7 +220,7 @@ function resolveConversationRootEventId(
 }
 
 function buildToolXmlAttributes(
-  entry: ConversationEntry,
+  entry: ConversationRecordInput,
   maxToolDescriptionLength: number,
   maxToolInputJsonLength: number
 ): Record<string, string> {
@@ -280,7 +280,7 @@ function resolveEntryDisplayName(
 }
 
 export function buildConversationTimeline(
-  entries: ConversationEntry[],
+  entries: ConversationRecordInput[],
   options: ConversationTimelineOptions = {}
 ): ConversationTimeline {
   const identityDisplayService = getIdentityDisplayService();
@@ -325,7 +325,7 @@ export function buildConversationTimeline(
 }
 
 export function renderConversationXml(
-  entries: ConversationEntry[],
+  entries: ConversationRecordInput[],
   options: ConversationXmlRenderOptions = {}
 ): ConversationXmlRenderResult {
   const shortIdLength = options.shortIdLength ?? DEFAULT_SHORT_ID_LENGTH;

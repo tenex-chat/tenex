@@ -2,7 +2,7 @@
  * Message builder for converting ConversationStore entries to LLM messages.
  *
  * This module handles the complex logic of building ModelMessages from
- * ConversationEntry records, including:
+ * ConversationRecordInput records, including:
  * - Tool call/result ordering for AI SDK validation
  * - Orphaned tool call reconciliation
  * - Message deference during pending tool execution
@@ -295,7 +295,7 @@ function hasMultipleHumanSenders(
 }
 
 /**
- * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+ * Convert a ConversationRecordInput to a ModelMessage for the viewing agent.
  *
  * Attribution prefixes are added for multi-agent shared conversations using
  * computeAttributionPrefix() to help the LLM distinguish who said what.
