@@ -66,4 +66,18 @@ describe("RecordingRuntimePublisher", () => {
         expect(collector.list()).toHaveLength(1);
         expect(collector.list()[0]?.eventId).toBeUndefined();
     });
+
+    it("uses deterministic local ids and the runtime conversation id for local channel refs", async () => {
+        const collector = new RuntimePublishCollector();
+        const publisher = new RecordingRuntimePublisher(createAgent(), collector);
+        const context = createContext();
+
+        const first = await publisher.conversation({ content: "hello world" }, context);
+        const second = await publisher.error({ message: "boom" }, context);
+
+        expect(first.id).toBe("0000000000000000000000000000000000000000000000000000000000000001");
+        expect(second.id).toBe("0000000000000000000000000000000000000000000000000000000000000002");
+        expect(first.envelope.channel.id).toBe("local:conversation:conversation-id");
+        expect(second.envelope.channel.id).toBe("local:conversation:conversation-id");
+    });
 });

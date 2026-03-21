@@ -115,7 +115,7 @@ export interface ConversationMetadata {
     requirements?: string;
     plan?: string;
     projectPath?: string;
-    last_user_message?: string;
+    lastUserMessage?: string;
     statusLabel?: string;
     statusCurrentActivity?: string;
     referencedArticle?: {

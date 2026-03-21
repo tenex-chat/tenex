@@ -21,6 +21,7 @@ import { buildPromptMessagesFromRecords } from "./PromptBuilder";
 import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
+import { normalizeScratchpadEntries } from "./utils/normalize-scratchpad-entries";
 import type {
     ConversationRecordInput,
     ConversationRecord,
@@ -61,63 +62,67 @@ function normalizeLoadedMessages(messages: ConversationRecordInput[]): Conversat
     return messages.map((message, index) => ensureConversationRecord(message, index));
 }
 
-function normalizeScratchpadEntries(
-    entries: Record<string, unknown> | undefined
-): Record<string, string> | undefined {
-    const normalizedEntries = Object.entries(entries ?? {})
-        .flatMap(([key, value]) => {
-            if (typeof value !== "string") {
-                return [];
-            }
-
-            const normalizedKey = key.trim();
-            const normalizedValue = value.trim();
-
-            if (normalizedKey.length === 0 || normalizedValue.length === 0) {
-                return [];
-            }
-
-            return [[normalizedKey, normalizedValue] as const];
-        })
-        .sort(([left], [right]) => left.localeCompare(right));
-
-    if (normalizedEntries.length === 0) {
-        return undefined;
+function normalizeLoadedMetadata(
+    metadata: ConversationMetadata | Record<string, unknown> | undefined
+): ConversationMetadata {
+    if (!metadata || typeof metadata !== "object") {
+        return {};
     }
 
-    return Object.fromEntries(normalizedEntries);
+    const {
+        last_user_message: legacyLastUserMessage,
+        ...rest
+    } = metadata as ConversationMetadata & { last_user_message?: unknown };
+
+    const lastUserMessage = typeof metadata.lastUserMessage === "string"
+        ? metadata.lastUserMessage
+        : typeof legacyLastUserMessage === "string"
+            ? legacyLastUserMessage
+            : undefined;
+
+    return {
+        ...(rest as ConversationMetadata),
+        ...(lastUserMessage !== undefined ? { lastUserMessage } : {}),
+    };
 }
 
 function normalizeContextManagementScratchpadState(
-    state: ContextManagementScratchpadState | undefined
+    state: ContextManagementScratchpadState | Record<string, unknown> | undefined
 ): ContextManagementScratchpadState | undefined {
     if (!state) {
         return undefined;
     }
 
-    const entries = normalizeScratchpadEntries(state.entries ?? {});
-    const keepLastMessages = typeof state.keepLastMessages === "number"
-        && Number.isFinite(state.keepLastMessages)
-        ? Math.max(0, Math.floor(state.keepLastMessages))
+    const rawState = state as Record<string, unknown>;
+    const rawEntries = typeof rawState.entries === "object" && rawState.entries !== null
+        ? rawState.entries as Record<string, unknown>
+        : undefined;
+    const legacyNotes = typeof rawState.notes === "string" ? rawState.notes : undefined;
+    const entries = normalizeScratchpadEntries(rawEntries)
+        ?? normalizeScratchpadEntries(legacyNotes ? { notes: legacyNotes } : undefined);
+    const keepLastMessages = typeof rawState.keepLastMessages === "number"
+        && Number.isFinite(rawState.keepLastMessages)
+        ? Math.max(0, Math.floor(rawState.keepLastMessages))
         : undefined;
     const omitToolCallIds = Array.from(
         new Set(
-            (state.omitToolCallIds ?? [])
+            (Array.isArray(rawState.omitToolCallIds) ? rawState.omitToolCallIds : [])
                 .filter((toolCallId): toolCallId is string =>
                     typeof toolCallId === "string" && toolCallId.trim().length > 0
                 )
                 .map((toolCallId) => toolCallId.trim())
         )
     );
-    const agentLabel = typeof state.agentLabel === "string" && state.agentLabel.trim().length > 0
-        ? state.agentLabel
+    const agentLabel = typeof rawState.agentLabel === "string" && rawState.agentLabel.trim().length > 0
+        ? rawState.agentLabel
         : undefined;
+    const updatedAt = typeof rawState.updatedAt === "number" ? rawState.updatedAt : undefined;
 
     return {
         ...(entries ? { entries } : {}),
         ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
         omitToolCallIds,
-        ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
+        ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(agentLabel ? { agentLabel } : {}),
     };
 }
@@ -335,7 +340,9 @@ export class ConversationStore {
                 nextRalNumber: loaded.nextRalNumber ?? {},
                 injections: loaded.injections ?? [],
                 messages,
-                metadata: loaded.metadata ?? {},
+                metadata: normalizeLoadedMetadata(
+                    loaded.metadata as ConversationMetadata | Record<string, unknown> | undefined
+                ),
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
                 // Note: todoRemindedAgents removed in refactor - ignore if present in old files
@@ -861,7 +868,7 @@ export class ConversationStore {
         });
 
         if (!isFromAgent) {
-            this.state.metadata.last_user_message = envelope.content;
+            this.state.metadata.lastUserMessage = envelope.content;
         }
     }
 

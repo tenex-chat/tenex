@@ -144,6 +144,43 @@ describe("ConversationStore", () => {
             expect(store.getAllMessages()[0].id).toBe("record:evt-1");
         });
 
+        it("migrates legacy last_user_message metadata to lastUserMessage", async () => {
+            const conversationsDir = join(testDir, PROJECT_ID, "conversations");
+            await mkdir(conversationsDir, { recursive: true });
+            await writeFile(
+                join(conversationsDir, `${CONVERSATION_ID}.json`),
+                JSON.stringify({
+                    activeRal: {},
+                    nextRalNumber: {},
+                    injections: [],
+                    messages: [],
+                    metadata: {
+                        title: "Transport runtime",
+                        last_user_message: "Legacy field value",
+                    },
+                    agentTodos: {},
+                    todoNudgedAgents: [],
+                    blockedAgents: [],
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
+                }, null, 2)
+            );
+
+            store.load(PROJECT_ID, CONVERSATION_ID);
+            expect(store.metadata.lastUserMessage).toBe("Legacy field value");
+
+            await store.save();
+
+            const saved = JSON.parse(
+                await readFile(
+                    join(conversationsDir, `${CONVERSATION_ID}.json`),
+                    "utf-8"
+                )
+            );
+
+            expect(saved.metadata.lastUserMessage).toBe("Legacy field value");
+            expect(saved.metadata.last_user_message).toBeUndefined();
+        });
+
         it("persists context-management scratchpads per agent", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
 

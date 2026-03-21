@@ -611,11 +611,11 @@ export class AgentStorage {
     /**
      * Delete an agent and update index.
      *
-     * @deprecated This method permanently deletes agent identity (pubkey/nsec).
-     * Prefer using removeAgentFromProject() which sets agents to 'inactive' status
-     * while preserving their identity for potential reactivation.
+     * This method permanently deletes agent identity (pubkey/nsec).
+     * Prefer removeAgentFromProject(), which marks an agent inactive while preserving
+     * its identity for later reactivation.
      *
-     * This method is kept for:
+     * Reserved for:
      * - Administrative cleanup of truly orphaned agents
      * - Test teardown
      * - Explicit user-requested deletion
@@ -628,7 +628,7 @@ export class AgentStorage {
 
         logger.warn(
             `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - ` +
-            `this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
+            "this permanently destroys agent identity. Consider using removeAgentFromProject instead."
         );
 
         // Delete file
@@ -1111,7 +1111,7 @@ export class AgentStorage {
      * Priority:
      * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
      * 2. projectOverrides[projectDTag].isPM (project-scoped PM via kind 24020 with a-tag)
-     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
+     * 3. pmOverrides[projectDTag] (older persisted project-scoped PM state)
      */
     resolveEffectiveIsPM(agent: StoredAgent, projectDTag: string): boolean {
         if (agent.isPM === true) {

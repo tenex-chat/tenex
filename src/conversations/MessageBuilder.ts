@@ -30,6 +30,16 @@ export type AddressableModelMessage = ModelMessage & {
     eventId?: string;
 };
 
+type ImageReplacementStats = {
+    replacedCount: number;
+    uniqueReplacedCount: number;
+};
+
+interface EntryMessageBuildResult {
+    message: ModelMessage;
+    imageReplacementStats?: ImageReplacementStats;
+}
+
 export interface MessageBuilderContext {
     /**
      * The pubkey of the agent viewing/building messages
@@ -316,11 +326,11 @@ async function entryToMessage(
     imageTracker: ImageTracker,
     multipleHumanSenders: boolean,
     enableMultimodal: boolean = true
-): Promise<ModelMessage> {
+): Promise<EntryMessageBuildResult> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
     if (entry.messageType === "tool-call" && entry.toolData) {
-        return { role: "assistant", content: entry.toolData as ToolCallPart[] };
+        return { message: { role: "assistant", content: entry.toolData as ToolCallPart[] } };
     }
 
     if (entry.messageType === "tool-result" && entry.toolData) {
@@ -333,12 +343,14 @@ async function entryToMessage(
         const toolData = imageProcessingResult.processedParts;
 
         return {
-            role: "tool",
-            content: toolData,
-            _imageReplacementStats: imageProcessingResult.replacedCount > 0
+            message: {
+                role: "tool",
+                content: toolData,
+            },
+            imageReplacementStats: imageProcessingResult.replacedCount > 0
                 ? { replacedCount: imageProcessingResult.replacedCount, uniqueReplacedCount: imageProcessingResult.uniqueReplacedCount }
                 : undefined,
-        } as unknown as ModelMessage;
+        };
     }
 
     // Text message - compute attribution prefix for multi-agent conversations
@@ -349,7 +361,7 @@ async function entryToMessage(
         undefined,
         multipleHumanSenders
     );
-    let messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
+    const messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
 
     // Track any images in text messages (but don't replace them - user content)
     // This ensures that if the same image appears later in a tool result,
@@ -371,7 +383,7 @@ async function entryToMessage(
     // the LLM has already seen them, no need to re-fetch and waste context window on image tokens.
     const content = (role === "user" && enableMultimodal) ? convertToMultimodalContent(messageContent) : messageContent;
 
-    return { role, content } as ModelMessage;
+    return { message: { role, content } as ModelMessage };
 }
 
 /**
@@ -519,6 +531,7 @@ export async function buildMessagesFromEntries(
     // Image placeholder strategy: Track seen images across all messages
     // First appearance = full image, subsequent = placeholder
     const imageTracker = createImageTracker();
+    const imageReplacementStatsByMessage = new Map<ModelMessage, ImageReplacementStats>();
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
@@ -558,6 +571,31 @@ export async function buildMessagesFromEntries(
         viewingAgentPubkey,
         agentPubkeys
     );
+
+    const buildEntryMessage = async (
+        entry: ConversationRecord,
+        absoluteIndex: number,
+        enableMultimodal: boolean
+    ): Promise<ModelMessage> => {
+        const builtMessage = await entryToMessage(
+            entry,
+            viewingAgentPubkey,
+            agentPubkeys,
+            imageTracker,
+            multipleHumanSenders,
+            enableMultimodal
+        );
+        const message = withMessageIdentity(
+            builtMessage.message,
+            entry,
+            absoluteIndex,
+            includeMessageIds
+        );
+        if (builtMessage.imageReplacementStats) {
+            imageReplacementStatsByMessage.set(message, builtMessage.imageReplacementStats);
+        }
+        return message;
+    };
 
     let prunedDelegationCompletions = 0;
 
@@ -646,18 +684,7 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(withMessageIdentity(
-                await entryToMessage(
-                    entry,
-                    viewingAgentPubkey,
-                    agentPubkeys,
-                    imageTracker,
-                    multipleHumanSenders
-                ),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, true));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -683,18 +710,7 @@ export async function buildMessagesFromEntries(
                 continue;
             }
 
-            result.push(withMessageIdentity(
-                await entryToMessage(
-                    entry,
-                    viewingAgentPubkey,
-                    agentPubkeys,
-                    imageTracker,
-                    multipleHumanSenders
-                ),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, true));
 
             for (const part of parts) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -703,18 +719,10 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(withMessageIdentity(
-                        await entryToMessage(
-                            deferred.entry,
-                            viewingAgentPubkey,
-                            agentPubkeys,
-                            imageTracker,
-                            multipleHumanSenders,
-                            deferred.enableMultimodal
-                        ),
+                    result.push(await buildEntryMessage(
                         deferred.entry,
                         deferred.absoluteIndex,
-                        includeMessageIds
+                        deferred.enableMultimodal
                     ));
                 }
                 deferredMessages.length = 0;
@@ -823,19 +831,7 @@ export async function buildMessagesFromEntries(
         if (pendingToolCalls.size > 0) {
             deferredMessages.push({ entry, enableMultimodal, absoluteIndex });
         } else {
-            result.push(withMessageIdentity(
-                await entryToMessage(
-                    entry,
-                    viewingAgentPubkey,
-                    agentPubkeys,
-                    imageTracker,
-                    multipleHumanSenders,
-                    enableMultimodal
-                ),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, enableMultimodal));
         }
     }
 
@@ -893,18 +889,10 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(withMessageIdentity(
-            await entryToMessage(
-                deferred.entry,
-                viewingAgentPubkey,
-                agentPubkeys,
-                imageTracker,
-                multipleHumanSenders,
-                deferred.enableMultimodal
-            ),
+        result.push(await buildEntryMessage(
             deferred.entry,
             deferred.absoluteIndex,
-            includeMessageIds
+            deferred.enableMultimodal
         ));
     }
 
@@ -915,17 +903,14 @@ export async function buildMessagesFromEntries(
         });
     }
 
-    // Image placeholder telemetry: Aggregate replacement statistics
-    // The _imageReplacementStats field is set during entryToMessage for tool-result messages
+    // Image placeholder telemetry: Aggregate replacement statistics.
     let totalReplacedCount = 0;
     let totalUniqueReplacedCount = 0;
     for (const msg of result) {
-        const stats = (msg as unknown as { _imageReplacementStats?: { replacedCount: number; uniqueReplacedCount: number } })._imageReplacementStats;
+        const stats = imageReplacementStatsByMessage.get(msg);
         if (stats) {
             totalReplacedCount += stats.replacedCount;
             totalUniqueReplacedCount += stats.uniqueReplacedCount;
-            // Clean up the internal field (don't send to API)
-            delete (msg as unknown as { _imageReplacementStats?: unknown })._imageReplacementStats;
         }
     }
 

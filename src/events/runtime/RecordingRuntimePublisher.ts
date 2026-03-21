@@ -18,7 +18,6 @@ import type {
     StreamTextDeltaIntent,
     ToolUseIntent,
 } from "@/nostr/types";
-import { randomBytes } from "node:crypto";
 
 export interface PublishedRuntimeRecord {
     agentSlug: string;
@@ -50,10 +49,6 @@ export class RuntimePublishCollector {
     }
 }
 
-function createEventId(): string {
-    return randomBytes(32).toString("hex");
-}
-
 function fallbackRecipientPrincipal(context: EventContext): PrincipalRef {
     const linkedPubkey =
         context.completionRecipientPubkey ??
@@ -70,18 +65,27 @@ function fallbackRecipientPrincipal(context: EventContext): PrincipalRef {
 }
 
 export class RecordingRuntimePublisher implements AgentRuntimePublisher {
+    private nextLocalId = 0;
+
     constructor(
         private readonly agent: RuntimePublishAgent,
         private readonly collector: RuntimePublishCollector
     ) {}
 
+    private createEventId(): string {
+        this.nextLocalId += 1;
+        return this.nextLocalId.toString(16).padStart(64, "0");
+    }
+
     private createEvent(
         kind: number,
         content: string,
-        tags: string[][]
+        tags: string[][],
+        conversationId?: string
     ): PublishedMessageRef {
-        const id = createEventId();
+        const id = this.createEventId();
         const replyTarget = tags.find((tag) => tag[0] === "e")?.[1];
+        const channelId = conversationId ?? replyTarget ?? id;
         const envelope: InboundEnvelope = {
             transport: "local",
             principal: {
@@ -92,7 +96,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
                 kind: "agent",
             },
             channel: {
-                id: `local:conversation:${id}`,
+                id: `local:conversation:${channelId}`,
                 transport: "local",
                 kind: "conversation",
             },
@@ -157,7 +161,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         if (recipient) {
             tags.unshift(["p", recipient]);
         }
-        const event = this.createEvent(NDKKind.Text, intent.content, tags);
+        const event = this.createEvent(NDKKind.Text, intent.content, tags, context.conversationId);
 
         this.record("complete", context, {
             recipient,
@@ -173,7 +177,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
 
     async conversation(intent: ConversationIntent, context: EventContext): Promise<PublishedMessageRef> {
         const rootEventId = context.rootEvent.id ?? context.conversationId;
-        const event = this.createEvent(NDKKind.Text, intent.content, [["e", rootEventId]]);
+        const event = this.createEvent(NDKKind.Text, intent.content, [["e", rootEventId]], context.conversationId);
 
         this.record("conversation", context, {
             rootEventId,
@@ -185,7 +189,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
     }
 
     async delegate(config: DelegateConfig, context: EventContext): Promise<string> {
-        const delegationConversationId = createEventId();
+        const delegationConversationId = this.createEventId();
         this.record("delegate", context, {
             recipient: config.recipient,
             delegationConversationId,
@@ -197,7 +201,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
     async ask(config: AskConfig, context: EventContext): Promise<PublishedMessageRef> {
         const content = `${config.title}\n\n${config.context}`;
         const tags: string[][] = [["p", config.recipient]];
-        const event = this.createEvent(NDKKind.Text, content, tags);
+        const event = this.createEvent(NDKKind.Text, content, tags, context.conversationId);
 
         this.record("ask", context, {
             recipient: config.recipient,
@@ -219,7 +223,7 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         },
         context: EventContext
     ): Promise<string> {
-        const eventId = createEventId();
+        const eventId = this.createEventId();
         this.record("delegateFollowup", context, {
             recipient: params.recipient,
             delegationEventId: params.delegationEventId,
@@ -239,7 +243,8 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
             [
                 ["error", intent.errorType ?? "execution_error"],
                 ["e", rootEventId],
-            ]
+            ],
+            context.conversationId
         );
 
         this.record("error", context, {
@@ -257,7 +262,8 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
         const event = this.createEvent(
             NDKKind.AgentLesson,
             content,
-            [["e", rootEventId]]
+            [["e", rootEventId]],
+            context.conversationId
         );
 
         this.record("lesson", context, {
@@ -270,7 +276,12 @@ export class RecordingRuntimePublisher implements AgentRuntimePublisher {
     }
 
     async toolUse(intent: ToolUseIntent, context: EventContext): Promise<PublishedMessageRef> {
-        const event = this.createEvent(NDKKind.Text, intent.content, [["tool", intent.toolName]]);
+        const event = this.createEvent(
+            NDKKind.Text,
+            intent.content,
+            [["tool", intent.toolName]],
+            context.conversationId
+        );
 
         this.record("toolUse", context, {
             toolName: intent.toolName,

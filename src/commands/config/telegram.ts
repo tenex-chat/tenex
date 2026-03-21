@@ -48,6 +48,10 @@ function uniq(values: string[]): string[] {
     return Array.from(new Set(values));
 }
 
+function getChatBindingKey(binding: TelegramChatBinding): string {
+    return `${binding.chatId}:${binding.topicId ?? ""}:${binding.title ?? ""}`;
+}
+
 function normalizeTelegramDraft(draft: TelegramDraft | undefined): TelegramAgentConfig | undefined {
     if (!draft) {
         return undefined;
@@ -64,16 +68,22 @@ function normalizeTelegramDraft(draft: TelegramDraft | undefined): TelegramAgent
             .filter(Boolean)
     );
 
-    const chatBindings = uniq(
-        (draft.chatBindings ?? [])
-            .map((binding) => ({
-                chatId: binding.chatId.trim(),
-                topicId: binding.topicId?.trim() || undefined,
-                title: binding.title?.trim() || undefined,
-            }))
-            .filter((binding) => binding.chatId)
-            .map((binding) => JSON.stringify(binding))
-    ).map((entry) => JSON.parse(entry) as TelegramChatBinding);
+    const seenChatBindings = new Set<string>();
+    const chatBindings = (draft.chatBindings ?? [])
+        .map((binding) => ({
+            chatId: binding.chatId.trim(),
+            topicId: binding.topicId?.trim() || undefined,
+            title: binding.title?.trim() || undefined,
+        }))
+        .filter((binding) => binding.chatId)
+        .filter((binding) => {
+            const key = getChatBindingKey(binding);
+            if (seenChatBindings.has(key)) {
+                return false;
+            }
+            seenChatBindings.add(key);
+            return true;
+        });
 
     return {
         botToken,

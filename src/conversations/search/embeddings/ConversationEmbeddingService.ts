@@ -202,7 +202,7 @@ export class ConversationEmbeddingService {
             const metadata = store.metadata;
             const title = metadata.title ?? store.title;
             const summary = metadata.summary;
-            const lastUserMessage = metadata.last_user_message;
+            const lastUserMessage = metadata.lastUserMessage;
 
             // Build embedding content
             const embeddingContent = this.buildEmbeddingContent(title, summary, lastUserMessage);

@@ -31,5 +31,9 @@ export interface RuntimeAgentRef {
 }
 
 export interface RuntimePublishAgent extends RuntimeAgentRef {
+    /**
+     * Runtime publishers still hand Nostr event publication to AgentPublisher,
+     * so signing remains NDK-specific at this seam.
+     */
     sign(event: NDKEvent): Promise<void>;
 }

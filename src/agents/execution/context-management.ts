@@ -33,6 +33,7 @@ import type {
     ContextManagementScratchpadEntry as StoredScratchpadEntry,
     ContextManagementScratchpadState as StoredScratchpadState,
 } from "@/conversations/types";
+import { normalizeScratchpadEntries } from "@/conversations/utils/normalize-scratchpad-entries";
 import { resolveToolCallEventIdMap } from "@/conversations/utils/resolve-tool-call-event-id-map";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { getContextWindow } from "@/llm/utils/context-window-cache";
@@ -214,32 +215,6 @@ function getRecordStringCharCount(value: unknown, key: string): number | undefin
     }
 
     return total;
-}
-
-function normalizeScratchpadEntries(
-    entries: Record<string, unknown> | undefined
-): Record<string, string> | undefined {
-    const normalizedEntries = Object.entries(entries ?? {})
-        .flatMap(([key, value]) => {
-            if (typeof value !== "string") {
-                return [];
-            }
-
-            const normalizedKey = key.trim();
-            const normalizedValue = value.trim();
-            if (normalizedKey.length === 0 || normalizedValue.length === 0) {
-                return [];
-            }
-
-            return [[normalizedKey, normalizedValue] as const];
-        })
-        .sort(([left], [right]) => left.localeCompare(right));
-
-    if (normalizedEntries.length === 0) {
-        return undefined;
-    }
-
-    return Object.fromEntries(normalizedEntries);
 }
 
 function toRuntimeScratchpadState(

@@ -3,7 +3,7 @@
  *
  * This manager tracks the indexing state of conversations to determine when
  * they need to be re-indexed. It uses a hash-based approach to detect changes
- * in conversation metadata (title, summary, last_user_message, lastActivity).
+ * in conversation metadata (title, summary, lastUserMessage, lastActivity).
  *
  * Key features:
  * - Durable state: persisted to disk in a KV store

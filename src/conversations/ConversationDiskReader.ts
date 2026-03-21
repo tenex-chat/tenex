@@ -39,7 +39,7 @@ export function readLightweightMetadata(
             lastActivity,
             title: parsed.metadata?.title,
             summary: parsed.metadata?.summary,
-            lastUserMessage: parsed.metadata?.last_user_message,
+            lastUserMessage: parsed.metadata?.lastUserMessage ?? parsed.metadata?.last_user_message,
         };
     } catch {
         return null;
