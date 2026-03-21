@@ -1081,9 +1081,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     if (!ral) return;
 
     if (isActive) {
+      if (!toolName) {
+        throw new Error(`[RALRegistry] Missing tool name for toolCallId ${toolCallId} in conversation ${shortenConversationId(conversationId)}.`);
+      }
       // Store toolCallId -> tool info mapping (name + startedAt)
       const now = Date.now();
-      ral.activeTools.set(toolCallId, { name: toolName ?? "unknown", startedAt: now });
+      ral.activeTools.set(toolCallId, { name: toolName, startedAt: now });
       ral.toolStartedAt = now;
       // Maintain backward compatibility - set currentTool to most recent tool name
       ral.currentTool = toolName;

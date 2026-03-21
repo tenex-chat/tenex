@@ -171,7 +171,11 @@ export async function handleDelegationCompletion(
             return { recorded: false };
         }
 
-        span.setAttribute("delegation.event_id", delegationEventId || "unknown");
+        if (!delegationEventId) {
+            throw new Error(`[DelegationCompletionHandler] Missing delegation event id for completion event ${event.id ?? "unknown"}.`);
+        }
+
+        span.setAttribute("delegation.event_id", delegationEventId);
 
         // Get the target agent for logging
         const projectCtx = getProjectContext();
