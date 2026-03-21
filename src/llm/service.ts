@@ -1,7 +1,9 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
+import { CONTEXT_MANAGEMENT_KEY } from "ai-sdk-context-management";
 import { trace } from "@opentelemetry/api";
 import {
     type LanguageModel,
@@ -321,6 +323,15 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         const attempt = this.createStandardAttemptContext(messages);
         const attemptKey = attempt.failedKey;
         const model = this.wrapWithRequestMiddleware(attempt.model, options?.middlewares);
+
+        const safeConversationId = this.conversationId ?? "unknown";
+
+        if (!options?.providerOptions || !(CONTEXT_MANAGEMENT_KEY in options.providerOptions)) {
+            throw new Error(`[LLMService] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${this.agentSlug} in conversation ${shortenConversationId(safeConversationId)}.`);
+        }
+        if (!options?.middlewares || options.middlewares.length === 0) {
+            throw new Error(`[LLMService] Missing required context management middleware for agent ${this.agentSlug} in conversation ${shortenConversationId(safeConversationId)}.`);
+        }
 
         const processedMessages = prepareMessagesForRequest(messages, this.provider);
 

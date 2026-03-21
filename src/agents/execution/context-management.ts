@@ -36,7 +36,6 @@ const DEFAULT_FORCE_SCRATCHPAD_THRESHOLD_PERCENT = 70;
 const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
 
 interface ContextManagementSettings {
-    enabled: boolean;
     tokenBudget: number;
     scratchpadEnabled: boolean;
     forceScratchpadEnabled: boolean;
@@ -213,7 +212,6 @@ function getContextManagementSettings(): ContextManagementSettings {
     const raw = configService.getContextManagementConfig();
 
     return {
-        enabled: raw?.enabled ?? true,
         tokenBudget: Math.floor(
             normalizePositiveNumber(raw?.tokenBudget, DEFAULT_WORKING_TOKEN_BUDGET)
         ),
@@ -1330,10 +1328,6 @@ export function createExecutionContextManagement(options: {
     nudgeToolPermissions?: NudgeToolPermissions;
 }): ExecutionContextManagement | undefined {
     const settings = getContextManagementSettings();
-
-    if (!settings.enabled) {
-        return undefined;
-    }
 
     const scratchpadAvailable =
         settings.scratchpadEnabled

@@ -26,6 +26,7 @@ import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { LanguageModel } from "ai";
+import { CONTEXT_MANAGEMENT_KEY } from "ai-sdk-context-management";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
 import type { MessageCompiler } from "./MessageCompiler";
@@ -184,6 +185,14 @@ export class StreamExecutionHandler {
                 "stream.abort_signal_aborted": abortSignal.aborted,
                 "ral.number": ralNumber,
             });
+
+            const contextManagementRequest = request.providerOptions?.[CONTEXT_MANAGEMENT_KEY];
+            if (!contextManagementRequest) {
+                throw new Error(`[StreamExecutionHandler] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${context.agent.slug} in conversation ${shortenConversationId(context.conversationId)}.`);
+            }
+            if (!request.middlewares || request.middlewares.length === 0) {
+                throw new Error(`[StreamExecutionHandler] Missing required context management middleware for agent ${context.agent.slug} in conversation ${shortenConversationId(context.conversationId)}.`);
+            }
 
             await llmService.stream(messages, toolsObject, {
                 abortSignal,
