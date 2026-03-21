@@ -20,8 +20,6 @@ const allowedDispatchImports = new Set([
     "src/services/ingress/RuntimeIngressService.ts",
 ]);
 const allowedInboundAdapterImports = new Set([
-    "src/commands/doctor-transport-chat.ts",
-    "src/commands/doctor-transport-smoke.ts",
     "src/event-handler/reply.ts",
 ]);
 
