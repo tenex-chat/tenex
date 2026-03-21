@@ -324,13 +324,15 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         const attemptKey = attempt.failedKey;
         const model = this.wrapWithRequestMiddleware(attempt.model, options?.middlewares);
 
-        const safeConversationId = this.conversationId ?? "unknown";
+        if (!this.conversationId) {
+            throw new Error(`[LLMService] Missing required conversationId for agent ${this.agentSlug}.`);
+        }
 
         if (!options?.providerOptions || !(CONTEXT_MANAGEMENT_KEY in options.providerOptions)) {
-            throw new Error(`[LLMService] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${this.agentSlug} in conversation ${shortenConversationId(safeConversationId)}.`);
+            throw new Error(`[LLMService] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${this.agentSlug} in conversation ${shortenConversationId(this.conversationId)}.`);
         }
         if (!options?.middlewares || options.middlewares.length === 0) {
-            throw new Error(`[LLMService] Missing required context management middleware for agent ${this.agentSlug} in conversation ${shortenConversationId(safeConversationId)}.`);
+            throw new Error(`[LLMService] Missing required context management middleware for agent ${this.agentSlug} in conversation ${shortenConversationId(this.conversationId)}.`);
         }
 
         const processedMessages = prepareMessagesForRequest(messages, this.provider);
