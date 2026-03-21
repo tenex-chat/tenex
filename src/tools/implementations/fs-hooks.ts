@@ -29,7 +29,11 @@ export async function executeReadToolResult(eventId: string): Promise<string> {
         throw new Error(`Could not extract tool call/result for event ID: ${eventId}`);
     }
 
-    const toolName = "toolName" in toolCallContent ? toolCallContent.toolName : "unknown";
+    const toolName = "toolName" in toolCallContent ? toolCallContent.toolName : undefined;
+    if (typeof toolName !== "string" || toolName.length === 0) {
+        throw new Error(`Missing tool name in tool call for event ID: ${eventId}`);
+    }
+
     const input = "input" in toolCallContent ? toolCallContent.input : {};
     const output = "output" in toolResultContent ? toolResultContent.output : null;
 
