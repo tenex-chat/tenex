@@ -569,7 +569,10 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         projectCacheKey = dTag;
     } else {
         // Warn once per project to avoid log spam on hot path
-        const projectIdentifier = project.id || project.pubkey || "unknown";
+        const projectIdentifier = project.id || project.pubkey;
+        if (!projectIdentifier) {
+            throw new Error("[systemPromptBuilder] Project missing id and pubkey; cannot compute cache key.");
+        }
         if (!warnedMissingDTagProjects.has(projectIdentifier)) {
             warnedMissingDTagProjects.add(projectIdentifier);
             logger.warn("⚠️ Project missing d-tag, using event ID for cache key. This may indicate a misconfigured project.", {
@@ -577,7 +580,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
                 projectPubkey: project.pubkey?.substring(0, 8),
             });
         }
-        projectCacheKey = project.id || `fallback-${project.pubkey?.substring(0, 16) || "unknown"}`;
+        projectCacheKey = project.id || `fallback-${project.pubkey?.substring(0, 16)}`;
     }
 
     let t0 = performance.now();

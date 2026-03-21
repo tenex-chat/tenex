@@ -461,6 +461,11 @@ async function killAgent(
  * Kill a background shell task
  */
 function killShellTask(taskId: string, context: ToolExecutionContext): KillOutput {
+    const callerAgentSlug = context.agent.slug;
+    if (!callerAgentSlug) {
+        throw new Error(`[kill] Missing caller agent slug for shell kill in conversation ${shortenConversationId(context.conversationId)}`);
+    }
+
     // Get task info before killing (for reporting)
     const taskInfo = getBackgroundTaskInfo(taskId);
 
@@ -472,13 +477,13 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
 
     if (!callerProjectId) {
         logger.warn("[kill] Authorization check failed: caller has no project context for shell kill", {
-            callerAgent: context.agent?.slug ?? "unknown",
+            callerAgent: callerAgentSlug,
             targetTaskId: taskId,
         });
 
         trace.getActiveSpan()?.addEvent("kill.shell_authorization_failed", {
             "kill.reason": "caller_no_project",
-            "kill.caller_agent": context.agent?.slug ?? "unknown",
+            "kill.caller_agent": callerAgentSlug,
             "kill.target_task_id": taskId,
         });
 
@@ -493,7 +498,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
     // Verify task exists and belongs to caller's project
     if (!taskInfo) {
         logger.warn("[kill] Task not found", {
-            callerAgent: context.agent?.slug ?? "unknown",
+            callerAgent: callerAgentSlug,
             targetTaskId: taskId,
         });
 
@@ -508,7 +513,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
     // CRITICAL: Enforce project isolation - deny kill if projectId doesn't match
     if (taskInfo.projectId !== callerProjectId) {
         logger.warn("[kill] Authorization check failed: project isolation violation", {
-            callerAgent: context.agent?.slug ?? "unknown",
+            callerAgent: callerAgentSlug,
             callerProjectId: callerProjectId.substring(0, 12),
             taskProjectId: taskInfo.projectId.substring(0, 12),
             targetTaskId: taskId,
@@ -516,7 +521,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
 
         trace.getActiveSpan()?.addEvent("kill.shell_authorization_failed", {
             "kill.reason": "project_mismatch",
-            "kill.caller_agent": context.agent?.slug ?? "unknown",
+            "kill.caller_agent": callerAgentSlug,
             "kill.caller_project_id": callerProjectId.substring(0, 12),
             "kill.task_project_id": taskInfo.projectId.substring(0, 12),
             "kill.target_task_id": taskId,
@@ -532,15 +537,15 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
 
     // Log audit trail for shell kill
     logger.info("[kill] Shell task kill requested", {
-        callerAgent: context.agent?.slug ?? "unknown",
-        callerConversationId: context.conversationId?.substring(0, 12) ?? "unknown",
+        callerAgent: callerAgentSlug,
+        callerConversationId: shortenConversationId(context.conversationId),
         callerProjectId: callerProjectId.substring(0, 12),
         targetTaskId: taskId,
         taskCommand: taskInfo?.command,
     });
 
     trace.getActiveSpan()?.addEvent("kill.shell_task_killing", {
-        "kill.caller_agent": context.agent?.slug ?? "unknown",
+        "kill.caller_agent": callerAgentSlug,
         "kill.caller_project_id": callerProjectId.substring(0, 12),
         "kill.target_task_id": taskId,
     });
@@ -586,7 +591,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
         logger.info("[kill] Shell task killed successfully", {
             taskId,
             pid: result.pid,
-            callerAgent: context.agent?.slug ?? "unknown",
+            callerAgent: callerAgentSlug,
             projectId: callerProjectId.substring(0, 12),
         });
     }
