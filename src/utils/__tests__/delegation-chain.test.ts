@@ -126,23 +126,16 @@ describe("delegation-chain utilities", () => {
             expect(result).toBe("[User -> agent] [conversation conv123abc12]");
         });
 
-        it("should show 'unknown' for missing conversation IDs (backward compatibility)", () => {
-            // SEMANTICS: conversationId = "where this agent was delegated TO"
-            // If an entry doesn't have conversationId, show "unknown" for that link
+        it("should throw if a conversation ID is missing", () => {
             const chain: DelegationChainEntry[] = [
                 { pubkey: "user-pubkey", displayName: "User", isUser: true },
-                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false }, // No conversationId
-                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false }, // No conversationId
+                { pubkey: "pm-pubkey", displayName: "pm-wip", isUser: false },
+                { pubkey: "claude-pubkey", displayName: "claude-code", isUser: false },
             ];
 
-            const result = formatDelegationChain(chain, "claude-pubkey");
-            const lines = result.split("\n");
-
-            expect(lines).toHaveLength(2);
-            // pm-wip has no conversationId -> unknown
-            expect(lines[0]).toBe("[User -> pm-wip] [conversation unknown]");
-            // claude-code has no conversationId -> unknown
-            expect(lines[1]).toBe("  -> [pm-wip -> claude-code (you)] [conversation unknown]");
+            expect(() => formatDelegationChain(chain, "claude-pubkey")).toThrow(
+                "[DelegationChain] Missing recipient conversation id."
+            );
         });
 
         it("should use recipient.conversationId for each link", () => {

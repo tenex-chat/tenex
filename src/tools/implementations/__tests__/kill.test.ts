@@ -78,7 +78,7 @@ describe("kill tool", () => {
             })) as any;
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             expect(result.success).toBe(true);
             expect(result.targetType).toBe("agent");
@@ -110,7 +110,7 @@ describe("kill tool", () => {
             ConversationStore.getAll = mock(() => []);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: shellTaskId });
+            const result = await killTool.execute({ target: shellTaskId, reason: "test kill" });
 
             // Task won't be found - generic error returned (targetType defaults to "agent")
             // The shell path was attempted but fell through to the error handler
@@ -292,7 +292,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => mockConversation as any);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             expect(result.success).toBe(false);
             expect(result.message).toContain("no project ID");
@@ -319,7 +319,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => mockConversation as any);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             expect(result.success).toBe(false);
             expect(result.message).toContain("No active agents found");
@@ -338,7 +338,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => undefined);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             expect(result.success).toBe(false);
             expect(result.message).toContain("not found");
@@ -381,7 +381,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => targetConversation as any);
 
             const killTool = createKillTool(contextWithProjectId);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             // SECURITY: Should reject cross-project kill
             expect(result.success).toBe(false);
@@ -423,7 +423,7 @@ describe("kill tool", () => {
             ConversationStore.getAll = mock(() => []);
 
             const killTool = createKillTool(contextWithProject);
-            const result = await killTool.execute({ target: shellTaskId });
+            const result = await killTool.execute({ target: shellTaskId, reason: "test kill" });
 
             // Task won't be found - generic error returned
             // The shell path was attempted via resolveTargetId but task doesn't exist
@@ -464,7 +464,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => targetConversation as any);
 
             const killTool = createKillTool(contextWithoutProject);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             // SECURITY: Should reject when no project context
             expect(result.success).toBe(false);
@@ -619,7 +619,7 @@ describe("kill tool", () => {
             ConversationStore.getAll = mock(() => []);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: shortId });
+            const result = await killTool.execute({ target: shortId, reason: "test kill" });
 
             expect(result.success).toBe(false);
             expect(result.message).toContain("not found");
@@ -664,7 +664,7 @@ describe("kill tool", () => {
             })) as any;
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             // Should succeed because we found the agent in RALRegistry
             expect(result.success).toBe(true);
@@ -705,7 +705,7 @@ describe("kill tool", () => {
             })) as any;
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             // Should succeed - agent found in both stores
             expect(result.success).toBe(true);
@@ -749,7 +749,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => mockDelegationConversation as any);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: delegationConversationId });
+            const result = await killTool.execute({ target: delegationConversationId, reason: "test kill" });
 
             // Should succeed with pre-emptive kill
             expect(result.success).toBe(true);
@@ -783,7 +783,7 @@ describe("kill tool", () => {
             ConversationStore.get = mock(() => mockConversation as any);
 
             const killTool = createKillTool(mockContext);
-            const result = await killTool.execute({ target: conversationId });
+            const result = await killTool.execute({ target: conversationId, reason: "test kill" });
 
             // Should fail - no agents and no delegation info
             expect(result.success).toBe(false);

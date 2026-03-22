@@ -176,7 +176,10 @@ function xmlToLegacyLines(xml: string): string[] {
         const node = nodes[i];
         const rawTime = node.attrs.time ?? "+0";
         const time = rawTime.startsWith("+") ? `[${rawTime}]` : rawTime;
-        const author = node.attrs.author ?? node.attrs.user ?? "unknown";
+        const author = node.attrs.author ?? node.attrs.user;
+        if (!author) {
+            throw new Error("[conversation_get.test] Missing author in transcript xml.");
+        }
         const recipientList = node.attrs.recipient
             ? node.attrs.recipient.split(",").map((v) => v.trim()).filter(Boolean)
             : [];
@@ -185,7 +188,10 @@ function xmlToLegacyLines(xml: string): string[] {
             : "";
 
         if (node.tag === "tool") {
-            const toolName = node.attrs.name ?? "unknown";
+            const toolName = node.attrs.name;
+            if (!toolName) {
+                throw new Error("[conversation_get.test] Missing tool name in transcript xml.");
+            }
             const attrSegments = Object.entries(node.attrs)
                 .filter(([key]) => !["id", "user", "name", "time"].includes(key))
                 .map(([key, value]) => `${key}=${JSON.stringify(value)}`);

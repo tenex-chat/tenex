@@ -68,7 +68,7 @@ describe("MockLLMService Performance Testing", () => {
 
     it("should delay response by specified streamDelay", async () => {
         const response = await mockLLM.complete({
-            messages: [{ role: "user", content: "slow test" }],
+            messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "slow test" }],
             options: { configName: "test-model" },
         });
         const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
@@ -78,7 +78,7 @@ describe("MockLLMService Performance Testing", () => {
 
     it("should handle very slow responses", async () => {
         const response = await mockLLM.complete({
-            messages: [{ role: "user", content: "very slow test" }],
+            messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "very slow test" }],
             options: { configName: "test-model" },
         });
         const delays = setTimeoutSpy.mock.calls.map(([, delay]) => Number(delay ?? 0));
@@ -88,7 +88,7 @@ describe("MockLLMService Performance Testing", () => {
 
     it("should handle instant responses with no delay", async () => {
         const response = await mockLLM.complete({
-            messages: [{ role: "user", content: "instant test" }],
+            messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "instant test" }],
             options: { configName: "test-model" },
         });
         expect(setTimeoutSpy).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("MockLLMService Performance Testing", () => {
 
         // Stream the response
         for await (const event of mockLLM.stream({
-            messages: [{ role: "user", content: "slow test" }],
+            messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "slow test" }],
             options: { configName: "test-model" },
         })) {
             if (event.type === "content") {
@@ -117,7 +117,7 @@ describe("MockLLMService Performance Testing", () => {
     it("should track requests with delays in history", async () => {
         // Make a delayed request
         await mockLLM.complete({
-            messages: [{ role: "user", content: "slow test" }],
+            messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "slow test" }],
             options: { configName: "test-model" },
         });
 
@@ -131,15 +131,15 @@ describe("MockLLMService Performance Testing", () => {
         // Start three requests concurrently
         const promises = [
             mockLLM.complete({
-                messages: [{ role: "user", content: "instant test" }],
+                messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "instant test" }],
                 options: { configName: "test-model" },
             }),
             mockLLM.complete({
-                messages: [{ role: "user", content: "slow test" }],
+                messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "slow test" }],
                 options: { configName: "test-model" },
             }),
             mockLLM.complete({
-                messages: [{ role: "user", content: "very slow test" }],
+                messages: [{ role: "system", content: "You are the test-agent agent. Current Phase: test." }, { role: "user", content: "very slow test" }],
                 options: { configName: "test-model" },
             }),
         ];

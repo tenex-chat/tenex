@@ -608,15 +608,13 @@ describe("LLMService telemetry configuration", () => {
         expect(config.recordOutputs).toBe(true);
     });
 
-    test("uses 'unknown' for missing agent slug", () => {
+    test("throws if agent slug is missing", () => {
         const mockRegistry = createMockRegistry();
         const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
 
         const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
-        const config = getTelemetryConfig();
 
-        expect(config.functionId).toBe("unknown.openrouter.gpt-4");
-        expect(config.metadata["agent.slug"]).toBe("unknown");
+        expect(() => getTelemetryConfig()).toThrow("[Tracing] Missing agent slug for telemetry config.");
     });
 });
 

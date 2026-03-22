@@ -116,7 +116,10 @@ export class ConversationalLogger {
 
         if (response.toolCalls && response.toolCalls.length > 0) {
             for (const toolCall of response.toolCalls) {
-                const toolName = toolCall.function || toolCall.name || "unknown";
+                const toolName = toolCall.function || toolCall.name;
+                if (!toolName) {
+                    throw new Error("[ConversationalLogger] Missing tool name in tool call.");
+                }
 
                 this.logToolExecution(agentName, toolName, toolCall);
             }
@@ -266,7 +269,10 @@ export class ConversationalLogger {
         // Log tool calls if present
         if (mockResponse.response.toolCalls && mockResponse.response.toolCalls.length > 0) {
             const toolNames = mockResponse.response.toolCalls.map((tc) => {
-                const toolName = tc.function || tc.name || "unknown";
+                const toolName = tc.function || tc.name;
+                if (!toolName) {
+                    throw new Error("[ConversationalLogger] Missing tool name in response tool call.");
+                }
                 return toolName;
             });
             console.log(`   → Tools: [${toolNames.join(", ")}]`);

@@ -92,7 +92,10 @@ export class MockLLMService implements MockLLMServiceContract {
 
                   if (typeof tc === "object" && "function" in tc) {
                       // Format with function as string
-                      functionName = tc.function || "unknown";
+                      if (!tc.function) {
+                      throw new Error("[MockLLMService] Missing tool function name in mock response.");
+                  }
+                  functionName = tc.function;
                       try {
                           const argsStr = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
                           args = JSON.parse(argsStr || "{}");
@@ -101,10 +104,13 @@ export class MockLLMService implements MockLLMServiceContract {
                       }
                   } else if (typeof tc === "object" && "name" in tc) {
                       // Direct ToolCall format
-                      functionName = tc.name || "unknown";
+                      if (!tc.name) {
+                      throw new Error("[MockLLMService] Missing tool name in mock response.");
+                  }
+                  functionName = tc.name;
                       args = tc.params || {};
                   } else {
-                      functionName = "unknown";
+                      throw new Error("[MockLLMService] Unknown tool call format in mock response.");
                   }
 
                   return {
@@ -322,7 +328,7 @@ export class MockLLMService implements MockLLMServiceContract {
 
         // Return default response
         if (this.config.debug) {
-            conversationalLogger.logAgentResponse("unknown", {
+            conversationalLogger.logAgentResponse(agentName, {
                 content: this.config.defaultResponse?.content || "Default mock response",
                 toolCalls: this.config.defaultResponse?.toolCalls,
                 reason: "No matching response found, using default",
@@ -360,7 +366,7 @@ export class MockLLMService implements MockLLMServiceContract {
         if (systemPrompt.includes("planning specialist")) return "planner";
         if (systemPrompt.includes("planner")) return "planner";
 
-        return "unknown";
+        throw new Error("[MockLLMService] Unable to extract agent name from system prompt.");
     }
 
     private extractPhase(systemPrompt: string): string {
@@ -375,11 +381,15 @@ export class MockLLMService implements MockLLMServiceContract {
         for (const pattern of patterns) {
             const match = systemPrompt.match(pattern);
             if (match) {
-                return match[1]?.toLowerCase() || "unknown";
+                const phase = match[1]?.toLowerCase();
+                if (!phase) {
+                    throw new Error("[MockLLMService] Missing phase match in system prompt.");
+                }
+                return phase;
             }
         }
 
-        return "unknown";
+        throw new Error("[MockLLMService] Unable to extract phase from system prompt.");
     }
 
     private recordRequest(
