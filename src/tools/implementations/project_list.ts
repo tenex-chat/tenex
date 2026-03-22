@@ -98,10 +98,10 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         });
     }
 
-    // Then, process NON-RUNNING projects from knownProjects (discovered but not booted)
+    // Then, process NON-RUNNING projects from knownProjects (discovered via Nostr)
     for (const [projectId, project] of knownProjects) {
-        // projectId format is "31933:pubkey:id"
-        const id = projectId.split(":")[2];
+        // projectId format is "31933:pubkey:id" or just the d-tag
+        const id = projectId.includes(":") ? projectId.split(":")[2] : projectId;
         if (!id) {
             logger.warn("⚠️ Project missing id, skipping", { projectId });
             continue;
@@ -111,6 +111,8 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
         if (processedDTags.has(id)) {
             continue;
         }
+
+        processedDTags.add(id);
 
         const title = project.tagValue("title") || project.tagValue("name");
         const description = project.tagValue("description");
@@ -136,6 +138,40 @@ async function executeProjectList(context: ToolExecutionContext): Promise<Projec
             title,
             description,
             repository,
+            isRunning: false,
+            agents,
+        });
+    }
+
+    // Finally, process OFFLINE projects from AgentStorage (local storage, not discovered via Nostr)
+    // This catches projects that exist locally but haven't been discovered via Nostr subscriptions
+    const storedProjectDTags = await agentStorage.getAllProjectDTags();
+    for (const dTag of storedProjectDTags) {
+        // Skip if already processed (either running or discovered via Nostr)
+        if (processedDTags.has(dTag)) {
+            continue;
+        }
+
+        processedDTags.add(dTag);
+
+        // Get agents from storage - this is the only metadata we have for offline projects
+        const agents: ProjectAgent[] = [];
+        const storedAgents = await agentStorage.getProjectAgents(dTag);
+        for (const storedAgent of storedAgents) {
+            const signer = new NDKPrivateKeySigner(storedAgent.nsec);
+            const pubkey = (await signer.user()).pubkey;
+            agents.push({
+                slug: storedAgent.slug,
+                pubkey: pubkey.substring(0, PREFIX_LENGTH),
+                role: storedAgent.role,
+            });
+        }
+
+        totalAgents += agents.length;
+
+        projects.push({
+            id: dTag,
+            title: dTag, // Use dTag as title since we have no Nostr metadata
             isRunning: false,
             agents,
         });

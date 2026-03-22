@@ -755,6 +755,19 @@ export class AgentStorage {
     }
 
     /**
+     * Get all known project dTags from the local index.
+     *
+     * This returns ALL projects that have agents stored locally, regardless of
+     * whether they are currently running or discovered via Nostr subscriptions.
+     * Use this as a source of truth for offline/non-running projects.
+     */
+    async getAllProjectDTags(): Promise<string[]> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return [];
+        return Object.keys(this.index.byProject);
+    }
+
+    /**
      * Scan byProject index and return all dTags where pubkey appears.
      */
     private getIndexProjectsForAgent(pubkey: string): string[] {
