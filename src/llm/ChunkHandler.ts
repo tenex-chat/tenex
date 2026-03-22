@@ -169,11 +169,16 @@ export class ChunkHandler {
 
         if (hasError) {
             const errorDetails = extractErrorDetails(result);
+            if (!errorDetails?.type || !errorDetails?.message) {
+                throw new Error(
+                    `[LLMService] Tool '${toolName}' returned an error result without details (toolCallId: ${toolCallId}).`
+                );
+            }
             logger.error(`[LLMService] Tool '${toolName}' execution failed`, {
                 toolCallId,
                 toolName,
-                errorType: errorDetails?.type || "unknown",
-                errorMessage: errorDetails?.message || "No error details available",
+                errorType: errorDetails.type,
+                errorMessage: errorDetails.message,
             });
         }
 

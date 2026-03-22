@@ -44,7 +44,9 @@ export class ConfigurationTester {
             const llmConfig = configService.getLLMConfig(configName);
 
             await llmServiceFactory.initializeProviders(llmsConfig.providers);
-            const service = llmServiceFactory.createService(llmConfig);
+            const service = llmServiceFactory.createService(llmConfig, {
+                agentName: "configuration-tester",
+            });
 
             service.on("content", (_event: ContentEvent) => {});
 

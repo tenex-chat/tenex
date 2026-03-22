@@ -593,7 +593,10 @@ export class ProjectContext {
         let memorized = 0;
 
         for (const report of this.reports.values()) {
-            const author = this.extractPubkeyFromReport(report) || "unknown";
+            const author = this.extractPubkeyFromReport(report);
+            if (!author) {
+                throw new Error("[ProjectContext] Missing author pubkey in report cache.");
+            }
             byAuthor[author.substring(0, 8)] = (byAuthor[author.substring(0, 8)] || 0) + 1;
             if (report.isMemorized) memorized++;
         }

@@ -189,9 +189,13 @@ export async function checkPostCompletion(
     const supervisionResult = await supervisorOrchestrator.checkPostCompletion(supervisionContext, executionId);
 
     if (supervisionResult.hasViolation && supervisionResult.correctionAction) {
+        if (!supervisionResult.heuristicId) {
+            throw new Error("[PostCompletionChecker] Missing heuristic id for supervision violation.");
+        }
+
         trace.getActiveSpan()?.addEvent("executor.supervision_violation", {
             "ral.number": ralNumber,
-            "heuristic.id": supervisionResult.heuristicId || "unknown",
+            "heuristic.id": supervisionResult.heuristicId,
             "action.type": supervisionResult.correctionAction.type,
         });
 
@@ -213,7 +217,7 @@ export async function checkPostCompletion(
             trace.getActiveSpan()?.addEvent("executor.supervision_correction", {
                 "has_message": !!supervisionResult.correctionAction.message,
                 "message_length": supervisionResult.correctionAction.message?.length || 0,
-                "heuristic.id": supervisionResult.heuristicId || "unknown",
+                "heuristic.id": supervisionResult.heuristicId,
                 "action.type": supervisionResult.correctionAction.type,
                 "action.reEngage": supervisionResult.correctionAction.reEngage,
             });
@@ -247,7 +251,7 @@ export async function checkPostCompletion(
 
             trace.getActiveSpan()?.addEvent("executor.supervision_deferred_injection", {
                 "ral.number": ralNumber,
-                "heuristic.id": supervisionResult.heuristicId || "unknown",
+                "heuristic.id": supervisionResult.heuristicId,
                 "message_length": supervisionResult.correctionAction.message.length,
             });
 

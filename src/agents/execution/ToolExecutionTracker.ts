@@ -254,12 +254,18 @@ export class ToolExecutionTracker {
             // Extract error details for better logging
             const errorDetails = extractErrorDetails(result);
 
+            if (!errorDetails?.type || !errorDetails.message) {
+                throw new Error(
+                    `[ToolExecutionTracker] Missing error details for tool ${execution.toolName} (${toolCallId}).`
+                );
+            }
+
             logger.error("[ToolExecutionTracker] Tool execution failed", {
                 toolName: execution.toolName,
                 toolCallId,
                 toolEventId: execution.toolEventId,
-                errorType: errorDetails?.type || "unknown",
-                errorMessage: errorDetails?.message || "No details available",
+                errorType: errorDetails.type,
+                errorMessage: errorDetails.message,
                 result,
             });
 
@@ -269,8 +275,8 @@ export class ToolExecutionTracker {
                 "tool.name": execution.toolName,
                 "tool.call_id": toolCallId,
                 "tool.error": true,
-                "tool.error_type": errorDetails?.type || "unknown",
-                "tool.error_message": (errorDetails?.message || "").substring(0, 200),
+                "tool.error_type": errorDetails.type,
+                "tool.error_message": errorDetails.message.substring(0, 200),
             });
         }
 

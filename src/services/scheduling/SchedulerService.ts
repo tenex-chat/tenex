@@ -974,9 +974,13 @@ export class SchedulerService {
             reroutedToPM: wasRerouted,
         });
 
+        if (!event.id) {
+            throw new Error("[SchedulerService] Missing event id after publish.");
+        }
+
         trace.getActiveSpan()?.addEvent("scheduler.event_published", {
             "task.id": task.id,
-            "event.id": event.id || "unknown",
+            "event.id": event.id,
             "event.from": truncatePubkey(signer.pubkey),
             "event.to": truncatePubkey(targetPubkey),
             "event.original_target": wasRerouted ? truncatePubkey(task.toPubkey) : undefined,

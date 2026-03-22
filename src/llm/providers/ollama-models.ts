@@ -81,7 +81,9 @@ export async function fetchOllamaModels(baseUrl?: string): Promise<OllamaModelsR
  * Format bytes to human readable size
  */
 function formatSize(bytes: number): string {
-    if (!bytes) return "unknown";
+    if (!bytes) {
+        throw new Error("[OllamaModels] Missing model size for formatSize.");
+    }
     const gb = bytes / (1024 * 1024 * 1024);
     if (gb >= 1) {
         return `${gb.toFixed(1)}GB`;

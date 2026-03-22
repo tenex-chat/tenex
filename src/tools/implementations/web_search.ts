@@ -101,7 +101,9 @@ async function executeLLMSearch(input: WebSearchInput, searchConfigName: string)
 
     logger.debug(`LLM search: "${query}" (max: ${max_results}) using config: ${searchConfigName}`);
 
-    const llmService = configService.createLLMService(searchConfigName);
+    const llmService = configService.createLLMService(searchConfigName, {
+        agentName: "web-search",
+    });
 
     const systemPrompt = `You are a web search tool. You MUST respond ONLY with valid JSON matching the required schema.
 Return search results for the given query. Provide accurate, relevant results with real URLs when possible.

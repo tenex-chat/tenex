@@ -150,12 +150,16 @@ export function parseDocumentMetadata(
  * Handles metadata parsing and field extraction.
  */
 export function mapLanceResultToDocument(result: LanceDBResult): MappedRAGDocument {
+    if (!result.source) {
+        throw new Error("[RAG] Missing source for LanceDB result.");
+    }
+
     return {
         id: result.id ?? "",
         content: result.content ?? "",
         metadata: parseDocumentMetadata(result.metadata),
         timestamp: result.timestamp ?? Date.now(),
-        source: result.source ?? "unknown",
+        source: result.source,
     };
 }
 

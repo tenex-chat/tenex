@@ -48,7 +48,11 @@ const formatToolInput = (toolCall: MockToolCall): string => {
 };
 
 const formatToolName = (toolCall: MockToolCall): string => {
-    return toolCall.name ?? toolCall.function ?? "unknown";
+    const name = toolCall.name ?? toolCall.function;
+    if (!name) {
+        throw new Error("[MockProvider] Missing tool name in tool call.");
+    }
+    return name;
 };
 
 const formatMessageContent = (

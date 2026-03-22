@@ -329,9 +329,11 @@ export function formatDelegationChain(
 
         // Get the conversation ID for this link from RECIPIENT.conversationId
         // Truncate to PREFIX_LENGTH chars for display (full IDs are stored in chain entries)
-        const convId = recipient.conversationId
-            ? shortenConversationId(recipient.conversationId)
-            : "unknown";
+        if (!recipient.conversationId) {
+            throw new Error("[DelegationChain] Missing recipient conversation id.");
+        }
+
+        const convId = shortenConversationId(recipient.conversationId);
 
         // Build the line with proper indentation
         const indent = i === 0 ? "" : "  ".repeat(i) + "-> ";

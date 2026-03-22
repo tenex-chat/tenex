@@ -74,9 +74,12 @@ export const daemonStatusCommand = new Command("status")
         if (status.runtimes.length > 0) {
             console.log();
             for (const runtime of status.runtimes) {
-                const startedAgo = runtime.startTime
-                    ? formatDuration(Date.now() - new Date(runtime.startTime).getTime()) + " ago"
-                    : "unknown";
+                if (!runtime.startTime) {
+                    throw new Error("[daemon-status] Missing runtime startTime.");
+                }
+
+                const startedAgo =
+                    formatDuration(Date.now() - new Date(runtime.startTime).getTime()) + " ago";
                 const lastEventAgo = runtime.lastEventTime
                     ? formatDuration(Date.now() - new Date(runtime.lastEventTime).getTime()) + " ago"
                     : "never";

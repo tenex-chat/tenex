@@ -341,6 +341,10 @@ export class StreamExecutionHandler {
                 reason: "complete",
             });
 
+            if (!event.finishReason) {
+                throw new Error("[StreamExecutionHandler] Missing finish reason for complete event.");
+            }
+
             const completeReceivedTime = Date.now();
             const timeSinceRegistration = completeReceivedTime - completeListenerRegisteredAt;
             this.executionSpan?.addEvent("executor.complete_received", {
@@ -348,7 +352,7 @@ export class StreamExecutionHandler {
                 "complete.ms_since_listener_registered": timeSinceRegistration,
                 "complete.message_length": event.message?.length ?? 0,
                 "complete.steps_count": event.steps?.length ?? 0,
-                "complete.finish_reason": event.finishReason ?? "unknown",
+                "complete.finish_reason": event.finishReason,
                 "complete.result_already_set": this.result !== undefined,
                 "complete.result_kind": this.result?.kind ?? "none",
                 "ral.number": ralNumber,

@@ -53,7 +53,9 @@ async function distillWithRetry<T>(
     let lastError: unknown;
     for (const config of llmConfigs) {
         try {
-            const service = llmServiceFactory.createService(config);
+            const service = llmServiceFactory.createService(config, {
+                agentName: "openclaw-distiller",
+            });
             return await run(service);
         } catch (error) {
             lastError = error;

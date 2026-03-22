@@ -389,8 +389,12 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
             signal,
         };
 
+        if (exitCode == null) {
+            throw new Error("[ShellTool] Missing exit code for shell error result.");
+        }
+
         span?.addEvent("shell.execute_error", {
-            exit_code: exitCode ?? "unknown",
+            exit_code: exitCode,
             signal: signal ?? "none",
             error_message: execError.message.substring(0, 200),
             has_stdout: !!stdout,

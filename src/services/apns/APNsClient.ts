@@ -139,7 +139,10 @@ export class APNsClient {
 
             // Parse error response
             const errorBody = await response.json().catch(() => ({})) as Record<string, unknown>;
-            const reason = (errorBody.reason as string) ?? "unknown";
+            const reason = errorBody.reason as string | undefined;
+            if (!reason) {
+                throw new Error("[APNsClient] Missing rejection reason from APNs response.");
+            }
 
             logger.warn(`${LOG_PREFIX} APNs rejected push`, {
                 statusCode,

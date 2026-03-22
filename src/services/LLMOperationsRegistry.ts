@@ -337,9 +337,12 @@ export class LLMOperationsRegistry {
             peak: this.peakConcurrentOperations,
             total: this.totalOperationsRegistered,
             histogram: Object.fromEntries(this.concurrencyHistogram),
-            activeAgents: Array.from(this.operations.values()).map(
-                (op) => `${op.agentPubkey.substring(0, 8)}:${op.ralState || "unknown"}`
-            ),
+            activeAgents: Array.from(this.operations.values()).map((op) => {
+                if (!op.ralState) {
+                    throw new Error("[LLMOperationsRegistry] Missing RAL state for active operation.");
+                }
+                return `${op.agentPubkey.substring(0, 8)}:${op.ralState}`;
+            }),
         };
     }
 

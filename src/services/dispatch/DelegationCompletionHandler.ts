@@ -171,8 +171,12 @@ export async function handleDelegationCompletion(
             return { recorded: false };
         }
 
+        if (!event.id) {
+            throw new Error("[DelegationCompletionHandler] Missing completion event id.");
+        }
+
         if (!delegationEventId) {
-            throw new Error(`[DelegationCompletionHandler] Missing delegation event id for completion event ${event.id ?? "unknown"}.`);
+            throw new Error(`[DelegationCompletionHandler] Missing delegation event id for completion event ${event.id}.`);
         }
 
         span.setAttribute("delegation.event_id", delegationEventId);
@@ -194,9 +198,13 @@ export async function handleDelegationCompletion(
         const targetAgent = projectCtx.getAgentByPubkey(location.agentPubkey);
         const agentSlug = targetAgent?.slug;
 
+        if (!agentSlug) {
+            throw new Error("[DelegationCompletionHandler] Missing agent slug for delegation completion.");
+        }
+
         span.setAttributes({
             "agent.pubkey": location.agentPubkey,
-            "agent.slug": agentSlug || "unknown",
+            "agent.slug": agentSlug,
             "conversation.id": shortenConversationId(location.conversationId),
             "delegation.pending_count": pendingDelegations.length,
             "delegation.completed_count": completedDelegations.length,

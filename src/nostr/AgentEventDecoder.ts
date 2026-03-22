@@ -303,7 +303,7 @@ export class AgentEventDecoder {
      */
     static classifyForDaemon(
         event: NDKEvent
-    ): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" | "unknown" {
+    ): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" {
         if (this.isNeverRouteKind(event)) return "never_route";
         if (this.isProjectEvent(event)) return "project";
         if (this.isLessonEvent(event)) return "lesson";
@@ -314,7 +314,7 @@ export class AgentEventDecoder {
         if (event.kind === NDKKind.TenexBootProject) {
             return "boot";
         }
-        return "unknown";
+        throw new Error(`[AgentEventDecoder] Unclassified event kind ${event.kind}.`);
     }
 
     /**

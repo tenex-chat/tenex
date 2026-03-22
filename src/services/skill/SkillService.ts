@@ -212,39 +212,22 @@ export class SkillService {
                 const fileEvent = await ndk.fetchEvent(eventId, { groupable: false });
 
                 if (!fileEvent) {
-                    results.push({
-                        eventId,
-                        relativePath: "unknown",
-                        absolutePath: "unknown",
-                        success: false,
-                        error: `Could not fetch event ${eventId}`,
-                    });
-                    continue;
+                    throw new Error(`[SkillService] Could not fetch event ${eventId}`);
                 }
 
                 // Verify it's a kind:1063 event
                 if (fileEvent.kind !== 1063) {
-                    results.push({
-                        eventId,
-                        relativePath: "unknown",
-                        absolutePath: "unknown",
-                        success: false,
-                        error: `Event ${eventId} is not kind:1063 (got kind:${fileEvent.kind})`,
-                    });
-                    continue;
+                    throw new Error(
+                        `[SkillService] Event ${eventId} is not kind:1063 (got kind:${fileEvent.kind})`
+                    );
                 }
 
                 // Extract file info from the event
                 const fileInfo = this.extractFileInfo(fileEvent);
                 if (!fileInfo) {
-                    results.push({
-                        eventId,
-                        relativePath: "unknown",
-                        absolutePath: "unknown",
-                        success: false,
-                        error: "Missing required tags (url, name) in kind:1063 event",
-                    });
-                    continue;
+                    throw new Error(
+                        `[SkillService] Missing required tags (url, name) in kind:1063 event ${eventId}`
+                    );
                 }
 
                 // Download and install the file
@@ -252,13 +235,7 @@ export class SkillService {
                 results.push(result);
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                results.push({
-                    eventId,
-                    relativePath: "unknown",
-                    absolutePath: "unknown",
-                    success: false,
-                    error: errorMessage,
-                });
+                throw new Error(`[SkillService] Failed to install skill file ${eventId}: ${errorMessage}`);
             }
         }
 

@@ -56,13 +56,17 @@ export function getFullTelemetryConfig(config: {
     maxTokens?: number;
     contextWindow?: number;
 }): TelemetrySettings {
+    if (!config.agentSlug) {
+        throw new Error("[TracingUtils] Missing required agentSlug for telemetry.");
+    }
+
     return {
         isEnabled: true,
-        functionId: `${config.agentSlug || "unknown"}.${config.provider}.${config.model}`,
+        functionId: `${config.agentSlug}.${config.provider}.${config.model}`,
 
         // Metadata for debugging context
         metadata: {
-            "agent.slug": config.agentSlug || "unknown",
+            "agent.slug": config.agentSlug,
             "llm.provider": config.provider,
             "llm.model": config.model,
             "llm.temperature": config.temperature ?? 0,

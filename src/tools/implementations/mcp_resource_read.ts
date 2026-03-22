@@ -92,8 +92,12 @@ async function executeReadResource(
             if ("text" in content && typeof content.text === "string") {
                 formattedContents.push(content.text);
             } else if ("blob" in content && typeof content.blob === "string") {
+                if (!content.mimeType) {
+                    throw new Error("[McpResourceRead] Missing MIME type for binary content.");
+                }
+
                 formattedContents.push(
-                    `[Binary content: ${content.blob.length} bytes, MIME type: ${content.mimeType || "unknown"}]`
+                    `[Binary content: ${content.blob.length} bytes, MIME type: ${content.mimeType}]`
                 );
             }
         }

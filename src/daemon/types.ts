@@ -9,7 +9,6 @@ export type EventClassification =
     | "project" // Project creation/update events (kind 31933)
     | "lesson" // Agent lesson events (kind 4129)
     | "conversation" // Reply and thread events
-    | "unknown"; // Unclassified events
 
 /**
  * Routing decision for an event

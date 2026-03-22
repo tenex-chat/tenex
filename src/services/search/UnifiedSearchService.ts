@@ -266,7 +266,9 @@ export class UnifiedSearchService {
                 return undefined;
             }
 
-            const llmService = configService.createLLMService(configName);
+            const llmService = configService.createLLMService(configName, {
+                agentName: "unified-search",
+            });
 
             // Build context from search results
             const resultContext = results

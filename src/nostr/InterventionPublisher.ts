@@ -113,14 +113,18 @@ export class InterventionPublisher {
                 });
             }
 
+            if (!event.id) {
+                throw new Error("[InterventionPublisher] Missing event id after publish.");
+            }
+
             trace.getActiveSpan()?.addEvent("intervention.review_request_published", {
-                "event.id": event.id || "unknown",
+                "event.id": event.id,
                 "conversation.id": conversationId,
                 "target.pubkey": humanReplicaPubkey.substring(0, 8),
                 "relay.count": successRelays.length,
             });
 
-            return event.id || "";
+            return event.id;
         } catch (error) {
             logger.error("Failed to publish intervention review request", {
                 error,

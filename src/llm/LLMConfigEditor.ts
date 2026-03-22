@@ -193,7 +193,13 @@ export class LLMConfigEditor {
             const detail =
                 cfg.provider === "meta"
                     ? `multi-modal, ${Object.keys((cfg as { variants: Record<string, unknown> }).variants).length} variants`
-                    : `${"model" in cfg ? cfg.model : "unknown"}`;
+                    : (() => {
+                        if (!("model" in cfg)) {
+                            throw new Error(`[LLMConfigEditor] Missing model for configuration ${name}.`);
+                        }
+                        return `${cfg.model}`;
+                    })();
+
             return {
                 name: `${name} ${chalk.dim(detail)}`,
                 value: `config:${name}`,

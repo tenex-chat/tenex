@@ -97,7 +97,11 @@ export class CooldownRegistry {
      * @param agentPubkey - The agent's pubkey
      * @param reason - Optional reason for the abort (for debugging)
      */
-    add(projectId: string, conversationId: string, agentPubkey: string, reason?: string): void {
+    add(projectId: string, conversationId: string, agentPubkey: string, reason: string): void {
+        if (!reason) {
+            throw new Error("[CooldownRegistry] Missing cooldown reason.");
+        }
+
         const key = this.makeKey(projectId, conversationId, agentPubkey);
         const entry: CooldownEntry = {
             projectId,
@@ -113,7 +117,7 @@ export class CooldownRegistry {
             "cooldown.project_id": projectId.substring(0, 12),
             "cooldown.conversation_id": shortenConversationId(conversationId),
             "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
-            "cooldown.reason": reason ?? "unknown",
+            "cooldown.reason": reason,
             "cooldown.total_count": this.cooldowns.size,
         });
 
@@ -158,7 +162,7 @@ export class CooldownRegistry {
             "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
             "cooldown.elapsed_ms": elapsed,
             "cooldown.remaining_ms": COOLDOWN_DURATION_MS - elapsed,
-            "cooldown.reason": entry.reason ?? "unknown",
+            "cooldown.reason": entry.reason,
         });
 
         return true;

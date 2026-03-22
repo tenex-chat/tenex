@@ -590,22 +590,32 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                     case "text-delta":
                         textDeltaCount++;
                         break;
-                    case "finish":
+                    case "finish": {
                         finishPartSeen = true;
+                        const finishReason = (part as { finishReason?: string }).finishReason;
+                        if (!finishReason) {
+                            throw new Error("[LLMService] Missing finish reason in finish chunk.");
+                        }
                         activeSpan?.addEvent("llm.finish_part_received", {
-                            "finish.reason": (part as { finishReason?: string }).finishReason ?? "unknown",
+                            "finish.reason": finishReason,
                             "stream.chunk_count": chunkCount,
                             "stream.ms_since_start": lastChunkTime - startTime,
                         });
                         break;
-                    case "finish-step":
+                    }
+                    case "finish-step": {
                         stepFinishCount++;
+                        const stepFinishReason = (part as { finishReason?: string }).finishReason;
+                        if (!stepFinishReason) {
+                            throw new Error("[LLMService] Missing finish reason in finish-step chunk.");
+                        }
                         activeSpan?.addEvent("llm.step_finish_received", {
                             "step.number": stepFinishCount,
-                            "step.finish_reason": (part as { finishReason?: string }).finishReason ?? "unknown",
+                            "step.finish_reason": stepFinishReason,
                             "stream.chunk_count": chunkCount,
                         });
                         break;
+                    }
                 }
 
                 if (part.type === "finish") {

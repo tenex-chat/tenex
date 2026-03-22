@@ -37,8 +37,8 @@ const killSchema = z.object({
         ),
     reason: z
         .string()
-        .optional()
-        .describe("Optional reason for the kill (used for agent aborts)"),
+        .min(1, "reason is required")
+        .describe("Reason for the kill (used for agent aborts)"),
 });
 
 type KillInput = z.infer<typeof killSchema>;
@@ -157,6 +157,10 @@ interface KillOutput {
 async function executeKill(input: KillInput, context: ToolExecutionContext): Promise<KillOutput> {
     const { target, reason } = input;
 
+    if (!reason) {
+        throw new Error("[kill] Missing kill reason.");
+    }
+
     // Normalize target once for consistent matching throughout
     const normalizedTarget = target.trim().toLowerCase();
 
@@ -260,7 +264,7 @@ async function executeKill(input: KillInput, context: ToolExecutionContext): Pro
  */
 async function killAgent(
     conversationId: string,
-    reason: string | undefined,
+    reason: string,
     context: ToolExecutionContext
 ): Promise<KillOutput> {
     const ralRegistry = RALRegistry.getInstance();
@@ -414,7 +418,7 @@ async function killAgent(
         "kill.project_id": projectId.substring(0, 12),
         "kill.conversation_id": shortenConversationId(conversationId),
         "kill.agent_pubkey": agentPubkey.substring(0, 12),
-        "kill.reason": reason ?? "manual kill",
+        "kill.reason": reason,
         "kill.cascade_enabled": true,
     });
 
@@ -430,7 +434,7 @@ async function killAgent(
         agentPubkey,
         conversationId,
         projectId,
-        reason ?? "manual kill via kill tool",
+        reason,
         cooldownRegistry
     );
 

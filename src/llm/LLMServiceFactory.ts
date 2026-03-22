@@ -115,6 +115,10 @@ export class LLMServiceFactory {
             ? context.agentName.toLowerCase().replace(/\s+/g, "-")
             : undefined;
 
+        if (!agentSlug) {
+            throw new Error("[LLMServiceFactory] Missing required agentName for LLM service creation.");
+        }
+
         // Determine the actual provider (mock mode handling)
         const actualProvider = process.env.USE_MOCK_LLM === "true" ? "mock" : config.provider;
 

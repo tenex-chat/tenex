@@ -173,12 +173,25 @@ function extractToolCallParts(entry: ConversationEntry): ToolCallPart[] {
   return entry.toolData
     .map((tool) => tool as unknown as Record<string, unknown>)
     .filter((tool) => (tool.type ?? entry.messageType) === "tool-call")
-    .map((tool) => ({
-      type: "tool-call",
-      toolCallId: typeof tool.toolCallId === "string" ? tool.toolCallId : "",
-      toolName: typeof tool.toolName === "string" ? tool.toolName : "unknown",
-      input: tool.input,
-    })) as ToolCallPart[];
+    .map((tool) => {
+      const toolCallId = typeof tool.toolCallId === "string" ? tool.toolCallId : null;
+      const toolName = typeof tool.toolName === "string" ? tool.toolName : null;
+
+      if (!toolCallId) {
+        throw new Error("[ConversationTranscript] Missing tool call id.");
+      }
+
+      if (!toolName) {
+        throw new Error("[ConversationTranscript] Missing tool name.");
+      }
+
+      return {
+        type: "tool-call",
+        toolCallId,
+        toolName,
+        input: tool.input,
+      };
+    }) as ToolCallPart[];
 }
 
 function resolveConversationRootEventId(
@@ -234,7 +247,10 @@ function buildToolXmlAttributes(
     }
   }
 
-  const toolName = firstPart?.toolName ?? "unknown";
+  const toolName = firstPart?.toolName;
+  if (!toolName) {
+    throw new Error("[ConversationTranscript] Missing tool name for xml attributes.");
+  }
   if (toolName.startsWith("mcp_") && !attrs.args) {
     attrs.args = truncateWithSuffix(safeStringify(firstInput ?? {}), maxToolInputJsonLength);
   }
@@ -317,9 +333,10 @@ export function renderConversationXml(
   };
 
   const rootEventId = resolveConversationRootEventId(entries, options.conversationId);
-  const rootId = rootEventId
-    ? getOrCreateShortId(rootEventId)
-    : "unknown";
+  if (!rootEventId) {
+    throw new Error("[ConversationTranscript] Missing conversation root event id.");
+  }
+  const rootId = getOrCreateShortId(rootEventId);
 
   const lines: string[] = [`<conversation id="${escapeXml(rootId)}" t0="${timeline.t0}">`];
 
@@ -354,7 +371,7 @@ export function renderConversationXml(
       }
 
       const idAttr = toolId ? ` id="${escapeXml(toolId)}"` : "";
-      const nameAttr = ` name="${escapeXml(primaryPart.toolName || "unknown")}"`;
+      const nameAttr = ` name="${escapeXml(primaryPart.toolName)}"`;
       const transcriptAttrs = buildToolXmlAttributes(
         entry,
         maxToolDescriptionLength,

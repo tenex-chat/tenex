@@ -1220,10 +1220,17 @@ export class Daemon {
      * Does NOT start new project runtimes
      */
     private async handleLessonEvent(event: NDKEvent): Promise<void> {
+        if (!event.id) {
+            throw new Error("[Daemon] Missing lesson event id.");
+        }
+        if (!event.pubkey) {
+            throw new Error("[Daemon] Missing lesson event pubkey.");
+        }
+
         const span = lessonTracer.startSpan("tenex.lesson.received", {
             attributes: {
-                "lesson.event_id": event.id?.substring(0, 16) || "unknown",
-                "lesson.publisher": event.pubkey?.substring(0, 16) || "unknown",
+                "lesson.event_id": event.id.substring(0, 16),
+                "lesson.publisher": event.pubkey.substring(0, 16),
                 "lesson.created_at": event.created_at || 0,
             },
         });
@@ -1243,7 +1250,7 @@ export class Daemon {
             const agentDefinitionId = lesson.agentDefinitionId;
             const lessonAuthorPubkey = event.pubkey;
             span.setAttribute("lesson.agent_definition_id", agentDefinitionId?.substring(0, 16) || "none");
-            span.setAttribute("lesson.author_pubkey", lessonAuthorPubkey?.substring(0, 16) || "unknown");
+            span.setAttribute("lesson.author_pubkey", lessonAuthorPubkey.substring(0, 16));
 
             // Hydrate lesson into ACTIVE runtimes only (don't start new ones)
             const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
@@ -1289,7 +1296,7 @@ export class Daemon {
                             "project.agent_count": allAgents.length,
                             "project.agents": JSON.stringify(agentInfo),
                             "lesson.agent_definition_id": agentDefinitionId?.substring(0, 16) || "none",
-                            "lesson.author_pubkey": lessonAuthorPubkey?.substring(0, 16) || "unknown",
+                            "lesson.author_pubkey": lessonAuthorPubkey.substring(0, 16),
                         });
                         continue;
                     }
@@ -1353,10 +1360,17 @@ export class Daemon {
      * agent the comment belongs to, falling back to p-tag if present.
      */
     private async handleLessonCommentEvent(event: NDKEvent): Promise<void> {
+        if (!event.id) {
+            throw new Error("[Daemon] Missing lesson comment event id.");
+        }
+        if (!event.pubkey) {
+            throw new Error("[Daemon] Missing lesson comment pubkey.");
+        }
+
         const span = lessonTracer.startSpan("tenex.lesson_comment.received", {
             attributes: {
-                "comment.event_id": event.id?.substring(0, 16) || "unknown",
-                "comment.author": event.pubkey?.substring(0, 16) || "unknown",
+                "comment.event_id": event.id.substring(0, 16),
+                "comment.author": event.pubkey.substring(0, 16),
                 "comment.created_at": event.created_at || 0,
             },
         });

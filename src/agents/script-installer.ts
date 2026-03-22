@@ -211,27 +211,15 @@ export async function installAgentScripts(
             const event = await ndk.fetchEvent(scriptRef.eventId, { groupable: false });
 
             if (!event) {
-                results.push({
-                    eventId: scriptRef.eventId,
-                    relativePath: "unknown",
-                    absolutePath: "unknown",
-                    success: false,
-                    error: `Could not fetch event ${scriptRef.eventId}`,
-                });
-                continue;
+                throw new Error(`[ScriptInstaller] Could not fetch event ${scriptRef.eventId}`);
             }
 
             // Extract script info
             const scriptInfo = extractScriptFileInfo(event);
             if (!scriptInfo) {
-                results.push({
-                    eventId: scriptRef.eventId,
-                    relativePath: "unknown",
-                    absolutePath: "unknown",
-                    success: false,
-                    error: "Event is not a valid kind 1063 file metadata event",
-                });
-                continue;
+                throw new Error(
+                    `[ScriptInstaller] Event ${scriptRef.eventId} is not a valid kind 1063 file metadata event`
+                );
             }
 
             // Install the script
@@ -239,13 +227,7 @@ export async function installAgentScripts(
             results.push(result);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            results.push({
-                eventId: scriptRef.eventId,
-                relativePath: "unknown",
-                absolutePath: "unknown",
-                success: false,
-                error: errorMessage,
-            });
+            throw new Error(`[ScriptInstaller] Failed to install script ${scriptRef.eventId}: ${errorMessage}`);
         }
     }
 

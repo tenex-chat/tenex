@@ -111,6 +111,10 @@ export function createEventSpan(event: NDKEvent): Span {
     const replyToEventId = TagExtractor.getFirstETag(event);
 
     // Create span with conversation-aware context
+    if (!conversationId) {
+        throw new Error("[telemetry] Missing conversation id for event span.");
+    }
+
     const span = trace.getTracer("tenex.daemon").startSpan(
         "tenex.event.process",
         {
@@ -125,7 +129,7 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.tag_count": event.tags.length,
                 "event.has_trace_context": !!traceContextTag,
                 "event.reply_to": replyToEventId || "",
-                "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
+                "conversation.id": shortenConversationId(conversationId),
                 "conversation.is_root": !AgentEventDecoder.getReplyTarget(event),
                 "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,
             },

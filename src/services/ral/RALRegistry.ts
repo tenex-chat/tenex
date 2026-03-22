@@ -1601,9 +1601,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     agentPubkey: string,
     conversationId: string,
     projectId: ProjectDTag,
-    reason?: string,
-    cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason?: string) => void }
+    reason: string,
+    cooldownRegistry?: { add: (projectId: ProjectDTag, convId: string, agentPubkey: string, reason: string) => void }
   ): Promise<{ abortedCount: number; descendantConversations: Array<{ conversationId: string; agentPubkey: string }> }> {
+    if (!reason) {
+      throw new Error("[RALRegistry] Missing abort reason for cascade.");
+    }
+
     const abortedTuples: Array<{ conversationId: string; agentPubkey: string }> = [];
 
     // CRITICAL: Capture pending delegations AND conversation delegations BEFORE aborting/clearing
@@ -1650,7 +1654,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
       // Persist abort message in conversation store
       if (conversation) {
-        const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason ?? "manual abort"}`;
+        const abortMessage = `This conversation was aborted at ${new Date().toISOString()}. Reason: ${reason}`;
         conversation.addMessage({
           pubkey: "system",
           content: abortMessage,
@@ -1665,7 +1669,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       "cascade.root_conversation_id": shortenConversationId(conversationId),
       "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
       "cascade.pending_delegations": pendingDelegations.length,
-      "cascade.reason": reason ?? "unknown",
+      "cascade.reason": reason,
     });
 
     // Recursively abort each pending delegation
