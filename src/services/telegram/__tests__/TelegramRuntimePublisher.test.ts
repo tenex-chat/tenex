@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import type { EventContext } from "@/nostr/types";
-import { TelegramRuntimePublisher } from "@/services/telegram/TelegramRuntimePublisherService";
+import { TelegramRuntimePublisherService } from "@/services/telegram/TelegramRuntimePublisherService";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 const nostrPublisherMethods = {
@@ -38,7 +38,7 @@ const createTelegramEnvelope = (messageId: string) =>
         },
     });
 
-describe("TelegramRuntimePublisher", () => {
+describe("TelegramRuntimePublisherService", () => {
     beforeEach(() => {
         Object.values(nostrPublisherMethods).forEach((method) => method.mockReset());
         nostrPublisherMethods.complete.mockImplementation(async () => undefined);
@@ -78,7 +78,7 @@ describe("TelegramRuntimePublisher", () => {
 
     it("delivers completions to Telegram when the triggering context is Telegram", async () => {
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: "a".repeat(64),
@@ -112,7 +112,7 @@ describe("TelegramRuntimePublisher", () => {
 
     it("delivers conversation updates to Telegram as they are published", async () => {
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: "a".repeat(64),
@@ -142,7 +142,7 @@ describe("TelegramRuntimePublisher", () => {
 
     it("delivers allowlisted todo_write tool updates to Telegram", async () => {
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: "a".repeat(64),
@@ -201,7 +201,7 @@ describe("TelegramRuntimePublisher", () => {
 
     it("does not deliver non-allowlisted tool updates to Telegram", async () => {
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: "a".repeat(64),
@@ -238,6 +238,7 @@ describe("TelegramRuntimePublisher", () => {
     it("returns the generated event when Telegram recovery succeeds after a Nostr publish failure", async () => {
         const recoveredEvent = {
             id: "event-1",
+            transport: "nostr",
             content: "hello telegram",
             tags: [],
         } as any;
@@ -250,7 +251,7 @@ describe("TelegramRuntimePublisher", () => {
         });
 
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: "a".repeat(64),

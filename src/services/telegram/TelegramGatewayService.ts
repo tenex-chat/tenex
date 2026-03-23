@@ -116,8 +116,9 @@ export class TelegramGatewayService {
     private running = false;
 
     /**
-     * Single-project compatibility harness retained for isolated tests and project-scoped
-     * workflows. Production shared-bot polling uses TelegramGatewayCoordinator.
+     * Project-scoped Telegram polling entrypoint for isolated tests and explicit
+     * single-project runtime wiring. Shared multi-project polling uses
+     * TelegramGatewayCoordinator.
      */
 
     constructor(private readonly options: TelegramGatewayOptions) {

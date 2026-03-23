@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { createDefaultRuntimePublisherFactory } from "@/services/runtime/runtime-publisher-factory";
 import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
-import { TelegramRuntimePublisher } from "@/services/telegram/TelegramRuntimePublisherService";
+import { TelegramRuntimePublisherService } from "@/services/telegram/TelegramRuntimePublisherService";
 import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 
 function createAgent(overrides: Partial<RuntimePublishAgent> = {}): RuntimePublishAgent {
@@ -25,7 +25,7 @@ describe("createDefaultRuntimePublisherFactory", () => {
             },
         }));
 
-        expect(publisher).toBeInstanceOf(TelegramRuntimePublisher);
+        expect(publisher).toBeInstanceOf(TelegramRuntimePublisherService);
     });
 
     it("falls back to the Nostr publisher for non-Telegram agents", () => {

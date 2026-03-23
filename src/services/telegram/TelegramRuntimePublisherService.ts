@@ -26,7 +26,7 @@ import { renderTelegramToolPublication } from "@/services/telegram/telegram-runt
 
 type TelegramPublishReason = "ask" | "complete" | "conversation" | "error" | "toolUse";
 
-export class TelegramRuntimePublisher implements AgentRuntimePublisher {
+export class TelegramRuntimePublisherService implements AgentRuntimePublisher {
     private readonly nostrPublisher: AgentPublisher;
 
     constructor(
@@ -200,7 +200,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
                 "conversation.id": context.conversationId,
             });
             await this.telegramDeliveryService.sendReply(this.agent, context, content);
-            logger.info("[TelegramRuntimePublisher] Delivered Telegram reply", withActiveTraceLogFields({
+            logger.info("[TelegramRuntimePublisherService] Delivered Telegram reply", withActiveTraceLogFields({
                 agentSlug: this.agent.slug,
                 conversationId: context.conversationId,
                 reason,
@@ -208,7 +208,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
             }));
             return true;
         } catch (error) {
-            logger.warn("[TelegramRuntimePublisher] Failed to deliver Telegram reply", withActiveTraceLogFields({
+            logger.warn("[TelegramRuntimePublisherService] Failed to deliver Telegram reply", withActiveTraceLogFields({
                 agentSlug: this.agent.slug,
                 conversationId: context.conversationId,
                 reason,
@@ -234,7 +234,7 @@ export class TelegramRuntimePublisher implements AgentRuntimePublisher {
             return undefined;
         }
 
-        logger.warn("[TelegramRuntimePublisher] Recovered Telegram delivery after Nostr publish failure", withActiveTraceLogFields({
+        logger.warn("[TelegramRuntimePublisherService] Recovered Telegram delivery after Nostr publish failure", withActiveTraceLogFields({
             agentSlug: this.agent.slug,
             conversationId: context.conversationId,
             reason,

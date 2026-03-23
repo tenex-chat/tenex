@@ -1,4 +1,5 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { NDKKind } from "@/nostr/kinds";
 
 interface AgentPubkeyCarrier {
     pubkey: string;
@@ -64,7 +65,7 @@ export function isAgentInternalMessage(envelope: InboundEnvelope): boolean {
 }
 
 export function isDelegationCompletion(envelope: InboundEnvelope): boolean {
-    return envelope.metadata.eventKind === 1 && envelope.metadata.statusValue === "completed";
+    return envelope.metadata.eventKind === NDKKind.Text && envelope.metadata.statusValue === "completed";
 }
 
 export function getDelegationRequestId(envelope: InboundEnvelope): string | undefined {

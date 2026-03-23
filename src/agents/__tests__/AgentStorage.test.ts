@@ -87,6 +87,31 @@ describe("AgentStorage", () => {
 
             expect(agent.status).toBe("active");
         });
+
+        it("prefers defaultConfig.telegram over the legacy top-level telegram field", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                telegram: {
+                    botToken: "legacy-token",
+                    allowDMs: true,
+                },
+                defaultConfig: {
+                    telegram: {
+                        botToken: "default-token",
+                        allowDMs: false,
+                    },
+                },
+            });
+
+            expect(agent.default?.telegram).toEqual({
+                botToken: "default-token",
+                allowDMs: false,
+            });
+        });
     });
 
     describe("isAgentActive helper", () => {

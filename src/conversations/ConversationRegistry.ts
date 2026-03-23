@@ -70,6 +70,7 @@ interface ProjectRegistryConfig {
 class ConversationRegistryImpl {
     private stores: Map<string, ConversationStore> = new Map();
     private envelopeCache: Map<string, InboundEnvelope> = new Map();
+    private envelopeCacheOwners: Map<string, string> = new Map();
     private _basePath: string = join(getTenexBasePath(), "projects");
 
     /**
@@ -377,7 +378,7 @@ class ConversationRegistryImpl {
         const isFromAgent = senderPubkey ? projectAgentPubkeys.has(senderPubkey) : false;
         store.addEnvelopeMessage(envelope, isFromAgent, principalContext);
 
-        this.envelopeCache.set(nativeId, envelope);
+        this.cacheEnvelopeForConversation(nativeId, envelope);
 
         if (envelope.content) {
             store.setTitle(envelope.content.substring(0, 50) + (envelope.content.length > 50 ? "..." : ""));
@@ -420,6 +421,27 @@ class ConversationRegistryImpl {
         return Array.from(this.stores.values());
     }
 
+    private cacheEnvelopeForConversation(conversationId: string, envelope: InboundEnvelope): void {
+        const nativeId = envelope.message.nativeId;
+        if (!nativeId) {
+            return;
+        }
+
+        this.envelopeCache.set(nativeId, envelope);
+        this.envelopeCacheOwners.set(nativeId, conversationId);
+    }
+
+    private evictConversationEnvelopes(conversationId: string): void {
+        for (const [nativeId, ownerConversationId] of this.envelopeCacheOwners.entries()) {
+            if (ownerConversationId !== conversationId) {
+                continue;
+            }
+
+            this.envelopeCacheOwners.delete(nativeId);
+            this.envelopeCache.delete(nativeId);
+        }
+    }
+
     /**
      * Cache an InboundEnvelope by its native ID.
      */
@@ -427,6 +449,10 @@ class ConversationRegistryImpl {
         const nativeId = envelope.message.nativeId;
         if (nativeId) {
             this.envelopeCache.set(nativeId, envelope);
+            const store = this.findByEventId(nativeId);
+            if (store) {
+                this.envelopeCacheOwners.set(nativeId, store.id);
+            }
         }
     }
 
@@ -452,10 +478,7 @@ class ConversationRegistryImpl {
         const isFromAgent = senderPubkey ? projectAgentPubkeys.has(senderPubkey) : false;
         store.addEnvelopeMessage(envelope, isFromAgent, principalContext);
 
-        const nativeId = envelope.message.nativeId;
-        if (nativeId) {
-            this.envelopeCache.set(nativeId, envelope);
-        }
+        this.cacheEnvelopeForConversation(store.id, envelope);
 
         await store.save();
     }
@@ -491,11 +514,7 @@ class ConversationRegistryImpl {
     archive(conversationId: string): void {
         const store = this.stores.get(conversationId);
         if (store) {
-            for (const entry of store.getAllMessages()) {
-                if (entry.eventId) {
-                    this.envelopeCache.delete(entry.eventId);
-                }
-            }
+            this.evictConversationEnvelopes(store.id);
         }
         this.stores.delete(conversationId);
     }
@@ -507,11 +526,7 @@ class ConversationRegistryImpl {
         const store = this.stores.get(conversationId);
         if (store) {
             await store.save();
-            for (const entry of store.getAllMessages()) {
-                if (entry.eventId) {
-                    this.envelopeCache.delete(entry.eventId);
-                }
-            }
+            this.evictConversationEnvelopes(store.id);
             this.stores.delete(conversationId);
         }
     }
@@ -528,8 +543,7 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Search conversations by title (legacy in-memory search).
-     * @deprecated Use searchAdvanced for full-text search across all conversations.
+     * Search loaded conversations by title.
      */
     search(query: string): ConversationStore[] {
         const results: ConversationStore[] = [];
@@ -718,6 +732,7 @@ class ConversationRegistryImpl {
     reset(): void {
         this.stores.clear();
         this.envelopeCache.clear();
+        this.envelopeCacheOwners.clear();
         this._basePath = join(getTenexBasePath(), "projects");
         this._projectConfigs.clear();
         this._allAgentPubkeys.clear();

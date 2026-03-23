@@ -31,6 +31,6 @@ export {
     TelegramPendingBindingStore,
     getTelegramPendingBindingStore,
 } from "./TelegramPendingBindingStoreService";
-export { TelegramRuntimePublisher } from "./TelegramRuntimePublisherService";
+export { TelegramRuntimePublisherService } from "./TelegramRuntimePublisherService";
 export * from "@/utils/telegram-identifiers";
 export type * from "./types";

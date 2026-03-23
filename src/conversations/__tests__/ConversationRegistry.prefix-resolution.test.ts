@@ -184,6 +184,24 @@ describe("ConversationRegistry Prefix Resolution", () => {
             expect(store).toBeDefined();
             expect(store?.id).toBe(testId);
         });
+
+        it("evicts cached envelopes by nativeId even after a message gets a different published eventId", async () => {
+            const envelope = createEnvelope(generateUniqueTestId(), "Transport-rooted test");
+
+            const store = await conversationRegistry.create(envelope);
+            const messageIndex = store.getAllMessages().findIndex((entry) =>
+                entry.eventId === envelope.message.nativeId
+            );
+
+            expect(messageIndex).toBeGreaterThanOrEqual(0);
+            expect(conversationRegistry.getCachedEnvelope(envelope.message.nativeId)).toEqual(envelope);
+
+            store.setEventId(messageIndex, "published-event-id");
+
+            await conversationRegistry.complete(store.id);
+
+            expect(conversationRegistry.getCachedEnvelope(envelope.message.nativeId)).toBeUndefined();
+        });
     });
 
     describe("integration with has()", () => {

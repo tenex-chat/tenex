@@ -124,6 +124,17 @@ export function createStoredAgent(config: {
     definitionAuthor?: string;
     definitionCreatedAt?: number;
 }): StoredAgent {
+    // `defaultConfig.telegram` wins when both shapes are supplied because callers using
+    // the structured default config have already chosen the persisted source of truth.
+    // The top-level `telegram` field only migrates older call sites into that shape.
+    const defaultTelegramConfig = config.defaultConfig?.telegram ?? config.telegram;
+    const defaultConfig = config.defaultConfig || defaultTelegramConfig
+        ? {
+            ...config.defaultConfig,
+            ...(defaultTelegramConfig ? { telegram: defaultTelegramConfig } : {}),
+        }
+        : undefined;
+
     return {
         eventId: config.eventId,
         nsec: config.nsec,
@@ -137,9 +148,7 @@ export function createStoredAgent(config: {
         status: "active",
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
-        default: config.telegram
-            ? { ...config.defaultConfig, telegram: config.defaultConfig?.telegram ?? config.telegram }
-            : config.defaultConfig,
+        default: defaultConfig,
         projectOverrides: config.projectOverrides,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,

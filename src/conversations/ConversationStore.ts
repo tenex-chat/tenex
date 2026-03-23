@@ -16,6 +16,7 @@ import { writeFile } from "fs/promises";
 import { join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
 import { buildPromptMessagesFromRecords } from "./PromptBuilder";
 import { getConversationRecordAuthorPubkey } from "./record-author";
@@ -827,7 +828,7 @@ export class ConversationStore {
     ): void {
         const nativeId = envelope.message.nativeId;
         if (!nativeId) return;
-        if (envelope.metadata.eventKind !== undefined && envelope.metadata.eventKind !== 1) return;
+        if (envelope.metadata.eventKind !== undefined && envelope.metadata.eventKind !== NDKKind.Text) return;
         if (envelope.metadata.toolName) return;
         if (this.hasEventId(nativeId)) return;
 

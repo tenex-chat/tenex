@@ -4,7 +4,7 @@ import { ToolExecutionTracker } from "../ToolExecutionTracker";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import { RALRegistry } from "@/services/ral";
-import { TelegramRuntimePublisher } from "@/services/telegram/TelegramRuntimePublisherService";
+import { TelegramRuntimePublisherService } from "@/services/telegram/TelegramRuntimePublisherService";
 
 describe("AgentExecutor no_response Telegram runtime", () => {
     const projectId = "31933:test:no-response-executor";
@@ -21,7 +21,7 @@ describe("AgentExecutor no_response Telegram runtime", () => {
 
     it("does not send Telegram replies when explicit silent completion is honored", async () => {
         const sendReply = mock(async () => undefined);
-        const publisher = new TelegramRuntimePublisher(
+        const publisher = new TelegramRuntimePublisherService(
             {
                 slug: "telegram-agent",
                 pubkey: agentPubkey,
