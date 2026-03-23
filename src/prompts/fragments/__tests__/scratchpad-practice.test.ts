@@ -23,13 +23,17 @@ describe("scratchpad-practice fragment", () => {
         expect(result).toContain("**code**");
         expect(result).toContain("**commands**");
         expect(result).toContain("**patterns**");
+        expect(result).toContain("**requirements**");
+        expect(result).toContain("**completion-state**");
     });
 
-    test("includes guidance on pruning tool calls", () => {
+    test("includes guidance on pruning tool calls and preserving conversation state", () => {
         const result = scratchpadPracticeFragment.template({});
 
         expect(result).toContain("Prefer compact current state over a long running log");
         expect(result).toContain("prune the tool calls that produced the information");
         expect(result).toContain("read something twice");
+        expect(result).toContain("Save user requirements, constraints, and completion state before you prune");
+        expect(result).toContain("If a preserved request could look unresolved later");
     });
 });

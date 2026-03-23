@@ -28,6 +28,8 @@ Use any key names that fit your task. Common patterns:
 - **files** - file paths and their purpose, or small file contents you need
 - **commands** - shell commands that work, build scripts, test invocations
 - **code** - working code samples, snippets to reuse, templates to follow
+- **requirements** - exact user requests, constraints, and success criteria
+- **completion-state** - what is already done, what must not be repeated, and what is still pending
 
 ### How to use it
 
@@ -35,6 +37,8 @@ Use any key names that fit your task. Common patterns:
 - Prefer compact current state over a long running log
 - Once captured, prune the tool calls that produced the information
 - If you've read something twice, that's a sign you should have captured it the first time
+- Save user requirements, constraints, and completion state before you prune
+- If a preserved request could look unresolved later, either keep the satisfying turn or record clearly that it is already done and must not be repeated
 
 Update after every information-gathering burst, every side-effect, every shift in understanding.`,
 };
