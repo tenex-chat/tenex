@@ -267,7 +267,7 @@ export class AgentStorage {
 
                 // Detect old format: bySlug is Record<string, string> instead of Record<string, SlugEntry>
                 const needsMigration = rawIndex.bySlug &&
-                    Object.values(rawIndex.bySlug).some((val: any) => typeof val === "string");
+                    Object.values(rawIndex.bySlug).some((val: unknown) => typeof val === "string");
 
                 if (needsMigration) {
                     logger.info("Migrating agent index from old format to multi-project slug structure");
@@ -315,11 +315,11 @@ export class AgentStorage {
      *
      * This function returns a new AgentIndex object and does NOT mutate the input.
      */
-    private migrateIndexFormat(oldIndex: any): AgentIndex {
+    private migrateIndexFormat(oldIndex: Record<string, unknown>): AgentIndex {
         const newIndex: AgentIndex = {
             bySlug: {},
-            byEventId: oldIndex.byEventId || {},
-            byProject: oldIndex.byProject || {},
+            byEventId: (oldIndex.byEventId || {}) as Record<string, string>,
+            byProject: (oldIndex.byProject || {}) as Record<string, string[]>,
         };
 
         // Build reverse lookup: pubkey -> projectIds[]
@@ -1165,7 +1165,7 @@ export class AgentStorage {
                 override.isPM = undefined;
                 if (Object.keys(override).length === 0) {
                     delete agent.projectOverrides?.[projectDTag];
-                    if (Object.keys(agent.projectOverrides!).length === 0) {
+                    if (Object.keys(agent.projectOverrides ?? {}).length === 0) {
                         agent.projectOverrides = undefined;
                     }
                 }

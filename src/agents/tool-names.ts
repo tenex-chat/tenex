@@ -1,12 +1,12 @@
 import type { ToolName } from "@/tools/types";
 import { DELEGATE_TOOLS } from "./constants";
 
-export type McpToolNameParts = {
+type McpToolNameParts = {
     serverName: string;
     toolName: string;
 };
 
-export function parseMcpToolName(toolName: string): McpToolNameParts | null {
+function parseMcpToolName(toolName: string): McpToolNameParts | null {
     if (!toolName.startsWith("mcp__")) {
         return null;
     }

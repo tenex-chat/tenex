@@ -47,7 +47,6 @@ export { AgentConfigPublisher } from "./AgentConfigPublisher";
 export {
     publishProjectAgentSnapshot,
     publishAgentProfile,
-    publishContactList,
     publishBackendProfile,
     publishCompiledInstructions,
 } from "./AgentProfilePublisher";

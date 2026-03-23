@@ -1,23 +1,6 @@
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
 /**
- * Extract all a-tags from an event
- */
-export function getATags(event: NDKEvent): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "a")
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
-}
-
-/**
- * Extract project-specific A-tags (those starting with "31933:")
- */
-export function getProjectATags(event: NDKEvent): string[] {
-    return getATags(event).filter((tag) => tag.startsWith("31933:"));
-}
-
-/**
  * Extract all E-tags from an event
  */
 export function getETags(event: NDKEvent): string[] {
@@ -81,16 +64,6 @@ export function getDTag(event: NDKEvent): string | null {
 }
 
 /**
- * Extract K-tags (kind tags) from an event
- */
-export function getKTags(event: NDKEvent): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "k")
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
-}
-
-/**
  * Extract mode tags from an event
  */
 export function getModeTags(event: NDKEvent): string[] {
@@ -108,29 +81,11 @@ export function hasMode(event: NDKEvent, mode: string): boolean {
 }
 
 /**
- * Extract nudge tags from an event
- */
-export function getNudgeTags(event: NDKEvent): string[] {
-    return event.tags
-        .filter((tag) => tag[0] === "nudge")
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
-}
-
-/**
  * Extract error type from error tags
  */
 export function getErrorType(event: NDKEvent): string | null {
     const errorTag = event.tags.find((tag) => tag[0] === "error");
     return errorTag?.[1] || null;
-}
-
-/**
- * Extract moderator from moderator tags
- */
-export function getModerator(event: NDKEvent): string | null {
-    const modTag = event.tags.find((tag) => tag[0] === "moderator");
-    return modTag?.[1] || null;
 }
 
 /**
@@ -141,21 +96,6 @@ export function getParticipants(event: NDKEvent): string[] {
         .filter((tag) => tag[0] === "participant")
         .map((tag) => tag[1])
         .filter((value): value is string => !!value);
-}
-
-/**
- * Extract trace context from an event (for telemetry)
- */
-export function getTraceContext(event: NDKEvent): string | null {
-    const traceTag = event.tags.find((tag) => tag[0] === "trace_context");
-    return traceTag?.[1] || null;
-}
-
-/**
- * Check if an event has any tags of a specific type
- */
-export function hasTag(event: NDKEvent, tagType: string): boolean {
-    return event.tags.some((tag) => tag[0] === tagType);
 }
 
 /**

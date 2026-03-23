@@ -419,15 +419,15 @@ export async function publishAgentProfile(
 
         await profileEvent.sign(signer, { pTags: false });
 
-        try {
-            await profileEvent.publish();
-        } catch (publishError) {
-            logger.warn("Failed to publish agent profile (may already exist)", {
-                error: publishError,
-                agentName,
-                pubkey: signer.pubkey.substring(0, 8),
+        // Don't await
+        profileEvent.publish()
+            .catch((publishError) => {
+                logger.warn("Failed to publish agent profile (may already exist)", {
+                    error: publishError,
+                    agentName,
+                    pubkey: signer.pubkey.substring(0, 8),
+                });
             });
-        }
 
         // Schedule debounced 14199 snapshot publish for this project
         const projectTag = projectEvent.dTag;
@@ -440,51 +440,6 @@ export async function publishAgentProfile(
             agentName,
         });
         throw error;
-    }
-}
-
-/**
- * Publishes a kind:3 contact list for an agent
- * This allows agents to follow other agents in the project and whitelisted pubkeys
- */
-export async function publishContactList(
-    signer: NDKPrivateKeySigner,
-    contactPubkeys: string[]
-): Promise<void> {
-    try {
-        // Create a kind:3 event (contact list)
-        const contactListEvent = new NDKEvent(getNDK(), {
-            kind: 3,
-            pubkey: signer.pubkey,
-            content: "", // Contact list content is usually empty
-            tags: [],
-        });
-
-        // Add p-tags for each contact
-        for (const pubkey of contactPubkeys) {
-            if (pubkey && pubkey !== signer.pubkey) {
-                // Don't follow self
-                contactListEvent.tags.push(["p", pubkey]);
-            }
-        }
-
-        // Sign and publish the contact list
-        await contactListEvent.sign(signer, { pTags: false });
-
-        try {
-            await contactListEvent.publish();
-        } catch (publishError) {
-            logger.warn("Failed to publish contact list (may already exist)", {
-                error: publishError,
-                agentPubkey: signer.pubkey.substring(0, 8),
-            });
-        }
-    } catch (error) {
-        logger.error("Failed to create contact list", {
-            error,
-            agentPubkey: signer.pubkey.substring(0, 8),
-        });
-        // Don't throw - contact list is not critical
     }
 }
 
