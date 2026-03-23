@@ -44,7 +44,7 @@ export interface ExecutionContextManagement {
 }
 
 const TENEX_EMPTY_SCRATCHPAD_GUIDANCE =
-    "If helpful, some commonly useful scratchpad keys in TENEX are: objective, findings, notes, side-effects, next-steps, errors, types, patterns, files, commands, and code. Use whatever keys fit the task.";
+    "If helpful, some commonly useful scratchpad keys in TENEX are: objective, requirements, findings, notes, side-effects, completion-state, next-steps, errors, types, patterns, files, commands, and code. Use whatever keys fit the task. Use scratchpad proactively and often; do not wait for context pressure.";
 
 function createSummarizationModel(options: {
     conversationId: string;
