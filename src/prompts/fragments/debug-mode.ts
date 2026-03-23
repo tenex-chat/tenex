@@ -1,4 +1,4 @@
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import type { PromptFragment } from "../core/types";
 
 /**
@@ -40,9 +40,9 @@ ONLY reply to the question being asked; do NOT perform any other action, do NOT 
 /**
  * Helper function to check if debug mode is enabled
  */
-export function isDebugMode(triggeringEvent: NDKEvent | undefined): boolean {
-    if (!triggeringEvent || !triggeringEvent.content) {
+export function isDebugMode(triggeringEnvelope: InboundEnvelope | undefined): boolean {
+    if (!triggeringEnvelope || !triggeringEnvelope.content) {
         return false;
     }
-    return triggeringEvent.content.includes("#debug");
+    return triggeringEnvelope.content.includes("#debug");
 }

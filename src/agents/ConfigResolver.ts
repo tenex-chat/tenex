@@ -19,7 +19,7 @@
  * @example
  * const resolver = new ConfigResolver({
  *   defaultConfig: { model: 'modelA', tools: ['tool1', 'tool2'] },
- *   projectConfigs: {
+ *   projectOverrides: {
  *     projectA: { model: 'modelB', tools: ['-tool1', '+tool4'] },
  *     projectB: { tools: ['+tool5'] }
  *   }
@@ -32,7 +32,7 @@
  * resolver.resolveEffectiveConfig('projectB');
  */
 
-import type { AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type { AgentDefaultConfig, AgentProjectConfig, TelegramAgentConfig } from "@/agents/types";
 export type { AgentDefaultConfig, AgentProjectConfig };
 
 export interface ResolvedAgentConfig {
@@ -40,6 +40,8 @@ export interface ResolvedAgentConfig {
     model?: string;
     /** The effective tools list (fully resolved, no +/- prefixes) */
     tools?: string[];
+    /** The effective Telegram transport configuration */
+    telegram?: TelegramAgentConfig;
 }
 
 /**
@@ -109,10 +111,12 @@ export function resolveEffectiveConfig(
 ): ResolvedAgentConfig {
     const effectiveModel = resolveEffectiveModel(defaultConfig.model, projectConfig?.model);
     const effectiveTools = resolveEffectiveTools(defaultConfig.tools, projectConfig?.tools);
+    const effectiveTelegram = projectConfig?.telegram ?? defaultConfig.telegram;
 
     return {
         model: effectiveModel,
         tools: effectiveTools,
+        telegram: effectiveTelegram,
     };
 }
 
@@ -197,6 +201,14 @@ export function deduplicateProjectConfig(
             // Normalize: recompute the minimal delta from the fully-resolved tool list.
             cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
         }
+    }
+
+    if (
+        cleaned.telegram &&
+        defaultConfig.telegram &&
+        JSON.stringify(cleaned.telegram) === JSON.stringify(defaultConfig.telegram)
+    ) {
+        delete cleaned.telegram;
     }
 
     return cleaned;

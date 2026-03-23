@@ -18,6 +18,11 @@ import { assertSupervisionHealth } from "@/agents/supervision";
 import { checkPostCompletion } from "./PostCompletionChecker";
 import { resolveRAL } from "./RALResolver";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
+import type { AgentRuntimePublisherFactory } from "@/events/runtime/AgentRuntimePublisherFactory";
 import { startExecutionTime, stopExecutionTime } from "@/conversations/executionTime";
 import { formatAnyError } from "@/lib/error-formatter";
 import {
@@ -25,12 +30,13 @@ import {
     runWithSystemReminderContext,
 } from "@/llm/system-reminder-context";
 import { shortenConversationId } from "@/utils/conversation-id";
+import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
 import { getProjectContext } from "@/services/projects";
 import { createProjectDTag } from "@/types/project-ids";
 import { RALRegistry } from "@/services/ral";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import { getToolsObject } from "@/tools/registry";
 import type { ToolRegistryContext } from "@/tools/types";
 import { logger } from "@/utils/logger";
@@ -50,11 +56,39 @@ import type {
 
 const tracer = trace.getTracer("tenex.agent-executor");
 
+interface AgentExecutorOptions {
+    publisherFactory?: AgentRuntimePublisherFactory;
+}
+
+function failSchemaOnlyAccess(methodName: string): never {
+    throw new Error(`${methodName}() called in schema-only context`);
+}
+
+function createSchemaOnlyPublisher(): AgentRuntimePublisher {
+    return {
+        complete: async () => failSchemaOnlyAccess("agentPublisher.complete"),
+        conversation: async () => failSchemaOnlyAccess("agentPublisher.conversation"),
+        delegate: async () => failSchemaOnlyAccess("agentPublisher.delegate"),
+        ask: async () => failSchemaOnlyAccess("agentPublisher.ask"),
+        delegateFollowup: async () => failSchemaOnlyAccess("agentPublisher.delegateFollowup"),
+        error: async () => failSchemaOnlyAccess("agentPublisher.error"),
+        lesson: async () => failSchemaOnlyAccess("agentPublisher.lesson"),
+        toolUse: async () => failSchemaOnlyAccess("agentPublisher.toolUse"),
+        streamTextDelta: async () => failSchemaOnlyAccess("agentPublisher.streamTextDelta"),
+        delegationMarker: async () => failSchemaOnlyAccess("agentPublisher.delegationMarker"),
+    };
+}
+
 export class AgentExecutor {
-    constructor() {
+    private readonly publisherFactory: AgentRuntimePublisherFactory;
+
+    constructor(options: AgentExecutorOptions = {}) {
         // Centralized supervision health check - ensures both total registry size AND
         // post-completion heuristic count are validated (fail-closed semantics)
         assertSupervisionHealth("AgentExecutor");
+        const defaultPublisherFactory: AgentRuntimePublisherFactory = (agent) =>
+            new AgentPublisher(agent);
+        this.publisherFactory = options.publisherFactory ?? defaultPublisherFactory;
     }
 
     /**
@@ -66,8 +100,8 @@ export class AgentExecutor {
             .filter((pk): pk is string => !!pk);
 
         if (senderPubkeys.length > 0) {
-            const pubkeyService = getPubkeyService();
-            void pubkeyService.warmUserProfiles(senderPubkeys).catch((error) => {
+            const identityService = getIdentityService();
+            void identityService.warmUserProfiles(senderPubkeys).catch((error) => {
                 logger.debug("[AgentExecutor] Best-effort profile warming failed", {
                     error: error instanceof Error ? error.message : String(error),
                 });
@@ -86,17 +120,20 @@ export class AgentExecutor {
         conversationHistory: ModelMessage[] = [],
         projectPath?: string
     ): Promise<LLMCompletionRequest> {
+        const triggeringEnvelope = new NostrInboundAdapter().toEnvelope(originalEvent);
         const context: ToolRegistryContext = {
             agent: agent as ToolRegistryContext["agent"],
-            triggeringEvent: originalEvent,
+            triggeringEnvelope,
             conversationId: originalEvent.id,
             projectBasePath: projectPath || "",
             workingDirectory: projectPath || "",
             currentBranch: "main",
-            agentPublisher: {} as AgentPublisher,
+            agentPublisher: createSchemaOnlyPublisher(),
             ralNumber: 0,
-            conversationStore: {} as ConversationStore,
-            getConversation: () => ({} as ConversationStore),
+            conversationStore: new Proxy({} as ConversationStore, {
+                get: (_, prop) => { throw new Error(`conversationStore.${String(prop)} called in schema-only context`); },
+            }),
+            getConversation: () => { throw new Error("getConversation() called in schema-only context"); },
         };
 
         const messages: ModelMessage[] = conversationHistory.length > 0
@@ -112,15 +149,22 @@ export class AgentExecutor {
     /**
      * Execute an agent's assignment for a conversation with streaming
      */
-    async execute(context: ExecutionContext): Promise<NDKEvent | undefined> {
+    async execute(context: ExecutionContext): Promise<PublishedMessageRef | undefined> {
+        const telegramMetadata = context.triggeringEnvelope.metadata.transport?.telegram;
         const span = tracer.startSpan("tenex.agent.execute", {
             attributes: {
                 "agent.slug": context.agent.slug,
                 "agent.pubkey": context.agent.pubkey,
                 "agent.role": context.agent.role || "worker",
                 "conversation.id": shortenConversationId(context.conversationId),
-                "triggering_event.id": context.triggeringEvent.id,
-                "triggering_event.kind": context.triggeringEvent.kind || 0,
+                "triggering_event.id": context.triggeringEnvelope.message.nativeId,
+                "triggering_event.kind": context.triggeringEnvelope.metadata.eventKind || 0,
+                "triggering_event.transport": context.triggeringEnvelope.transport,
+                "telegram.update.id": telegramMetadata?.updateId ?? 0,
+                "telegram.chat.id": telegramMetadata?.chatId ?? "",
+                "telegram.message.id": telegramMetadata?.messageId ?? "",
+                "telegram.chat.thread_id": telegramMetadata?.threadId ?? "",
+                "telegram.sender.id": telegramMetadata?.senderUserId ?? "",
             },
         }, otelContext.active());
 
@@ -139,13 +183,11 @@ export class AgentExecutor {
                         agentPubkey: context.agent.pubkey,
                         conversationId: context.conversationId,
                         projectId,
-                        triggeringEventId: context.triggeringEvent.id,
+                        triggeringEventId: context.triggeringEnvelope.message.nativeId,
                         span,
                     });
 
-                    // RACE CONDITION FIX: Early kill check
-                    // If this conversation was killed before the agent started (or during RAL resolution),
-                    // abort immediately without spending compute resources.
+                    // Abort before publisher/setup work if the conversation was killed during RAL resolution.
                     const ralRegistry = RALRegistry.getInstance();
                     if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
                         span.addEvent("executor.aborted_early_kill", {
@@ -230,7 +272,7 @@ export class AgentExecutor {
 
                     const conversation = context.getConversation();
                     if (conversation) {
-                        const agentPublisher = new AgentPublisher(context.agent);
+                        const agentPublisher = this.publisherFactory(context.agent);
                         try {
                             await agentPublisher.error(
                                 {
@@ -238,7 +280,7 @@ export class AgentExecutor {
                                     errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                                 },
                                 {
-                                    triggeringEvent: context.triggeringEvent,
+                                    triggeringEnvelope: context.triggeringEnvelope,
                                     rootEvent: { id: conversation.getRootEventId() },
                                     conversationId: conversation.id,
                                     ralNumber: 0,
@@ -295,13 +337,24 @@ export class AgentExecutor {
     ): {
         fullContext: FullRuntimeContext;
         toolTracker: ToolExecutionTracker;
-        agentPublisher: AgentPublisher;
+        agentPublisher: AgentRuntimePublisher;
         cleanup: () => Promise<void>;
     } {
         const toolTracker = new ToolExecutionTracker();
-        const agentPublisher = new AgentPublisher(context.agent);
+        const agentPublisher = this.publisherFactory(context.agent);
         const conversationStore = ConversationStore.getOrLoad(context.conversationId);
         const projectContext = getProjectContext();
+
+        logger.debug("[AgentExecutor] Created runtime publisher", {
+            agent: context.agent.slug,
+            conversationId: shortenConversationId(context.conversationId),
+            publisherImplementation: agentPublisher.constructor?.name ?? "unknown",
+        });
+        trace.getActiveSpan()?.addEvent("runtime.publisher_created", {
+            "agent.slug": context.agent.slug,
+            "conversation.id": shortenConversationId(context.conversationId),
+            "publisher.implementation": agentPublisher.constructor?.name ?? "unknown",
+        });
 
         const fullContext: FullRuntimeContext = {
             agent: context.agent,
@@ -309,7 +362,7 @@ export class AgentExecutor {
             projectBasePath: context.projectBasePath,
             workingDirectory: context.workingDirectory,
             currentBranch: context.currentBranch,
-            triggeringEvent: context.triggeringEvent,
+            triggeringEnvelope: context.triggeringEnvelope,
             agentPublisher,
             ralNumber: context.ralNumber,
             conversationStore,
@@ -336,9 +389,9 @@ export class AgentExecutor {
     private async executeOnce(
         context: FullRuntimeContext,
         toolTracker: ToolExecutionTracker,
-        agentPublisher: AgentPublisher,
+        agentPublisher: AgentRuntimePublisher,
         ralNumber: number
-    ): Promise<NDKEvent | undefined> {
+    ): Promise<PublishedMessageRef | undefined> {
         let result: StreamExecutionResult;
 
         try {
@@ -387,26 +440,20 @@ export class AgentExecutor {
             );
             // Handle case where completion was skipped (conversation was killed)
             if (responseEvent) {
-                await ConversationStore.addEvent(context.conversationId, responseEvent);
+                await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
             }
             return responseEvent;
         }
 
         const completionEvent = result.event;
         const ralRegistry = RALRegistry.getInstance();
+        const silentCompletionRequested = ralRegistry.isSilentCompletionRequested(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
 
-        // =====================================================================
-        // RACE CONDITION FIX: Check for ANY outstanding work, not just pending delegations
-        // =====================================================================
-        // This is the key guard against the race condition where delegation results arrive
-        // (via debounce in AgentDispatchService) after the last prepareStep but before
-        // the executor finalizes. The debounce state queues injections that would be
-        // invisible if we only checked pendingDelegations.
-        //
-        // hasOutstandingWork() consolidates checking for:
-        // 1. Queued injections (messages/delegation results waiting for next LLM step)
-        // 2. Pending delegations (delegations that haven't completed yet)
-        // =====================================================================
+        // Final publish/cleanup decisions must consider both queued injections and pending delegations.
         const outstandingWork = ralRegistry.hasOutstandingWork(
             context.agent.pubkey,
             context.conversationId,
@@ -433,8 +480,21 @@ export class AgentExecutor {
 
         // INVARIANT GUARD: If there's outstanding work (queued injections, pending delegations,
         // or completed delegations not yet consumed), we should NOT finalize.
-        const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
+        const trimmedCompletionMessage = completionEvent?.message?.trim() ?? "";
+        const hasMessageContent = trimmedCompletionMessage.length > 0;
         if (!hasMessageContent && outstandingWork.hasWork) {
+            if (silentCompletionRequested) {
+                ralRegistry.clearSilentCompletionRequest(
+                    context.agent.pubkey,
+                    context.conversationId,
+                    ralNumber
+                );
+                trace.getActiveSpan()?.addEvent("executor.silent_completion_cleared_outstanding_work", {
+                    "ral.number": ralNumber,
+                    "agent.slug": context.agent.slug,
+                    "conversation.id": shortenConversationId(context.conversationId),
+                });
+            }
             trace.getActiveSpan()?.addEvent("executor.awaiting_outstanding_work", {
                 "ral.number": ralNumber,
                 "outstanding.queued_injections": outstandingWork.details.queuedInjections,
@@ -471,6 +531,54 @@ export class AgentExecutor {
             throw new Error("LLM execution completed without producing a completion event");
         }
 
+        if (silentCompletionRequested && trimmedCompletionMessage.length === 0) {
+            ralRegistry.clearSilentCompletionRequest(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+
+            await this.cleanupRalAfterTurn({
+                context,
+                ralNumber,
+                startedWithPendingDelegations,
+                supervisionExecuted: false,
+                supervisionHadViolation: false,
+            });
+
+            trace.getActiveSpan()?.addEvent("executor.silent_completion_honored", {
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+                "conversation.id": shortenConversationId(context.conversationId),
+            });
+            logger.info("[AgentExecutor] Honored explicit silent completion", {
+                agent: context.agent.slug,
+                conversationId: shortenConversationId(context.conversationId),
+                ralNumber,
+            });
+            return undefined;
+        }
+
+        if (silentCompletionRequested && trimmedCompletionMessage.length > 0) {
+            ralRegistry.clearSilentCompletionRequest(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+            trace.getActiveSpan()?.addEvent("executor.silent_completion_conflict", {
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+                "conversation.id": shortenConversationId(context.conversationId),
+                "message.length": completionEvent.message.length,
+            });
+            logger.info("[AgentExecutor] Ignoring silent completion request because visible text was produced", {
+                agent: context.agent.slug,
+                conversationId: shortenConversationId(context.conversationId),
+                ralNumber,
+                messageLength: completionEvent.message.length,
+            });
+        }
+
         // Post-completion supervision check
         const supervisionCheckResult = await checkPostCompletion({
             agent: context.agent,
@@ -484,30 +592,13 @@ export class AgentExecutor {
             return this.executeOnce(context, toolTracker, agentPublisher, ralNumber);
         }
 
-        // RAL cleanup - use hasOutstandingWork for comprehensive check
-        const conversationStore = context.conversationStore;
-        const cleanupOutstandingWork = ralRegistry.hasOutstandingWork(
-            context.agent.pubkey,
-            context.conversationId,
-            ralNumber
-        );
-
-        if (!cleanupOutstandingWork.hasWork && !startedWithPendingDelegations) {
-            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
-            conversationStore.completeRal(context.agent.pubkey, ralNumber);
-            await conversationStore.save();
-
-            trace.getActiveSpan()?.addEvent("executor.ral_cleared_post_supervision_check", {
-                "ral.number": ralNumber,
-                "supervision.executed": true,
-                "supervision.had_violation": supervisionCheckResult.shouldReEngage,
-            });
-        } else if (!cleanupOutstandingWork.hasWork && startedWithPendingDelegations) {
-            trace.getActiveSpan()?.addEvent("executor.ral_clear_skipped_pending_at_start", {
-                "ral.number": ralNumber,
-                "supervision.executed": true,
-            });
-        }
+        await this.cleanupRalAfterTurn({
+            context,
+            ralNumber,
+            startedWithPendingDelegations,
+            supervisionExecuted: true,
+            supervisionHadViolation: supervisionCheckResult.shouldReEngage,
+        });
 
         const eventContext = createEventContext(context, {
             model: completionEvent?.usage?.model,
@@ -528,11 +619,11 @@ export class AgentExecutor {
             "outstanding.completed_delegations": finalOutstandingWork.details.completedDelegations,
         });
 
-        let responseEvent: NDKEvent | undefined;
+        let responseEvent: PublishedMessageRef | undefined;
 
         if (finalOutstandingWork.hasWork) {
             // If there's outstanding work, publish as conversation (not completion)
-            if (completionEvent.message.trim().length > 0) {
+            if (trimmedCompletionMessage.length > 0) {
                 responseEvent = await agentPublisher.conversation(
                     {
                         content: completionEvent.message,
@@ -555,7 +646,7 @@ export class AgentExecutor {
         }
 
         if (responseEvent) {
-            await ConversationStore.addEvent(context.conversationId, responseEvent);
+            await ConversationStore.addEnvelope(context.conversationId, responseEvent.envelope);
 
             trace.getActiveSpan()?.addEvent("executor.published", {
                 "event.id": responseEvent.id || "",
@@ -564,6 +655,51 @@ export class AgentExecutor {
         }
 
         return responseEvent;
+    }
+
+    private async cleanupRalAfterTurn(params: {
+        context: FullRuntimeContext;
+        ralNumber: number;
+        startedWithPendingDelegations: boolean;
+        supervisionExecuted: boolean;
+        supervisionHadViolation: boolean;
+    }): Promise<void> {
+        const { context, ralNumber, startedWithPendingDelegations, supervisionExecuted, supervisionHadViolation } =
+            params;
+        const ralRegistry = RALRegistry.getInstance();
+        const conversationStore = context.conversationStore;
+        const cleanupOutstandingWork = ralRegistry.hasOutstandingWork(
+            context.agent.pubkey,
+            context.conversationId,
+            ralNumber
+        );
+
+        if (!cleanupOutstandingWork.hasWork && !startedWithPendingDelegations) {
+            ralRegistry.clearRAL(context.agent.pubkey, context.conversationId, ralNumber);
+            conversationStore.completeRal(context.agent.pubkey, ralNumber);
+            await conversationStore.save();
+
+            trace.getActiveSpan()?.addEvent(
+                supervisionExecuted
+                    ? "executor.ral_cleared_post_supervision_check"
+                    : "executor.ral_cleared_without_supervision",
+                {
+                    "ral.number": ralNumber,
+                    "supervision.executed": supervisionExecuted,
+                    "supervision.had_violation": supervisionHadViolation,
+                }
+            );
+        } else if (!cleanupOutstandingWork.hasWork && startedWithPendingDelegations) {
+            trace.getActiveSpan()?.addEvent(
+                supervisionExecuted
+                    ? "executor.ral_clear_skipped_pending_at_start"
+                    : "executor.ral_clear_skipped_pending_at_start_without_supervision",
+                {
+                    "ral.number": ralNumber,
+                    "supervision.executed": supervisionExecuted,
+                }
+            );
+        }
     }
 
     /**

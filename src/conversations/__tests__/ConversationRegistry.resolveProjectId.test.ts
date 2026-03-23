@@ -38,7 +38,7 @@ describe("ConversationRegistry.resolveProjectId", () => {
             expect(result).toBe("explicit-project");
         });
 
-        it("should prefer explicit projectId over AsyncLocalStorage context", () => {
+        it("should prefer explicit projectId over AsyncLocalStorage context", async () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
             // Even if ALS context is available, explicit param wins
@@ -47,16 +47,16 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const mockContext = { project: mockProject } as any;
 
-            const result = projectContextStore.runSync(mockContext, () => {
-                return conversationRegistry.resolveProjectId("explicit-override");
-            });
+            const result = await projectContextStore.run(mockContext, async () =>
+                conversationRegistry.resolveProjectId("explicit-override")
+            );
 
             expect(result).toBe("explicit-override");
         });
     });
 
     describe("Tier 2: AsyncLocalStorage context", () => {
-        it("should resolve from ALS context when no explicit param given", () => {
+        it("should resolve from ALS context when no explicit param given", async () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
             const mockProject = {
@@ -64,14 +64,14 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const mockContext = { project: mockProject } as any;
 
-            const result = projectContextStore.runSync(mockContext, () => {
-                return conversationRegistry.resolveProjectId();
-            });
+            const result = await projectContextStore.run(mockContext, async () =>
+                conversationRegistry.resolveProjectId()
+            );
 
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should fall through when ALS context has unknown project dTag", () => {
+        it("should fall through when ALS context has unknown project dTag", async () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
             const mockProject = {
@@ -79,15 +79,15 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const mockContext = { project: mockProject } as any;
 
-            const result = projectContextStore.runSync(mockContext, () => {
-                return conversationRegistry.resolveProjectId();
-            });
+            const result = await projectContextStore.run(mockContext, async () =>
+                conversationRegistry.resolveProjectId()
+            );
 
             // Should fall through to Tier 3 (legacy fallback)
             expect(result).toBe(PROJECT_A);
         });
 
-        it("should fall through when ALS context project has no dTag", () => {
+        it("should fall through when ALS context project has no dTag", async () => {
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
             const mockProject = {
@@ -95,9 +95,9 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const mockContext = { project: mockProject } as any;
 
-            const result = projectContextStore.runSync(mockContext, () => {
-                return conversationRegistry.resolveProjectId();
-            });
+            const result = await projectContextStore.run(mockContext, async () =>
+                conversationRegistry.resolveProjectId()
+            );
 
             // Should fall through to Tier 3 (legacy fallback)
             expect(result).toBe(PROJECT_A);
@@ -115,6 +115,7 @@ describe("ConversationRegistry.resolveProjectId", () => {
 
         it("should warn when using legacy fallback with multiple projects", () => {
             const warnSpy = spyOn(logger, "warn");
+            warnSpy.mockClear();
 
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_B}`, []);
@@ -123,21 +124,27 @@ describe("ConversationRegistry.resolveProjectId", () => {
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBe(PROJECT_B); // last initialized
 
-            expect(warnSpy).toHaveBeenCalled();
-            const call = warnSpy.mock.calls[0];
-            expect(call[0]).toContain("legacy projectId fallback");
+            const legacyFallbackCalls = warnSpy.mock.calls.filter(
+                (call) =>
+                    typeof call[0] === "string" && call[0].includes("legacy projectId fallback")
+            );
+            expect(legacyFallbackCalls.length).toBeGreaterThan(0);
         });
 
         it("should NOT warn when using legacy fallback with single project", () => {
             const warnSpy = spyOn(logger, "warn");
+            warnSpy.mockClear();
 
             conversationRegistry.initialize(`${TEST_DIR}/${PROJECT_A}`, []);
 
             const result = conversationRegistry.resolveProjectId();
             expect(result).toBe(PROJECT_A);
 
-            // Should not have warned — single project is the expected case
-            expect(warnSpy).not.toHaveBeenCalled();
+            const legacyFallbackCalls = warnSpy.mock.calls.filter(
+                (call) =>
+                    typeof call[0] === "string" && call[0].includes("legacy projectId fallback")
+            );
+            expect(legacyFallbackCalls).toHaveLength(0);
         });
 
         it("should return null when no project has been initialized", () => {
@@ -147,7 +154,7 @@ describe("ConversationRegistry.resolveProjectId", () => {
     });
 
     describe("Multiple initialize() calls accumulate entries", () => {
-        it("should accumulate project configs across multiple initialize() calls", () => {
+        it("should accumulate project configs across multiple initialize() calls", async () => {
             const agentsA = ["pubkey-a1", "pubkey-a2"];
             const agentsB = ["pubkey-b1"];
 
@@ -160,9 +167,9 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const contextA = { project: mockProjectA } as any;
 
-            const resolvedA = projectContextStore.runSync(contextA, () => {
-                return conversationRegistry.resolveProjectId();
-            });
+            const resolvedA = await projectContextStore.run(contextA, async () =>
+                conversationRegistry.resolveProjectId()
+            );
             expect(resolvedA).toBe(PROJECT_A);
 
             const mockProjectB = {
@@ -170,13 +177,13 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const contextB = { project: mockProjectB } as any;
 
-            const resolvedB = projectContextStore.runSync(contextB, () => {
-                return conversationRegistry.resolveProjectId();
-            });
+            const resolvedB = await projectContextStore.run(contextB, async () =>
+                conversationRegistry.resolveProjectId()
+            );
             expect(resolvedB).toBe(PROJECT_B);
         });
 
-        it("should return project-specific agent pubkeys via ALS context", () => {
+        it("should return project-specific agent pubkeys via ALS context", async () => {
             const agentsA = ["pubkey-a1", "pubkey-a2"];
             const agentsB = ["pubkey-b1"];
 
@@ -189,9 +196,9 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const contextA = { project: mockProjectA } as any;
 
-            const pubkeysA = projectContextStore.runSync(contextA, () => {
-                return conversationRegistry.agentPubkeys;
-            });
+            const pubkeysA = await projectContextStore.run(contextA, async () =>
+                conversationRegistry.agentPubkeys
+            );
             expect(pubkeysA).toEqual(new Set(agentsA));
 
             // In project B context, should see project B agents
@@ -200,9 +207,9 @@ describe("ConversationRegistry.resolveProjectId", () => {
             };
             const contextB = { project: mockProjectB } as any;
 
-            const pubkeysB = projectContextStore.runSync(contextB, () => {
-                return conversationRegistry.agentPubkeys;
-            });
+            const pubkeysB = await projectContextStore.run(contextB, async () =>
+                conversationRegistry.agentPubkeys
+            );
             expect(pubkeysB).toEqual(new Set(agentsB));
         });
 

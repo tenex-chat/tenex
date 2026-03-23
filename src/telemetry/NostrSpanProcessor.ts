@@ -19,6 +19,10 @@ function nostrIdToSpanId(nostrId: string): string {
     return nostrId.substring(0, 16);
 }
 
+function isHexNostrId(value: unknown): value is string {
+    return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
 /**
  * SpanProcessor that rewrites span IDs for Nostr event processing spans.
  *
@@ -53,7 +57,7 @@ export class NostrSpanProcessor implements SpanProcessor {
 
         // Only process spans that have event.id attribute (Nostr event processing spans)
         const eventId = span.attributes["event.id"];
-        if (typeof eventId !== "string" || !eventId) {
+        if (!isHexNostrId(eventId)) {
             return;
         }
 
@@ -69,8 +73,13 @@ export class NostrSpanProcessor implements SpanProcessor {
         }
 
         // Fix parentSpanId based on event.reply_to
+        const hasTraceContext = span.attributes["event.has_trace_context"] === true;
         const replyTo = span.attributes["event.reply_to"];
-        if (typeof replyTo === "string" && replyTo) {
+        if (hasTraceContext) {
+            return;
+        }
+
+        if (isHexNostrId(replyTo)) {
             // This is a reply - set parent to the event being replied to
             const derivedParentSpanId = nostrIdToSpanId(replyTo);
 

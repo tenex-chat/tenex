@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-
-// --- Mocks (must be set up before dynamic imports) ---
+import * as nostrModule from "@/nostr";
+import * as projectsModule from "@/services/projects";
+import * as reportEmbeddingModule from "@/services/reports/ReportEmbeddingService";
+import * as reportsModule from "@/services/reports";
+import { PendingDelegationsRegistry } from "@/services/ral";
+import { createReportWriteTool } from "../report_write";
 
 const mockWriteReport = mock(() =>
     Promise.resolve({
@@ -12,57 +16,19 @@ const mockWriteReport = mock(() =>
 const mockValidateSlug = mock(() => {});
 const mockWriteLocalReport = mock(() => Promise.resolve());
 const mockGetReportPath = mock(() => "/tmp/reports/test-slug.md");
-
-mock.module("@/services/reports", () => ({
-    ReportService: class {
-        writeReport = mockWriteReport;
-    },
-    getLocalReportStore: () => ({
-        validateSlug: mockValidateSlug,
-        writeReport: mockWriteLocalReport,
-        getReportPath: mockGetReportPath,
-    }),
-    InvalidSlugError: class InvalidSlugError extends Error {
-        constructor(slug: string, reason: string) {
-            super(`Invalid slug "${slug}": ${reason}`);
-            this.name = "InvalidSlugError";
-        }
-    },
-}));
+const mockLocalReportStore = {
+    validateSlug: mockValidateSlug,
+    writeReport: mockWriteLocalReport,
+    getReportPath: mockGetReportPath,
+};
 
 const mockIndexReport = mock(() => Promise.resolve(true));
-
-mock.module("@/services/reports/ReportEmbeddingService", () => ({
-    getReportEmbeddingService: () => ({
-        indexReport: mockIndexReport,
-    }),
-}));
+const mockReportEmbeddingService = {
+    indexReport: mockIndexReport,
+};
 
 const mockTagId = mock(() => "31933:owner:test-project");
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        project: { tagId: mockTagId },
-    }),
-}));
-
-mock.module("@/services/ral", () => ({
-    RALRegistry: class {},
-    PendingDelegationsRegistry: {
-        registerAddressable: mock(() => {}),
-    },
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        warn: () => {},
-        debug: () => {},
-        error: () => {},
-    },
-}));
-
-// Dynamic import after mocks
-const { createReportWriteTool } = await import("../report_write");
+const mockRegisterAddressable = mock(() => {});
 
 describe("report_write tool", () => {
     const mockContext = {
@@ -77,7 +43,7 @@ describe("report_write tool", () => {
         workingDirectory: "/tmp/test",
         projectBasePath: "/tmp/test",
         currentBranch: "main",
-        triggeringEvent: {},
+        triggeringEnvelope: {},
         getConversation: () => undefined,
         agentPublisher: {},
         ralNumber: 1,
@@ -88,6 +54,30 @@ describe("report_write tool", () => {
         mockIndexReport.mockClear();
         mockValidateSlug.mockClear();
         mockWriteLocalReport.mockClear();
+        mockGetReportPath.mockClear();
+        mockTagId.mockClear();
+        mockRegisterAddressable.mockClear();
+
+        spyOn(reportsModule.ReportService.prototype, "writeReport").mockImplementation(
+            mockWriteReport as typeof reportsModule.ReportService.prototype.writeReport
+        );
+        spyOn(nostrModule, "getNDK").mockReturnValue({} as ReturnType<typeof nostrModule.getNDK>);
+        spyOn(reportsModule, "getLocalReportStore").mockReturnValue(
+            mockLocalReportStore as ReturnType<typeof reportsModule.getLocalReportStore>
+        );
+        spyOn(reportEmbeddingModule, "getReportEmbeddingService").mockReturnValue(
+            mockReportEmbeddingService as ReturnType<typeof reportEmbeddingModule.getReportEmbeddingService>
+        );
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: { tagId: mockTagId },
+        } as ReturnType<typeof projectsModule.getProjectContext>);
+        spyOn(PendingDelegationsRegistry, "registerAddressable").mockImplementation(
+            mockRegisterAddressable
+        );
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("should call indexReport after a successful write", async () => {

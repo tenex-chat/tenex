@@ -13,7 +13,6 @@ import {
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
 import type { CompleteEvent } from "@/llm/types";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
 import { buildSystemPromptMessages } from "@/prompts/utils/systemPromptBuilder";
 import { NudgeService } from "@/services/nudge";
 import { getProjectContext } from "@/services/projects";
@@ -94,7 +93,7 @@ export async function checkPostCompletion(
     const conversation = context.getConversation();
 
     // Fetch nudge content if triggering event has nudge tags
-    const nudgeEventIds = AgentEventDecoder.extractNudgeEventIds(context.triggeringEvent);
+    const nudgeEventIds = context.triggeringEnvelope.metadata.nudgeEventIds ?? [];
     const nudgeContent = nudgeEventIds.length > 0
         ? await NudgeService.getInstance().fetchNudges(nudgeEventIds)
         : "";
@@ -103,6 +102,7 @@ export async function checkPostCompletion(
         agent,
         project: projectContext.project,
         conversation,
+        triggeringEnvelope: context.triggeringEnvelope,
         projectBasePath: context.projectBasePath,
         workingDirectory: context.workingDirectory,
         currentBranch: context.currentBranch,
@@ -131,6 +131,11 @@ export async function checkPostCompletion(
     const hasBeenNudgedAboutTodos = conversationStore
         ? conversationStore.hasBeenNudgedAboutTodos(agent.pubkey)
         : false;
+    const silentCompletionRequested = ralRegistry.isSilentCompletionRequested(
+        agent.pubkey,
+        context.conversationId,
+        ralNumber
+    );
 
     // Get pending delegation count from RALRegistry (conversation-wide, not RAL-scoped)
     // We check ALL pending delegations for this conversation because a delegation from
@@ -171,6 +176,7 @@ export async function checkPostCompletion(
     const supervisionContext: PostCompletionContext = {
         agentSlug: agent.slug,
         agentPubkey: agent.pubkey,
+        silentCompletionRequested,
         messageContent: completionEvent.message || "",
         toolCallsMade,
         systemPrompt,

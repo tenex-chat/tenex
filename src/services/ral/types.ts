@@ -1,3 +1,4 @@
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ProjectDTag } from "@/types/project-ids";
 
 /** Role types that can be used for message injection */
@@ -120,6 +121,10 @@ export interface QueuedInjection {
   queuedAt: number;
   /** Original sender pubkey (for message attribution when sender differs from expected) */
   senderPubkey?: string;
+  /** Optional transport-neutral sender metadata */
+  senderPrincipal?: PrincipalRef;
+  /** Optional transport-neutral recipient metadata */
+  targetedPrincipals?: PrincipalRef[];
   /** Original Nostr event ID (for deduplication - prevents double-insertion via both addEvent and injection paths) */
   eventId?: string;
 }
@@ -163,6 +168,8 @@ export interface RALRegistryEntry {
   llmStreamStartTime?: number;
   /** Checkpoint timestamp for incremental runtime reporting mid-stream (resets on each consume) */
   lastRuntimeCheckpointAt?: number;
+  /** Explicit request from the agent to complete this RAL without a visible assistant reply */
+  silentCompletionRequestedAt?: number;
   /** Heuristic state - namespaced under 'heuristics' */
   heuristics?: {
     /** Pending violations waiting to be injected */

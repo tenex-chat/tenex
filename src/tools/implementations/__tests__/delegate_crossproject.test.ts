@@ -6,44 +6,19 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { NDKEvent } from "@nostr-dev-kit/ndk";
+import { agentStorage } from "@/agents/AgentStorage";
+import * as daemonModule from "@/daemon";
+import * as ndkClientModule from "@/nostr/ndkClient";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
-import { RALRegistry } from "@/services/ral";
+import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
+import { createDelegateCrossProjectTool } from "@/tools/implementations/delegate_crossproject";
 
-// Mock NDKEvent to prevent actual signing/publishing
 const mockEventId = "mock-event-id-1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd";
-const mockNDKEvent = {
-    kind: 1,
-    content: "",
-    tags: [] as string[][],
-    id: mockEventId,
-    publish: mock(async () => new Set()),
-};
+const mockPublish = mock(async () => new Set());
 
-mock.module("@nostr-dev-kit/ndk", () => ({
-    NDKEvent: class MockNDKEvent {
-        kind = 1;
-        content = "";
-        tags: string[][] = [];
-        id = mockEventId;
-        async publish() {
-            return new Set();
-        }
-    },
-    NDKPrivateKeySigner: class MockNDKPrivateKeySigner {
-        pubkey = "mock-signer-pubkey";
-        constructor(_nsec: string) {}
-    },
-}));
-
-// Mock NDK before importing modules that use it
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvent: async () => null,
-    }),
-}));
-
-// Mock getDaemon before importing delegate_crossproject
 const mockGetKnownProjects = mock(() => new Map([
     ["target-project", {
         pubkey: "project-pubkey",
@@ -67,33 +42,10 @@ const mockGetActiveRuntimes = mock(() => new Map([
         }),
     }],
 ]));
+const mockGetProjectAgents = mock(async () => []);
+const mockRegisterDelegation = mock(() => {});
 
-mock.module("@/daemon", () => ({
-    getDaemon: () => ({
-        getKnownProjects: mockGetKnownProjects,
-        getActiveRuntimes: mockGetActiveRuntimes,
-    }),
-}));
-
-// Mock agentStorage for fallback lookup
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getProjectAgents: async () => [],
-    },
-}));
-
-// Mock PendingDelegationsRegistry
-mock.module("@/services/ral", () => {
-    const originalModule = require("@/services/ral/RALRegistry");
-    return {
-        RALRegistry: originalModule.RALRegistry,
-        PendingDelegationsRegistry: {
-            register: mock(() => {}),
-        },
-    };
-});
-
-import { createDelegateCrossProjectTool } from "@/tools/implementations/delegate_crossproject";
+const createTriggeringEnvelope = () => createMockInboundEnvelope();
 
 describe("delegate_crossproject - Todo enforcement", () => {
     const conversationId = "test-conversation-id-1234567890abcdef1234567890abcdef1234567890abcdef";
@@ -117,7 +69,11 @@ describe("delegate_crossproject - Todo enforcement", () => {
         slug: "sender-agent",
         name: "Sender Agent",
         pubkey: "sender-agent-pubkey-123456789012345678901234567890123456789012345678",
-        sign: mock(async () => {}),
+        sign: mock(async (event?: { id?: string }) => {
+            if (event) {
+                event.id = mockEventId;
+            }
+        }),
     }) as unknown as AgentInstance;
 
     /**
@@ -126,9 +82,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithTodos = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -147,9 +101,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithNoConversation = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -164,9 +116,7 @@ describe("delegate_crossproject - Todo enforcement", () => {
     const createMockContextWithoutTodos = (ralNumber: number): ToolExecutionContext => ({
         agent: createMockAgent(),
         conversationId,
-        triggeringEvent: {
-            tags: [],
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {} as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -179,6 +129,27 @@ describe("delegate_crossproject - Todo enforcement", () => {
     });
 
     beforeEach(() => {
+        mockGetKnownProjects.mockClear();
+        mockGetActiveRuntimes.mockClear();
+        mockGetProjectAgents.mockClear();
+        mockPublish.mockClear();
+        mockRegisterDelegation.mockClear();
+
+        spyOn(daemonModule, "getDaemon").mockReturnValue({
+            getKnownProjects: mockGetKnownProjects,
+            getActiveRuntimes: mockGetActiveRuntimes,
+        } as ReturnType<typeof daemonModule.getDaemon>);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({
+            fetchEvent: async () => null,
+        } as ReturnType<typeof ndkClientModule.getNDK>);
+        spyOn(agentStorage, "getProjectAgents").mockImplementation(
+            mockGetProjectAgents as typeof agentStorage.getProjectAgents
+        );
+        spyOn(PendingDelegationsRegistry, "register").mockImplementation(mockRegisterDelegation);
+        spyOn(NDKEvent.prototype, "publish").mockImplementation(
+            mockPublish as typeof NDKEvent.prototype.publish
+        );
+
         // Reset singleton for testing
         // @ts-expect-error - accessing private static for testing
         RALRegistry.instance = undefined;

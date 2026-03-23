@@ -41,6 +41,7 @@ export function createAgentInstance(
     const resolvedConfig = agentStorage.getEffectiveConfig(storedAgent, projectDTag);
     const effectiveLLMConfig = resolvedConfig.model;
     const effectiveTools = resolvedConfig.tools;
+    const effectiveTelegram = resolvedConfig.telegram;
 
     // Process tools using pure functions
     const normalizedTools = processAgentTools(effectiveTools || [], storedAgent.slug);
@@ -73,6 +74,7 @@ export function createAgentInstance(
         pmOverrides: storedAgent.pmOverrides,
         isPM: storedAgent.isPM,
         projectOverrides: storedAgent.projectOverrides,
+        telegram: effectiveTelegram,
         createMetadataStore: (conversationId: string) => {
             const metadataPath = registry.getMetadataPath();
             return new AgentMetadataStore(conversationId, storedAgent.slug, metadataPath);

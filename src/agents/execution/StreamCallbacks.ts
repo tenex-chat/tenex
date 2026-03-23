@@ -148,23 +148,30 @@ export function createPrepareStep(
                 );
 
                 if (newInjections.length > 0) {
+                    const triggeringPrincipalId =
+                        context.triggeringEnvelope.principal.linkedPubkey ??
+                        context.triggeringEnvelope.principal.id;
                     for (const injection of newInjections) {
                         const relocated = injection.eventId
                             ? conversationStore.relocateToEnd(injection.eventId, {
                                   ral: ralNumber,
                                   senderPubkey: injection.senderPubkey,
+                                  senderPrincipal: injection.senderPrincipal,
                                   targetedPubkeys: [context.agent.pubkey],
+                                  targetedPrincipals: injection.targetedPrincipals,
                               })
                             : false;
 
                         if (!relocated) {
                             conversationStore.addMessage({
-                                pubkey: context.triggeringEvent.pubkey,
+                                pubkey: triggeringPrincipalId,
                                 ral: ralNumber,
                                 content: injection.content,
                                 messageType: "text",
                                 targetedPubkeys: [context.agent.pubkey],
+                                targetedPrincipals: injection.targetedPrincipals,
                                 senderPubkey: injection.senderPubkey,
+                                senderPrincipal: injection.senderPrincipal,
                                 eventId: injection.eventId,
                             });
                         }
@@ -219,6 +226,7 @@ export function createPrepareStep(
                     agent: context.agent,
                     project: projectContext.project,
                     conversation,
+                    triggeringEnvelope: context.triggeringEnvelope,
                     projectBasePath: context.projectBasePath,
                     workingDirectory: context.workingDirectory,
                     currentBranch: context.currentBranch,
@@ -231,7 +239,6 @@ export function createPrepareStep(
                     nudgeToolPermissions,
                     skillContent,
                     skills,
-                    respondingToPubkey: context.triggeringEvent.pubkey,
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
@@ -241,7 +248,7 @@ export function createPrepareStep(
                 updateReminderData({
                     agent: context.agent,
                     conversation,
-                    respondingToPubkey: context.triggeringEvent.pubkey,
+                    respondingToPrincipal: context.triggeringEnvelope.principal,
                     pendingDelegations,
                     completedDelegations,
                 });

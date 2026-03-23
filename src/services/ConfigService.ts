@@ -605,6 +605,33 @@ export class ConfigService {
         return Array.from(pubkeys);
     }
 
+    /**
+     * Get whitelisted transport principals from configuration.
+     * Always includes Nostr principals derived from whitelisted pubkeys.
+     */
+    getWhitelistedIdentities(config?: TenexConfig): string[] {
+        const identities: Set<string> = new Set();
+        const activeConfig = config ?? this.loadedConfig?.config;
+
+        const pubkeys = Array.isArray(activeConfig?.whitelistedPubkeys)
+            ? activeConfig.whitelistedPubkeys
+            : [];
+        for (const pubkey of pubkeys) {
+            identities.add(`nostr:${pubkey}`);
+        }
+
+        if (activeConfig?.whitelistedIdentities) {
+            for (const principalId of activeConfig.whitelistedIdentities) {
+                const trimmed = principalId.trim();
+                if (trimmed) {
+                    identities.add(trimmed);
+                }
+            }
+        }
+
+        return Array.from(identities);
+    }
+
     // =====================================================================================
     // CONVENIENCE METHODS
     // =====================================================================================

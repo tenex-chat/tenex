@@ -1,5 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { agentStorage } from "@/agents/AgentStorage";
+import { config } from "@/services/ConfigService";
+import * as projectsModule from "@/services/projects";
+import { logger } from "@/utils/logger";
 
 /**
  * Tests for kind 24030 agent deletion events.
@@ -27,103 +31,12 @@ const NON_OWNER_PUBKEY = "cccc".repeat(16);
 const PROJECT_DTAG = "test-project";
 const AGENT_EVENT_ID = "dddd".repeat(16);
 
-// Mock modules before importing handler
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-mock.module("@/lib/error-formatter", () => ({
-    formatAnyError: (e: unknown) => String(e),
-}));
-
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: () => ({ whitelistedPubkeys: [OWNER_PUBKEY] }),
-        getWhitelistedPubkeys: () => [OWNER_PUBKEY],
-    },
-}));
-
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getAgentProjects: async (pubkey: string) => {
-            getAgentProjectsCalls.push(pubkey);
-            return [PROJECT_DTAG];
-        },
-    },
-}));
-
-mock.module("@/nostr/ndkClient", () => ({
-    getNDK: () => ({}),
-}));
-
-mock.module("@/services/nip46", () => ({
-    Nip46SigningService: {
-        getInstance: () => ({
-            isEnabled: () => false,
-        }),
-    },
-    Nip46SigningLog: {
-        getInstance: () => ({
-            log: () => {},
-        }),
-        truncatePubkey: (pk: string) => pk.substring(0, 12),
-    },
-}));
-
 const mockStatusPublisher = {
     publishImmediately: async () => {
         publishImmediatelyCalls++;
     },
 };
-
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
-        project: {
-            pubkey: OWNER_PUBKEY,
-            dTag: PROJECT_DTAG,
-            tagValue: (tag: string) => {
-                if (tag === "d") return PROJECT_DTAG;
-                return undefined;
-            },
-            content: "",
-            tags: [
-                ["d", PROJECT_DTAG],
-                ["title", "Test Project"],
-                ["agent", AGENT_EVENT_ID],
-            ],
-        },
-        getAgentByPubkey: (pubkey: string) => {
-            // Return undefined for agents that were "removed" (supports idempotency tests)
-            if (removedAgentPubkeys.has(pubkey)) return undefined;
-
-            if (pubkey === AGENT_PUBKEY) {
-                return {
-                    slug: "test-agent",
-                    pubkey: AGENT_PUBKEY,
-                    name: "Test Agent",
-                    eventId: AGENT_EVENT_ID,
-                };
-            }
-            return undefined;
-        },
-        agentRegistry: {
-            removeAgentFromProject: async (slug: string) => {
-                removeAgentFromProjectCalls.push(slug);
-                return true;
-            },
-            getAllAgents: () => [],
-        },
-        statusPublisher: mockStatusPublisher,
-    }),
-}));
-
-// Import handler AFTER mocks are set up
-const { handleAgentDeletion, _testClearPendingTimers } = await import("../agentDeletion");
+import { handleAgentDeletion, _testClearPendingTimers } from "../agentDeletion";
 
 // Helper to create a mock NDKEvent
 function createMockEvent(overrides: {
@@ -153,11 +66,61 @@ describe("handleAgentDeletion", () => {
         getAgentProjectsCalls = [];
         publishImmediatelyCalls = 0;
         removedAgentPubkeys = new Set();
+
+        spyOn(logger, "info").mockImplementation(() => {});
+        spyOn(logger, "debug").mockImplementation(() => {});
+        spyOn(logger, "warn").mockImplementation(() => {});
+        spyOn(logger, "error").mockImplementation(() => {});
+
+        spyOn(config, "getWhitelistedPubkeys").mockReturnValue([OWNER_PUBKEY]);
+        spyOn(agentStorage, "getAgentProjects").mockImplementation(async (pubkey: string) => {
+            getAgentProjectsCalls.push(pubkey);
+            return [PROJECT_DTAG];
+        });
+
+        spyOn(projectsModule, "getProjectContext").mockReturnValue({
+            project: {
+                pubkey: OWNER_PUBKEY,
+                dTag: PROJECT_DTAG,
+                tagValue: (tag: string) => {
+                    if (tag === "d") return PROJECT_DTAG;
+                    return undefined;
+                },
+                content: "",
+                tags: [
+                    ["d", PROJECT_DTAG],
+                    ["title", "Test Project"],
+                    ["agent", AGENT_EVENT_ID],
+                ],
+            },
+            getAgentByPubkey: (pubkey: string) => {
+                if (removedAgentPubkeys.has(pubkey)) return undefined;
+
+                if (pubkey === AGENT_PUBKEY) {
+                    return {
+                        slug: "test-agent",
+                        pubkey: AGENT_PUBKEY,
+                        name: "Test Agent",
+                        eventId: AGENT_EVENT_ID,
+                    };
+                }
+                return undefined;
+            },
+            agentRegistry: {
+                removeAgentFromProject: async (slug: string) => {
+                    removeAgentFromProjectCalls.push(slug);
+                    return true;
+                },
+                getAllAgents: () => [],
+            },
+            statusPublisher: mockStatusPublisher,
+        } as any);
     });
 
     afterEach(() => {
         // Clear pending debounce timers so they don't keep the test runner alive
         _testClearPendingTimers();
+        mock.restore();
     });
 
     describe("project-scoped deletion (r=project)", () => {

@@ -28,6 +28,7 @@ export interface MessageCompilerContext {
     agent: AgentInstance;
     project: NDKProject;
     conversation: ConversationStore;
+    triggeringEnvelope?: import("@/events/runtime/InboundEnvelope").InboundEnvelope;
     projectBasePath?: string;
     workingDirectory?: string;
     currentBranch?: string;
@@ -45,7 +46,6 @@ export interface MessageCompilerContext {
     skillContent?: string;
     /** Individual skill data for rendering in fragments */
     skills?: SkillData[];
-    respondingToPubkey: string;
     pendingDelegations: PendingDelegation[];
     completedDelegations: CompletedDelegation[];
     ralNumber: number;

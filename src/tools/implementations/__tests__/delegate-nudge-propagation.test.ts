@@ -1,41 +1,33 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, spyOn, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn, mock } from "bun:test";
 import type { ToolExecutionContext } from "@/tools/types";
 import type { AgentInstance } from "@/agents/types";
+import * as nostrModule from "@/nostr";
 
 // Track delegate calls to verify nudge propagation
 const delegateCallArgs: Array<{ nudges?: string[] }> = [];
 
-// Mock NDK before importing modules that use it
-mock.module("@/nostr", () => ({
-    getNDK: () => ({
-        fetchEvent: async () => null,
-    }),
-}));
-
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 // Mock the resolution function to return pubkeys for our test agents
 import * as agentResolution from "@/services/agents";
-const mockResolve = spyOn(agentResolution, "resolveAgentSlug");
-mockResolve.mockImplementation((slug: string) => {
-    const availableSlugs = ["self-agent", "other-agent", "third-agent"];
-    if (slug === "self-agent") {
-        return { pubkey: "agent-pubkey-123", availableSlugs };
-    }
-    if (slug === "other-agent") {
-        return { pubkey: "other-pubkey-456", availableSlugs };
-    }
-    if (slug === "third-agent") {
-        return { pubkey: "third-pubkey-789", availableSlugs };
-    }
-    return { pubkey: null, availableSlugs };
-});
+
+const createTriggeringEnvelope = (nudgeTags: string[][] = []) =>
+    createMockInboundEnvelope({
+        metadata: {
+            nudgeEventIds: nudgeTags
+                .filter((tag) => tag[0] === "nudge" && Boolean(tag[1]))
+                .map((tag) => tag[1]),
+        },
+    });
 
 describe("Delegate Tool - Nudge Propagation", () => {
     const conversationId = "test-conversation-id";
     const projectId = "31933:pubkey:test-project";
     let registry: RALRegistry;
+    let getNDKSpy: ReturnType<typeof spyOn>;
+    let resolveAgentSlugSpy: ReturnType<typeof spyOn>;
 
     const defaultTodo = {
         id: "test-todo",
@@ -56,9 +48,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
             pubkey: "agent-pubkey-123",
         } as AgentInstance,
         conversationId,
-        triggeringEvent: {
-            tags: nudgeTags,
-        } as any,
+        triggeringEnvelope: createTriggeringEnvelope(nudgeTags),
         agentPublisher: {
             delegate: async (config: any) => {
                 // Track the delegate call to verify nudge propagation
@@ -85,10 +75,31 @@ describe("Delegate Tool - Nudge Propagation", () => {
         RALRegistry.instance = undefined;
         registry = RALRegistry.getInstance();
         delegateCallArgs.length = 0;
+        getNDKSpy = spyOn(nostrModule, "getNDK").mockReturnValue({
+            fetchEvent: async () => null,
+        } as never);
+        resolveAgentSlugSpy = spyOn(agentResolution, "resolveAgentSlug").mockImplementation(
+            (slug: string) => {
+                const availableSlugs = ["self-agent", "other-agent", "third-agent"];
+                if (slug === "self-agent") {
+                    return { pubkey: "agent-pubkey-123", availableSlugs };
+                }
+                if (slug === "other-agent") {
+                    return { pubkey: "other-pubkey-456", availableSlugs };
+                }
+                if (slug === "third-agent") {
+                    return { pubkey: "third-pubkey-789", availableSlugs };
+                }
+                return { pubkey: null, availableSlugs };
+            }
+        );
     });
 
     afterEach(() => {
         delegateCallArgs.length = 0;
+        getNDKSpy?.mockRestore();
+        resolveAgentSlugSpy?.mockRestore();
+        mock.restore();
     });
 
     describe("nudge inheritance", () => {
@@ -292,8 +303,4 @@ describe("Delegate Tool - Nudge Propagation", () => {
             expect(delegateCallArgs[0].nudges).toContain(nudgeId);
         });
     });
-});
-
-afterAll(() => {
-    mockResolve.mockRestore();
 });

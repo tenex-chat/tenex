@@ -87,6 +87,31 @@ describe("AgentStorage", () => {
 
             expect(agent.status).toBe("active");
         });
+
+        it("prefers defaultConfig.telegram over the legacy top-level telegram field", () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "test-agent",
+                name: "Test Agent",
+                role: "assistant",
+                telegram: {
+                    botToken: "legacy-token",
+                    allowDMs: true,
+                },
+                defaultConfig: {
+                    telegram: {
+                        botToken: "default-token",
+                        allowDMs: false,
+                    },
+                },
+            });
+
+            expect(agent.default?.telegram).toEqual({
+                botToken: "default-token",
+                allowDMs: false,
+            });
+        });
     });
 
     describe("isAgentActive helper", () => {
@@ -293,6 +318,63 @@ describe("AgentStorage", () => {
 
             const loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.default?.tools).toEqual(newTools);
+        });
+
+        it("should update default Telegram config and migrate off legacy top-level telegram", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                telegram: {
+                    botToken: "legacy-token",
+                    allowDMs: true,
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultConfig(signer.pubkey, {
+                telegram: {
+                    botToken: "updated-token",
+                    allowDMs: false,
+                    authorizedIdentityIds: ["telegram:user:42"],
+                },
+            });
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.telegram).toEqual({
+                botToken: "updated-token",
+                allowDMs: false,
+                authorizedIdentityIds: ["telegram:user:42"],
+            });
+            expect(loaded?.telegram).toBeUndefined();
+        });
+
+        it("should clear default Telegram config when updated with undefined", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "token",
+                        allowDMs: true,
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+
+            const success = await storage.updateDefaultTelegramConfig(signer.pubkey, undefined);
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.default?.telegram).toBeUndefined();
         });
 
         it("should return false for non-existent agent", async () => {
@@ -901,6 +983,176 @@ describe("AgentStorage", () => {
             await storage.updateProjectScopedIsPM(signer.pubkey, "project-1", undefined);
             loaded = await storage.loadAgent(signer.pubkey);
             expect(loaded?.projectOverrides).toBeUndefined();
+        });
+
+        it("should update project Telegram config while preserving other override fields", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "default-token",
+                        allowDMs: true,
+                    },
+                },
+                projectOverrides: {
+                    "project-1": {
+                        model: "anthropic:claude-opus-4",
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectTelegramConfig(
+                signer.pubkey,
+                "project-1",
+                {
+                    botToken: "project-token",
+                    allowDMs: false,
+                    chatBindings: [{ chatId: "-1001", title: "Ops" }],
+                }
+            );
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides?.["project-1"]).toEqual({
+                model: "anthropic:claude-opus-4",
+                telegram: {
+                    botToken: "project-token",
+                    allowDMs: false,
+                    chatBindings: [{ chatId: "-1001", title: "Ops" }],
+                },
+            });
+        });
+
+        it("should clear project Telegram override when it matches defaults", async () => {
+            const signer = NDKPrivateKeySigner.generate();
+            const agent = createStoredAgent({
+                nsec: signer.nsec,
+                slug: "telegram-agent",
+                name: "Telegram Agent",
+                role: "assistant",
+                defaultConfig: {
+                    telegram: {
+                        botToken: "shared-token",
+                        allowDMs: true,
+                    },
+                },
+                projectOverrides: {
+                    "project-1": {
+                        telegram: {
+                            botToken: "project-token",
+                            allowDMs: false,
+                        },
+                    },
+                },
+            });
+
+            await storage.saveAgent(agent);
+            await storage.addAgentToProject(signer.pubkey, "project-1");
+
+            const success = await storage.updateProjectTelegramConfig(
+                signer.pubkey,
+                "project-1",
+                {
+                    botToken: "shared-token",
+                    allowDMs: true,
+                }
+            );
+            expect(success).toBe(true);
+
+            const loaded = await storage.loadAgent(signer.pubkey);
+            expect(loaded?.projectOverrides).toBeUndefined();
+        });
+    });
+
+    describe("global agent listings", () => {
+        it("should return every stored agent record in getAllStoredAgents", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+            const signer3 = NDKPrivateKeySigner.generate();
+
+            const canonicalAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "Canonical Agent",
+                role: "assistant",
+            });
+            const duplicateAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Duplicate Agent",
+                role: "assistant",
+            });
+            const inactiveAgent = createStoredAgent({
+                nsec: signer3.nsec,
+                slug: "inactive-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(canonicalAgent);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
+            await storage.saveAgent(duplicateAgent);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+
+            await storage.saveAgent(inactiveAgent);
+            await storage.addAgentToProject(signer3.pubkey, "project-3");
+            await storage.removeAgentFromProject(signer3.pubkey, "project-3");
+
+            const storedAgents = await storage.getAllStoredAgents();
+            expect(storedAgents).toHaveLength(3);
+            expect(storedAgents.map((agent) => agent.name).sort()).toEqual([
+                "Canonical Agent",
+                "Duplicate Agent",
+                "Inactive Agent",
+            ]);
+        });
+
+        it("should return only canonical active agents in getCanonicalActiveAgents", async () => {
+            const signer1 = NDKPrivateKeySigner.generate();
+            const signer2 = NDKPrivateKeySigner.generate();
+            const signer3 = NDKPrivateKeySigner.generate();
+
+            const firstAgent = createStoredAgent({
+                nsec: signer1.nsec,
+                slug: "shared-slug",
+                name: "First Agent",
+                role: "assistant",
+            });
+            const canonicalAgent = createStoredAgent({
+                nsec: signer2.nsec,
+                slug: "shared-slug",
+                name: "Canonical Agent",
+                role: "assistant",
+            });
+            const inactiveAgent = createStoredAgent({
+                nsec: signer3.nsec,
+                slug: "inactive-slug",
+                name: "Inactive Agent",
+                role: "assistant",
+            });
+
+            await storage.saveAgent(firstAgent);
+            await storage.addAgentToProject(signer1.pubkey, "project-1");
+
+            await storage.saveAgent(canonicalAgent);
+            await storage.addAgentToProject(signer2.pubkey, "project-2");
+
+            await storage.saveAgent(inactiveAgent);
+            await storage.addAgentToProject(signer3.pubkey, "project-3");
+            await storage.removeAgentFromProject(signer3.pubkey, "project-3");
+
+            const activeAgents = await storage.getCanonicalActiveAgents();
+            expect(activeAgents).toHaveLength(1);
+            expect(activeAgents[0]?.name).toBe("Canonical Agent");
+            expect(activeAgents[0]?.slug).toBe("shared-slug");
         });
     });
 

@@ -1,6 +1,8 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ExecutionContext } from "@/agents/execution/types";
 import type { AgentInstance } from "@/agents/types";
+import * as agentResolutionModule from "@/services/agents/AgentResolution";
+import * as nostrEntityParserModule from "@/utils/nostr-entity-parser";
 
 // Mock dependencies - must be before imports
 mock.module("@/utils/logger", () => ({
@@ -27,35 +29,38 @@ mock.module("@/services/PubkeyService", () => ({
     }),
 }));
 
-// Mock AgentResolution
 const mockResolveAgentSlug = mock((slug: string) => {
     if (slug === "agent-1") return { pubkey: "agent-pubkey-1", availableSlugs: ["agent-1", "agent-2"] };
     if (slug === "agent-2") return { pubkey: "agent-pubkey-2", availableSlugs: ["agent-1", "agent-2"] };
     return { pubkey: null, availableSlugs: ["agent-1", "agent-2"] };
 });
 
-mock.module("@/services/agents/AgentResolution", () => ({
-    resolveAgentSlug: mockResolveAgentSlug,
-}));
-
-// Mock parseNostrUser
-mock.module("@/utils/nostr-entity-parser", () => ({
-    PREFIX_LENGTH: 12,
-    parseNostrUser: (input: string) => {
-        // Accept valid 64-char hex pubkeys
-        if (/^[0-9a-fA-F]{64}$/.test(input.trim())) {
-            return input.trim().toLowerCase();
-        }
-        return null;
-    },
-}));
-
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { logger } from "@/utils/logger";
 import { createConversationListTool } from "../conversation_list";
 
 type StoreOverrides = {
-    messages?: Array<{ timestamp: number; pubkey?: string; messageType?: string; delegationMarker?: { delegationConversationId: string; recipientPubkey: string; parentConversationId: string; completedAt: number; status: string } }>;
+    messages?: Array<{
+        timestamp: number;
+        pubkey?: string;
+        senderPubkey?: string;
+        senderPrincipal?: {
+            id: string;
+            transport: string;
+            linkedPubkey?: string;
+            displayName?: string;
+            username?: string;
+            kind?: "agent" | "human" | "system";
+        };
+        messageType?: string;
+        delegationMarker?: {
+            delegationConversationId: string;
+            recipientPubkey: string;
+            parentConversationId: string;
+            completedAt: number;
+            status: string;
+        };
+    }>;
     metadata?: Record<string, unknown>;
     lastActivityTime?: number;
 };
@@ -81,6 +86,8 @@ const buildMessages = (overrides: StoreOverrides) => {
     if (overrides.messages && overrides.messages.length > 0) {
         return overrides.messages.map(msg => ({
             pubkey: msg.pubkey ?? "user-pubkey",
+            senderPubkey: msg.senderPubkey,
+            senderPrincipal: msg.senderPrincipal,
             content: "",
             messageType: msg.messageType ?? "text",
             timestamp: msg.timestamp,
@@ -127,6 +134,8 @@ const applyStateToStore = (
             messageType: (message as any).messageType ?? "text",
             timestamp: message.timestamp,
             eventId: `event-${projectId}-${conversationId}-${index}`,
+            senderPubkey: (message as any).senderPubkey,
+            senderPrincipal: (message as any).senderPrincipal,
             delegationMarker: (message as any).delegationMarker,
         })),
         metadata,
@@ -208,11 +217,38 @@ afterAll(() => {
     ConversationStore.prototype.load = originalLoad;
 });
 
+afterEach(() => {
+    ConversationStore.getProjectId = originalGetProjectId;
+    ConversationStore.getBasePath = originalGetBasePath;
+    ConversationStore.listProjectIdsFromDisk = originalListProjectIdsFromDisk;
+    ConversationStore.listConversationIdsFromDisk = originalListConversationIdsFromDisk;
+    ConversationStore.listConversationIdsFromDiskForProject = originalListConversationIdsFromDiskForProject;
+    ConversationStore.getOrLoad = originalGetOrLoad;
+    ConversationStore.prototype.load = originalLoad;
+});
+
 describe("conversation_list Tool", () => {
     let mockContext: ExecutionContext;
     let mockAgent: AgentInstance;
+    let resolveAgentSlugSpy: ReturnType<typeof spyOn>;
+    let parseNostrUserSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
+        resolveAgentSlugSpy = spyOn(agentResolutionModule, "resolveAgentSlug").mockImplementation(
+            mockResolveAgentSlug
+        );
+        parseNostrUserSpy = spyOn(nostrEntityParserModule, "parseNostrUser").mockImplementation(
+            (input: string | undefined) => {
+                if (!input) {
+                    return null;
+                }
+                const trimmed = input.trim();
+                if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+                    return trimmed.toLowerCase();
+                }
+                return null;
+            }
+        );
         // Reset all mocks
         (logger.info as ReturnType<typeof mock>).mockReset();
         (logger.warn as ReturnType<typeof mock>).mockReset();
@@ -271,6 +307,8 @@ describe("conversation_list Tool", () => {
     });
 
     afterEach(() => {
+        resolveAgentSlugSpy?.mockRestore();
+        parseNostrUserSpy?.mockRestore();
         // Clear instantiated stores
         instantiatedStores.length = 0;
     });
@@ -718,6 +756,35 @@ describe("conversation_list Tool", () => {
             // Should have unique participants (agent-1 and agent-2)
             expect(summary.participants).toContain("agent-1");
             expect(summary.participants).toContain("agent-2");
+            expect(summary.participants).toHaveLength(2);
+        });
+
+        it("should include transport-only participants without treating their principal id as a pubkey", async () => {
+            mockStoreOverrides["current-project:conv1"] = {
+                messages: [
+                    {
+                        timestamp: 1700000000,
+                        pubkey: "",
+                        senderPrincipal: {
+                            id: "telegram:user:42",
+                            transport: "telegram",
+                            displayName: "Pablo Telegram",
+                            kind: "human",
+                        },
+                    },
+                    { timestamp: 1700001000, pubkey: "agent-pubkey-1" },
+                ],
+                metadata: { title: "Telegram conversation" },
+                lastActivityTime: 1700001000,
+            };
+
+            const tool = createConversationListTool(mockContext);
+            const result = await tool.execute({});
+
+            expect(result.success).toBe(true);
+            const summary = result.conversations[0];
+            expect(summary.participants).toContain("Pablo Telegram");
+            expect(summary.participants).toContain("agent-1");
             expect(summary.participants).toHaveLength(2);
         });
 

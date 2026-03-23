@@ -27,6 +27,12 @@ describe("Current-cycle supervision reminder injection", () => {
     const PROJECT_ID = "test-project";
     const CONVERSATION_ID = "conv-current-cycle-test";
     const AGENT_PUBKEY = "agent-pubkey-123";
+    const respondingToPrincipal = {
+        id: "nostr:user-pubkey-456",
+        transport: "nostr" as const,
+        linkedPubkey: "user-pubkey-456",
+        kind: "human" as const,
+    };
 
     let store: ConversationStore;
     let agent: AgentInstance;
@@ -70,7 +76,7 @@ describe("Current-cycle supervision reminder injection", () => {
         updateReminderData({
             agent,
             conversation: store,
-            respondingToPubkey: "user-pubkey-456",
+            respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [],
         });
@@ -85,7 +91,7 @@ describe("Current-cycle supervision reminder injection", () => {
         updateReminderData({
             agent,
             conversation: store,
-            respondingToPubkey: "user-pubkey-456",
+            respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [],
         });
@@ -120,7 +126,7 @@ describe("Current-cycle supervision reminder injection", () => {
         updateReminderData({
             agent,
             conversation: store,
-            respondingToPubkey: "user-pubkey-456",
+            respondingToPrincipal,
             pendingDelegations: [],
             completedDelegations: [],
         });

@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { ToolExecutionContext } from "@/tools/types";
+import * as projectsModule from "@/services/projects";
+import * as nostrEntityParserModule from "@/utils/nostr-entity-parser";
 
 // Mock dependencies before imports
 mock.module("@/utils/logger", () => ({
@@ -21,6 +23,9 @@ let lastCreatedEvent: any = null;
 mock.module("@nostr-dev-kit/ndk", () => ({
     NDKEvent: class MockNDKEvent {
         ndk: any;
+        id: string = "";
+        pubkey: string = "";
+        created_at: number = Math.floor(Date.now() / 1000);
         kind: number | undefined;
         tags: string[][] = [];
         content: string = "";
@@ -32,6 +37,14 @@ mock.module("@nostr-dev-kit/ndk", () => ({
 
         publish() {
             return ndkEventMocks.publish();
+        }
+
+        tagValue(tagName: string) {
+            return this.tags.find((tag) => tag[0] === tagName)?.[1];
+        }
+
+        getMatchingTags(tagName: string) {
+            return this.tags.filter((tag) => tag[0] === tagName);
         }
     },
 }));
@@ -60,22 +73,6 @@ const projectContextMocks = {
     removeLesson: mock(),
 };
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => projectContextMocks,
-}));
-
-// Mock the normalization utility
-mock.module("@/utils/nostr-entity-parser", () => ({
-    normalizeLessonEventId: (input: string, _lessons: any[]) => {
-        // Simple mock: if starts with "invalid", return error
-        if (input.startsWith("invalid")) {
-            return { success: false, error: `Invalid event ID format: ${input}` };
-        }
-        // Otherwise return the input as-is (assuming it's already normalized)
-        return { success: true, eventId: input };
-    },
-}));
-
 import { createLessonDeleteTool } from "../lesson_delete";
 
 describe("Lesson Delete Tool", () => {
@@ -85,6 +82,8 @@ describe("Lesson Delete Tool", () => {
         pubkey: string;
         encode: () => string;
     };
+    let normalizeLessonEventIdSpy: ReturnType<typeof spyOn>;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
 
     // Track agent.sign calls
     const agentSignMock = mock().mockResolvedValue(undefined);
@@ -101,7 +100,7 @@ describe("Lesson Delete Tool", () => {
             } as any,
             conversationId: "mock-conversation-id",
             conversationCoordinator: {} as any,
-            triggeringEvent: {
+            triggeringEnvelope: {
                 id: "mock-triggering-event-id",
                 tags: [],
             } as any,
@@ -127,6 +126,18 @@ describe("Lesson Delete Tool", () => {
         agentSignMock.mockReset().mockResolvedValue(undefined);
         ndkEventMocks.publish.mockReset().mockResolvedValue(new Set());
         lastCreatedEvent = null;
+        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockReturnValue(
+            projectContextMocks as never
+        );
+        normalizeLessonEventIdSpy = spyOn(
+            nostrEntityParserModule,
+            "normalizeLessonEventId"
+        ).mockImplementation((input: string) => {
+            if (input.startsWith("invalid")) {
+                return { success: false, error: `Invalid event ID format: ${input}` } as never;
+            }
+            return { success: true, eventId: input } as never;
+        });
 
         // Create fresh mock lesson
         mockLesson = {
@@ -135,6 +146,11 @@ describe("Lesson Delete Tool", () => {
             pubkey: "agent-pubkey-123",
             encode: () => "encoded-lesson-id",
         };
+    });
+
+    afterEach(() => {
+        getProjectContextSpy?.mockRestore();
+        normalizeLessonEventIdSpy?.mockRestore();
     });
 
     describe("Successful Deletion", () => {

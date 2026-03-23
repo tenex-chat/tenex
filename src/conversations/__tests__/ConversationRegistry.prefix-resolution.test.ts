@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import { mkdir, rm } from "fs/promises";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { conversationRegistry } from "../ConversationRegistry";
 import { prefixKVStore, PrefixKVStore } from "@/services/storage";
 
@@ -15,6 +16,35 @@ function generateUniqueTestId(): string {
     const timestamp = Date.now().toString(16).padStart(12, "0").slice(-12);
     const random = Math.random().toString(16).slice(2).padStart(52, "0").slice(0, 52);
     return timestamp + random;
+}
+
+function createEnvelope(id: string, content: string): InboundEnvelope {
+    return {
+        transport: "nostr",
+        principal: {
+            id: "nostr:user-pubkey",
+            transport: "nostr",
+            linkedPubkey: "user-pubkey",
+        },
+        channel: {
+            id: `nostr:conversation:${id}`,
+            transport: "nostr",
+            kind: "conversation",
+        },
+        message: {
+            id: `nostr:${id}`,
+            transport: "nostr",
+            nativeId: id,
+        },
+        recipients: [],
+        content,
+        occurredAt: Math.floor(Date.now() / 1000),
+        capabilities: [],
+        metadata: {
+            eventKind: 1,
+            eventTagCount: 0,
+        },
+    };
 }
 
 describe("ConversationRegistry Prefix Resolution", () => {
@@ -69,19 +99,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testPrefix = testId.substring(0, 12);
 
             // Create a conversation so it exists in the registry
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for prefix resolution",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for prefix resolution")
+            );
 
             // Verify PrefixKVStore has the mapping (prerequisite)
             const lookup = prefixKVStore.lookup(testPrefix);
@@ -113,19 +133,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testPrefix = testId.substring(0, 12);
 
             // Create a conversation so it exists in the registry
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test for case insensitive lookup",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test for case insensitive lookup")
+            );
 
             // The uppercase prefix should be normalized and work with ConversationRegistry
             const upperCasePrefix = testPrefix.toUpperCase();
@@ -145,23 +155,11 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
 
             // Create a mock NDKEvent
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
             // Spy on prefixKVStore.add
             const addSpy = spyOn(prefixKVStore, "add");
 
             // Create the conversation
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(createEnvelope(testId, "Test message"));
 
             // Verify prefixKVStore.add was called with the conversation ID
             expect(addSpy).toHaveBeenCalledWith(testId);
@@ -172,20 +170,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const testPrefix = testId.substring(0, 12);
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for prefix lookup",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // Create the conversation
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for prefix lookup")
+            );
 
             // The conversation should now be retrievable by prefix
             // First verify it's in PrefixKVStore
@@ -197,25 +184,31 @@ describe("ConversationRegistry Prefix Resolution", () => {
             expect(store).toBeDefined();
             expect(store?.id).toBe(testId);
         });
+
+        it("evicts cached envelopes by nativeId even after a message gets a different published eventId", async () => {
+            const envelope = createEnvelope(generateUniqueTestId(), "Transport-rooted test");
+
+            const store = await conversationRegistry.create(envelope);
+            const messageIndex = store.getAllMessages().findIndex((entry) =>
+                entry.eventId === envelope.message.nativeId
+            );
+
+            expect(messageIndex).toBeGreaterThanOrEqual(0);
+            expect(conversationRegistry.getCachedEnvelope(envelope.message.nativeId)).toEqual(envelope);
+
+            store.setEventId(messageIndex, "published-event-id");
+
+            await conversationRegistry.complete(store.id);
+
+            expect(conversationRegistry.getCachedEnvelope(envelope.message.nativeId)).toBeUndefined();
+        });
     });
 
     describe("integration with has()", () => {
         it("has() with full ID returns true when conversation exists", async () => {
             const testId = generateUniqueTestId();
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(createEnvelope(testId, "Test"));
 
             expect(conversationRegistry.has(testId)).toBe(true);
         });
@@ -224,19 +217,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const testPrefix = testId.substring(0, 12);
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(createEnvelope(testId, "Test"));
 
             // Should find conversation by prefix
             expect(conversationRegistry.has(testPrefix)).toBe(true);
@@ -248,19 +229,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const testPrefix = testId.substring(0, 12);
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for getOrLoad prefix",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for getOrLoad prefix")
+            );
 
             // Clear in-memory cache
             conversationRegistry.reset();
@@ -276,19 +247,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const upperCasePrefix = testId.substring(0, 12).toUpperCase();
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for getOrLoad uppercase",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for getOrLoad uppercase")
+            );
 
             // Clear in-memory cache
             conversationRegistry.reset();
@@ -306,20 +267,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testId = generateUniqueTestId();
             const testPrefix = testId.substring(0, 12);
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for disk persistence",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // Create the conversation (indexes to disk)
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for disk persistence")
+            );
 
             // Verify it's in memory first
             expect(conversationRegistry.get(testPrefix)).toBeDefined();
@@ -348,19 +298,9 @@ describe("ConversationRegistry Prefix Resolution", () => {
             const testPrefix = testId.substring(0, 12);
             const upperCasePrefix = testPrefix.toUpperCase();
 
-            const mockEvent = {
-                id: testId,
-                pubkey: "user-pubkey",
-                content: "Test message for case normalization",
-                kind: 1,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-                getMatchingTags: () => [],
-                tagValue: () => undefined,
-            };
-
-            // @ts-expect-error - Using minimal mock event
-            await conversationRegistry.create(mockEvent);
+            await conversationRegistry.create(
+                createEnvelope(testId, "Test message for case normalization")
+            );
 
             // Clear in-memory cache
             conversationRegistry.reset();

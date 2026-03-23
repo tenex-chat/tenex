@@ -1,16 +1,20 @@
 import { ConversationStore } from "../ConversationStore";
-import type { ConversationMetadata } from "../types";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import type { ConversationMetadata, MessagePrincipalContext } from "../types";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import {
+    getMentionedPubkeys,
+    getReplyTarget,
+    toNativeId,
+} from "@/events/runtime/envelope-classifier";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { getNDK } from "@/nostr/ndkClient";
+import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { buildDelegationChain } from "@/utils/delegation-chain";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKArticle } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import chalk from "chalk";
-import { TagExtractor } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
 
 /**
@@ -28,7 +32,7 @@ async function fetchReferencedArticle(
         }
 
         const [, pubkey, ...dTagParts] = parts;
-        const dTag = dTagParts.join(":"); // Handle d-tags that contain colons
+        const dTag = dTagParts.join(":");
 
         const ndk = getNDK();
         const filter = {
@@ -59,18 +63,10 @@ async function fetchReferencedArticle(
     }
 }
 
-/**
- * Extract and fetch the first kind 30023 article reference from an event's a-tags.
- * @param event - The event to extract article references from
- * @returns The article metadata or null if none found
- */
 async function extractReferencedArticle(
-    event: NDKEvent
+    envelope: InboundEnvelope
 ): Promise<ConversationMetadata["referencedArticle"] | null> {
-    const aTags = TagExtractor.getATags(event);
-
-    // Find the first a-tag referencing a kind 30023 (article)
-    const articleATag = aTags.find((tag) => tag.startsWith("30023:"));
+    const articleATag = envelope.metadata.articleReferences?.find((tag) => tag.startsWith("30023:"));
     if (!articleATag) {
         return null;
     }
@@ -85,20 +81,19 @@ export interface ConversationResolutionResult {
 
 /**
  * ConversationResolver encapsulates all logic for finding or creating conversations
- * based on incoming Nostr events.
+ * based on incoming envelopes.
  */
 export class ConversationResolver {
-
-    /**
-     * Resolve the conversation for an incoming event.
-     */
-    async resolveConversationForEvent(event: NDKEvent): Promise<ConversationResolutionResult> {
+    async resolveConversationForEvent(
+        envelope: InboundEnvelope,
+        principalContext?: MessagePrincipalContext
+    ): Promise<ConversationResolutionResult> {
         const activeSpan = trace.getActiveSpan();
-        const replyTarget = AgentEventDecoder.getReplyTarget(event);
+        const replyTarget = getReplyTarget(envelope);
+        const nativeReplyTarget = replyTarget ? toNativeId(replyTarget) : undefined;
 
-        // If event has an 'e' tag (reply), try to find existing conversation
-        if (replyTarget) {
-            const conversation = ConversationStore.findByEventId(replyTarget);
+        if (nativeReplyTarget) {
+            const conversation = ConversationStore.findByEventId(nativeReplyTarget);
             if (conversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "found_existing",
@@ -108,9 +103,13 @@ export class ConversationResolver {
                 return { conversation };
             }
 
-            // Has e tag but conversation not found - try orphaned reply handling
-            const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
-            const newConversation = await this.handleOrphanedReply(event, replyTarget, mentionedPubkeys);
+            const mentionedPubkeys = getMentionedPubkeys(envelope);
+            const newConversation = await this.handleOrphanedReply(
+                envelope,
+                nativeReplyTarget,
+                mentionedPubkeys,
+                principalContext
+            );
             if (newConversation) {
                 activeSpan?.addEvent("conversation.resolved", {
                     "resolution.type": "created_from_orphan",
@@ -122,16 +121,15 @@ export class ConversationResolver {
 
             activeSpan?.addEvent("conversation.resolution_failed", {
                 reason: "conversation_not_found_for_reply_target",
-                "reply_target.id": replyTarget,
+                "reply_target.id": nativeReplyTarget,
             });
             return { conversation: undefined };
         }
 
-        // No 'e' tag - this is a NEW conversation, create it
-        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+        const mentionedPubkeys = getMentionedPubkeys(envelope);
         const projectCtx = getProjectContext();
         const isDirectedToAgent = mentionedPubkeys.some((pubkey) =>
-            Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
         );
 
         if (!isDirectedToAgent) {
@@ -141,75 +139,68 @@ export class ConversationResolver {
             return { conversation: undefined };
         }
 
-        const conversation = await ConversationStore.create(event);
-        if (conversation) {
-            // Check for referenced kind 30023 articles and populate metadata
-            const referencedArticle = await extractReferencedArticle(event);
-            if (referencedArticle) {
-                conversation.updateMetadata({ referencedArticle });
-                await conversation.save();
-
-                activeSpan?.addEvent("referenced_article_loaded", {
-                    "article.title": referencedArticle.title,
-                    "article.dTag": referencedArticle.dTag,
-                    "article.content_length": referencedArticle.content.length,
-                });
-            }
-
-            // Build and store delegation chain if this is a delegated conversation
-            // For delegation events, the first p-tag is always the intended recipient.
-            // getMentionedPubkeys returns p-tags in order, so the first agent pubkey
-            // found is the correct target.
-            const targetAgentPubkey = mentionedPubkeys.find((pubkey) =>
-                Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
-            );
-
-            if (targetAgentPubkey) {
-                const delegationChain = buildDelegationChain(
-                    event,
-                    targetAgentPubkey,
-                    projectCtx.project.pubkey, // Project owner is the human user
-                    conversation.id // The conversation being created for the current agent
-                );
-
-                if (delegationChain && delegationChain.length > 0) {
-                    conversation.updateMetadata({ delegationChain });
-                    await conversation.save();
-
-                    activeSpan?.addEvent("delegation_chain_built", {
-                        "chain.length": delegationChain.length,
-                        "chain.display": delegationChain.map(c => c.displayName).join(" → "),
-                    });
-
-                    logger.debug("[ConversationResolver] Built delegation chain for new conversation", {
-                        conversationId: conversation.id.substring(0, 8),
-                        chainLength: delegationChain.length,
-                        chain: delegationChain.map(c => c.displayName).join(" → "),
-                    });
-                }
-            }
-
-            logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
-            activeSpan?.addEvent("conversation.resolved", {
-                "resolution.type": "created_new",
-                "conversation.id": shortenConversationId(conversation.id),
+        const conversation = await ConversationStore.create(envelope, principalContext);
+        if (!conversation) {
+            activeSpan?.addEvent("conversation.resolution_failed", {
+                reason: "failed_to_create_conversation",
             });
-            return { conversation, isNew: true };
+            return { conversation: undefined };
         }
 
-        activeSpan?.addEvent("conversation.resolution_failed", {
-            reason: "failed_to_create_conversation",
+        const referencedArticle = await extractReferencedArticle(envelope);
+        if (referencedArticle) {
+            conversation.updateMetadata({ referencedArticle });
+            await conversation.save();
+
+            activeSpan?.addEvent("referenced_article_loaded", {
+                "article.title": referencedArticle.title,
+                "article.dTag": referencedArticle.dTag,
+                "article.content_length": referencedArticle.content.length,
+            });
+        }
+
+        const targetAgentPubkey = mentionedPubkeys.find((pubkey) =>
+            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
+        );
+
+        if (targetAgentPubkey) {
+            const delegationChain = buildDelegationChain(
+                envelope,
+                targetAgentPubkey,
+                projectCtx.project.pubkey,
+                conversation.id
+            );
+
+            if (delegationChain && delegationChain.length > 0) {
+                conversation.updateMetadata({ delegationChain });
+                await conversation.save();
+
+                activeSpan?.addEvent("delegation_chain_built", {
+                    "chain.length": delegationChain.length,
+                    "chain.display": delegationChain.map((entry) => entry.displayName).join(" → "),
+                });
+
+                logger.debug("[ConversationResolver] Built delegation chain for new conversation", {
+                    conversationId: conversation.id.substring(0, 8),
+                    chainLength: delegationChain.length,
+                    chain: delegationChain.map((entry) => entry.displayName).join(" → "),
+                });
+            }
+        }
+
+        logger.info(chalk.green(`Created new conversation ${conversation.id.substring(0, 8)} from kind:1 event`));
+        activeSpan?.addEvent("conversation.resolved", {
+            "resolution.type": "created_new",
+            "conversation.id": shortenConversationId(conversation.id),
         });
-        return { conversation: undefined };
+        return { conversation, isNew: true };
     }
 
-    /**
-     * Handle orphaned replies by fetching the thread from the network
-     */
     private async handleOrphanedReply(
-        event: NDKEvent,
+        envelope: InboundEnvelope,
         replyTargetId: string,
-        mentionedPubkeys: string[]
+        mentionedPubkeys: string[],
+        principalContext?: MessagePrincipalContext
     ): Promise<ConversationStore | undefined> {
         if (mentionedPubkeys.length === 0) {
             return undefined;
@@ -217,7 +208,7 @@ export class ConversationResolver {
 
         const projectCtx = getProjectContext();
         const isDirectedToAgent = mentionedPubkeys.some((pubkey) =>
-            Array.from(projectCtx.agents.values()).some((a) => a.pubkey === pubkey)
+            Array.from(projectCtx.agents.values()).some((agent) => agent.pubkey === pubkey)
         );
 
         if (!isDirectedToAgent) {
@@ -236,17 +227,17 @@ export class ConversationResolver {
         });
 
         const ndk = getNDK();
-
-        // Fetch the reply target event and any events that also reply to it
+        const inboundAdapter = new NostrInboundAdapter();
         const events = await ndk.fetchEvents([
             { ids: [replyTargetId] },
             { "#e": [replyTargetId] },
         ]);
 
         const eventsArray = Array.from(events);
-        const rootEvent = eventsArray.find((e) => e.id === replyTargetId);
+        const rootEvent = eventsArray.find((event) => event.id === replyTargetId);
+        const rootEnvelope = rootEvent ? inboundAdapter.toEnvelope(rootEvent) : undefined;
 
-        if (!rootEvent) {
+        if (!rootEnvelope) {
             logger.warn(chalk.yellow(`Could not fetch target event ${replyTargetId.substring(0, 8)} from network`));
             activeSpan?.addEvent("conversation.fetch_failed", {
                 reason: "target_event_not_found",
@@ -255,21 +246,23 @@ export class ConversationResolver {
             return undefined;
         }
 
-        const replies = eventsArray.filter((e) => e.id !== replyTargetId);
+        const replyEnvelopes = eventsArray
+            .filter((event) => event.id !== replyTargetId)
+            .map((event) => inboundAdapter.toEnvelope(event))
+            .sort((left, right) => left.occurredAt - right.occurredAt);
 
-        logger.info(chalk.green(`Fetched target event and ${replies.length} replies`));
+        logger.info(chalk.green(`Fetched target event and ${replyEnvelopes.length} replies`));
         activeSpan?.addEvent("conversation.thread_fetched", {
-            "fetched.reply_count": replies.length,
+            "fetched.reply_count": replyEnvelopes.length,
             "fetched.total_events": eventsArray.length,
         });
 
-        const conversation = await ConversationStore.create(rootEvent);
+        const conversation = await ConversationStore.create(rootEnvelope);
         if (!conversation) {
             return undefined;
         }
 
-        // Check for referenced kind 30023 articles in the root event and populate metadata
-        const referencedArticle = await extractReferencedArticle(rootEvent);
+        const referencedArticle = await extractReferencedArticle(rootEnvelope);
         if (referencedArticle) {
             conversation.updateMetadata({ referencedArticle });
             await conversation.save();
@@ -281,14 +274,15 @@ export class ConversationResolver {
             });
         }
 
-        replies.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-
-        for (const reply of replies) {
-            await ConversationStore.addEvent(conversation.id, reply);
+        for (const replyEnvelope of replyEnvelopes) {
+            await ConversationStore.addEnvelope(conversation.id, replyEnvelope);
         }
 
-        if (event.id !== rootEvent.id && !replies.some((r) => r.id === event.id)) {
-            await ConversationStore.addEvent(conversation.id, event);
+        if (
+            envelope.message.nativeId !== rootEnvelope.message.nativeId &&
+            !replyEnvelopes.some((replyEnvelope) => replyEnvelope.message.nativeId === envelope.message.nativeId)
+        ) {
+            await ConversationStore.addEnvelope(conversation.id, envelope, principalContext);
         }
 
         return conversation;

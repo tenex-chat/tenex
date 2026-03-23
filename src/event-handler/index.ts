@@ -64,8 +64,10 @@ export class EventHandler {
     private agentExecutor!: AgentExecutor;
     private isUpdatingProject = false;
 
+    constructor(private readonly options: { agentExecutor?: AgentExecutor } = {}) {}
+
     async initialize(): Promise<void> {
-        this.agentExecutor = new AgentExecutor();
+        this.agentExecutor = this.options.agentExecutor ?? new AgentExecutor();
     }
 
     async handleEvent(event: NDKEvent): Promise<void> {

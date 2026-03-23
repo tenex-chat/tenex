@@ -1,2 +1,6 @@
-export { createEventContext, resolveCompletionRecipient } from "./EventContextService";
+export {
+    createEventContext,
+    resolveCompletionRecipient,
+    resolveCompletionRecipientPrincipal,
+} from "./EventContextService";
 export type { CreateEventContextOptions } from "./EventContextService";

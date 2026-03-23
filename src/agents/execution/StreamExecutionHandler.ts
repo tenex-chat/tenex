@@ -41,6 +41,8 @@ import type {
 } from "./types";
 import { extractLastUserMessage } from "./utils";
 
+const NO_RESPONSE_ABORT_REASON = "NO_RESPONSE_ABORT";
+
 /**
  * Configuration for stream execution
  */
@@ -82,12 +84,19 @@ export class StreamExecutionHandler {
     private result: StreamExecutionResult | undefined;
     private lastUsedVariant: string | undefined;
     private currentModel: LanguageModel | undefined;
+    private silentTerminationRequested = false;
+    private readonly internalAbortController = new AbortController();
+    private readonly effectiveAbortSignal: AbortSignal;
     private readonly execContext: RALExecutionContext;
     private readonly executionSpan = trace.getActiveSpan();
 
     constructor(private readonly config: StreamExecutionConfig) {
         this.lastUsedVariant = config.context.conversationStore.getMetaModelVariantOverride(
             config.context.agent.pubkey
+        );
+        this.effectiveAbortSignal = this.combineAbortSignals(
+            config.abortSignal,
+            this.internalAbortController.signal
         );
         this.execContext = { accumulatedMessages: [] };
     }
@@ -195,12 +204,17 @@ export class StreamExecutionHandler {
             }
 
             await llmService.stream(messages, toolsObject, {
-                abortSignal,
+                abortSignal: this.effectiveAbortSignal,
                 prepareStep,
+                onStopCheck: async () => this.silentTerminationRequested,
                 providerOptions: request.providerOptions,
                 experimentalContext: request.experimentalContext,
                 middlewares: request.middlewares,
             });
+
+            if (this.silentTerminationRequested && !this.result) {
+                this.ensureSilentCompletionResult("stream-return-without-terminal-event");
+            }
 
             await this.flushStreamTextDeltas({
                 force: true,
@@ -235,7 +249,7 @@ export class StreamExecutionHandler {
                 "ral.number": ralNumber,
             });
         } catch (streamError) {
-            await this.handleStreamError(streamError, abortSignal);
+            await this.handleStreamError(streamError, this.effectiveAbortSignal);
         } finally {
             await this.cleanup();
         }
@@ -305,17 +319,26 @@ export class StreamExecutionHandler {
         const ralNumber = this.config.ralNumber;
 
         llmService.on("content", (event: ContentEvent) => {
+            if (this.silentTerminationRequested) {
+                return;
+            }
             process.stdout.write(chalk.white(event.delta));
             this.contentBuffer += event.delta;
             this.enqueueStreamTextDelta(event.delta);
         });
 
         llmService.on("reasoning", (event: ReasoningEvent) => {
+            if (this.silentTerminationRequested) {
+                return;
+            }
             process.stdout.write(chalk.gray(event.delta));
             this.reasoningBuffer += event.delta;
         });
 
         llmService.on("chunk-type-change", async (event: ChunkTypeChangeEvent) => {
+            if (this.silentTerminationRequested) {
+                return;
+            }
             if (event.from === "reasoning-delta") {
                 await this.flushReasoningBuffer();
             }
@@ -359,9 +382,12 @@ export class StreamExecutionHandler {
             });
 
             if (!this.result) {
+                const completionEvent = this.silentTerminationRequested
+                    ? { ...event, message: "" }
+                    : event;
                 this.result = {
                     kind: "complete",
-                    event,
+                    event: completionEvent,
                     messageCompiler: this.config.messageCompiler,
                     accumulatedRuntime: 0,
                 };
@@ -394,6 +420,17 @@ export class StreamExecutionHandler {
                 "ral.number": ralNumber,
             });
 
+            if (
+                this.effectiveAbortSignal.aborted &&
+                this.effectiveAbortSignal.reason === NO_RESPONSE_ABORT_REASON
+            ) {
+                this.executionSpan?.addEvent("executor.stream_error_ignored_for_no_response", {
+                    "ral.number": ralNumber,
+                    "agent.slug": context.agent.slug,
+                });
+                return;
+            }
+
             logger.error("[StreamExecutionHandler] Stream error from LLMService", event);
             this.result = { kind: "error-handled" };
 
@@ -415,6 +452,9 @@ export class StreamExecutionHandler {
             toolsObject,
             eventContext,
             ralNumber,
+            onNoResponseRequested: () => {
+                this.requestSilentTermination();
+            },
         });
     }
 
@@ -423,7 +463,7 @@ export class StreamExecutionHandler {
      */
     private createEventContext(): EventContext {
         const { context, llmService } = this.config;
-        const eventContext = createEventContext(context, llmService.model);
+        const eventContext = createEventContext(context, { model: llmService.model });
 
         // DIAGNOSTIC: Track event context creation to debug llm-ral=0 issues
         this.executionSpan?.addEvent("executor.event_context_created", {
@@ -542,6 +582,22 @@ export class StreamExecutionHandler {
             force: true,
             reason: "handle-stream-error",
         });
+
+        if (abortSignal.aborted && abortSignal.reason === NO_RESPONSE_ABORT_REASON) {
+            this.executionSpan?.addEvent("executor.silent_completion_short_circuit", {
+                "ral.number": ralNumber,
+                "agent.slug": context.agent.slug,
+                "conversation.id": shortenConversationId(context.conversationId),
+            });
+            logger.info("[StreamExecutionHandler] Execution short-circuited by no_response", {
+                agent: context.agent.slug,
+                ralNumber,
+                conversationId: context.conversationId.substring(0, 8),
+            });
+
+            this.ensureSilentCompletionResult("stream-error-abort");
+            return;
+        }
 
         if (abortSignal.aborted) {
             this.executionSpan?.addEvent("executor.aborted_by_stop_signal", {
@@ -669,5 +725,93 @@ export class StreamExecutionHandler {
             });
 
         return this.streamTextDeltaFlushChain;
+    }
+
+    private ensureSilentCompletionResult(source: string): void {
+        if (this.result) {
+            return;
+        }
+
+        this.executionSpan?.addEvent("executor.silent_completion_result_synthesized", {
+            "ral.number": this.config.ralNumber,
+            "agent.slug": this.config.context.agent.slug,
+            "conversation.id": shortenConversationId(this.config.context.conversationId),
+            "silent_completion.source": source,
+        });
+
+        this.result = {
+            kind: "complete",
+            event: {
+                message: "",
+                steps: [],
+                usage: {
+                    inputTokens: 0,
+                    inputTokenDetails: {
+                        noCacheTokens: 0,
+                        cacheReadTokens: 0,
+                        cacheWriteTokens: 0,
+                    },
+                    outputTokens: 0,
+                    outputTokenDetails: {
+                        textTokens: 0,
+                        reasoningTokens: 0,
+                    },
+                    totalTokens: 0,
+                },
+                finishReason: "stop",
+            },
+            messageCompiler: this.config.messageCompiler,
+            accumulatedRuntime: 0,
+        };
+    }
+
+    private requestSilentTermination(): void {
+        if (this.silentTerminationRequested) {
+            return;
+        }
+
+        this.silentTerminationRequested = true;
+        this.contentBuffer = "";
+        this.reasoningBuffer = "";
+        this.streamTextDeltaBuffer = "";
+        this.clearStreamTextDeltaTimer();
+
+        this.executionSpan?.addEvent("executor.silent_completion_abort_requested", {
+            "ral.number": this.config.ralNumber,
+            "agent.slug": this.config.context.agent.slug,
+            "conversation.id": shortenConversationId(this.config.context.conversationId),
+        });
+
+        if (!this.internalAbortController.signal.aborted) {
+            this.internalAbortController.abort(NO_RESPONSE_ABORT_REASON);
+        }
+    }
+
+    private combineAbortSignals(...signals: AbortSignal[]): AbortSignal {
+        const controller = new AbortController();
+
+        const abortFrom = (signal: AbortSignal): void => {
+            if (controller.signal.aborted) {
+                return;
+            }
+            controller.abort(signal.reason);
+        };
+
+        for (const signal of signals) {
+            if (signal.aborted) {
+                abortFrom(signal);
+                break;
+            }
+
+            signal.addEventListener(
+                "abort",
+                () => {
+                    abortFrom(signal);
+                },
+                { once: true }
+            );
+        }
+
+        return controller.signal;
     }
 }

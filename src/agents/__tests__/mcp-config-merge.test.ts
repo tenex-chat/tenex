@@ -1,8 +1,9 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { createAgentInstance } from "../agent-loader";
 import { createStoredAgent } from "../AgentStorage";
 import type { AgentRegistry } from "../AgentRegistry";
 import type { MCPConfig } from "@/llm/providers/types";
+import { config } from "@/services/ConfigService";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 
 /**
@@ -28,18 +29,16 @@ describe("MCP Config Merge", () => {
     beforeEach(() => {
         capturedMcpConfig = undefined;
 
-        // Mock config.createLLMService to capture the mcpConfig
-        mock.module("@/services/ConfigService", () => ({
-            config: {
-                createLLMService: (
-                    _configName: string,
-                    options: { mcpConfig?: MCPConfig }
-                ) => {
-                    capturedMcpConfig = options.mcpConfig;
-                    return { mock: true };
-                },
-            },
-        }));
+        spyOn(config, "createLLMService").mockImplementation(
+            (_configName: string, options: { mcpConfig?: MCPConfig }) => {
+                capturedMcpConfig = options.mcpConfig;
+                return { mock: true } as any;
+            }
+        );
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     describe("createAgentInstance MCP config merging", () => {

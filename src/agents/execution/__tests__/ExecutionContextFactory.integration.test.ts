@@ -5,10 +5,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { AgentInstance } from "@/agents/types";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
 import { getCurrentBranch } from "@/utils/git/initializeGitRepo";
 import { createWorktree, listWorktrees, WORKTREES_DIR, sanitizeBranchName } from "@/utils/git/worktree";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 
 const execAsync = promisify(exec);
 
@@ -53,19 +53,26 @@ describe("ExecutionContextFactory Integration", () => {
         await fs.rm(testRepoPath, { recursive: true, force: true });
     });
 
+    const createEnvelope = (branchName?: string) =>
+        createMockInboundEnvelope({
+            message: {
+                id: "test-event-id",
+                transport: "nostr",
+                nativeId: "test-event-id",
+            },
+            metadata: {
+                branchName,
+            },
+        });
+
     test("uses project root when no branch tag", async () => {
-        // Event with no branch tag
-        const event: NDKEvent = {
-            tags: [],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope();
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
         });
 
         // Should use project root directly
@@ -83,18 +90,13 @@ describe("ExecutionContextFactory Integration", () => {
         const currentBranch = await getCurrentBranch(testRepoPath);
         const worktreePath = await createWorktree(testRepoPath, featureBranch, currentBranch);
 
-        // Event with branch tag
-        const event: NDKEvent = {
-            tags: [["branch", featureBranch]],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope(featureBranch);
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
         });
 
         // Should use feature worktree in .worktrees/
@@ -106,19 +108,14 @@ describe("ExecutionContextFactory Integration", () => {
     });
 
     test("constructs expected path when branch tag has no matching worktree", async () => {
-        // Event with branch tag for non-existent worktree
         const nonexistentBranch = "feature/nonexistent";
-        const event: NDKEvent = {
-            tags: [["branch", nonexistentBranch]],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope(nonexistentBranch);
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
         });
 
         // Should construct expected path in .worktrees/ with sanitized name
@@ -143,18 +140,13 @@ describe("ExecutionContextFactory Integration", () => {
         const worktrees = await listWorktrees(testRepoPath);
         expect(worktrees.length).toBe(4); // main + 3 features
 
-        // Event targeting feature1
-        const event: NDKEvent = {
-            tags: [["branch", feature1]],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope(feature1);
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
         });
 
         // Should use feature1 worktree specifically
@@ -173,18 +165,13 @@ describe("ExecutionContextFactory Integration", () => {
         const testFile = path.join(worktreePath, "feature.txt");
         await fs.writeFile(testFile, "Feature work");
 
-        // Event with branch tag
-        const event: NDKEvent = {
-            tags: [["branch", featureBranch]],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope(featureBranch);
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
         });
 
         // Verify context points to worktree with the file
@@ -204,17 +191,13 @@ describe("ExecutionContextFactory Integration", () => {
         await createWorktree(testRepoPath, featureBranch, currentBranch);
 
         const mockPublisher = { publish: () => {} };
-        const event: NDKEvent = {
-            tags: [["branch", featureBranch]],
-            id: "test-event-id",
-        } as NDKEvent;
+        const event = createEnvelope(featureBranch);
 
         const context = await createExecutionContext({
             agent: mockAgent,
             conversationId: "test-conversation-123",
             projectBasePath: testRepoPath,
-            triggeringEvent: event,
-            conversationCoordinator: mockCoordinator,
+            triggeringEnvelope: event,
             agentPublisher: mockPublisher as any,
             isDelegationCompletion: true,
             debug: true,
@@ -224,7 +207,7 @@ describe("ExecutionContextFactory Integration", () => {
         expect(context.agent).toBe(mockAgent);
         expect(context.conversationId).toBe("test-conversation-123");
         expect(context.projectBasePath).toBe(testRepoPath);
-        expect(context.triggeringEvent).toBe(event);
+        expect(context.triggeringEnvelope).toBe(event);
         expect(context.agentPublisher).toBe(mockPublisher);
         expect(context.isDelegationCompletion).toBe(true);
         expect(context.debug).toBe(true);

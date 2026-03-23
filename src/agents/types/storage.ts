@@ -1,6 +1,28 @@
 import type { MCPServerConfig } from "@/llm/providers/types";
 import type { AgentCategory } from "@/agents/role-categories";
 
+export interface TelegramChatBinding {
+    /** Telegram chat ID (string to avoid 64-bit integer issues) */
+    chatId: string;
+    /** Optional forum topic thread ID for supergroups */
+    topicId?: string;
+    /** Optional label for operator-facing diagnostics */
+    title?: string;
+}
+
+export interface TelegramAgentConfig {
+    /** Bot API token for this agent's Telegram bot */
+    botToken: string;
+    /** Allow direct messages to this bot from authorized identities */
+    allowDMs?: boolean;
+    /** Additional principal IDs allowed to DM this agent */
+    authorizedIdentityIds?: string[];
+    /** Group or topic bindings that should trigger this agent */
+    chatBindings?: TelegramChatBinding[];
+    /** Optional API base URL override for tests or self-hosted gateways */
+    apiBaseUrl?: string;
+}
+
 /**
  * Default agent configuration block.
  * Stored under the `default` key in agent JSON files.
@@ -11,6 +33,8 @@ export interface AgentDefaultConfig {
     model?: string;
     /** Default tools list for this agent */
     tools?: string[];
+    /** Telegram transport configuration for this agent */
+    telegram?: TelegramAgentConfig;
 }
 
 /**
@@ -33,26 +57,13 @@ export interface AgentProjectConfig {
      * Empty array or undefined means: use defaults.
      */
     tools?: string[];
+    /** Project-specific Telegram transport override */
+    telegram?: TelegramAgentConfig;
     /**
      * Project-scoped PM designation.
      * When true, this agent is designated as PM for this specific project.
      * Set via kind 24020 event with ["pm"] tag and an a-tag.
      */
-    isPM?: boolean;
-}
-
-/**
- * Project-scoped configuration for an agent (legacy schema).
- * Used by agents written before the new `default`/`projectOverrides` schema.
- *
- * @deprecated Prefer `AgentProjectConfig` with `projectOverrides` field.
- */
-export interface ProjectScopedConfig {
-    /** Project-scoped LLM configuration string. */
-    llmConfig?: string;
-    /** Project-scoped tools list. */
-    tools?: string[];
-    /** Project-scoped PM designation. */
     isPM?: boolean;
 }
 
@@ -99,18 +110,6 @@ export interface StoredAgentData {
     definitionCreatedAt?: number;
 
     /**
-     * Legacy top-level LLM config field.
-     * @deprecated Use `default.model` instead.
-     */
-    llmConfig?: string;
-
-    /**
-     * Legacy top-level tools field.
-     * @deprecated Use `default.tools` instead.
-     */
-    tools?: string[];
-
-    /**
      * Default configuration block.
      * Written by kind 24020 events WITHOUT an a-tag.
      * Fields here are the global fallback when no project-specific override exists.
@@ -127,11 +126,6 @@ export interface StoredAgentData {
      */
     projectOverrides?: Record<string, AgentProjectConfig>;
 
-    /**
-     * Legacy project-scoped configurations (old schema).
-     * @deprecated Use `projectOverrides` instead.
-     */
-    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**

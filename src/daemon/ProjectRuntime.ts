@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import { config } from "@/services/ConfigService";
 import * as path from "node:path";
 import { AgentRegistry } from "@/agents/AgentRegistry";
+import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { checkSupervisionHealth, registerDefaultHeuristics } from "@/agents/supervision";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { EventHandler } from "@/event-handler";
@@ -17,6 +18,9 @@ import { createLocalReportStore, LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
+import { TelegramDeliveryService } from "@/services/telegram/TelegramDeliveryService";
+import { createDefaultRuntimePublisherFactory } from "@/services/runtime/runtime-publisher-factory";
+import { getTelegramGatewayCoordinator } from "@/services/telegram/TelegramGatewayCoordinator";
 import { RALRegistry } from "@/services/ral";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import { getPubkeyService } from "@/services/PubkeyService";
@@ -46,8 +50,10 @@ export class ProjectRuntime {
     private project: NDKProject;
     private context: ProjectContext | null = null;
     private eventHandler: EventHandler | null = null;
+    private agentExecutor: AgentExecutor | null = null;
     private statusPublisher: ProjectStatusService | null = null;
     private operationsStatusPublisher: OperationsStatusService | null = null;
+    private telegramGatewayRegistered = false;
     private mcpManager: MCPManager = new MCPManager();
     private localReportStore: LocalReportStore = createLocalReportStore();
 
@@ -192,12 +198,34 @@ export class ProjectRuntime {
             await getTrustPubkeyService().initializeBackendPubkeyCache();
 
             // Initialize event handler
-            this.eventHandler = new EventHandler();
+            const telegramDeliveryService = new TelegramDeliveryService();
+            this.agentExecutor = new AgentExecutor({
+                publisherFactory: createDefaultRuntimePublisherFactory(telegramDeliveryService),
+            });
+            this.eventHandler = new EventHandler({
+                agentExecutor: this.agentExecutor,
+            });
             await this.eventHandler.initialize();
+
+            const context = this.context;
+            const projectBinding = context.project.tagReference()[1];
+            if (!projectBinding) {
+                throw new Error(`Project ${this.projectId} is missing a canonical tag reference`);
+            }
+
+            await getTelegramGatewayCoordinator().registerRuntime({
+                projectId: this.projectId,
+                projectTitle: projectTitle,
+                projectBinding,
+                agents: context.agents.values(),
+                runInProjectContext: async <T>(operation: () => Promise<T>) =>
+                    await projectContextStore.run(context, operation),
+                agentExecutor: this.agentExecutor,
+            });
+            this.telegramGatewayRegistered = true;
 
             // Start status publisher
             this.statusPublisher = new ProjectStatusService();
-            const context = this.context;
             context.statusPublisher = this.statusPublisher;
             await projectContextStore.run(context, async () => {
                 await this.statusPublisher?.startPublishing(
@@ -243,6 +271,10 @@ export class ProjectRuntime {
                 error: errorMessage,
                 stack: error instanceof Error ? error.stack : undefined,
             });
+            if (this.telegramGatewayRegistered) {
+                await getTelegramGatewayCoordinator().unregisterRuntime(this.projectId);
+                this.telegramGatewayRegistered = false;
+            }
             throw error;
         }
     }
@@ -298,6 +330,13 @@ export class ProjectRuntime {
         });
 
         // Stop status publisher
+        if (this.telegramGatewayRegistered) {
+            logger.info(`[ProjectRuntime] Unregistering Telegram runtime: ${this.projectId}`);
+            await getTelegramGatewayCoordinator().unregisterRuntime(this.projectId);
+            this.telegramGatewayRegistered = false;
+        }
+
+        // Stop status publisher
         if (this.statusPublisher) {
             logger.info(`[ProjectRuntime] Stopping status publisher: ${this.projectId}`);
             await this.statusPublisher.stopPublishing();
@@ -317,6 +356,7 @@ export class ProjectRuntime {
             await this.eventHandler.cleanup();
             this.eventHandler = null;
         }
+        this.agentExecutor = null;
 
         // Shutdown MCP subscription service
         try {

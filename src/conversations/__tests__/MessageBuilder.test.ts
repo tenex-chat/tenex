@@ -9,7 +9,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { buildMessagesFromEntries, type MessageBuilderContext } from "../MessageBuilder";
-import type { ConversationEntry } from "../types";
+import type { ConversationRecordInput } from "../types";
 
 describe("MessageBuilder", () => {
     const viewingAgentPubkey = "agent-pubkey-123";
@@ -31,7 +31,7 @@ describe("MessageBuilder", () => {
             // Scenario: User sends message while tool is executing
             // Chronological order: [tool-call, user-message, tool-result]
             // Expected order: [tool-call, tool-result, user-message]
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     id: "record:tool-call-1",
                     pubkey: viewingAgentPubkey,
@@ -86,7 +86,7 @@ describe("MessageBuilder", () => {
         });
 
         test("emits sourceRecordId when message ids are requested", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     id: "record:user-1",
                     pubkey: userPubkey,
@@ -106,7 +106,7 @@ describe("MessageBuilder", () => {
         });
 
         test("defers multiple user messages between tool-call and tool-result", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -160,7 +160,7 @@ describe("MessageBuilder", () => {
         });
 
         test("handles multiple tool calls with interleaved user messages", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 // First tool call
                 {
                     pubkey: viewingAgentPubkey,
@@ -239,7 +239,7 @@ describe("MessageBuilder", () => {
             const conversationId = "parent-conv-456";
             const delegatePubkey = "delegate-agent-789";
 
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -331,7 +331,7 @@ describe("MessageBuilder", () => {
             const currentConversationId = "current-conv-789";
             const delegatePubkey = "nested-delegate-pubkey";
 
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -403,7 +403,7 @@ describe("MessageBuilder", () => {
             const conversationId = "self-delegation-conv";
             const delegationConversationId = "self-deleg-123";
 
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -476,7 +476,7 @@ describe("MessageBuilder", () => {
     describe("Orphaned Tool-Call Reconciliation", () => {
         test("injects synthetic error result for orphaned tool-call", async () => {
             // Scenario: Tool call exists but result was never stored (RAL interruption)
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -512,7 +512,7 @@ describe("MessageBuilder", () => {
         });
 
         test("injects synthetic results for multiple orphaned tool-calls", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -555,7 +555,7 @@ describe("MessageBuilder", () => {
         });
 
         test("handles mixed orphaned and resolved tool-calls", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -619,7 +619,7 @@ describe("MessageBuilder", () => {
         });
 
         test("handles text-only conversation", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: userPubkey,
                     content: "Hello",
@@ -644,7 +644,7 @@ describe("MessageBuilder", () => {
         test("flushes remaining deferred messages at end", async () => {
             // Edge case: Messages deferred but no tool-result arrives
             // (though this is covered by orphan reconciliation too)
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -678,7 +678,7 @@ describe("MessageBuilder", () => {
 
     describe("Role Derivation", () => {
         test("assigns assistant role to own messages", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -694,7 +694,7 @@ describe("MessageBuilder", () => {
         });
 
         test("assigns user role to other agent messages", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: otherAgentPubkey,
                     ral: 1,
@@ -710,7 +710,7 @@ describe("MessageBuilder", () => {
         });
 
         test("assigns user role to human messages", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: userPubkey,
                     content: "Human user message",
@@ -727,7 +727,7 @@ describe("MessageBuilder", () => {
 
     describe("Image Placeholder Strategy", () => {
         test("first image appearance shows full image URL", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -773,7 +773,7 @@ describe("MessageBuilder", () => {
         });
 
         test("second image appearance is replaced with placeholder", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 // First screenshot - full image
                 {
                     pubkey: viewingAgentPubkey,
@@ -864,7 +864,7 @@ describe("MessageBuilder", () => {
         });
 
         test("handles multiple different images in same tool result", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -910,7 +910,7 @@ describe("MessageBuilder", () => {
         });
 
         test("mixed new and seen images in same tool result", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 // First screenshot
                 {
                     pubkey: viewingAgentPubkey,
@@ -990,7 +990,7 @@ describe("MessageBuilder", () => {
         });
 
         test("tool results without images pass through unchanged", async () => {
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: viewingAgentPubkey,
                     ral: 1,
@@ -1036,7 +1036,7 @@ describe("MessageBuilder", () => {
         test("image in user text message is tracked but not replaced", async () => {
             // User messages might contain image URLs in text
             // We track them but don't replace them (user messages are user's content)
-            const entries: ConversationEntry[] = [
+            const entries: ConversationRecordInput[] = [
                 {
                     pubkey: userPubkey,
                     content: "Look at this image: https://example.com/user-img.png",

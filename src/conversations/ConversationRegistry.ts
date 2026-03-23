@@ -20,7 +20,7 @@
 import { existsSync, readdirSync } from "fs";
 import { basename, dirname, join } from "path";
 import { getTenexBasePath } from "@/constants";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { logger } from "@/utils/logger";
 // Import directly from the module file (not the barrel) to avoid circular
 // dependency: barrel re-exports ProjectContext → @/agents → ConversationStore
@@ -28,6 +28,7 @@ import { logger } from "@/utils/logger";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
 import type { ConversationMetadata } from "./types";
+import type { MessagePrincipalContext } from "./types";
 import type { ConversationStore } from "./ConversationStore";
 import {
     listConversationIdsFromDiskForProject,
@@ -68,7 +69,8 @@ interface ProjectRegistryConfig {
  */
 class ConversationRegistryImpl {
     private stores: Map<string, ConversationStore> = new Map();
-    private eventCache: Map<string, NDKEvent> = new Map();
+    private envelopeCache: Map<string, InboundEnvelope> = new Map();
+    private envelopeCacheOwners: Map<string, string> = new Map();
     private _basePath: string = join(getTenexBasePath(), "projects");
 
     /**
@@ -346,19 +348,19 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Create a new conversation from an NDKEvent.
+     * Create a new conversation from an InboundEnvelope.
      * Indexes the conversation ID in PrefixKVStore for prefix lookups.
      * Uses three-tier project resolution to determine the correct project.
      */
-    async create(event: NDKEvent): Promise<ConversationStore> {
-        const eventId = event.id;
-        if (!eventId) {
-            throw new Error("Event must have an ID to create a conversation");
+    async create(envelope: InboundEnvelope, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
+        const nativeId = envelope.message.nativeId;
+        if (!nativeId) {
+            throw new Error("Envelope must have a nativeId to create a conversation");
         }
 
-        const existing = this.stores.get(eventId);
+        const existing = this.stores.get(nativeId);
         if (existing) {
-            logger.debug(`Conversation ${eventId.substring(0, 8)} already exists`);
+            logger.debug(`Conversation ${nativeId.substring(0, 8)} already exists`);
             return existing;
         }
 
@@ -369,41 +371,31 @@ class ConversationRegistryImpl {
 
         const StoreClass = getConversationStoreClass();
         const store = new StoreClass(this._basePath);
-        store.load(currentProjectId, eventId);
+        store.load(currentProjectId, nativeId);
 
         const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
-        const isFromAgent = projectAgentPubkeys.has(event.pubkey);
-        store.addEventMessage(event, isFromAgent);
+        const senderPubkey = envelope.principal.linkedPubkey;
+        const isFromAgent = senderPubkey ? projectAgentPubkeys.has(senderPubkey) : false;
+        store.addEnvelopeMessage(envelope, isFromAgent, principalContext);
 
-        this.eventCache.set(eventId, event);
+        this.cacheEnvelopeForConversation(nativeId, envelope);
 
-        if (event.content) {
-            store.setTitle(event.content.substring(0, 50) + (event.content.length > 50 ? "..." : ""));
+        if (envelope.content) {
+            store.setTitle(envelope.content.substring(0, 50) + (envelope.content.length > 50 ? "..." : ""));
         }
 
         await store.save();
-        this.stores.set(eventId, store);
+        this.stores.set(nativeId, store);
 
-        // Index conversation ID in PrefixKVStore for 12-char prefix lookups
-        //
-        // BACKFILL LIMITATION: Prefix indexing only happens on create().
-        // If the prefix store is empty (fresh install or data loss), pre-existing
-        // conversations won't be resolvable by prefix until they are backfilled
-        // separately, or until those conversations receive a new message that
-        // triggers re-indexing via conversation events.
-        // This is acceptable because:
-        // 1. Most prefix lookups target recently-active conversations
-        // 2. Full 64-char IDs always work as a fallback
-        // 3. The prefix index is only a convenience layer
         if (prefixKVStore.isInitialized()) {
             try {
-                await prefixKVStore.add(eventId);
+                await prefixKVStore.add(nativeId);
             } catch (error) {
-                logger.warn(`[ConversationRegistry] Failed to index conversation ${eventId.substring(0, PREFIX_LENGTH)} in PrefixKVStore`, { error });
+                logger.warn(`[ConversationRegistry] Failed to index conversation ${nativeId.substring(0, PREFIX_LENGTH)} in PrefixKVStore`, { error });
             }
         }
 
-        logger.info(`Starting conversation ${eventId.substring(0, 8)} - "${event.content?.substring(0, 50)}..."`, {
+        logger.info(`Starting conversation ${nativeId.substring(0, 8)} - "${envelope.content?.substring(0, 50)}..."`, {
             projectId: currentProjectId,
         });
 
@@ -429,35 +421,64 @@ class ConversationRegistryImpl {
         return Array.from(this.stores.values());
     }
 
-    /**
-     * Cache an NDKEvent.
-     */
-    cacheEvent(event: NDKEvent): void {
-        if (event.id) {
-            this.eventCache.set(event.id, event);
+    private cacheEnvelopeForConversation(conversationId: string, envelope: InboundEnvelope): void {
+        const nativeId = envelope.message.nativeId;
+        if (!nativeId) {
+            return;
+        }
+
+        this.envelopeCache.set(nativeId, envelope);
+        this.envelopeCacheOwners.set(nativeId, conversationId);
+    }
+
+    private evictConversationEnvelopes(conversationId: string): void {
+        for (const [nativeId, ownerConversationId] of this.envelopeCacheOwners.entries()) {
+            if (ownerConversationId !== conversationId) {
+                continue;
+            }
+
+            this.envelopeCacheOwners.delete(nativeId);
+            this.envelopeCache.delete(nativeId);
         }
     }
 
     /**
-     * Get a cached NDKEvent.
+     * Cache an InboundEnvelope by its native ID.
      */
-    getCachedEvent(eventId: string): NDKEvent | undefined {
-        return this.eventCache.get(eventId);
+    cacheEnvelope(envelope: InboundEnvelope): void {
+        const nativeId = envelope.message.nativeId;
+        if (nativeId) {
+            this.envelopeCache.set(nativeId, envelope);
+            const store = this.findByEventId(nativeId);
+            if (store) {
+                this.envelopeCacheOwners.set(nativeId, store.id);
+            }
+        }
     }
 
     /**
-     * Add an event to a conversation.
+     * Get a cached InboundEnvelope by native ID.
      */
-    async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
+    getCachedEnvelope(nativeId: string): InboundEnvelope | undefined {
+        return this.envelopeCache.get(nativeId);
+    }
+
+    /**
+     * Add an envelope to a conversation.
+     */
+    async addEnvelope(
+        conversationId: string,
+        envelope: InboundEnvelope,
+        principalContext?: MessagePrincipalContext
+    ): Promise<void> {
         const store = this.getOrLoad(conversationId);
         const currentProjectId = this.resolveProjectId();
         const projectAgentPubkeys = this.getAgentPubkeysForProject(currentProjectId);
-        const isFromAgent = projectAgentPubkeys.has(event.pubkey);
-        store.addEventMessage(event, isFromAgent);
+        const senderPubkey = envelope.principal.linkedPubkey;
+        const isFromAgent = senderPubkey ? projectAgentPubkeys.has(senderPubkey) : false;
+        store.addEnvelopeMessage(envelope, isFromAgent, principalContext);
 
-        if (event.id) {
-            this.eventCache.set(event.id, event);
-        }
+        this.cacheEnvelopeForConversation(store.id, envelope);
 
         await store.save();
     }
@@ -493,11 +514,7 @@ class ConversationRegistryImpl {
     archive(conversationId: string): void {
         const store = this.stores.get(conversationId);
         if (store) {
-            for (const entry of store.getAllMessages()) {
-                if (entry.eventId) {
-                    this.eventCache.delete(entry.eventId);
-                }
-            }
+            this.evictConversationEnvelopes(store.id);
         }
         this.stores.delete(conversationId);
     }
@@ -509,11 +526,7 @@ class ConversationRegistryImpl {
         const store = this.stores.get(conversationId);
         if (store) {
             await store.save();
-            for (const entry of store.getAllMessages()) {
-                if (entry.eventId) {
-                    this.eventCache.delete(entry.eventId);
-                }
-            }
+            this.evictConversationEnvelopes(store.id);
             this.stores.delete(conversationId);
         }
     }
@@ -530,8 +543,7 @@ class ConversationRegistryImpl {
     }
 
     /**
-     * Search conversations by title (legacy in-memory search).
-     * @deprecated Use searchAdvanced for full-text search across all conversations.
+     * Search loaded conversations by title.
      */
     search(query: string): ConversationStore[] {
         const results: ConversationStore[] = [];
@@ -719,7 +731,8 @@ class ConversationRegistryImpl {
      */
     reset(): void {
         this.stores.clear();
-        this.eventCache.clear();
+        this.envelopeCache.clear();
+        this.envelopeCacheOwners.clear();
         this._basePath = join(getTenexBasePath(), "projects");
         this._projectConfigs.clear();
         this._allAgentPubkeys.clear();

@@ -1,6 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { StoredAgentData, ProjectScopedConfig, AgentDefaultConfig, AgentProjectConfig } from "@/agents/types";
+import type {
+    StoredAgentData,
+    AgentDefaultConfig,
+    AgentProjectConfig,
+    TelegramAgentConfig,
+} from "@/agents/types";
 import type { AgentCategory } from "@/agents/role-categories";
 import type { MCPServerConfig } from "@/llm/providers/types";
 import {
@@ -22,6 +27,16 @@ export interface UpdateDefaultConfigOptions {
     clearProjectOverrides?: boolean;
 }
 
+function hasOwnProperty<T extends object>(value: T, key: PropertyKey): boolean {
+    return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function stripUndefinedValues<T extends object>(value: T): Partial<T> {
+    return Object.fromEntries(
+        Object.entries(value).filter(([, entry]) => entry !== undefined)
+    ) as Partial<T>;
+}
+
 /**
  * Agent data stored in ~/.tenex/agents/<pubkey>.json
  */
@@ -39,11 +54,6 @@ export interface StoredAgent extends StoredAgentData {
      * 'inactive' and retain their pubkey/nsec for potential reactivation.
      */
     status?: "active" | "inactive";
-    /**
-     * @deprecated Use pmOverrides instead. Kept for backward compatibility.
-     * Will be migrated to pmOverrides on first save.
-     */
-    isPMOverride?: boolean;
     /**
      * Project-scoped PM override flags.
      * Key is project dTag, value is true if this agent is PM for that project.
@@ -63,12 +73,11 @@ export interface StoredAgent extends StoredAgentData {
      * Set via kind 24020 TenexAgentConfigUpdate events WITH an a-tag specifying the project.
      *
      * ## Priority (highest to lowest)
-     * 1. projectConfigs[projectDTag].* (project-scoped from kind 24020 with a-tag)
+     * 1. projectOverrides[projectDTag].* (project-scoped from kind 24020 with a-tag)
      * 2. Global fields (llmConfig, tools, isPM) (global from kind 24020 without a-tag)
-     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
+     * 3. pmOverrides[projectDTag]
      * 4. Project tag designations (from kind 31933)
      */
-    projectConfigs?: Record<string, ProjectScopedConfig>;
 }
 
 /**
@@ -110,10 +119,22 @@ export function createStoredAgent(config: {
     pmOverrides?: Record<string, boolean>;
     defaultConfig?: AgentDefaultConfig;
     projectOverrides?: Record<string, AgentProjectConfig>;
+    telegram?: TelegramAgentConfig;
     definitionDTag?: string;
     definitionAuthor?: string;
     definitionCreatedAt?: number;
 }): StoredAgent {
+    // `defaultConfig.telegram` wins when both shapes are supplied because callers using
+    // the structured default config have already chosen the persisted source of truth.
+    // The top-level `telegram` field only migrates older call sites into that shape.
+    const defaultTelegramConfig = config.defaultConfig?.telegram ?? config.telegram;
+    const defaultConfig = config.defaultConfig || defaultTelegramConfig
+        ? {
+            ...config.defaultConfig,
+            ...(defaultTelegramConfig ? { telegram: defaultTelegramConfig } : {}),
+        }
+        : undefined;
+
     return {
         eventId: config.eventId,
         nsec: config.nsec,
@@ -127,12 +148,16 @@ export function createStoredAgent(config: {
         status: "active",
         mcpServers: config.mcpServers,
         pmOverrides: config.pmOverrides,
-        default: config.defaultConfig,
+        default: defaultConfig,
         projectOverrides: config.projectOverrides,
         definitionDTag: config.definitionDTag,
         definitionAuthor: config.definitionAuthor,
         definitionCreatedAt: config.definitionCreatedAt,
     };
+}
+
+export function deriveAgentPubkeyFromNsec(nsec: string): string {
+    return new NDKPrivateKeySigner(nsec).pubkey;
 }
 
 /**
@@ -508,8 +533,7 @@ export class AgentStorage {
      */
     async saveAgent(agent: StoredAgent): Promise<void> {
         // Get pubkey from nsec
-        const signer = new NDKPrivateKeySigner(agent.nsec);
-        const pubkey = signer.pubkey;
+        const pubkey = deriveAgentPubkeyFromNsec(agent.nsec);
 
         const filePath = path.join(this.agentsDir, `${pubkey}.json`);
 
@@ -596,11 +620,11 @@ export class AgentStorage {
     /**
      * Delete an agent and update index.
      *
-     * @deprecated This method permanently deletes agent identity (pubkey/nsec).
-     * Prefer using removeAgentFromProject() which sets agents to 'inactive' status
-     * while preserving their identity for potential reactivation.
+     * This method permanently deletes agent identity (pubkey/nsec).
+     * Prefer removeAgentFromProject(), which marks an agent inactive while preserving
+     * its identity for later reactivation.
      *
-     * This method is kept for:
+     * Reserved for:
      * - Administrative cleanup of truly orphaned agents
      * - Test teardown
      * - Explicit user-requested deletion
@@ -613,7 +637,7 @@ export class AgentStorage {
 
         logger.warn(
             `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - ` +
-            `this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
+            "this permanently destroys agent identity. Consider using removeAgentFromProject instead."
         );
 
         // Delete file
@@ -914,6 +938,7 @@ export class AgentStorage {
         const defaultConfig: AgentDefaultConfig = {
             model: agent.default?.model,
             tools: agent.default?.tools,
+            telegram: agent.default?.telegram,
         };
 
         const projectConfig = projectDTag
@@ -960,6 +985,15 @@ export class AgentStorage {
             } else {
                 delete agent.default.tools;
             }
+        }
+
+        if (hasOwnProperty(updates, "telegram")) {
+            if (updates.telegram) {
+                agent.default.telegram = updates.telegram;
+            } else {
+                delete agent.default.telegram;
+            }
+
         }
 
         // Clean up empty default block
@@ -1019,9 +1053,12 @@ export class AgentStorage {
             const defaultConfig: AgentDefaultConfig = {
                 model: agent.default?.model,
                 tools: agent.default?.tools,
+                telegram: agent.default?.telegram,
             };
 
-            const deduplicated = deduplicateProjectConfig(defaultConfig, override);
+            const deduplicated = stripUndefinedValues(
+                deduplicateProjectConfig(defaultConfig, override)
+            );
 
             if (!agent.projectOverrides) {
                 agent.projectOverrides = {};
@@ -1048,12 +1085,42 @@ export class AgentStorage {
         return true;
     }
 
+    async updateDefaultTelegramConfig(
+        pubkey: string,
+        telegram?: TelegramAgentConfig
+    ): Promise<boolean> {
+        return this.updateDefaultConfig(pubkey, { telegram });
+    }
+
+    async updateProjectTelegramConfig(
+        pubkey: string,
+        projectDTag: string,
+        telegram?: TelegramAgentConfig
+    ): Promise<boolean> {
+        const agent = await this.loadAgent(pubkey);
+        if (!agent) {
+            logger.warn(`Agent with pubkey ${pubkey} not found`);
+            return false;
+        }
+
+        const existingOverride = agent.projectOverrides?.[projectDTag] ?? {};
+
+        return this.updateProjectOverride(
+            pubkey,
+            projectDTag,
+            {
+                ...existingOverride,
+                telegram,
+            }
+        );
+    }
+
     /**
      * Resolve the effective PM status for an agent in a specific project.
      * Priority:
      * 1. agent.isPM (global PM designation via kind 24020 without a-tag)
      * 2. projectOverrides[projectDTag].isPM (project-scoped PM via kind 24020 with a-tag)
-     * 3. pmOverrides[projectDTag] (legacy, for backward compatibility)
+     * 3. pmOverrides[projectDTag] (older persisted project-scoped PM state)
      */
     resolveEffectiveIsPM(agent: StoredAgent, projectDTag: string): boolean {
         if (agent.isPM === true) {
@@ -1135,9 +1202,36 @@ export class AgentStorage {
     }
 
     /**
-     * Get all agents (for debugging/admin purposes)
+     * Get canonical active agents across the store.
+     *
+     * Returns one active agent per slug, using the current bySlug index owner.
+     * This is the safe listing for operator-facing flows and agent selection UIs.
      */
-    async getAllAgents(): Promise<StoredAgent[]> {
+    async getCanonicalActiveAgents(): Promise<StoredAgent[]> {
+        if (!this.index) await this.loadIndex();
+        if (!this.index) return [];
+
+        const agents: StoredAgent[] = [];
+
+        for (const slugEntry of Object.values(this.index.bySlug)) {
+            const agent = await this.loadAgent(slugEntry.pubkey);
+            if (!agent || !isAgentActive(agent)) {
+                continue;
+            }
+            agents.push(agent);
+        }
+
+        return agents;
+    }
+
+    /**
+     * Get every stored agent record from disk.
+     *
+     * This intentionally includes inactive agents, stale records, and duplicate
+     * slugs. It exists for maintenance and repair flows that need raw storage
+     * visibility rather than canonical runtime semantics.
+     */
+    async getAllStoredAgents(): Promise<StoredAgent[]> {
         await ensureDirectory(this.agentsDir);
         const files = await fs.readdir(this.agentsDir);
         const agents: StoredAgent[] = [];

@@ -185,7 +185,7 @@ describeIntegration("MessageSyncer E2E - Tool Error Handling", () => {
                 agent: testAgent,
                 conversationId,
                 projectBasePath: projectPath,
-                triggeringEvent: event,
+                triggeringEnvelope: event,
             });
         });
 

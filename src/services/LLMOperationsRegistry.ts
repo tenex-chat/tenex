@@ -50,14 +50,15 @@ export class LLMOperationsRegistry {
     registerOperation(context: ExecutionContext): AbortSignal {
         const operationId = crypto.randomUUID();
         const conversation = context.getConversation();
-        const rootEventId = conversation?.getRootEventId() || context.triggeringEvent.id;
+        const rootEventId =
+            conversation?.getRootEventId() || context.triggeringEnvelope.message.nativeId;
 
         // Create operation with metadata
         const operation: LLMOperation = {
             id: operationId,
             abortController: new AbortController(),
             eventEmitter: new EventEmitter(),
-            eventId: context.triggeringEvent.id,
+            eventId: context.triggeringEnvelope.message.nativeId,
             agentPubkey: context.agent.pubkey,
             conversationId: rootEventId,
             registeredAt: Date.now(),
@@ -68,8 +69,8 @@ export class LLMOperationsRegistry {
 
         // Index by both root event and triggering event
         this.indexOperation(operationId, rootEventId);
-        if (context.triggeringEvent.id !== rootEventId) {
-            this.indexOperation(operationId, context.triggeringEvent.id);
+        if (context.triggeringEnvelope.message.nativeId !== rootEventId) {
+            this.indexOperation(operationId, context.triggeringEnvelope.message.nativeId);
         }
 
         // Also index by context for easy lookup on completion
@@ -83,7 +84,7 @@ export class LLMOperationsRegistry {
         logger.debug("[LLMOpsRegistry] Registered operation", {
             operationId: operationId.substring(0, 8),
             rootEvent: rootEventId.substring(0, 8),
-            triggeringEvent: context.triggeringEvent.id.substring(0, 8),
+            triggeringEnvelope: context.triggeringEnvelope.message.nativeId.substring(0, 8),
             agent: context.agent.name,
             agentPubkey: context.agent.pubkey.substring(0, 8),
         });
@@ -176,7 +177,7 @@ export class LLMOperationsRegistry {
 
     private getContextKey(context: ExecutionContext): string {
         // Create a unique key from the context that identifies this specific operation
-        return `${context.triggeringEvent.id}:${context.agent.pubkey}`;
+        return `${context.triggeringEnvelope.message.nativeId}:${context.agent.pubkey}`;
     }
 
     stopByEventId(eventId: string): number {

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
 import type { AgentInstance } from "@/agents/types";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { createExecutionContext } from "../ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import * as worktreeModule from "@/utils/git/worktree";
 import * as initializeGitRepoModule from "@/utils/git/initializeGitRepo";
 
@@ -21,10 +21,13 @@ describe("ExecutionContextFactory", () => {
         getConversation: mock(() => undefined),
     } as unknown as ConversationCoordinator;
 
-    const mockEvent: NDKEvent = {
-        tags: [],
-        id: "test-event-id",
-    } as NDKEvent;
+    const mockEvent = createMockInboundEnvelope({
+        message: {
+            id: "test-event-id",
+            transport: "nostr",
+            nativeId: "test-event-id",
+        },
+    });
 
     const projectBasePath = "/test/project";
 
@@ -59,10 +62,13 @@ describe("ExecutionContextFactory", () => {
     describe("createExecutionContext", () => {
         it("should create context with worktree when branch tag matches", async () => {
             // Setup: Event has branch tag, matching worktree exists
-            const eventWithBranch: NDKEvent = {
+            const eventWithBranch = createMockInboundEnvelope({
                 ...mockEvent,
-                tags: [["branch", "feature-branch"]],
-            };
+                metadata: {
+                    ...mockEvent.metadata,
+                    branchName: "feature-branch",
+                },
+            });
 
             listWorktreesSpy.mockResolvedValue([
                 { branch: "main", path: "/test/project" },
@@ -74,8 +80,7 @@ describe("ExecutionContextFactory", () => {
                 agent: mockAgent,
                 conversationId: "test-conversation",
                 projectBasePath,
-                triggeringEvent: eventWithBranch,
-                conversationCoordinator: mockCoordinator,
+                triggeringEnvelope: eventWithBranch,
             });
 
             // Assert
@@ -88,10 +93,13 @@ describe("ExecutionContextFactory", () => {
 
         it("should create worktree when branch tag has no matching worktree", async () => {
             // Setup: Event has branch tag, but no matching worktree
-            const eventWithBranch: NDKEvent = {
+            const eventWithBranch = createMockInboundEnvelope({
                 ...mockEvent,
-                tags: [["branch", "feature/nonexistent"]],
-            };
+                metadata: {
+                    ...mockEvent.metadata,
+                    branchName: "feature/nonexistent",
+                },
+            });
 
             listWorktreesSpy.mockResolvedValue([
                 { branch: "main", path: "/test/project" },
@@ -102,8 +110,7 @@ describe("ExecutionContextFactory", () => {
                 agent: mockAgent,
                 conversationId: "test-conversation",
                 projectBasePath,
-                triggeringEvent: eventWithBranch,
-                conversationCoordinator: mockCoordinator,
+                triggeringEnvelope: eventWithBranch,
             });
 
             // Assert - should create worktree and use the returned path
@@ -121,8 +128,7 @@ describe("ExecutionContextFactory", () => {
                 agent: mockAgent,
                 conversationId: "test-conversation",
                 projectBasePath,
-                triggeringEvent: mockEvent,
-                conversationCoordinator: mockCoordinator,
+                triggeringEnvelope: mockEvent,
             });
 
             // Assert - should use projectBasePath directly
@@ -141,8 +147,7 @@ describe("ExecutionContextFactory", () => {
                 agent: mockAgent,
                 conversationId: "test-conversation",
                 projectBasePath,
-                triggeringEvent: mockEvent,
-                conversationCoordinator: mockCoordinator,
+                triggeringEnvelope: mockEvent,
                 agentPublisher: mockPublisher as any,
                 isDelegationCompletion: true,
                 debug: true,
@@ -167,8 +172,7 @@ describe("ExecutionContextFactory", () => {
                     agent: mockAgent,
                     conversationId: "test-conversation",
                     projectBasePath,
-                    triggeringEvent: mockEvent,
-                    conversationCoordinator: mockCoordinator,
+                    triggeringEnvelope: mockEvent,
                 });
 
                 // Assert
@@ -189,8 +193,7 @@ describe("ExecutionContextFactory", () => {
                 agent: mockAgent,
                 conversationId: "test-conversation",
                 projectBasePath,
-                triggeringEvent: mockEvent,
-                conversationCoordinator: mockCoordinator,
+                triggeringEnvelope: mockEvent,
             });
 
             // Assert - should use projectBasePath with detected branch

@@ -1,7 +1,14 @@
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import type { TodoItem } from "@/services/ral/types";
 
 export type MessageType = "text" | "tool-call" | "tool-result" | "delegation-marker";
+export type PrincipalSnapshot = PrincipalRef;
+
+export interface MessagePrincipalContext {
+    senderPrincipal?: PrincipalSnapshot;
+    targetedPrincipals?: PrincipalSnapshot[];
+}
 
 /**
  * Marker stored in conversation history to track delegation lifecycle.
@@ -28,6 +35,7 @@ export interface DelegationMarker {
 }
 
 interface ConversationRecordFields {
+    /** Canonical Nostr pubkey when available; empty string for transport-only authors. */
     pubkey: string;
     ral?: number; // Only for agent messages
     content: string; // Text content (for text messages) or empty for tool messages
@@ -36,8 +44,11 @@ interface ConversationRecordFields {
     eventId?: string; // If published to Nostr
     timestamp?: number; // Unix timestamp (seconds) - from NDKEvent.created_at or Date.now()/1000
     targetedPubkeys?: string[]; // Agent pubkeys this message is directed to (from p-tags)
+    targetedPrincipals?: PrincipalSnapshot[]; // Optional transport-neutral recipient metadata
     /** Original sender pubkey for injected messages (for attribution when sender differs from expected) */
     senderPubkey?: string;
+    /** Optional transport-neutral sender metadata */
+    senderPrincipal?: PrincipalSnapshot;
     /**
      * Explicit role override for synthetic entries.
      * When present, this role is used instead of deriving from pubkey.
@@ -67,15 +78,11 @@ export interface ConversationRecord extends ConversationRecordFields {
 }
 
 /**
- * Transitional input shape accepted by write paths while legacy callers migrate to
- * explicit ConversationRecord creation.
+ * Input shape for write paths where the caller may not yet have an id assigned.
  */
 export interface ConversationRecordInput extends ConversationRecordFields {
     id?: string;
 }
-
-/** @deprecated Use ConversationRecord for canonical stored records. */
-export type ConversationEntry = ConversationRecordInput;
 
 export interface Injection {
     targetRal: { pubkey: string; ral: number };
@@ -97,6 +104,8 @@ export interface DelegationChainEntry {
     isUser: boolean;
     /** The conversation ID where this delegation occurred (full ID, truncated only at display time) */
     conversationId?: string;
+    /** Optional transport-aware principal snapshot for routing/persistence fidelity. */
+    principal?: PrincipalSnapshot;
 }
 
 export interface ConversationMetadata {
@@ -106,7 +115,7 @@ export interface ConversationMetadata {
     requirements?: string;
     plan?: string;
     projectPath?: string;
-    last_user_message?: string;
+    lastUserMessage?: string;
     statusLabel?: string;
     statusCurrentActivity?: string;
     referencedArticle?: {
@@ -124,8 +133,6 @@ export interface ConversationMetadata {
 
 export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
-    /** @deprecated Legacy field normalized into entries.notes on load/save. */
-    notes?: string;
     keepLastMessages?: number | null;
     omitToolCallIds: string[];
     updatedAt?: number;

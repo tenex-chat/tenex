@@ -1,71 +1,52 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import {
+    getMentionedPubkeys,
+    isFromAgent,
+} from "@/events/runtime/envelope-classifier";
 import type { ProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import chalk from "chalk";
 import type { DelegationCompletionResult } from "./DelegationCompletionHandler";
 
-/**
- * AgentRouter is a static utility class that determines which agent
- * should handle an incoming event. This centralizes the routing logic
- * that was previously embedded in reply.ts.
- */
-
-// biome-ignore lint/complexity/noStaticOnlyClass: <explanation>
+// biome-ignore lint/complexity/noStaticOnlyClass: Static routing utility.
 export class AgentRouter {
-    /**
-     * Process a stop signal (kind 24134) to block an agent in a conversation.
-     * Returns { blocked: true } if the agent was blocked.
-     */
     static processStopSignal(
-        event: NDKEvent,
+        envelope: InboundEnvelope,
         conversation: ConversationStore,
         projectContext: ProjectContext
     ): { blocked: boolean } {
-        const pTags = event.getMatchingTags("p");
+        const recipientPubkeys = getMentionedPubkeys(envelope);
 
-        for (const [, agentPubkey] of pTags) {
+        for (const agentPubkey of recipientPubkeys) {
             const agent = projectContext.getAgentByPubkey(agentPubkey);
-            if (agent) {
-                conversation.blockAgent(agentPubkey);
-                logger.info(
-                    chalk.yellow(
-                        `Blocked agent ${agent.slug} in conversation ${conversation.id.substring(0, 8)}`
-                    )
-                );
+            if (!agent) {
+                continue;
             }
+
+            conversation.blockAgent(agentPubkey);
+            logger.info(
+                chalk.yellow(
+                    `Blocked agent ${agent.slug} in conversation ${conversation.id.substring(0, 8)}`
+                )
+            );
         }
 
-        return { blocked: pTags.length > 0 };
+        return { blocked: recipientPubkeys.length > 0 };
     }
 
-    /**
-     * Determine which agents should handle the event based on p-tags,
-     * event author, and other context.
-     *
-     * @param event - The incoming event
-     * @param projectContext - Project context with agent information
-     * @param conversation - Optional conversation to check for blocked agents
-     * @returns Array of target agents that should process this event
-     */
     static resolveTargetAgents(
-        event: NDKEvent,
+        envelope: InboundEnvelope,
         projectContext: ProjectContext,
         conversation?: ConversationStore
     ): AgentInstance[] {
-        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+        const mentionedPubkeys = getMentionedPubkeys(envelope);
+        const isAuthorAnAgent = isFromAgent(envelope, projectContext.agents);
 
-        // Check if the event author is an agent in the system
-        const isAuthorAnAgent = AgentEventDecoder.isEventFromAgent(event, projectContext.agents);
-
-        // Check for p-tagged agents regardless of sender
         if (mentionedPubkeys.length > 0) {
-            // Find ALL p-tagged system agents
             const targetAgents: AgentInstance[] = [];
             for (const pubkey of mentionedPubkeys) {
-                // Skip blocked agents
                 if (conversation?.isAgentBlocked(pubkey)) {
                     const agent = projectContext.getAgentByPubkey(pubkey);
                     logger.info(
@@ -83,20 +64,21 @@ export class AgentRouter {
             }
 
             if (targetAgents.length > 0) {
-                const agentNames = targetAgents.map((a) => a.name).join(", ");
                 logger.info(
-                    chalk.gray(`Routing to ${targetAgents.length} p-tagged agent(s): ${agentNames}`)
+                    chalk.gray(
+                        `Routing to ${targetAgents.length} p-tagged agent(s): ${targetAgents.map((agent) => agent.name).join(", ")}`
+                    )
                 );
                 return targetAgents;
             }
         }
 
-        // If no p-tags, don't route to anyone - just log it
         if (mentionedPubkeys.length === 0) {
             const senderType = isAuthorAnAgent ? "agent" : "user";
+            const senderId = envelope.principal.linkedPubkey ?? envelope.principal.id;
             logger.info(
                 chalk.gray(
-                    `Event from ${senderType} ${event.pubkey.substring(0, 8)} without p-tags - not routing to any agent`
+                    `Event from ${senderType} ${senderId.substring(0, 8)} without p-tags - not routing to any agent`
                 )
             );
             return [];
@@ -105,45 +87,38 @@ export class AgentRouter {
         return [];
     }
 
-    /**
-     * Unblock an agent in a conversation if the sender is whitelisted.
-     * Returns { unblocked: true } if successful.
-     */
     static unblockAgent(
-        event: NDKEvent,
+        envelope: InboundEnvelope,
         conversation: ConversationStore,
         projectContext: ProjectContext,
         whitelist: Set<string>
     ): { unblocked: boolean } {
-        // Only whitelisted pubkeys can unblock
-        if (!whitelist.has(event.pubkey)) {
+        const senderPubkey = envelope.principal.linkedPubkey;
+        if (!senderPubkey || !whitelist.has(senderPubkey)) {
             return { unblocked: false };
         }
 
-        const pTags = event.getMatchingTags("p");
+        const targetedPubkeys = getMentionedPubkeys(envelope);
         let unblocked = false;
 
-        for (const [, agentPubkey] of pTags) {
-            if (conversation.isAgentBlocked(agentPubkey)) {
-                conversation.unblockAgent(agentPubkey);
-                const agent = projectContext.getAgentByPubkey(agentPubkey);
-                logger.info(
-                    chalk.green(
-                        `Unblocked agent ${agent?.slug ?? agentPubkey.substring(0, 8)} in conversation ${conversation.id.substring(0, 8)} by ${event.pubkey.substring(0, 8)}`
-                    )
-                );
-                unblocked = true;
+        for (const agentPubkey of targetedPubkeys) {
+            if (!conversation.isAgentBlocked(agentPubkey)) {
+                continue;
             }
+
+            conversation.unblockAgent(agentPubkey);
+            const agent = projectContext.getAgentByPubkey(agentPubkey);
+            logger.info(
+                chalk.green(
+                    `Unblocked agent ${agent?.slug ?? agentPubkey.substring(0, 8)} in conversation ${conversation.id.substring(0, 8)} by ${senderPubkey.substring(0, 8)}`
+                )
+            );
+            unblocked = true;
         }
 
         return { unblocked };
     }
 
-    /**
-     * Resolve routing target for a delegation completion.
-     * Returns the agent and conversation ID where the waiting RAL lives,
-     * or null if the delegation wasn't recorded or agent not found.
-     */
     static resolveDelegationTarget(
         delegationResult: DelegationCompletionResult,
         projectContext: ProjectContext
@@ -164,9 +139,7 @@ export class AgentRouter {
 
         const waitingAgent = projectContext.getAgent(agentSlug);
         if (!waitingAgent) {
-            logger.warn(
-                chalk.yellow(`[AgentRouter] Waiting agent not found: ${agentSlug}`)
-            );
+            logger.warn(chalk.yellow(`[AgentRouter] Waiting agent not found: ${agentSlug}`));
             return null;
         }
 

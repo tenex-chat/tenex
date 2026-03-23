@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,13 +11,28 @@ import {
     resolveHomeScopedPath,
 } from "../agent-home";
 
-// Mock the constants to use a temp path that doesn't affect other tests
 const TEST_BASE_PATH = "/tmp/tenex-test";
-mock.module("@/constants", () => ({
-    getTenexBasePath: () => TEST_BASE_PATH,
-}));
+const originalTenexBaseDir = process.env.TENEX_BASE_DIR;
 
 describe("agent-home utilities", () => {
+    beforeEach(() => {
+        process.env.TENEX_BASE_DIR = TEST_BASE_PATH;
+    });
+
+    afterEach(() => {
+        if (originalTenexBaseDir === undefined) {
+            delete process.env.TENEX_BASE_DIR;
+        } else {
+            process.env.TENEX_BASE_DIR = originalTenexBaseDir;
+        }
+
+        try {
+            rmSync(TEST_BASE_PATH, { recursive: true, force: true });
+        } catch {
+            // Ignore cleanup errors from shared temp paths.
+        }
+    });
+
     describe("normalizePath", () => {
         it("should resolve relative path components", () => {
             const result = normalizePath("/home/user/../admin/file.txt");

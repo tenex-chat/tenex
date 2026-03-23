@@ -1,8 +1,13 @@
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
+import { TagExtractor } from "@/nostr/TagExtractor";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
 import type { UpdateDefaultConfigOptions } from "@/agents/AgentStorage";
+import * as projectsModule from "@/services/projects";
+import * as pubkeyGateModule from "@/services/pubkey-gate";
+import { logger } from "@/utils/logger";
 
 /**
  * Tests for project-scoped agent configuration via kind 24020 TenexAgentConfigUpdate events.
@@ -29,68 +34,32 @@ let updateProjectScopedIsPMCalls: Array<{
 }> = [];
 let reloadAgentCalls: string[] = [];
 
-// Mock modules before importing
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
+import { EventHandler } from "../index";
 
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        // loadAgent returns a mock agent with empty defaults (so delta = full list as additions)
-        loadAgent: async (_pubkey: string) => ({
-            slug: "test-agent",
-            name: "Test Agent",
-            role: "assistant",
-            nsec: "nsec1abc",
-            default: { tools: [] }, // Empty defaults so all tools from event become additions
-        }),
-        updateProjectOverride: async (
-            pubkey: string,
-            projectDTag: string,
-            override: AgentProjectConfig,
-            reset = false
-        ) => {
-            updateProjectOverrideCalls.push({ pubkey, projectDTag, override, reset });
-            return true;
-        },
-        updateDefaultConfig: async (pubkey: string, updates: AgentDefaultConfig, options?: UpdateDefaultConfigOptions) => {
-            updateDefaultConfigCalls.push({ pubkey, updates, options });
-            return true;
-        },
-        updateAgentIsPM: async (pubkey: string, isPM: boolean | undefined) => {
-            updateGlobalIsPMCalls.push({ pubkey, isPM });
-            return true;
-        },
-        updateProjectScopedIsPM: async (
-            pubkey: string,
-            projectDTag: string,
-            isPM: boolean | undefined
-        ) => {
-            updateProjectScopedIsPMCalls.push({ pubkey, projectDTag, isPM });
-            return true;
-        },
-    },
-}));
+beforeEach(() => {
+    spyOn(logger, "info").mockImplementation(() => {});
+    spyOn(logger, "debug").mockImplementation(() => {});
+    spyOn(logger, "warn").mockImplementation(() => {});
+    spyOn(logger, "error").mockImplementation(() => {});
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => ({
+    spyOn(pubkeyGateModule, "getPubkeyGateService").mockReturnValue({
+        shouldAllowEvent: () => true,
+    } as any);
+
+    spyOn(projectsModule, "getProjectContext").mockReturnValue({
+        agents: new Map(),
         getAgentByPubkey: (pubkey: string) => ({
             slug: "test-agent",
             pubkey,
             name: "Test Agent",
         }),
+        getAgentSlugs: () => ["test-agent"],
         agentRegistry: {
             reloadAgent: async (pubkey: string) => {
                 reloadAgentCalls.push(pubkey);
             },
         },
         statusPublisher: null,
-        // Include project with dTag for a-tag validation
         project: {
             dTag: "my-project",
             tagValue: (tag: string) => {
@@ -98,26 +67,56 @@ mock.module("@/services/projects", () => ({
                 return undefined;
             },
         },
-    }),
-}));
+    } as any);
 
-mock.module("@/nostr/TagExtractor", () => ({
-    TagExtractor: {
-        // Mirrors actual TagExtractor.getToolTags() which filters out empty tool names.
-        // This ensures tests reflect the production behavior where ["tool", ""] tags are
-        // excluded from the returned array — exercising the raw-tag-presence guard.
-        getToolTags: (event: NDKEvent) => {
-            return event.tags
-                .filter((tag) => tag[0] === "tool")
-                .map((tag) => ({ name: tag[1] }))
-                .filter((tool): tool is { name: string } => !!tool.name);
-        },
-    },
-}));
+    spyOn(TagExtractor, "getToolTags").mockImplementation((event: NDKEvent) => {
+        return event.tags
+            .filter((tag) => tag[0] === "tool")
+            .map((tag) => ({ name: tag[1] }))
+            .filter((tool): tool is { name: string } => !!tool.name);
+    });
 
-// Now import the EventHandler and the mocked agentStorage
-import { EventHandler } from "../index";
-import { agentStorage } from "@/agents/AgentStorage";
+    spyOn(agentStorage, "loadAgent").mockImplementation(async (_pubkey: string) => ({
+        slug: "test-agent",
+        name: "Test Agent",
+        role: "assistant",
+        nsec: "nsec1abc",
+        default: { tools: [] },
+    } as any));
+    spyOn(agentStorage, "updateProjectOverride").mockImplementation(
+        async (
+            pubkey: string,
+            projectDTag: string,
+            override: AgentProjectConfig,
+            reset = false
+        ) => {
+            updateProjectOverrideCalls.push({ pubkey, projectDTag, override, reset });
+            return true;
+        }
+    );
+    spyOn(agentStorage, "updateDefaultConfig").mockImplementation(
+        async (pubkey: string, updates: AgentDefaultConfig, options?: UpdateDefaultConfigOptions) => {
+            updateDefaultConfigCalls.push({ pubkey, updates, options });
+            return true;
+        }
+    );
+    spyOn(agentStorage, "updateAgentIsPM").mockImplementation(
+        async (pubkey: string, isPM: boolean | undefined) => {
+            updateGlobalIsPMCalls.push({ pubkey, isPM });
+            return true;
+        }
+    );
+    spyOn(agentStorage, "updateProjectScopedIsPM").mockImplementation(
+        async (pubkey: string, projectDTag: string, isPM: boolean | undefined) => {
+            updateProjectScopedIsPMCalls.push({ pubkey, projectDTag, isPM });
+            return true;
+        }
+    );
+});
+
+afterEach(() => {
+    mock.restore();
+});
 
 describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
     let eventHandler: EventHandler;
@@ -157,7 +156,7 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
         // Mock agent has empty defaults [], so all tools from the event become additions (+)
         expect(updateProjectOverrideCalls[0].override).toEqual({
             model: "anthropic:claude-opus-4",
-            tools: ["+fs_read", "+shell"],
+            tools: ["+fs_read", "+shell", "+fs_glob", "+fs_grep"],
         });
         expect(updateProjectOverrideCalls[0].reset).toBe(false);
 
@@ -193,7 +192,11 @@ describe("Project-Scoped Config via Kind 24020 with a-tag", () => {
 
         expect(updateDefaultConfigCalls.length).toBe(1);
         expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-opus-4");
-        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual([
+            "fs_read",
+            "fs_glob",
+            "fs_grep",
+        ]);
 
         // Global config updates should clear project overrides
         expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
@@ -375,7 +378,11 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
         // model should NOT be present in updates - no model tag means no change to model
         expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
         // tools should be present since tool tags were explicitly provided
-        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual([
+            "fs_read",
+            "fs_glob",
+            "fs_grep",
+        ]);
         // All global updates should clear project overrides
         expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
     });
@@ -414,7 +421,12 @@ describe("Global (non-a-tag) 24020 - Partial Update Semantics", () => {
 
         expect(updateDefaultConfigCalls.length).toBe(1);
         expect(updateDefaultConfigCalls[0].updates.model).toBe("anthropic:claude-sonnet-4");
-        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read", "shell"]);
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual([
+            "fs_read",
+            "shell",
+            "fs_glob",
+            "fs_grep",
+        ]);
         // All global updates should clear project overrides
         expect(updateDefaultConfigCalls[0].options).toEqual({ clearProjectOverrides: true });
     });
@@ -482,7 +494,12 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
 
         expect(updateProjectOverrideCalls.length).toBe(1);
         // Tools stored as delta: [+fs_read, +shell] (all additions relative to empty defaults)
-        expect(updateProjectOverrideCalls[0].override.tools).toEqual(["+fs_read", "+shell"]);
+        expect(updateProjectOverrideCalls[0].override.tools).toEqual([
+            "+fs_read",
+            "+shell",
+            "+fs_glob",
+            "+fs_grep",
+        ]);
     });
 
     it("should produce empty delta (no tools override) when full list matches defaults", async () => {
@@ -516,7 +533,12 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
 
         expect(updateDefaultConfigCalls.length).toBe(1);
         // Default config stores the FULL list (no + or - prefixes)
-        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read", "shell"]);
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual([
+            "fs_read",
+            "shell",
+            "fs_glob",
+            "fs_grep",
+        ]);
         // Verify no delta notation in the stored defaults
         const tools = updateDefaultConfigCalls[0].updates.tools ?? [];
         for (const tool of tools) {
@@ -559,7 +581,7 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            default: { tools: ["fs_read", "shell", "agents_write"] },
+            default: { tools: ["fs_read", "shell", "fs_glob", "fs_grep", "agents_write"] },
         });
 
         try {
@@ -580,6 +602,8 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             // "fs_read" and "shell" match defaults → no addition entries needed
             expect(storedTools).not.toContain("+fs_read");
             expect(storedTools).not.toContain("+shell");
+            expect(storedTools).not.toContain("+fs_glob");
+            expect(storedTools).not.toContain("+fs_grep");
         } finally {
             agentStorage.loadAgent = originalLoadAgent;
         }
@@ -597,7 +621,7 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            default: { tools: ["fs_read", "shell"] },
+            default: { tools: ["fs_read", "shell", "fs_glob", "fs_grep"] },
         });
 
         try {
@@ -633,7 +657,7 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             name: "Test Agent",
             role: "assistant",
             nsec: "nsec1abc",
-            default: { tools: ["fs_read", "shell"] },
+            default: { tools: ["fs_read", "shell", "fs_glob", "fs_grep"] },
         });
 
         try {
@@ -653,6 +677,8 @@ describe("Project-Scoped 24020 Delta Conversion (Issue 2: full list → delta st
             const storedTools = updateProjectOverrideCalls[0].override.tools ?? [];
             expect(storedTools).toContain("-fs_read");
             expect(storedTools).toContain("-shell");
+            expect(storedTools).toContain("-fs_glob");
+            expect(storedTools).toContain("-fs_grep");
         } finally {
             agentStorage.loadAgent = originalLoadAgent;
         }
@@ -691,7 +717,11 @@ describe("Global (non-a-tag) 24020 - Empty Model Tag Guard", () => {
         // model should NOT be set — empty tag value is a no-op, not a clear
         expect(updateDefaultConfigCalls[0].updates.model).toBeUndefined();
         // tools should still be updated normally
-        expect(updateDefaultConfigCalls[0].updates.tools).toEqual(["fs_read"]);
+        expect(updateDefaultConfigCalls[0].updates.tools).toEqual([
+            "fs_read",
+            "fs_glob",
+            "fs_grep",
+        ]);
     });
 });
 

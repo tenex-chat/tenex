@@ -155,6 +155,35 @@ describe("RALRegistry", () => {
     });
   });
 
+  describe("silent completion requests", () => {
+    it("should request and clear silent completion for a specific RAL", () => {
+      const ralNumber1 = registry.create(agentPubkey, conversationId, projectId);
+      const ralNumber2 = registry.create(agentPubkey, conversationId, projectId);
+
+      expect(registry.requestSilentCompletion(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber2)).toBe(false);
+
+      expect(registry.clearSilentCompletionRequest(agentPubkey, conversationId, ralNumber1)).toBe(true);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, ralNumber1)).toBe(false);
+    });
+
+    it("should clear silent completion state when a RAL or conversation is cleared", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+      registry.requestSilentCompletion(agentPubkey, conversationId, ralNumber);
+      registry.clearRAL(agentPubkey, conversationId, ralNumber);
+
+      const recreatedRal = registry.create(agentPubkey, conversationId, projectId);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, recreatedRal)).toBe(false);
+
+      registry.requestSilentCompletion(agentPubkey, conversationId, recreatedRal);
+      registry.clear(agentPubkey, conversationId);
+
+      const afterConversationClear = registry.create(agentPubkey, conversationId, projectId);
+      expect(registry.isSilentCompletionRequested(agentPubkey, conversationId, afterConversationClear)).toBe(false);
+    });
+  });
+
   describe("setPendingDelegations", () => {
     it("should set pending delegations", () => {
       const ralNumber = registry.create(agentPubkey, conversationId, projectId);
@@ -401,6 +430,33 @@ describe("RALRegistry", () => {
 
       const state = registry.getState(agentPubkey, conversationId);
       expect(state?.queuedInjections).toEqual([]);
+    });
+
+    it("should preserve principal snapshots on queued user messages", () => {
+      const ralNumber = registry.create(agentPubkey, conversationId, projectId);
+
+      registry.queueUserMessage(agentPubkey, conversationId, ralNumber, "User message", {
+        senderPubkey: "linked-user-pubkey",
+        senderPrincipal: {
+          id: "telegram:user:42",
+          transport: "telegram",
+          linkedPubkey: "linked-user-pubkey",
+          displayName: "Alice Telegram",
+        },
+        targetedPrincipals: [{
+          id: `nostr:${agentPubkey}`,
+          transport: "nostr",
+          linkedPubkey: agentPubkey,
+          displayName: "agent",
+        }],
+      });
+
+      const injections = registry.getAndConsumeInjections(agentPubkey, conversationId, ralNumber);
+
+      expect(injections).toHaveLength(1);
+      expect(injections[0].senderPrincipal?.id).toBe("telegram:user:42");
+      expect(injections[0].senderPrincipal?.displayName).toBe("Alice Telegram");
+      expect(injections[0].targetedPrincipals?.[0]?.linkedPubkey).toBe(agentPubkey);
     });
 
     it("should return copy of injections, not original array", () => {

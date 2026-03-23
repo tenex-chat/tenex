@@ -1,51 +1,47 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, spyOn, beforeEach, afterEach } from "bun:test";
 import { formatDelegationChain, wouldCreateCircularDelegation, buildDelegationChain } from "../delegation-chain";
 import { shortenConversationId } from "../conversation-id";
 import type { DelegationChainEntry } from "@/conversations/types";
-import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import { ConversationStore } from "@/conversations/ConversationStore";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import * as projectsModule from "@/services/projects";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
 
 // Mock functions that will be used by the mocked modules
-const mockConversationStoreGet = vi.fn();
-const mockConversationStoreGetCachedEvent = vi.fn();
-const mockGetNameSync = vi.fn();
+const mockConversationStoreGet = mock();
+const mockConversationStoreGetCachedEnvelope = mock();
+const mockGetNameSync = mock();
 
-// Mock dependencies - must be before imports that use them
-vi.mock("@/conversations/ConversationStore", () => ({
-    ConversationStore: {
-        get: (...args: unknown[]) => mockConversationStoreGet(...args),
-        getCachedEvent: (...args: unknown[]) => mockConversationStoreGetCachedEvent(...args),
-    },
-}));
-
-vi.mock("@/services/projects", () => ({
-    isProjectContextInitialized: () => true,
-    getProjectContext: () => ({
-        getAgentByPubkey: (pubkey: string) => {
-            const agents: Record<string, { slug: string }> = {
-                "agent-pubkey-pm": { slug: "pm-wip" },
-                "agent-pubkey-exec": { slug: "execution-coordinator" },
-                "agent-pubkey-claude": { slug: "claude-code" },
-            };
-            return agents[pubkey];
+function createEnvelope(
+    pubkey: string,
+    delegationParentConversationId?: string
+): InboundEnvelope {
+    return {
+        transport: "nostr",
+        principal: {
+            id: `nostr:${pubkey}`,
+            transport: "nostr",
+            linkedPubkey: pubkey,
         },
-    }),
-}));
-
-vi.mock("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
-    }),
-}));
-
-vi.mock("@/utils/logger", () => ({
-    logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-    },
-}));
+        channel: {
+            id: "nostr:test-channel",
+            transport: "nostr",
+            kind: "conversation",
+        },
+        message: {
+            id: `nostr:${pubkey}:message`,
+            transport: "nostr",
+            nativeId: `${pubkey}-message`,
+        },
+        recipients: [],
+        content: "",
+        occurredAt: 0,
+        capabilities: [],
+        metadata: delegationParentConversationId
+            ? { delegationParentConversationId }
+            : {},
+    };
+}
 
 describe("delegation-chain utilities", () => {
     describe("shortenConversationId", () => {
@@ -198,33 +194,47 @@ describe("delegation-chain utilities", () => {
     describe("buildDelegationChain", () => {
         beforeEach(() => {
             mockConversationStoreGet.mockReset();
-            mockConversationStoreGetCachedEvent.mockReset();
+            mockConversationStoreGetCachedEnvelope.mockReset();
             mockGetNameSync.mockReset();
+            spyOn(ConversationStore, "get").mockImplementation(
+                mockConversationStoreGet as typeof ConversationStore.get
+            );
+            spyOn(ConversationStore, "getCachedEnvelope").mockImplementation(
+                mockConversationStoreGetCachedEnvelope as typeof ConversationStore.getCachedEnvelope
+            );
+            spyOn(projectsModule, "getProjectContext").mockReturnValue({
+                getAgentByPubkey: (pubkey: string) => {
+                    const agents: Record<string, { slug: string }> = {
+                        "agent-pubkey-pm": { slug: "pm-wip" },
+                        "agent-pubkey-exec": { slug: "execution-coordinator" },
+                        "agent-pubkey-claude": { slug: "claude-code" },
+                    };
+                    return agents[pubkey];
+                },
+            } as ReturnType<typeof projectsModule.getProjectContext>);
+            spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+                getNameSync: (pubkey: string) => mockGetNameSync(pubkey),
+            } as ReturnType<typeof pubkeyServiceModule.getPubkeyService>);
             // Default behavior: return "User" for any pubkey (fallback behavior)
             mockGetNameSync.mockReturnValue("User");
         });
 
         afterEach(() => {
             mockConversationStoreGet.mockReset();
-            mockConversationStoreGetCachedEvent.mockReset();
+            mockConversationStoreGetCachedEnvelope.mockReset();
             mockGetNameSync.mockReset();
+            mock.restore();
         });
 
         it("should return undefined for direct user messages (no delegation tag)", () => {
-            const event = {
-                pubkey: "user-pubkey",
-                tags: [],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("user-pubkey");
 
             const result = buildDelegationChain(event, "agent-pubkey-claude", "user-pubkey", "any-conv-id");
             expect(result).toBeUndefined();
         });
 
         it("should build chain with correct ordering: User first, current agent last", () => {
-            const event = {
-                pubkey: "agent-pubkey-pm",
-                tags: [["delegation", "parent-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-pm", "parent-conv-id-1234567890");
 
             // Mock parent conversation with stored chain starting from User
             // SEMANTICS: conversationId = "where this agent was delegated TO"
@@ -251,16 +261,13 @@ describe("delegation-chain utilities", () => {
             // pm-wip: from stored chain, conversationId = userconv1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
         });
 
         it("should not have duplicate entries when merging stored chain with walked ancestors", () => {
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id");
 
             // Mock exec's conversation (has root event pointing to pm-conv)
             const mockExecStore = {
@@ -269,9 +276,7 @@ describe("delegation-chain utilities", () => {
                 getRootEventId: () => "exec-root-event",
             };
 
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id");
 
             // Mock pm's conversation with stored chain
             const mockPmStore = {
@@ -291,8 +296,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -312,10 +317,7 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should handle missing parent conversation gracefully", () => {
-            const event = {
-                pubkey: "agent-pubkey-pm",
-                tags: [["delegation", "missing-parent-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-pm", "missing-parent-id-1234567890");
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
@@ -335,10 +337,7 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should identify User when sender is project owner", () => {
-            const event = {
-                pubkey: "project-owner-pubkey",
-                tags: [["delegation", "parent-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("project-owner-pubkey", "parent-conv-id-1234567890");
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
@@ -350,15 +349,12 @@ describe("delegation-chain utilities", () => {
             // User: origin, no conversationId
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(2);
-            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "project-owner-pubkey", displayName: "User", isUser: true }); // Origin has no conversationId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
         });
 
         it("should use PubkeyService to resolve user display name from Nostr profile", () => {
-            const event = {
-                pubkey: "project-owner-pubkey",
-                tags: [["delegation", "parent-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("project-owner-pubkey", "parent-conv-id-1234567890");
 
             mockConversationStoreGet.mockReturnValue(undefined);
             // Mock PubkeyService returning a real user name instead of fallback "User"
@@ -370,17 +366,14 @@ describe("delegation-chain utilities", () => {
             expect(result).toBeDefined();
             expect(result).toHaveLength(2);
             // Should use "Pablo" from PubkeyService instead of hardcoded "User"
-            expect(result![0]).toEqual({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "project-owner-pubkey", displayName: "Pablo", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" });
             // Verify PubkeyService was called with the project owner pubkey
             expect(mockGetNameSync).toHaveBeenCalledWith("project-owner-pubkey");
         });
 
         it("should walk up multi-level delegation chains with correct full ordering", () => {
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id-1234567890");
 
             // Mock the execution-coordinator's conversation (has no stored chain, but has root event)
             const mockExecStore = {
@@ -390,9 +383,7 @@ describe("delegation-chain utilities", () => {
             };
 
             // Mock the cached root event for exec conversation (points to pm-conv)
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id-1234567890"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id-1234567890");
 
             // Mock pm-wip's conversation (has stored chain starting from User)
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
@@ -415,8 +406,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -431,10 +422,10 @@ describe("delegation-chain utilities", () => {
             // exec: delegated to in pm-conv-id-1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(4);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" }); // From stored chain
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pm-conv-id-1234567890" }); // Full ID
+            expect(result![3]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -443,10 +434,7 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should include immediate delegator in legacy path (parent exists but no stored chain)", () => {
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "legacy-parent-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "legacy-parent-conv-id-1234567890");
 
             // Mock a legacy parent conversation with no stored delegationChain
             // but with messages - simulating an older conversation
@@ -457,17 +445,15 @@ describe("delegation-chain utilities", () => {
             };
 
             // Root event has no further delegation tag - this is the origin
-            const mockLegacyRootEvent = {
-                tags: [], // No delegation tag - user started it
-            };
+            const mockLegacyRootEnvelope = createEnvelope("root-pubkey");
 
             mockConversationStoreGet.mockImplementation((convId: string) => {
                 if (convId === "legacy-parent-conv-id-1234567890") return mockLegacyParentStore;
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "legacy-root-event") return mockLegacyRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "legacy-root-event") return mockLegacyRootEnvelope;
                 return undefined;
             });
 
@@ -481,9 +467,9 @@ describe("delegation-chain utilities", () => {
             // exec: delegated to in legacy-parent-conv-id-1234567890
             // claude-code: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result).toHaveLength(3);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true }); // Origin, no convId
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "legacy-parent-conv-id-1234567890" }); // Full ID
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-claude", displayName: "claude-code", isUser: false, conversationId: "claude-conv-id-1234567890" }); // Current conv ID
 
             // Verify no duplicates
             const pubkeys = result!.map(e => e.pubkey);
@@ -492,10 +478,7 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should prevent infinite loops with visited set", () => {
-            const event = {
-                pubkey: "agent-pubkey-pm",
-                tags: [["delegation", "conv-a"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-pm", "conv-a");
 
             // Create a circular reference: conv-a -> conv-b -> conv-a
             const mockStoreA = {
@@ -516,9 +499,9 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "event-a") return { tags: [["delegation", "conv-b"]] };
-                if (eventId === "event-b") return { tags: [["delegation", "conv-a"]] };
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "event-a") return createEnvelope("root-pubkey", "conv-b");
+                if (eventId === "event-b") return createEnvelope("root-pubkey", "conv-a");
                 return undefined;
             });
 
@@ -534,10 +517,7 @@ describe("delegation-chain utilities", () => {
 
         // Integration test: validates buildDelegationChain + formatDelegationChain end-to-end
         it("integration: should produce correct formatted output with proper conversation IDs", () => {
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id-1234567890");
 
             // Mock the execution-coordinator's conversation
             const mockExecStore = {
@@ -547,9 +527,7 @@ describe("delegation-chain utilities", () => {
             };
 
             // Mock the cached root event for exec conversation (points to pm-conv)
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id-1234567890"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id-1234567890");
 
             // Mock pm-wip's conversation with stored chain (correct semantics)
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
@@ -570,8 +548,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -609,10 +587,7 @@ describe("delegation-chain utilities", () => {
             // once as the delegator and once as the terminal current-agent entry.
             // This ensures resolveCompletionRecipient picks chain[length-2] = exec (the delegator),
             // NOT the project owner.
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-parent-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-parent-conv-id-1234567890");
 
             // Mock parent conversation with stored chain ending at exec
             const mockParentStore = {
@@ -644,20 +619,17 @@ describe("delegation-chain utilities", () => {
             // Chain: User -> pm-wip -> exec(delegator) -> exec(current)
             // exec MUST appear twice
             expect(result).toHaveLength(4);
-            expect(result![0]).toEqual({ pubkey: "user-pubkey", displayName: "User", isUser: true });
-            expect(result![1]).toEqual({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
-            expect(result![2]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" });
-            expect(result![3]).toEqual({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "self-deleg-conv-id-1234567890" });
+            expect(result![0]).toMatchObject({ pubkey: "user-pubkey", displayName: "User", isUser: true });
+            expect(result![1]).toMatchObject({ pubkey: "agent-pubkey-pm", displayName: "pm-wip", isUser: false, conversationId: "userconv1234567890" });
+            expect(result![2]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "pmconv1234567890" });
+            expect(result![3]).toMatchObject({ pubkey: "agent-pubkey-exec", displayName: "execution-coordinator", isUser: false, conversationId: "self-deleg-conv-id-1234567890" });
 
             // Verify resolveCompletionRecipient logic: chain[length-2] should be the delegator (exec)
             expect(result![result!.length - 2].pubkey).toBe("agent-pubkey-exec");
         });
 
         it("should use truncated pubkey for unknown agents", () => {
-            const event = {
-                pubkey: "unknown123456789abcdef",
-                tags: [["delegation", "parent-conv-id"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("unknown123456789abcdef", "parent-conv-id");
 
             mockConversationStoreGet.mockReturnValue(undefined);
 
@@ -677,10 +649,7 @@ describe("delegation-chain utilities", () => {
             // but we now trust stored chains as authoritative and don't re-compute them.
             // This simplifies the logic and the stored format is stable going forward.
 
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id-1234567890");
 
             // Mock the execution-coordinator's conversation
             const mockExecStore = {
@@ -690,9 +659,7 @@ describe("delegation-chain utilities", () => {
             };
 
             // Mock the cached root event for exec conversation (points to pm-conv)
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id-1234567890"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id-1234567890");
 
             // Mock pm-wip's conversation with a stored chain (even if it has legacy format)
             // The key point: stored chains are now trusted as authoritative
@@ -714,8 +681,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -748,10 +715,7 @@ describe("delegation-chain utilities", () => {
             // NEW SEMANTICS: Origin entry does NOT have a conversationId.
             // This test verifies that valid new-semantic chains are trusted and used directly.
 
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id-1234567890");
 
             // Mock the execution-coordinator's conversation
             const mockExecStore = {
@@ -761,9 +725,7 @@ describe("delegation-chain utilities", () => {
             };
 
             // Mock the cached root event for exec conversation (points to pm-conv)
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id-1234567890"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id-1234567890");
 
             // Mock pm-wip's conversation with a NEW-SEMANTIC stored chain
             // NEW SEMANTICS: Origin (User) has NO conversationId - this is correct
@@ -785,8 +747,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -815,10 +777,7 @@ describe("delegation-chain utilities", () => {
         });
 
         it("should capture conversation IDs when walking the chain", () => {
-            const event = {
-                pubkey: "agent-pubkey-exec",
-                tags: [["delegation", "exec-conv-id-1234567890"]],
-            } as unknown as NDKEvent;
+            const event = createEnvelope("agent-pubkey-exec", "exec-conv-id-1234567890");
 
             // Mock the execution-coordinator's conversation
             const mockExecStore = {
@@ -828,9 +787,7 @@ describe("delegation-chain utilities", () => {
             };
 
             // Mock the cached root event for exec conversation (points to pm-conv)
-            const mockExecRootEvent = {
-                tags: [["delegation", "pm-conv-id-1234567890"]],
-            };
+            const mockExecRootEnvelope = createEnvelope("root-pubkey", "pm-conv-id-1234567890");
 
             // Mock pm-wip's conversation with stored chain
             // SEMANTICS: conversationId = "where this agent was delegated TO" (full IDs stored)
@@ -853,8 +810,8 @@ describe("delegation-chain utilities", () => {
                 return undefined;
             });
 
-            mockConversationStoreGetCachedEvent.mockImplementation((eventId: string) => {
-                if (eventId === "exec-root-event") return mockExecRootEvent;
+            mockConversationStoreGetCachedEnvelope.mockImplementation((eventId: string) => {
+                if (eventId === "exec-root-event") return mockExecRootEnvelope;
                 return undefined;
             });
 
@@ -874,6 +831,86 @@ describe("delegation-chain utilities", () => {
             expect(result![2].conversationId).toBe("pm-conv-id-1234567890");
             // claude: delegated to in claude-conv-id-1234567890 (the conversation created for them)
             expect(result![3].conversationId).toBe("claude-conv-id-1234567890");
+        });
+
+        it("preserves transport-aware principals from stored messages and the triggering envelope", () => {
+            const event: InboundEnvelope = {
+                ...createEnvelope("agent-pubkey-pm", "parent-conv-id-transport"),
+                principal: {
+                    id: "telegram:user:22",
+                    transport: "telegram",
+                    linkedPubkey: "agent-pubkey-pm",
+                    displayName: "PM Telegram",
+                    kind: "agent",
+                },
+            };
+
+            const mockParentStore = {
+                metadata: {},
+                getAllMessages: () => [
+                    {
+                        pubkey: "user-pubkey",
+                        senderPrincipal: {
+                            id: "local:user:42",
+                            transport: "local",
+                            linkedPubkey: "user-pubkey",
+                            displayName: "Local User",
+                            kind: "human",
+                        },
+                    },
+                ],
+                getRootEventId: () => undefined,
+            };
+            mockConversationStoreGet.mockReturnValue(mockParentStore);
+
+            const result = buildDelegationChain(
+                event,
+                "agent-pubkey-claude",
+                "user-pubkey",
+                "current-conv-id"
+            );
+
+            expect(result).toEqual([
+                {
+                    pubkey: "user-pubkey",
+                    displayName: "User",
+                    isUser: true,
+                    conversationId: undefined,
+                    principal: {
+                        id: "local:user:42",
+                        transport: "local",
+                        linkedPubkey: "user-pubkey",
+                        displayName: "Local User",
+                        kind: "human",
+                    },
+                },
+                {
+                    pubkey: "agent-pubkey-pm",
+                    displayName: "pm-wip",
+                    isUser: false,
+                    conversationId: "parent-conv-id-transport",
+                    principal: {
+                        id: "telegram:user:22",
+                        transport: "telegram",
+                        linkedPubkey: "agent-pubkey-pm",
+                        displayName: "PM Telegram",
+                        kind: "agent",
+                    },
+                },
+                {
+                    pubkey: "agent-pubkey-claude",
+                    displayName: "claude-code",
+                    isUser: false,
+                    conversationId: "current-conv-id",
+                    principal: {
+                        id: "nostr:agent-pubkey-claude",
+                        transport: "nostr",
+                        linkedPubkey: "agent-pubkey-claude",
+                        displayName: "claude-code",
+                        kind: "agent",
+                    },
+                },
+            ]);
         });
     });
 });

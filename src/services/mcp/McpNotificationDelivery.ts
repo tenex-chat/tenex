@@ -13,12 +13,11 @@
 import { AgentExecutor } from "@/agents/execution/AgentExecutor";
 import { createExecutionContext } from "@/agents/execution/ExecutionContextFactory";
 import { ConversationStore } from "@/conversations/ConversationStore";
-import { getNDK } from "@/nostr/ndkClient";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { getProjectContext } from "@/services/projects";
 import { RALRegistry } from "@/services/ral";
 import { wrapInSystemReminder } from "ai-sdk-system-reminders";
 import { logger } from "@/utils/logger";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import type { McpSubscription } from "./McpSubscriptionService";
 
@@ -36,6 +35,8 @@ export async function deliverMcpNotification(
     content: string
 ): Promise<void> {
     const projectCtx = getProjectContext();
+    const notificationTimestamp = Date.now();
+    const notificationEventId = `mcp-notification:${subscription.id}:${notificationTimestamp}`;
 
     // Look up the subscribing agent
     const agent = projectCtx.getAgentByPubkey(subscription.agentPubkey);
@@ -57,6 +58,20 @@ export async function deliverMcpNotification(
 
     // Get or load the conversation store
     const store = ConversationStore.getOrLoad(subscription.conversationId);
+    const metadata = store.getMetadata();
+    const senderPrincipal: InboundEnvelope["principal"] = {
+        id: `mcp:subscription:${subscription.id}`,
+        transport: "mcp",
+        displayName: subscription.serverName,
+        kind: "system",
+    };
+    const recipientPrincipal: InboundEnvelope["principal"] = {
+        id: `nostr:${subscription.agentPubkey}`,
+        transport: "nostr",
+        linkedPubkey: subscription.agentPubkey,
+        displayName: agent.slug,
+        kind: "agent",
+    };
 
     // Check if the agent already has an active streaming RAL in this conversation.
     // If so, queue the message as an injection rather than starting a new execution.
@@ -69,7 +84,12 @@ export async function deliverMcpNotification(
             agent.pubkey,
             subscription.conversationId,
             activeRal.ralNumber,
-            formattedContent
+            formattedContent,
+            {
+                senderPrincipal,
+                targetedPrincipals: [recipientPrincipal],
+                eventId: notificationEventId,
+            }
         );
 
         logger.info("MCP notification queued for active streaming execution", {
@@ -88,40 +108,48 @@ export async function deliverMcpNotification(
 
     // Add the notification as a user-role message in the conversation
     store.addMessage({
-        pubkey: subscription.agentPubkey,
+        pubkey: "",
         content: formattedContent,
         messageType: "text",
+        eventId: notificationEventId,
         role: "user",
         timestamp: Math.floor(Date.now() / 1000),
         targetedPubkeys: [subscription.agentPubkey],
+        targetedPrincipals: [recipientPrincipal],
+        senderPrincipal,
     });
     await store.save();
 
-    // Create a synthetic triggering event for the execution context.
-    // This carries the conversation's branch tag so the executor resolves
-    // the correct working directory (worktree or project root).
-    const ndk = getNDK();
-    const syntheticEvent = new NDKEvent(ndk);
-    syntheticEvent.id = subscription.rootEventId;
-    syntheticEvent.kind = 1;
-    syntheticEvent.pubkey = subscription.agentPubkey;
-    syntheticEvent.created_at = Math.floor(Date.now() / 1000);
-    syntheticEvent.content = formattedContent;
-
-    // Carry forward the branch tag from conversation metadata
-    const metadata = store.getMetadata();
-    const tags: string[][] = [];
-    if (metadata.branch) {
-        tags.push(["branch", metadata.branch]);
-    }
-    syntheticEvent.tags = tags;
+    const syntheticEnvelope: InboundEnvelope = {
+        transport: "mcp",
+        principal: senderPrincipal,
+        channel: {
+            id: `mcp:conversation:${subscription.conversationId}`,
+            transport: "mcp",
+            kind: "conversation",
+            projectBinding: subscription.projectId,
+        },
+        message: {
+            id: `mcp:${notificationEventId}`,
+            transport: "mcp",
+            nativeId: notificationEventId,
+        },
+        recipients: [recipientPrincipal],
+        content: formattedContent,
+        occurredAt: Math.floor(notificationTimestamp / 1000),
+        capabilities: ["mcp-subscription-notification", "direct-agent-execution"],
+        metadata: {
+            eventKind: 1,
+            branchName: metadata.branch,
+        },
+    };
 
     // Create execution context and run the agent
     const executionContext = await createExecutionContext({
         agent,
         conversationId: subscription.conversationId,
         projectBasePath: projectCtx.agentRegistry.getBasePath(),
-        triggeringEvent: syntheticEvent,
+        triggeringEnvelope: syntheticEnvelope,
         mcpManager: projectCtx.mcpManager,
     });
 

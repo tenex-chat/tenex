@@ -11,7 +11,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { computeAttributionPrefix, buildMessagesFromEntries, type MessageBuilderContext } from "../MessageBuilder";
-import type { ConversationEntry } from "../types";
+import type { ConversationRecordInput } from "../types";
 
 describe("computeAttributionPrefix", () => {
     // Test pubkeys
@@ -37,7 +37,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 1: Self-message → no prefix
     test("self-message returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: viewingAgentPubkey,
             content: "I am responding",
             messageType: "text",
@@ -49,7 +49,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 2: Tool-call entry → no prefix
     test("tool-call entry returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "",
             messageType: "tool-call",
@@ -67,7 +67,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 3: Tool-result entry → no prefix
     test("tool-result entry returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "",
             messageType: "tool-result",
@@ -85,7 +85,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 4: Agent message targeted elsewhere → routing prefix
     test("agent message targeted elsewhere returns routing prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "Emerald green! 🌿",
             messageType: "text",
@@ -98,7 +98,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 5: User message targeted elsewhere → routing prefix
     test("user message targeted elsewhere returns routing prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: userPubkey,
             content: "say a random color",
             messageType: "text",
@@ -111,7 +111,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 6: Agent message targeted to me → attribution prefix (just sender)
     test("agent message targeted to me returns attribution prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "Here is your result",
             messageType: "text",
@@ -124,7 +124,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 7: Agent message with no targeting → attribution prefix
     test("agent message with no targeting returns attribution prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "Broadcasting to everyone",
             messageType: "text",
@@ -136,7 +136,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 8: User message targeted to me → no prefix
     test("user message targeted to me returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: userPubkey,
             content: "tell me who said what",
             messageType: "text",
@@ -149,7 +149,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 9: User message with no targeting → no prefix
     test("user message with no targeting returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: userPubkey,
             content: "Hello everyone",
             messageType: "text",
@@ -161,7 +161,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 10: Multi-recipient message → uses first recipient
     test("multi-recipient message uses first recipient in routing prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: userPubkey,
             content: "message to two agents",
             messageType: "text",
@@ -174,7 +174,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 11: Unknown pubkey → hex fallback
     test("unknown pubkey falls back to hex prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: unknownPubkey,
             content: "message from unknown",
             messageType: "text",
@@ -188,7 +188,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 12: Injected message with senderPubkey → uses senderPubkey for attribution
     test("injected message with senderPubkey uses senderPubkey for attribution", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: viewingAgentPubkey, // The injection target
             senderPubkey: agent1Pubkey, // The actual sender
             content: "injected message from agent1",
@@ -205,7 +205,7 @@ describe("computeAttributionPrefix", () => {
 
     // Test 13: Message with empty targetedPubkeys array → treated as no targeting
     test("message with empty targetedPubkeys array is treated as no targeting", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "message with empty targeting",
             messageType: "text",
@@ -221,7 +221,7 @@ describe("computeAttributionPrefix", () => {
     // Additional edge cases
 
     test("entry with explicit role override returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "compressed summary",
             messageType: "text",
@@ -233,7 +233,7 @@ describe("computeAttributionPrefix", () => {
     });
 
     test("delegation-marker entry returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             content: "",
             messageType: "delegation-marker",
@@ -250,7 +250,7 @@ describe("computeAttributionPrefix", () => {
     });
 
     test("injected message where senderPubkey is self returns no prefix", () => {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agent1Pubkey,
             senderPubkey: viewingAgentPubkey, // Self is the sender
             content: "self-injected message",
@@ -283,7 +283,7 @@ describe("Multi-agent attribution integration", () => {
     }
 
     test("full multi-agent conversation shows correct attribution for agent2 view", async () => {
-        const entries: ConversationEntry[] = [
+        const entries: ConversationRecordInput[] = [
             // Pablo → transparent: "say a random color"
             {
                 pubkey: pabloPubkey,
@@ -357,7 +357,7 @@ describe("Multi-agent attribution integration", () => {
     });
 
     test("agent messages with no targeting get attribution but user messages do not", async () => {
-        const entries: ConversationEntry[] = [
+        const entries: ConversationRecordInput[] = [
             {
                 pubkey: pabloPubkey,
                 content: "Hello",
@@ -390,7 +390,7 @@ describe("Multi-agent attribution integration", () => {
     });
 
     test("self messages never get attribution prefix", async () => {
-        const entries: ConversationEntry[] = [
+        const entries: ConversationRecordInput[] = [
             {
                 pubkey: pabloPubkey,
                 content: "Do something",
@@ -415,8 +415,45 @@ describe("Multi-agent attribution integration", () => {
         expect(messages[1].content).toBe("I will do it");
     });
 
+    test("multiple visible Telegram humans get explicit sender attribution", async () => {
+        const entries: ConversationRecordInput[] = [
+            {
+                pubkey: pabloPubkey,
+                content: "First human message",
+                messageType: "text",
+                senderPrincipal: {
+                    id: "telegram:user:42",
+                    transport: "telegram",
+                    displayName: "Alice",
+                    username: "alice_tg",
+                    kind: "human",
+                },
+                targetedPubkeys: [viewingAgentPubkey],
+            },
+            {
+                pubkey: pabloPubkey,
+                content: "Second human message",
+                messageType: "text",
+                senderPrincipal: {
+                    id: "telegram:user:55",
+                    transport: "telegram",
+                    displayName: "Bob",
+                    username: "bob_tg",
+                    kind: "human",
+                },
+                targetedPubkeys: [viewingAgentPubkey],
+            },
+        ];
+
+        const ctx = createContext({});
+        const messages = await buildMessagesFromEntries(entries, ctx);
+
+        expect(messages[0].content).toBe("[@Alice] First human message");
+        expect(messages[1].content).toBe("[@Bob] Second human message");
+    });
+
     test("empty agentPubkeys set treats all non-self as users (no attribution)", async () => {
-        const entries: ConversationEntry[] = [
+        const entries: ConversationRecordInput[] = [
             {
                 pubkey: agent1Pubkey,
                 content: "message from another",

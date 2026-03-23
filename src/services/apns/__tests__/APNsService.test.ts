@@ -1,4 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as filesystemModule from "@/lib/fs/filesystem";
+import * as encryptionModule from "@/nostr/encryption";
+import * as ndkClientModule from "@/nostr/ndkClient";
+import { config } from "@/services/ConfigService";
+import { logger } from "@/utils/logger";
 
 /**
  * Tests for APNsService.
@@ -38,69 +43,9 @@ const mockBackendSigner = {
     user: () => Promise.resolve({ pubkey: "backend-pubkey-hex" }),
 };
 
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfig: mockGetConfig,
-        getBackendSigner: mock(() => Promise.resolve(mockBackendSigner)),
-        getConfigPath: mock(() => "/tmp/test-apns"),
-        getGlobalPath: mock(() => "/tmp/test-apns"),
-        getProjectsBase: mock(() => "/tmp/test-apns/projects"),
-        loadConfig: mock(() => Promise.resolve({ config: mockGetConfig() })),
-    },
-}));
-
-// Mock AgentStorage to avoid transitive dependency on ConfigService.getConfigPath
-mock.module("@/agents/AgentStorage", () => ({
-    agentStorage: {
-        getIndex: mock(() => ({})),
-        getAgent: mock(() => null),
-    },
-}));
-
-// Mock ConversationStore to avoid circular dependency issues
-mock.module("@/conversations/ConversationStore", () => ({
-    ConversationStore: {
-        get: mock(() => null),
-        create: mock(() => Promise.resolve()),
-        reset: mock(() => {}),
-    },
-}));
-
-mock.module("@/nostr/ndkClient", () => ({
-    getNDK: () => ({
-        subscribe: mock((_filter: unknown, opts: { onEvent?: (event: unknown) => void }) => {
-            if (opts?.onEvent) {
-                capturedEventHandler = opts.onEvent;
-            }
-            return {
-                stop: mock(() => {}),
-            };
-        }),
-    }),
-}));
-
-// Mock the nostr encryption wrapper
-mock.module("@/nostr/encryption", () => ({
-    nip44Decrypt: mockNip44Decrypt,
-}));
-
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
 // Mock filesystem for token persistence
 const mockReadJsonFile = mock((_path: string) => Promise.resolve(null));
 const mockWriteJsonFile = mock((_path: string, _data: unknown) => Promise.resolve());
-
-mock.module("@/lib/fs/filesystem", () => ({
-    readJsonFile: mockReadJsonFile,
-    writeJsonFile: mockWriteJsonFile,
-}));
 
 // Mock APNsClient via factory injection (avoids mock.module cross-file leaks)
 const mockSend = mock((_token: string, _payload: unknown) =>
@@ -125,14 +70,74 @@ async function simulateEvent(pubkey: string, decryptedContent: string): Promise<
 }
 
 describe("APNsService", () => {
+    let getConfigSpy: ReturnType<typeof spyOn>;
+    let getBackendSignerSpy: ReturnType<typeof spyOn>;
+    let getConfigPathSpy: ReturnType<typeof spyOn>;
+    let getGlobalPathSpy: ReturnType<typeof spyOn>;
+    let getProjectsBaseSpy: ReturnType<typeof spyOn>;
+    let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+    let loadConfigSpy: ReturnType<typeof spyOn>;
+
     beforeEach(() => {
         APNsService.resetInstance();
-        mockSend.mockClear();
-        mockGetConfig.mockClear();
-        mockNip44Decrypt.mockClear();
-        mockReadJsonFile.mockClear();
-        mockWriteJsonFile.mockClear();
+        mockSend.mockReset().mockImplementation((_token: string, _payload: unknown) =>
+            Promise.resolve({ success: true, statusCode: 200 })
+        );
+        mockGetConfig.mockReset().mockImplementation(() => ({
+            apns: {
+                enabled: true,
+                keyPath: "/tmp/test-key.p8",
+                keyId: "TESTKEY123",
+                teamId: "TESTTEAM",
+                bundleId: "com.test.tenex",
+                production: false,
+            },
+        }));
+        mockNip44Decrypt.mockReset().mockImplementation(
+            (_senderPubkey: string, _content: string, _signer: unknown) => Promise.resolve("{}")
+        );
+        mockReadJsonFile.mockReset().mockImplementation((_path: string) => Promise.resolve(null));
+        mockWriteJsonFile.mockReset().mockImplementation(
+            (_path: string, _data: unknown) => Promise.resolve()
+        );
         capturedEventHandler = null;
+        getConfigSpy = spyOn(config, "getConfig").mockImplementation(mockGetConfig as never);
+        getBackendSignerSpy = spyOn(config, "getBackendSigner").mockResolvedValue(
+            mockBackendSigner as never
+        );
+        getConfigPathSpy = spyOn(config, "getConfigPath").mockImplementation(
+            (..._args: any[]) => "/tmp/test-apns"
+        );
+        getGlobalPathSpy = spyOn(config, "getGlobalPath").mockImplementation(
+            (..._args: any[]) => "/tmp/test-apns"
+        );
+        getProjectsBaseSpy = spyOn(config, "getProjectsBase").mockImplementation(
+            (..._args: any[]) => "/tmp/test-apns/projects"
+        );
+        getContextManagementConfigSpy = spyOn(
+            config,
+            "getContextManagementConfig"
+        ).mockImplementation(() => undefined);
+        loadConfigSpy = spyOn(config, "loadConfig").mockResolvedValue({
+            config: mockGetConfig(),
+        } as never);
+        spyOn(ndkClientModule, "getNDK").mockReturnValue({
+            subscribe: mock((_filter: unknown, opts: { onEvent?: (event: unknown) => void }) => {
+                if (opts?.onEvent) {
+                    capturedEventHandler = opts.onEvent;
+                }
+                return {
+                    stop: mock(() => {}),
+                };
+            }),
+        } as any);
+        spyOn(encryptionModule, "nip44Decrypt").mockImplementation(mockNip44Decrypt as never);
+        spyOn(filesystemModule, "readJsonFile").mockImplementation(mockReadJsonFile as never);
+        spyOn(filesystemModule, "writeJsonFile").mockImplementation(mockWriteJsonFile as never);
+        spyOn(logger, "info").mockImplementation(() => undefined);
+        spyOn(logger, "debug").mockImplementation(() => undefined);
+        spyOn(logger, "warn").mockImplementation(() => undefined);
+        spyOn(logger, "error").mockImplementation(() => undefined);
 
         // Default: no persisted tokens
         mockReadJsonFile.mockReturnValue(Promise.resolve(null));
@@ -144,7 +149,15 @@ describe("APNsService", () => {
     });
 
     afterEach(() => {
+        getConfigSpy?.mockRestore();
+        getBackendSignerSpy?.mockRestore();
+        getConfigPathSpy?.mockRestore();
+        getGlobalPathSpy?.mockRestore();
+        getProjectsBaseSpy?.mockRestore();
+        getContextManagementConfigSpy?.mockRestore();
+        loadConfigSpy?.mockRestore();
         APNsService.resetInstance();
+        mock.restore();
     });
 
     describe("initialization", () => {

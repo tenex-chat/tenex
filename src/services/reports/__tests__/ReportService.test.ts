@@ -1,26 +1,12 @@
-import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as projectsModule from "@/services/projects";
+import { logger } from "@/utils/logger";
 
-// Mock dependencies before imports
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
-
-// Mock NDK
 const mockFetchEvents = mock();
 const mockNDK = {
     fetchEvents: mockFetchEvents,
 };
 
-mock.module("@/nostr", () => ({
-    getNDK: () => mockNDK,
-}));
-
-// Mock project context
 const mockProject = {
     tagId: () => "31933:projectpubkey:project-slug",
 };
@@ -50,19 +36,36 @@ const mockProjectContext = {
     ]),
 };
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => mockProjectContext,
-}));
-
 import { ReportService } from "../ReportService";
 
 describe("ReportService", () => {
     let reportService: ReportService;
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
+    let loggerInfoSpy: ReturnType<typeof spyOn>;
+    let loggerDebugSpy: ReturnType<typeof spyOn>;
+    let loggerWarnSpy: ReturnType<typeof spyOn>;
+    let loggerErrorSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         mockReportsCache.clear();
         mockFetchEvents.mockReset();
+        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockReturnValue(
+            mockProjectContext as never
+        );
+        loggerInfoSpy = spyOn(logger, "info").mockImplementation(() => {});
+        loggerDebugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+        loggerWarnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        loggerErrorSpy = spyOn(logger, "error").mockImplementation(() => {});
         reportService = new ReportService(mockNDK as any);
+    });
+
+    afterEach(() => {
+        getProjectContextSpy?.mockRestore();
+        loggerInfoSpy?.mockRestore();
+        loggerDebugSpy?.mockRestore();
+        loggerWarnSpy?.mockRestore();
+        loggerErrorSpy?.mockRestore();
+        mock.restore();
     });
 
     describe("readReport - cross-agent access", () => {

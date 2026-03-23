@@ -2,7 +2,7 @@
  * Message builder for converting ConversationStore entries to LLM messages.
  *
  * This module handles the complex logic of building ModelMessages from
- * ConversationEntry records, including:
+ * ConversationRecordInput records, including:
  * - Tool call/result ordering for AI SDK validation
  * - Orphaned tool call reconciliation
  * - Message deference during pending tool execution
@@ -12,9 +12,10 @@
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import { trace } from "@opentelemetry/api";
 import { buildConversationRecordId } from "./record-id";
+import { getConversationRecordAuthorPubkey } from "./record-author";
 import type { ConversationRecord, DelegationMarker } from "./types";
 import { renderConversationXml } from "@/conversations/formatters/utils/conversation-transcript-formatter";
-import { getPubkeyService } from "@/services/PubkeyService";
+import { getIdentityService } from "@/services/identity";
 import { convertToMultimodalContent, hasImageUrls } from "./utils/multimodal-content";
 import {
     createImageTracker,
@@ -28,6 +29,16 @@ export type AddressableModelMessage = ModelMessage & {
     sourceRecordId?: string;
     eventId?: string;
 };
+
+type ImageReplacementStats = {
+    replacedCount: number;
+    uniqueReplacedCount: number;
+};
+
+interface EntryMessageBuildResult {
+    message: ModelMessage;
+    imageReplacementStats?: ImageReplacementStats;
+}
 
 export interface MessageBuilderContext {
     /**
@@ -141,7 +152,8 @@ function deriveRole(
     if (entry.messageType === "tool-result") return "tool";
 
     // Text messages - assistant for own, user for everything else
-    if (entry.pubkey === viewingAgentPubkey) {
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
+    if (senderPubkey === viewingAgentPubkey) {
         return "assistant"; // Own messages
     }
 
@@ -149,16 +161,56 @@ function deriveRole(
 }
 
 /**
- * Resolve a display name through PubkeyService, falling back to its sync path.
- * This keeps all name formatting centralized in PubkeyService.
+ * Resolve a display name through IdentityService, falling back to its sync path.
+ * This keeps all name formatting centralized in the identity layer.
  */
 async function resolveDisplayName(pubkey: string): Promise<string> {
-    const pubkeyService = getPubkeyService();
+    const identityService = getIdentityService();
     try {
-        return await pubkeyService.getName(pubkey);
+        return await identityService.getName(pubkey);
     } catch {
-        return pubkeyService.getNameSync(pubkey);
+        return identityService.getNameSync(pubkey);
     }
+}
+
+function resolveDisplayNameSyncForEntry(
+    entry: ConversationRecord,
+    resolveDisplayName?: (pubkey: string) => string
+): string {
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
+
+    if (resolveDisplayName && senderPubkey) {
+        return resolveDisplayName(senderPubkey);
+    }
+
+    return getIdentityService().getDisplayNameSync({
+        principalId: entry.senderPrincipal?.id,
+        linkedPubkey: senderPubkey,
+        displayName: entry.senderPrincipal?.displayName,
+        username: entry.senderPrincipal?.username,
+        kind: entry.senderPrincipal?.kind,
+    });
+}
+
+function resolveRecipientDisplayNameSync(
+    entry: ConversationRecord,
+    index: number,
+    resolveDisplayName?: (pubkey: string) => string
+): string {
+    const recipientSnapshot = entry.targetedPrincipals?.[index];
+    const recipientPubkey = entry.targetedPubkeys?.[index];
+
+    if (resolveDisplayName && recipientPubkey) {
+        return resolveDisplayName(recipientPubkey);
+    }
+
+    return getIdentityService().getDisplayNameSync({
+        principalId: recipientSnapshot?.id,
+        linkedPubkey: recipientSnapshot?.linkedPubkey ?? recipientPubkey,
+        displayName: recipientSnapshot?.displayName,
+        username: recipientSnapshot?.username,
+        kind: recipientSnapshot?.kind,
+    });
 }
 
 /**
@@ -175,26 +227,25 @@ async function resolveDisplayName(pubkey: string): Promise<string> {
  * 5. Otherwise (user message targeted to me, or no targeting) → "" (no prefix)
  *
  * **Purity note:** This function is pure when a custom `resolveDisplayName` is provided
- * (as done in unit tests). The default resolver calls `PubkeyService.getNameSync()`, which
- * reads from a global service singleton—this is intentional for production use but means
- * the default invocation is not referentially transparent.
+ * (as done in unit tests). The default resolver calls `IdentityService.getNameSync()`,
+ * which reads from a global service singleton. That is intentional for production use
+ * but means the default invocation is not referentially transparent.
  *
  * @param entry - The conversation entry to compute prefix for
  * @param viewingAgentPubkey - The pubkey of the agent viewing/building messages
  * @param agentPubkeys - Set of pubkeys that belong to agents (used to distinguish agents from users)
- * @param resolveDisplayName - Optional injectable name resolver (defaults to PubkeyService.getNameSync)
+ * @param resolveDisplayName - Optional injectable name resolver (defaults to IdentityService.getNameSync)
  * @returns The prefix string to prepend, or empty string for no prefix
  */
 export function computeAttributionPrefix(
     entry: ConversationRecord,
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
-    resolveDisplayName?: (pubkey: string) => string
+    resolveDisplayName?: (pubkey: string) => string,
+    multipleHumanSenders: boolean = false
 ): string {
-    const resolve = resolveDisplayName ?? ((pk: string) => getPubkeyService().getNameSync(pk));
-
     // Determine the actual sender (injected messages track original sender via senderPubkey)
-    const senderPubkey = entry.senderPubkey ?? entry.pubkey;
+    const senderPubkey = getConversationRecordAuthorPubkey(entry);
 
     // Rule 1: Self message → no prefix
     if (senderPubkey === viewingAgentPubkey) return "";
@@ -206,23 +257,55 @@ export function computeAttributionPrefix(
     // Rule 3: Has targetedPubkeys NOT including viewing agent → routing prefix
     const targetedPubkeys = entry.targetedPubkeys ?? [];
     if (targetedPubkeys.length > 0 && !targetedPubkeys.includes(viewingAgentPubkey)) {
-        const senderName = resolve(senderPubkey);
-        const recipientName = resolve(targetedPubkeys[0]);
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
+        const recipientName = resolveRecipientDisplayNameSync(entry, 0, resolveDisplayName);
         return `[@${senderName} -> @${recipientName}] `;
     }
 
     // Rule 4: Sender is agent → attribution prefix
-    if (agentPubkeys.has(senderPubkey)) {
-        const senderName = resolve(senderPubkey);
+    if (senderPubkey && agentPubkeys.has(senderPubkey)) {
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
         return `[@${senderName}] `;
     }
 
-    // Rule 5: Otherwise (user message targeted to me, or no targeting) → no prefix
+    // Rule 5: Multiple visible human senders → explicit human attribution
+    if (multipleHumanSenders && entry.senderPrincipal?.kind === "human") {
+        const senderName = resolveDisplayNameSyncForEntry(entry, resolveDisplayName);
+        return `[@${senderName}] `;
+    }
+
+    // Rule 6: Otherwise (user message targeted to me, or no targeting) → no prefix
     return "";
 }
 
+function hasMultipleHumanSenders(
+    entries: ConversationRecord[],
+    viewingAgentPubkey: string,
+    agentPubkeys: Set<string>
+): boolean {
+    const humanSenderIds = new Set<string>();
+
+    for (const entry of entries) {
+        if (entry.messageType !== "text" || entry.role || entry.senderPrincipal?.kind !== "human") {
+            continue;
+        }
+
+        const senderPubkey = getConversationRecordAuthorPubkey(entry);
+        if (senderPubkey === viewingAgentPubkey || (senderPubkey && agentPubkeys.has(senderPubkey))) {
+            continue;
+        }
+
+        humanSenderIds.add(entry.senderPrincipal.id);
+        if (humanSenderIds.size > 1) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /**
- * Convert a ConversationEntry to a ModelMessage for the viewing agent.
+ * Convert a ConversationRecordInput to a ModelMessage for the viewing agent.
  *
  * Attribution prefixes are added for multi-agent shared conversations using
  * computeAttributionPrefix() to help the LLM distinguish who said what.
@@ -241,12 +324,13 @@ async function entryToMessage(
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
+    multipleHumanSenders: boolean,
     enableMultimodal: boolean = true
-): Promise<ModelMessage> {
+): Promise<EntryMessageBuildResult> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
     if (entry.messageType === "tool-call" && entry.toolData) {
-        return { role: "assistant", content: entry.toolData as ToolCallPart[] };
+        return { message: { role: "assistant", content: entry.toolData as ToolCallPart[] } };
     }
 
     if (entry.messageType === "tool-result" && entry.toolData) {
@@ -259,17 +343,25 @@ async function entryToMessage(
         const toolData = imageProcessingResult.processedParts;
 
         return {
-            role: "tool",
-            content: toolData,
-            _imageReplacementStats: imageProcessingResult.replacedCount > 0
+            message: {
+                role: "tool",
+                content: toolData,
+            },
+            imageReplacementStats: imageProcessingResult.replacedCount > 0
                 ? { replacedCount: imageProcessingResult.replacedCount, uniqueReplacedCount: imageProcessingResult.uniqueReplacedCount }
                 : undefined,
-        } as unknown as ModelMessage;
+        };
     }
 
     // Text message - compute attribution prefix for multi-agent conversations
-    const prefix = computeAttributionPrefix(entry, viewingAgentPubkey, agentPubkeys);
-    let messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
+    const prefix = computeAttributionPrefix(
+        entry,
+        viewingAgentPubkey,
+        agentPubkeys,
+        undefined,
+        multipleHumanSenders
+    );
+    const messageContent = prefix ? `${prefix}${entry.content}` : entry.content;
 
     // Track any images in text messages (but don't replace them - user content)
     // This ensures that if the same image appears later in a tool result,
@@ -291,7 +383,7 @@ async function entryToMessage(
     // the LLM has already seen them, no need to re-fetch and waste context window on image tokens.
     const content = (role === "user" && enableMultimodal) ? convertToMultimodalContent(messageContent) : messageContent;
 
-    return { role, content } as ModelMessage;
+    return { message: { role, content } as ModelMessage };
 }
 
 /**
@@ -439,6 +531,7 @@ export async function buildMessagesFromEntries(
     // Image placeholder strategy: Track seen images across all messages
     // First appearance = full image, subsequent = placeholder
     const imageTracker = createImageTracker();
+    const imageReplacementStatsByMessage = new Map<ModelMessage, ImageReplacementStats>();
 
     // Track latest delegation completion for each RAL (to prune superseded ones)
     const latestDelegationCompletionIndexByRal = new Map<number, number>();
@@ -472,6 +565,37 @@ export async function buildMessagesFromEntries(
             lastUserImageEntryIndex = i;
         }
     }
+
+    const multipleHumanSenders = hasMultipleHumanSenders(
+        entries,
+        viewingAgentPubkey,
+        agentPubkeys
+    );
+
+    const buildEntryMessage = async (
+        entry: ConversationRecord,
+        absoluteIndex: number,
+        enableMultimodal: boolean
+    ): Promise<ModelMessage> => {
+        const builtMessage = await entryToMessage(
+            entry,
+            viewingAgentPubkey,
+            agentPubkeys,
+            imageTracker,
+            multipleHumanSenders,
+            enableMultimodal
+        );
+        const message = withMessageIdentity(
+            builtMessage.message,
+            entry,
+            absoluteIndex,
+            includeMessageIds
+        );
+        if (builtMessage.imageReplacementStats) {
+            imageReplacementStatsByMessage.set(message, builtMessage.imageReplacementStats);
+        }
+        return message;
+    };
 
     let prunedDelegationCompletions = 0;
 
@@ -545,7 +669,7 @@ export async function buildMessagesFromEntries(
             if (!entry.ral) return true;
 
             // Same agent
-            if (entry.pubkey === viewingAgentPubkey) {
+            if (getConversationRecordAuthorPubkey(entry) === viewingAgentPubkey) {
                 if (entry.ral === ralNumber) return true; // Current RAL
                 if (activeRals.has(entry.ral)) return false; // Other active RAL - skip
                 return true; // Completed RAL
@@ -560,12 +684,7 @@ export async function buildMessagesFromEntries(
         // TOOL-CALL: Add to result and register as pending
         if (entry.messageType === "tool-call" && entry.toolData) {
             const resultIndex = result.length;
-            result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, true));
 
             for (const part of entry.toolData as ToolCallPart[]) {
                 pendingToolCalls.set(part.toolCallId, {
@@ -591,12 +710,7 @@ export async function buildMessagesFromEntries(
                 continue;
             }
 
-            result.push(withMessageIdentity(
-                await entryToMessage(entry, viewingAgentPubkey, agentPubkeys, imageTracker),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, true));
 
             for (const part of parts) {
                 pendingToolCalls.delete(part.toolCallId);
@@ -605,17 +719,10 @@ export async function buildMessagesFromEntries(
             // All tool-calls resolved - flush deferred messages now
             if (pendingToolCalls.size === 0 && deferredMessages.length > 0) {
                 for (const deferred of deferredMessages) {
-                    result.push(withMessageIdentity(
-                        await entryToMessage(
-                            deferred.entry,
-                            viewingAgentPubkey,
-                            agentPubkeys,
-                            imageTracker,
-                            deferred.enableMultimodal
-                        ),
+                    result.push(await buildEntryMessage(
                         deferred.entry,
                         deferred.absoluteIndex,
-                        includeMessageIds
+                        deferred.enableMultimodal
                     ));
                 }
                 deferredMessages.length = 0;
@@ -724,18 +831,7 @@ export async function buildMessagesFromEntries(
         if (pendingToolCalls.size > 0) {
             deferredMessages.push({ entry, enableMultimodal, absoluteIndex });
         } else {
-            result.push(withMessageIdentity(
-                await entryToMessage(
-                    entry,
-                    viewingAgentPubkey,
-                    agentPubkeys,
-                    imageTracker,
-                    enableMultimodal
-                ),
-                entry,
-                absoluteIndex,
-                includeMessageIds
-            ));
+            result.push(await buildEntryMessage(entry, absoluteIndex, enableMultimodal));
         }
     }
 
@@ -793,17 +889,10 @@ export async function buildMessagesFromEntries(
 
     // Flush any remaining deferred messages
     for (const deferred of deferredMessages) {
-        result.push(withMessageIdentity(
-            await entryToMessage(
-                deferred.entry,
-                viewingAgentPubkey,
-                agentPubkeys,
-                imageTracker,
-                deferred.enableMultimodal
-            ),
+        result.push(await buildEntryMessage(
             deferred.entry,
             deferred.absoluteIndex,
-            includeMessageIds
+            deferred.enableMultimodal
         ));
     }
 
@@ -814,17 +903,14 @@ export async function buildMessagesFromEntries(
         });
     }
 
-    // Image placeholder telemetry: Aggregate replacement statistics
-    // The _imageReplacementStats field is set during entryToMessage for tool-result messages
+    // Image placeholder telemetry: Aggregate replacement statistics.
     let totalReplacedCount = 0;
     let totalUniqueReplacedCount = 0;
     for (const msg of result) {
-        const stats = (msg as unknown as { _imageReplacementStats?: { replacedCount: number; uniqueReplacedCount: number } })._imageReplacementStats;
+        const stats = imageReplacementStatsByMessage.get(msg);
         if (stats) {
             totalReplacedCount += stats.replacedCount;
             totalUniqueReplacedCount += stats.uniqueReplacedCount;
-            // Clean up the internal field (don't send to API)
-            delete (msg as unknown as { _imageReplacementStats?: unknown })._imageReplacementStats;
         }
     }
 

@@ -47,6 +47,7 @@ import { createLessonLearnTool } from "./implementations/learn";
 import { createLessonDeleteTool } from "./implementations/lesson_delete";
 import { createLessonGetTool } from "./implementations/lesson_get";
 import { createLessonsListTool } from "./implementations/lessons_list";
+import { createNoResponseTool } from "./implementations/no_response";
 import { createProjectListTool } from "./implementations/project_list";
 import { createRAGAddDocumentsTool } from "./implementations/rag_add_documents";
 import { createRAGCreateCollectionTool } from "./implementations/rag_create_collection";
@@ -237,6 +238,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     shell: createShellTool,
     kill: createKillTool,
+    no_response: createNoResponseTool,
 
     // Upload tools
     upload_blob: createUploadBlobTool,

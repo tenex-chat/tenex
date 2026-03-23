@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as projectsModule from "@/services/projects";
 import type { ToolExecutionContext } from "@/tools/types";
 
 // Mock dependencies before imports
@@ -18,10 +19,6 @@ const projectContextMocks = {
     getAgentByPubkey: mock(),
 };
 
-mock.module("@/services/projects", () => ({
-    getProjectContext: () => projectContextMocks,
-}));
-
 import { createLessonsListTool } from "../lessons_list";
 
 describe("Lessons List Tool", () => {
@@ -29,6 +26,7 @@ describe("Lessons List Tool", () => {
     const MOCK_PUBKEY_1 = "0".repeat(64);
     const MOCK_PUBKEY_2 = "1".repeat(64);
     const MOCK_PUBKEY_UNKNOWN = "f".repeat(64);
+    let getProjectContextSpy: ReturnType<typeof spyOn>;
 
     const createMockContext = (
         overrides: Partial<ToolExecutionContext> = {}
@@ -43,7 +41,7 @@ describe("Lessons List Tool", () => {
             } as any,
             conversationId: "mock-conversation-id",
             conversationCoordinator: {} as any,
-            triggeringEvent: {
+            triggeringEnvelope: {
                 id: "mock-triggering-event-id",
                 tags: [],
             } as any,
@@ -77,6 +75,13 @@ describe("Lessons List Tool", () => {
         projectContextMocks.getAllLessons.mockReset();
         projectContextMocks.getLessonsForAgent.mockReset();
         projectContextMocks.getAgentByPubkey.mockReset();
+        getProjectContextSpy = spyOn(projectsModule, "getProjectContext").mockReturnValue(
+            projectContextMocks as never
+        );
+    });
+
+    afterEach(() => {
+        getProjectContextSpy?.mockRestore();
     });
 
     describe("listing lessons (default: calling agent only)", () => {

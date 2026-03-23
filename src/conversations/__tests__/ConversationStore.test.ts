@@ -10,13 +10,17 @@
  * - Nostr event hydration
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdir, rm, readFile, writeFile } from "fs/promises";
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
 import { join } from "path";
 import type { ToolCallPart, ToolResultPart } from "ai";
+import { NDKKind } from "@nostr-dev-kit/ndk";
+import * as pubkeyServiceModule from "@/services/PubkeyService";
+import { createMockInboundEnvelope } from "@/test-utils/mock-factories";
 import {
     ConversationStore,
-    type ConversationEntry,
+    type ConversationRecordInput,
     type Injection,
 } from "../ConversationStore";
 
@@ -41,36 +45,36 @@ const mockGetNameSync = mock((pubkey: string) => {
     return mockPubkeyNames[pubkey] ?? "Unknown";
 });
 
-mock.module("@/services/PubkeyService", () => ({
-    getPubkeyService: () => ({
-        getName: mockGetName,
-        getNameSync: mockGetNameSync,
-    }),
-}));
-
 describe("ConversationStore", () => {
-    const TEST_DIR = "/tmp/tenex-test-conversations";
     const PROJECT_ID = "test-project";
     const CONVERSATION_ID = "conv-123";
     const AGENT1_PUBKEY = "agent1-pubkey-abc";
     const AGENT2_PUBKEY = "agent2-pubkey-def";
     const USER_PUBKEY = "user-pubkey-xyz";
 
+    let testDir: string;
     let store: ConversationStore;
 
     beforeEach(async () => {
-        await mkdir(TEST_DIR, { recursive: true });
-        store = new ConversationStore(TEST_DIR);
+        testDir = await mkdtemp(join(tmpdir(), "tenex-test-conversations-"));
+        mockGetName.mockClear();
+        mockGetNameSync.mockClear();
+        spyOn(pubkeyServiceModule, "getPubkeyService").mockReturnValue({
+            getName: mockGetName,
+            getNameSync: mockGetNameSync,
+        } as any);
+        store = new ConversationStore(testDir);
     });
 
     afterEach(async () => {
-        await rm(TEST_DIR, { recursive: true, force: true });
+        mock.restore();
+        await rm(testDir, { recursive: true, force: true });
     });
 
     describe("File Operations", () => {
         it("should create conversation file on first save", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
-            const entry: ConversationEntry = {
+            const entry: ConversationRecordInput = {
                 pubkey: USER_PUBKEY,
                 content: "hello",
                 messageType: "text",
@@ -79,7 +83,7 @@ describe("ConversationStore", () => {
             await store.save();
 
             const filePath = join(
-                TEST_DIR,
+                testDir,
                 PROJECT_ID,
                 "conversations",
                 `${CONVERSATION_ID}.json`
@@ -102,7 +106,7 @@ describe("ConversationStore", () => {
             await store.save();
 
             // Create new store instance and load
-            const store2 = new ConversationStore(TEST_DIR);
+            const store2 = new ConversationStore(testDir);
             store2.load(PROJECT_ID, CONVERSATION_ID);
 
             const messages = store2.getAllMessages();
@@ -111,7 +115,7 @@ describe("ConversationStore", () => {
         });
 
         it("backfills canonical record ids for legacy stored messages", async () => {
-            const conversationsDir = join(TEST_DIR, PROJECT_ID, "conversations");
+            const conversationsDir = join(testDir, PROJECT_ID, "conversations");
             await mkdir(conversationsDir, { recursive: true });
             await writeFile(
                 join(conversationsDir, `${CONVERSATION_ID}.json`),
@@ -140,6 +144,43 @@ describe("ConversationStore", () => {
             expect(store.getAllMessages()[0].id).toBe("record:evt-1");
         });
 
+        it("migrates legacy last_user_message metadata to lastUserMessage", async () => {
+            const conversationsDir = join(testDir, PROJECT_ID, "conversations");
+            await mkdir(conversationsDir, { recursive: true });
+            await writeFile(
+                join(conversationsDir, `${CONVERSATION_ID}.json`),
+                JSON.stringify({
+                    activeRal: {},
+                    nextRalNumber: {},
+                    injections: [],
+                    messages: [],
+                    metadata: {
+                        title: "Transport runtime",
+                        last_user_message: "Legacy field value",
+                    },
+                    agentTodos: {},
+                    todoNudgedAgents: [],
+                    blockedAgents: [],
+                    executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
+                }, null, 2)
+            );
+
+            store.load(PROJECT_ID, CONVERSATION_ID);
+            expect(store.metadata.lastUserMessage).toBe("Legacy field value");
+
+            await store.save();
+
+            const saved = JSON.parse(
+                await readFile(
+                    join(conversationsDir, `${CONVERSATION_ID}.json`),
+                    "utf-8"
+                )
+            );
+
+            expect(saved.metadata.lastUserMessage).toBe("Legacy field value");
+            expect(saved.metadata.last_user_message).toBeUndefined();
+        });
+
         it("persists context-management scratchpads per agent", async () => {
             store.load(PROJECT_ID, CONVERSATION_ID);
 
@@ -155,7 +196,7 @@ describe("ConversationStore", () => {
             });
             await store.save();
 
-            const store2 = new ConversationStore(TEST_DIR);
+            const store2 = new ConversationStore(testDir);
             store2.load(PROJECT_ID, CONVERSATION_ID);
 
             expect(store2.getContextManagementScratchpad(AGENT1_PUBKEY)).toEqual({
@@ -205,7 +246,7 @@ describe("ConversationStore", () => {
         });
 
         it("migrates legacy scratchpad notes into structured entries on load", async () => {
-            const conversationDir = join(TEST_DIR, PROJECT_ID, "conversations");
+            const conversationDir = join(testDir, PROJECT_ID, "conversations");
             await mkdir(conversationDir, { recursive: true });
             await writeFile(
                 join(conversationDir, `${CONVERSATION_ID}.json`),
@@ -948,7 +989,18 @@ describe("ConversationStore", () => {
             const result = store.relocateToEnd("evt-1", {
                 ral: 1,
                 senderPubkey: USER_PUBKEY,
+                senderPrincipal: {
+                    id: "telegram:user:42",
+                    transport: "telegram",
+                    displayName: "Alice Telegram",
+                },
                 targetedPubkeys: [AGENT1_PUBKEY],
+                targetedPrincipals: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    displayName: "agent-one",
+                }],
             });
 
             expect(result).toBe(true);
@@ -962,11 +1014,114 @@ describe("ConversationStore", () => {
             expect(last.eventId).toBe("evt-1");
             expect(last.ral).toBe(1);
             expect(last.senderPubkey).toBe(USER_PUBKEY);
+            expect(last.senderPrincipal?.displayName).toBe("Alice Telegram");
             expect(last.targetedPubkeys).toEqual([AGENT1_PUBKEY]);
+            expect(last.targetedPrincipals?.[0]?.displayName).toBe("agent-one");
 
             // Tool messages should be first two
             expect(messages[0].messageType).toBe("tool-call");
             expect(messages[1].messageType).toBe("tool-result");
+        });
+
+        it("should preserve principal snapshots when storing event messages", () => {
+            const fakeEnvelope = createMockInboundEnvelope({
+                principal: {
+                    id: USER_PUBKEY,
+                    transport: "nostr",
+                    linkedPubkey: USER_PUBKEY,
+                    kind: "human",
+                },
+                message: {
+                    id: "evt-principal-1",
+                    transport: "nostr",
+                    nativeId: "evt-principal-1",
+                },
+                content: "hello from telegram-linked user",
+                occurredAt: 123,
+                metadata: {
+                    eventKind: NDKKind.Text,
+                    eventTagCount: 1,
+                    replyTargets: [],
+                    articleReferences: [],
+                    nudgeEventIds: [],
+                    skillEventIds: [],
+                },
+                recipients: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    kind: "agent",
+                }],
+            });
+
+            store.addEnvelopeMessage(fakeEnvelope, false, {
+                senderPrincipal: {
+                    id: "telegram:user:55",
+                    transport: "telegram",
+                    linkedPubkey: USER_PUBKEY,
+                    displayName: "Alice Telegram",
+                },
+                targetedPrincipals: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    displayName: "agent-one",
+                }],
+            });
+
+            const [message] = store.getAllMessages();
+            expect(message.senderPrincipal?.id).toBe("telegram:user:55");
+            expect(message.senderPrincipal?.displayName).toBe("Alice Telegram");
+            expect(message.targetedPrincipals?.[0]?.id).toBe(`nostr:${AGENT1_PUBKEY}`);
+            expect(message.targetedPrincipals?.[0]?.displayName).toBe("agent-one");
+        });
+
+        it("does not persist transport principal ids into pubkey for transport-only senders", () => {
+            const fakeEnvelope = createMockInboundEnvelope({
+                principal: {
+                    id: "telegram:user:88",
+                    transport: "telegram",
+                    linkedPubkey: undefined,
+                    kind: "human",
+                },
+                message: {
+                    id: "evt-transport-user-1",
+                    transport: "telegram",
+                    nativeId: "evt-transport-user-1",
+                },
+                content: "hello from telegram-only user",
+                occurredAt: 456,
+                metadata: {
+                    eventKind: NDKKind.Text,
+                    eventTagCount: 1,
+                    replyTargets: [],
+                    articleReferences: [],
+                    nudgeEventIds: [],
+                    skillEventIds: [],
+                },
+                recipients: [{
+                    id: `nostr:${AGENT1_PUBKEY}`,
+                    transport: "nostr",
+                    linkedPubkey: AGENT1_PUBKEY,
+                    kind: "agent",
+                }],
+            });
+
+            store.addEnvelopeMessage(fakeEnvelope, false, {
+                senderPrincipal: {
+                    id: "telegram:user:88",
+                    transport: "telegram",
+                    displayName: "Telegram User",
+                },
+            });
+
+            const [message] = store.getAllMessages();
+            expect(message.pubkey).toBe("");
+            expect(message.senderPubkey).toBeUndefined();
+            expect(message.senderPrincipal?.id).toBe("telegram:user:88");
+            expect(message.senderPrincipal?.displayName).toBe("Telegram User");
+            expect(store.getRootAuthorPubkey()).toBeUndefined();
+            expect(store.getFirstUserMessage()?.senderPrincipal?.id).toBe("telegram:user:88");
         });
 
         it("should return false when eventId is not found", () => {
@@ -991,7 +1146,7 @@ describe("ConversationStore", () => {
             store.completeRal(AGENT1_PUBKEY, 1);
             await store.save();
 
-            const store2 = new ConversationStore(TEST_DIR);
+            const store2 = new ConversationStore(testDir);
             store2.load(PROJECT_ID, CONVERSATION_ID);
 
             expect(store2.getActiveRals(AGENT1_PUBKEY)).toEqual([2]);
@@ -1009,7 +1164,7 @@ describe("ConversationStore", () => {
             });
             await store.save();
 
-            const store2 = new ConversationStore(TEST_DIR);
+            const store2 = new ConversationStore(testDir);
             store2.load(PROJECT_ID, CONVERSATION_ID);
 
             const injections = store2.getPendingInjections(AGENT1_PUBKEY, 1);
@@ -1023,7 +1178,7 @@ describe("ConversationStore", () => {
             store.createRal(AGENT1_PUBKEY);
             await store.save();
 
-            const store2 = new ConversationStore(TEST_DIR);
+            const store2 = new ConversationStore(testDir);
             store2.load(PROJECT_ID, CONVERSATION_ID);
             const nextRal = store2.createRal(AGENT1_PUBKEY);
 
@@ -1044,7 +1199,7 @@ describe("ConversationStore", () => {
 
         beforeEach(() => {
             // Reset agent registry to empty set to prevent inter-test leakage
-            ConversationStore.initialize(TEST_DIR);
+            ConversationStore.initialize(testDir);
             store.load(PROJECT_ID, CONVERSATION_ID);
             mockGetNameSync.mockClear();
         });
@@ -1121,7 +1276,7 @@ describe("ConversationStore", () => {
 
         it("should add attribution prefix when sender is a known agent", async () => {
             // Register agents for this test (beforeEach resets to empty)
-            ConversationStore.initialize(TEST_DIR, [AGENT1_PUBKEY, "agent2-pk"]);
+            ConversationStore.initialize(testDir, [AGENT1_PUBKEY, "agent2-pk"]);
 
             store.addMessage({
                 pubkey: OWNER_PUBKEY,

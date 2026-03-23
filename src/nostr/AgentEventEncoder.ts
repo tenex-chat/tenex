@@ -52,27 +52,29 @@ export class AgentEventEncoder {
      *
      * The recipient resolution is done by createEventContext() in EventContextService
      * (services/event-context/, layer 3) which has access to ConversationStore. This
-     * method just uses the pre-resolved value or falls back to triggeringEvent.pubkey
+     * method just uses the pre-resolved value or falls back to triggeringEnvelope.principal.linkedPubkey
      * for direct conversations.
      *
-     * @param context - The event context containing completionRecipientPubkey or triggeringEvent
+     * @param context - The event context containing completionRecipientPubkey or triggeringEnvelope
      * @returns The pubkey to use for the completion p-tag
      */
-    private getCompletionRecipientPubkey(context: EventContext): string {
+    private getCompletionRecipientPubkey(context: EventContext): string | undefined {
+        const fallbackPubkey = context.triggeringEnvelope.principal.linkedPubkey;
+
         // Use pre-resolved recipient if available (set by createEventContext from delegation chain)
         if (context.completionRecipientPubkey) {
             logger.debug("Completion routing via pre-resolved recipient", {
                 conversationId: context.conversationId.substring(0, 12),
                 recipientPubkey: context.completionRecipientPubkey.substring(0, 8),
-                triggeringEventPubkey: context.triggeringEvent.pubkey.substring(0, 8),
-                usingPreResolved: context.completionRecipientPubkey !== context.triggeringEvent.pubkey,
+                triggeringEventPubkey: fallbackPubkey?.substring(0, 8),
+                usingPreResolved: context.completionRecipientPubkey !== fallbackPubkey,
             });
             return context.completionRecipientPubkey;
         }
 
         // No pre-resolved recipient - fall back to triggering event pubkey
         // This is the correct behavior for direct user conversations
-        return context.triggeringEvent.pubkey;
+        return fallbackPubkey;
     }
 
     /**
@@ -80,12 +82,12 @@ export class AgentEventEncoder {
      * Ensures agents carry forward the branch context from the message they're replying to.
      */
     public forwardBranchTag(event: NDKEvent, context: EventContext): void {
-        const branchTag = context.triggeringEvent.tags.find((tag) => tag[0] === "branch" && tag[1]);
-        if (branchTag) {
-            event.tag(["branch", branchTag[1]]);
+        const branchName = context.triggeringEnvelope.metadata.branchName;
+        if (branchName) {
+            event.tag(["branch", branchName]);
             logger.debug("Forwarding branch tag", {
-                branch: branchTag[1],
-                fromEvent: context.triggeringEvent.id?.substring(0, 8),
+                branch: branchName,
+                fromEvent: context.triggeringEnvelope.message.nativeId.substring(0, 8),
             });
         }
     }
@@ -95,9 +97,9 @@ export class AgentEventEncoder {
      * Completions have p-tag (triggers notification) and status=completed.
      *
      * IMPORTANT: For delegation contexts, the p-tag targets the immediate delegator
-     * (second-to-last entry in the delegation chain), NOT the triggeringEvent.pubkey.
+     * (second-to-last entry in the delegation chain), NOT the triggeringEnvelope.pubkey.
      * This ensures completions route back up the delegation stack even when RAL state
-     * is lost and the execution restarts with a fresh triggeringEvent (e.g., after
+     * is lost and the execution restarts with a fresh triggeringEnvelope (e.g., after
      * a human responds to an "ask" hours later).
      */
     encodeCompletion(intent: CompletionIntent, context: EventContext): NDKEvent {
@@ -109,7 +111,15 @@ export class AgentEventEncoder {
 
         // Determine the correct p-tag recipient
         const recipientPubkey = this.getCompletionRecipientPubkey(context);
-        event.tag(["p", recipientPubkey]);
+        if (recipientPubkey) {
+            event.tag(["p", recipientPubkey]);
+        } else {
+            logger.warn("Completion event published without recipient p-tag", {
+                conversationId: context.conversationId?.substring(0, 12),
+                triggeringPrincipalId: context.triggeringEnvelope.principal.id,
+                transport: context.triggeringEnvelope.transport,
+            });
+        }
         event.tag(["status", "completed"]);
 
         if (intent.usage) {
@@ -134,8 +144,8 @@ export class AgentEventEncoder {
 
         logger.debug("Encoded completion event", {
             eventId: event.id,
-            recipientPubkey: recipientPubkey.substring(0, 8),
-            triggeringEventPubkey: context.triggeringEvent.pubkey?.substring(0, 8),
+            recipientPubkey: recipientPubkey?.substring(0, 8),
+            triggeringEventPubkey: context.triggeringEnvelope.principal.linkedPubkey?.substring(0, 8),
             conversationId: context.conversationId?.substring(0, 12),
         });
 
@@ -371,7 +381,16 @@ export class AgentEventEncoder {
         event.tag(["error", intent.errorType || "system"]);
 
         // Error events are finalization events - notify the user
-        event.tag(["p", context.triggeringEvent.pubkey]);
+        const recipientPubkey = context.triggeringEnvelope.principal.linkedPubkey;
+        if (recipientPubkey) {
+            event.tag(["p", recipientPubkey]);
+        } else {
+            logger.warn("Error event published without recipient p-tag", {
+                conversationId: context.conversationId?.substring(0, 12),
+                triggeringPrincipalId: context.triggeringEnvelope.principal.id,
+                transport: context.triggeringEnvelope.transport,
+            });
+        }
         event.tag(["status", "completed"]);
 
         // Add standard metadata

@@ -9,4 +9,4 @@ User-facing CLI commands. Thin wrappers that parse input, delegate to services, 
 - `agent/` — Agent management subcommands
 - `setup/` — Onboarding flows (interactive setup, LLM config, embedding config)
 
-Commands are wired via Commander in `src/cli.ts`.
+Commands are wired via Commander in `src/index.ts`.

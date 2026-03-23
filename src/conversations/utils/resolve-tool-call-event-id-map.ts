@@ -1,6 +1,6 @@
-import type { ConversationEntry } from "@/conversations/types";
+import type { ConversationRecordInput } from "@/conversations/types";
 
-export function resolveToolCallEventIdMap(entries: ConversationEntry[]): Map<string, string> {
+export function resolveToolCallEventIdMap(entries: ConversationRecordInput[]): Map<string, string> {
     const result = new Map<string, string>();
 
     for (const entry of entries) {

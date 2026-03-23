@@ -11,10 +11,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-mock.module("@/utils/error-handler", () => ({
-    handleError: () => {},
-}));
-
 // Mock RAGService
 const ragServiceMocks = {
     listCollections: mock(),
@@ -43,7 +39,7 @@ describe("rag_list_collections tool", () => {
             } as any,
             conversationId: "mock-conversation-id",
             conversationCoordinator: {} as any,
-            triggeringEvent: {
+            triggeringEnvelope: {
                 id: "mock-triggering-event-id",
                 tags: [],
             } as any,

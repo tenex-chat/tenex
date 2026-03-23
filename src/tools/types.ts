@@ -1,8 +1,8 @@
 import type { AgentInstance } from "@/agents/types";
 import type { ConversationStore } from "@/conversations/ConversationStore";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import type { AgentRuntimePublisher } from "@/events/runtime/AgentRuntimePublisher";
 import type { MCPManager } from "@/services/mcp/MCPManager";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { Tool as CoreTool } from "ai";
 
 export interface ToolTranscriptArgSpec {
@@ -72,6 +72,7 @@ export type ToolName =
     | "nostr_publish_as_user"
     | "change_model"
     | "kill"
+    | "no_response"
     | "generate_image";
 
 /**
@@ -122,7 +123,7 @@ export interface ExecutionEnvironment {
      * Example: "master", "feature/branch-name", "research/foo"
      */
     currentBranch: string;
-    triggeringEvent: NDKEvent;
+    triggeringEnvelope: InboundEnvelope;
     /**
      * Access to conversation state. May return undefined before full execution setup.
      */
@@ -135,7 +136,7 @@ export interface ExecutionEnvironment {
  * All runtime dependencies are REQUIRED, not optional.
  */
 export interface ToolExecutionContext extends ExecutionEnvironment {
-    agentPublisher: AgentPublisher;
+    agentPublisher: AgentRuntimePublisher;
     ralNumber: number;
 }
 

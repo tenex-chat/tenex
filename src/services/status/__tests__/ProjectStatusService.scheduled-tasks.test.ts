@@ -1,21 +1,13 @@
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { ProjectStatusService } from "../ProjectStatusService";
 import type { ScheduledTaskInfo, StatusIntent } from "@/nostr/types";
 import type { ProjectContext } from "@/services/projects";
 import type { AgentInstance } from "@/agents/types";
 import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { projectContextStore } from "@/services/projects";
+import { SchedulerService } from "@/services/scheduling/SchedulerService";
 
-// Mock SchedulerService
 const mockGetTasks = mock(() => Promise.resolve([]));
-
-mock.module("@/services/scheduling/SchedulerService", () => ({
-    SchedulerService: {
-        getInstance: () => ({
-            getTasks: mockGetTasks,
-        }),
-    },
-}));
 
 describe("ProjectStatusService scheduled task gathering", () => {
     function createMockProjectContext(options: {
@@ -68,6 +60,13 @@ describe("ProjectStatusService scheduled task gathering", () => {
     beforeEach(() => {
         mockGetTasks.mockReset();
         mockGetTasks.mockImplementation(() => Promise.resolve([]));
+        spyOn(SchedulerService, "getInstance").mockReturnValue({
+            getTasks: mockGetTasks,
+        } as any);
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     it("should not add scheduledTasks when there are no tasks", async () => {

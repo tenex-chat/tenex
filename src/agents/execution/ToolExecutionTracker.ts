@@ -12,11 +12,13 @@
 
 import { formatMcpToolName, isDelegateToolName, unwrapMcpToolName } from "@/agents/tool-names";
 import { toolMessageStorage } from "@/conversations/persistence/ToolMessageStorage";
+import type {
+    AgentRuntimePublisher,
+    PublishedMessageRef,
+} from "@/events/runtime/AgentRuntimePublisher";
 import type { EventContext } from "@/nostr/types";
-import type { AgentPublisher } from "@/nostr/AgentPublisher";
 import { PendingDelegationsRegistry } from "@/services/ral";
 import { logger } from "@/utils/logger";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { extractErrorDetails } from "./ToolResultUtils";
 
@@ -63,7 +65,7 @@ interface TrackedExecution {
     /** Event context for publishing (stored for delayed publishing) */
     eventContext?: EventContext;
     /** Agent publisher instance (stored for delayed publishing) */
-    agentPublisher?: AgentPublisher;
+    agentPublisher?: AgentRuntimePublisher;
 }
 
 /**
@@ -77,7 +79,7 @@ export interface TrackExecutionOptions {
     /** Arguments passed to the tool */
     args: unknown;
     /** Publisher for Nostr events */
-    agentPublisher: AgentPublisher;
+    agentPublisher: AgentRuntimePublisher;
     /** Context for event publishing */
     eventContext: EventContext;
     /** Cumulative usage from previous steps (if available) */
@@ -124,7 +126,7 @@ export class ToolExecutionTracker {
      *
      * @throws Will throw if Nostr event publishing fails
      */
-    async trackExecution(options: TrackExecutionOptions): Promise<NDKEvent | null> {
+    async trackExecution(options: TrackExecutionOptions): Promise<PublishedMessageRef | null> {
         const { toolCallId, toolName, args, agentPublisher, eventContext, usage } = options;
 
         logger.debug("[ToolExecutionTracker] Tracking new tool execution", {

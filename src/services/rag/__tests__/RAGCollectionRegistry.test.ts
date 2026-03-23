@@ -13,14 +13,6 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-// Mock ConfigService — needs to return valid paths even if tempDir isn't set yet.
-// RAGCollectionRegistry constructor checks LANCEDB_DATA_DIR first, so we use that.
-mock.module("@/services/ConfigService", () => ({
-    config: {
-        getConfigPath: () => "/tmp/unused-fallback",
-    },
-}));
-
 import { RAGCollectionRegistry } from "../RAGCollectionRegistry";
 
 describe("RAGCollectionRegistry", () => {

@@ -1,4 +1,5 @@
 import type { ConversationStore } from "@/conversations/ConversationStore";
+import type { PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import type { EventContext } from "@/nostr/types";
 import type { ToolExecutionContext } from "@/tools/types";
 
@@ -8,17 +9,66 @@ export interface CreateEventContextOptions {
     llmRuntime?: number;
 }
 
+function fallbackPrincipalFromTriggeringEnvelope(
+    envelope: ToolExecutionContext["triggeringEnvelope"]
+): PrincipalRef {
+    return {
+        id: envelope.principal.id,
+        transport: envelope.principal.transport,
+        linkedPubkey: envelope.principal.linkedPubkey,
+        displayName: envelope.principal.displayName,
+        username: envelope.principal.username,
+        kind: envelope.principal.kind,
+    };
+}
+
+function clonePrincipal(principal: PrincipalRef): PrincipalRef {
+    return {
+        id: principal.id,
+        transport: principal.transport,
+        linkedPubkey: principal.linkedPubkey,
+        displayName: principal.displayName,
+        username: principal.username,
+        kind: principal.kind,
+    };
+}
+
+function findMostRecentPrincipalByPubkey(
+    conversationStore: ConversationStore,
+    pubkey: string
+): PrincipalRef | undefined {
+    const messages = conversationStore.getAllMessages();
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const senderPrincipal = messages[index].senderPrincipal;
+        if (senderPrincipal?.linkedPubkey !== pubkey) {
+            continue;
+        }
+
+        return {
+            id: senderPrincipal.id,
+            transport: senderPrincipal.transport,
+            linkedPubkey: senderPrincipal.linkedPubkey,
+            displayName: senderPrincipal.displayName,
+            username: senderPrincipal.username,
+            kind: senderPrincipal.kind,
+        };
+    }
+
+    return undefined;
+}
+
 /**
  * Resolve the correct recipient pubkey for a completion event from the delegation chain.
  *
  * This function looks up the conversation's delegation chain and returns the immediate
  * delegator (second-to-last entry). This ensures completions route back up the delegation
- * stack even when RAL state is lost (e.g., daemon restart) and the triggeringEvent
+ * stack even when RAL state is lost (e.g., daemon restart) and the triggeringEnvelope
  * is from a different source (e.g., user responding to an ask).
  *
  * Exception: when the chain origin's pubkey matches the triggering event's pubkey,
  * the caller is interacting directly (not via delegation). In this case the function
- * returns undefined so the caller falls back to triggeringEvent.pubkey, avoiding
+ * returns undefined so the caller falls back to triggeringEnvelope.pubkey, avoiding
  * mis-routing the completion to the intermediate delegator.
  *
  * The delegation chain is persisted in the ConversationStore, so it survives restarts.
@@ -52,7 +102,7 @@ export function resolveCompletionRecipient(
 
         // If the chain origin directly triggered this RAL, the delegation is
         // already complete. Route back to them directly (return undefined so
-        // the caller falls back to triggeringEvent.pubkey).
+        // the caller falls back to triggeringEnvelope.pubkey).
         // In ask-resume, the original trigger is RESTORED to the delegator's
         // message, so this condition is never true there.
         if (triggeringEventPubkey && triggeringEventPubkey === origin.pubkey) {
@@ -62,8 +112,68 @@ export function resolveCompletionRecipient(
         return immediateDelegator.pubkey;
     }
 
-    // No delegation chain or chain too short - caller should fall back to triggeringEvent.pubkey
+    // No delegation chain or chain too short - caller should fall back to triggeringEnvelope.pubkey
     return undefined;
+}
+
+export function resolveCompletionRecipientPrincipal(
+    conversationStore: ConversationStore | undefined,
+    triggeringEnvelope: ToolExecutionContext["triggeringEnvelope"] | undefined
+): PrincipalRef | undefined {
+    if (!triggeringEnvelope) {
+        return undefined;
+    }
+
+    const fallbackPrincipal = fallbackPrincipalFromTriggeringEnvelope(triggeringEnvelope);
+
+    if (!conversationStore) {
+        return fallbackPrincipal;
+    }
+
+    const delegationChain = conversationStore.metadata?.delegationChain;
+    if (delegationChain && delegationChain.length >= 2) {
+        const immediateDelegator = delegationChain[delegationChain.length - 2];
+        const origin = delegationChain[0];
+
+        if (triggeringEnvelope.principal.linkedPubkey !== origin.pubkey) {
+            if (immediateDelegator.principal) {
+                return clonePrincipal(immediateDelegator.principal);
+            }
+
+            const storedPrincipal = findMostRecentPrincipalByPubkey(
+                conversationStore,
+                immediateDelegator.pubkey
+            );
+            if (storedPrincipal) {
+                return storedPrincipal;
+            }
+
+            return {
+                id: `nostr:${immediateDelegator.pubkey}`,
+                transport: "nostr",
+                linkedPubkey: immediateDelegator.pubkey,
+                displayName: immediateDelegator.displayName,
+                kind: immediateDelegator.isUser ? "human" : "agent",
+            };
+        }
+    }
+
+    if (typeof conversationStore.getAllMessages !== "function") {
+        return fallbackPrincipal;
+    }
+
+    const messages = conversationStore.getAllMessages();
+    let triggeringMessage = undefined;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message.eventId === triggeringEnvelope.message.nativeId) {
+            triggeringMessage = message;
+            break;
+        }
+    }
+
+    return triggeringMessage?.senderPrincipal ?? fallbackPrincipal;
 }
 
 /**
@@ -74,7 +184,7 @@ export function resolveCompletionRecipient(
  * from the delegation chain stored in ConversationStore. This ensures completions
  * route back to the immediate delegator even when:
  * - RAL state is lost (e.g., daemon restart)
- * - The triggeringEvent is from a different source (e.g., user responding to an ask)
+ * - The triggeringEnvelope is from a different source (e.g., user responding to an ask)
  *
  * When the chain origin directly triggers the RAL (direct-interaction case), the
  * resolved recipient is undefined and the completion routes to the triggering event's
@@ -82,27 +192,32 @@ export function resolveCompletionRecipient(
  */
 export function createEventContext(
     context: ToolExecutionContext,
-    options?: CreateEventContextOptions | string
+    options?: CreateEventContextOptions
 ): EventContext {
-    // Support legacy call signature: createEventContext(context, model)
-    const opts: CreateEventContextOptions = typeof options === "string"
-        ? { model: options }
-        : options ?? {};
+    const opts: CreateEventContextOptions = options ?? {};
 
     const conversation = context.getConversation?.();
-    const rootEventId = conversation?.getRootEventId() ?? context.triggeringEvent?.id;
+    const rootEventId = conversation?.getRootEventId() ?? context.triggeringEnvelope.message.nativeId;
 
     // Resolve completion recipient from delegation chain (layer-3 operation)
     // This pre-resolves the pubkey so AgentEventEncoder (layer 2) doesn't need to import ConversationStore
-    const completionRecipientPubkey = resolveCompletionRecipient(conversation, context.triggeringEvent?.pubkey);
+    const completionRecipientPubkey = resolveCompletionRecipient(
+        conversation,
+        context.triggeringEnvelope.principal.linkedPubkey
+    );
+    const completionRecipientPrincipal = resolveCompletionRecipientPrincipal(
+        conversation,
+        context.triggeringEnvelope
+    );
 
     return {
-        triggeringEvent: context.triggeringEvent,
+        triggeringEnvelope: context.triggeringEnvelope,
         rootEvent: rootEventId ? { id: rootEventId } : {},
         conversationId: context.conversationId,
         model: opts.model ?? context.agent.llmConfig,
         ralNumber: context.ralNumber,
         llmRuntime: opts.llmRuntime,
         completionRecipientPubkey,
+        completionRecipientPrincipal,
     };
 }

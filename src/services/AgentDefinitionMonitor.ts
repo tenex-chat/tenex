@@ -34,6 +34,12 @@ interface MonitoredAgent {
     currentCreatedAt?: number;
 }
 
+interface AgentDefinitionStorage {
+    getAllStoredAgents(): Promise<StoredAgent[]>;
+    saveAgent(agent: StoredAgent): Promise<void>;
+    loadAgent(pubkey: string): Promise<StoredAgent | null>;
+}
+
 /**
  * AgentDefinitionMonitor - Watches for updated agent definition events (kind:4199)
  * and auto-upgrades active agents when newer definitions are published.
@@ -69,6 +75,7 @@ export class AgentDefinitionMonitor {
     private ndk: NDK;
     private config: AgentDefinitionMonitorConfig;
     private getActiveRuntimes: ActiveRuntimesProvider;
+    private storage: AgentDefinitionStorage;
 
     private subscription: NDKSubscription | null = null;
     private monitoredAgents = new Map<string, MonitoredAgent>(); // key: "dTag:author"
@@ -83,10 +90,12 @@ export class AgentDefinitionMonitor {
         ndk: NDK,
         config: AgentDefinitionMonitorConfig,
         getActiveRuntimes: ActiveRuntimesProvider,
+        storage: AgentDefinitionStorage = agentStorage,
     ) {
         this.ndk = ndk;
         this.config = config;
         this.getActiveRuntimes = getActiveRuntimes;
+        this.storage = storage;
     }
 
     /**
@@ -182,7 +191,7 @@ export class AgentDefinitionMonitor {
     private async collectMonitoredAgents(): Promise<void> {
         this.monitoredAgents.clear();
 
-        const allAgents = await agentStorage.getAllAgents();
+        const allAgents = await this.storage.getAllStoredAgents();
 
         // Migrate legacy agents before the main loop so they can be monitored
         await this.bootstrapLegacyAgents(allAgents);
@@ -290,7 +299,7 @@ export class AgentDefinitionMonitor {
                 }
 
                 if (changed) {
-                    await agentStorage.saveAgent(agent);
+                    await this.storage.saveAgent(agent);
                     logger.info("[AgentDefinitionMonitor] Migrated legacy agent", {
                         slug: agent.slug,
                         definitionDTag: agent.definitionDTag,
@@ -465,7 +474,7 @@ export class AgentDefinitionMonitor {
         }
 
         // Load current agent from storage to compare timestamps
-        const storedAgent = await agentStorage.loadAgent(monitoredAgent.pubkey);
+        const storedAgent = await this.storage.loadAgent(monitoredAgent.pubkey);
         if (!storedAgent) {
             logger.warn("[AgentDefinitionMonitor] Monitored agent not found in storage", {
                 pubkey: monitoredAgent.pubkey.substring(0, 12),
@@ -618,7 +627,7 @@ export class AgentDefinitionMonitor {
         }
 
         // Save the updated agent
-        await agentStorage.saveAgent(storedAgent);
+        await this.storage.saveAgent(storedAgent);
 
         // Update monitored agent tracking
         monitoredAgent.currentEventId = event.id;

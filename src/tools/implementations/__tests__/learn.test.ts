@@ -1,15 +1,6 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import * as projectsModule from "@/services/projects";
 import type { ToolExecutionContext } from "@/tools/types";
-
-// Mock dependencies before imports
-mock.module("@/utils/logger", () => ({
-    logger: {
-        info: () => {},
-        debug: () => {},
-        warn: () => {},
-        error: () => {},
-    },
-}));
 
 // Use object to hold mock functions so we can swap them
 const ragMocks = {
@@ -17,11 +8,6 @@ const ragMocks = {
     createCollection: mock().mockResolvedValue(undefined),
     addDocuments: mock().mockResolvedValue(undefined),
 };
-
-mock.module("@/services/projects", () => ({
-    isProjectContextInitialized: () => false,
-    getProjectContext: () => { throw new Error("Not initialized"); },
-}));
 
 mock.module("@/services/rag/RAGService", () => ({
     RAGService: {
@@ -58,7 +44,7 @@ describe("Learn Tool", () => {
             } as any,
             conversationId: "mock-conversation-id",
             conversationCoordinator: {} as any,
-            triggeringEvent: {
+            triggeringEnvelope: {
                 id: "mock-triggering-event-id",
                 tags: [],
             } as any,
@@ -79,6 +65,14 @@ describe("Learn Tool", () => {
         ragMocks.listCollections.mockReset().mockResolvedValue([]);
         ragMocks.createCollection.mockReset().mockResolvedValue(undefined);
         ragMocks.addDocuments.mockReset().mockResolvedValue(undefined);
+        spyOn(projectsModule, "isProjectContextInitialized").mockReturnValue(false);
+        spyOn(projectsModule, "getProjectContext").mockImplementation(() => {
+            throw new Error("Not initialized");
+        });
+    });
+
+    afterEach(() => {
+        mock.restore();
     });
 
     describe("Execution", () => {
@@ -92,9 +86,8 @@ describe("Learn Tool", () => {
                 hashtags: [],
             });
 
-            expect(result.message).toContain("Lesson recorded");
-            expect(result.title).toBe("Performance Optimization");
             expect(result.eventId).toBe("mock-encoded-event");
+            expect(result.hasDetailed).toBe(false);
             expect(mockAgentPublisher.lesson).toHaveBeenCalled();
         });
 
@@ -109,7 +102,7 @@ describe("Learn Tool", () => {
                 hashtags: [],
             });
 
-            expect(result.message).toContain("with detailed version");
+            expect(result.eventId).toBe("mock-encoded-event");
             expect(result.hasDetailed).toBe(true);
         });
 
@@ -124,8 +117,8 @@ describe("Learn Tool", () => {
                 hashtags: ["event-sourcing", "audit"],
             });
 
-            expect(result.message).toContain("Lesson recorded");
-            expect(result.title).toBe("Architecture Decision");
+            expect(result.eventId).toBe("mock-encoded-event");
+            expect(result.hasDetailed).toBe(false);
         });
 
         // NOTE: Tests for missing agentPublisher/ralNumber removed - now enforced by ToolExecutionContext type

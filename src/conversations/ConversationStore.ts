@@ -15,15 +15,17 @@ import { existsSync, mkdirSync, readFileSync } from "fs";
 import { writeFile } from "fs/promises";
 import { join } from "path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
-import type { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { NDKKind } from "@/nostr/kinds";
 import type { TodoItem } from "@/services/ral/types";
 import { buildPromptMessagesFromRecords } from "./PromptBuilder";
+import { getConversationRecordAuthorPubkey } from "./record-author";
 import { ensureConversationRecord } from "./record-id";
 import { conversationRegistry } from "./ConversationRegistry";
+import { normalizeScratchpadEntries } from "./utils/normalize-scratchpad-entries";
 import type {
-    ConversationEntry,
-    ConversationRecord,
     ConversationRecordInput,
+    ConversationRecord,
     ConversationMetadata,
     ConversationState,
     ContextManagementScratchpadEntry,
@@ -31,6 +33,8 @@ import type {
     DelegationMarker,
     ExecutionTime,
     Injection,
+    MessagePrincipalContext,
+    PrincipalSnapshot,
 } from "./types";
 import { logger } from "@/utils/logger";
 import type { FullEventId } from "@/types/event-ids";
@@ -49,9 +53,8 @@ export type ConversationIdInput = string | FullEventId;
 
 // Re-export types for convenience
 export type {
-    ConversationEntry,
-    ConversationRecord,
     ConversationRecordInput,
+    ConversationRecord,
     ConversationMetadata,
     Injection,
 } from "./types";
@@ -60,69 +63,67 @@ function normalizeLoadedMessages(messages: ConversationRecordInput[]): Conversat
     return messages.map((message, index) => ensureConversationRecord(message, index));
 }
 
-function normalizeScratchpadEntries(
-    entries: Record<string, unknown> | undefined
-): Record<string, string> | undefined {
-    const normalizedEntries = Object.entries(entries ?? {})
-        .flatMap(([key, value]) => {
-            if (typeof value !== "string") {
-                return [];
-            }
-
-            const normalizedKey = key.trim();
-            const normalizedValue = value.trim();
-
-            if (normalizedKey.length === 0 || normalizedValue.length === 0) {
-                return [];
-            }
-
-            return [[normalizedKey, normalizedValue] as const];
-        })
-        .sort(([left], [right]) => left.localeCompare(right));
-
-    if (normalizedEntries.length === 0) {
-        return undefined;
+function normalizeLoadedMetadata(
+    metadata: ConversationMetadata | Record<string, unknown> | undefined
+): ConversationMetadata {
+    if (!metadata || typeof metadata !== "object") {
+        return {};
     }
 
-    return Object.fromEntries(normalizedEntries);
+    const {
+        last_user_message: legacyLastUserMessage,
+        ...rest
+    } = metadata as ConversationMetadata & { last_user_message?: unknown };
+
+    const lastUserMessage = typeof metadata.lastUserMessage === "string"
+        ? metadata.lastUserMessage
+        : typeof legacyLastUserMessage === "string"
+            ? legacyLastUserMessage
+            : undefined;
+
+    return {
+        ...(rest as ConversationMetadata),
+        ...(lastUserMessage !== undefined ? { lastUserMessage } : {}),
+    };
 }
 
 function normalizeContextManagementScratchpadState(
-    state: ContextManagementScratchpadState | undefined
+    state: ContextManagementScratchpadState | Record<string, unknown> | undefined
 ): ContextManagementScratchpadState | undefined {
     if (!state) {
         return undefined;
     }
 
-    const legacyNotes = typeof state.notes === "string" ? state.notes.trim() : "";
-    const entries = normalizeScratchpadEntries({
-        ...(state.entries ?? {}),
-        ...(legacyNotes.length > 0 && state.entries?.notes === undefined
-            ? { notes: legacyNotes }
-            : {}),
-    });
-    const keepLastMessages = typeof state.keepLastMessages === "number"
-        && Number.isFinite(state.keepLastMessages)
-        ? Math.max(0, Math.floor(state.keepLastMessages))
+    const rawState = state as Record<string, unknown>;
+    const rawEntries = typeof rawState.entries === "object" && rawState.entries !== null
+        ? rawState.entries as Record<string, unknown>
+        : undefined;
+    const legacyNotes = typeof rawState.notes === "string" ? rawState.notes : undefined;
+    const entries = normalizeScratchpadEntries(rawEntries)
+        ?? normalizeScratchpadEntries(legacyNotes ? { notes: legacyNotes } : undefined);
+    const keepLastMessages = typeof rawState.keepLastMessages === "number"
+        && Number.isFinite(rawState.keepLastMessages)
+        ? Math.max(0, Math.floor(rawState.keepLastMessages))
         : undefined;
     const omitToolCallIds = Array.from(
         new Set(
-            (state.omitToolCallIds ?? [])
+            (Array.isArray(rawState.omitToolCallIds) ? rawState.omitToolCallIds : [])
                 .filter((toolCallId): toolCallId is string =>
                     typeof toolCallId === "string" && toolCallId.trim().length > 0
                 )
                 .map((toolCallId) => toolCallId.trim())
         )
     );
-    const agentLabel = typeof state.agentLabel === "string" && state.agentLabel.trim().length > 0
-        ? state.agentLabel
+    const agentLabel = typeof rawState.agentLabel === "string" && rawState.agentLabel.trim().length > 0
+        ? rawState.agentLabel
         : undefined;
+    const updatedAt = typeof rawState.updatedAt === "number" ? rawState.updatedAt : undefined;
 
     return {
         ...(entries ? { entries } : {}),
         ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
         omitToolCallIds,
-        ...(typeof state.updatedAt === "number" ? { updatedAt: state.updatedAt } : {}),
+        ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(agentLabel ? { agentLabel } : {}),
     };
 }
@@ -169,8 +170,8 @@ export class ConversationStore {
         return conversationRegistry.has(conversationId);
     }
 
-    static async create(event: NDKEvent): Promise<ConversationStore> {
-        return conversationRegistry.create(event);
+    static async create(envelope: InboundEnvelope, principalContext?: MessagePrincipalContext): Promise<ConversationStore> {
+        return conversationRegistry.create(envelope, principalContext);
     }
 
     static findByEventId(eventId: string): ConversationStore | undefined {
@@ -181,16 +182,20 @@ export class ConversationStore {
         return conversationRegistry.getAll();
     }
 
-    static cacheEvent(event: NDKEvent): void {
-        conversationRegistry.cacheEvent(event);
+    static cacheEnvelope(envelope: InboundEnvelope): void {
+        conversationRegistry.cacheEnvelope(envelope);
     }
 
-    static getCachedEvent(eventId: string): NDKEvent | undefined {
-        return conversationRegistry.getCachedEvent(eventId);
+    static getCachedEnvelope(nativeId: string): InboundEnvelope | undefined {
+        return conversationRegistry.getCachedEnvelope(nativeId);
     }
 
-    static async addEvent(conversationId: string, event: NDKEvent): Promise<void> {
-        return conversationRegistry.addEvent(conversationId, event);
+    static async addEnvelope(
+        conversationId: string,
+        envelope: InboundEnvelope,
+        principalContext?: MessagePrincipalContext
+    ): Promise<void> {
+        return conversationRegistry.addEnvelope(conversationId, envelope, principalContext);
     }
 
     static setConversationTitle(conversationId: string, title: string): void {
@@ -258,7 +263,7 @@ export class ConversationStore {
         return conversationRegistry.readLightweightMetadata(conversationId);
     }
 
-    static readMessagesFromDisk(conversationId: string): ConversationEntry[] | null {
+    static readMessagesFromDisk(conversationId: string): ConversationRecordInput[] | null {
         return conversationRegistry.readMessagesFromDisk(conversationId);
     }
 
@@ -336,7 +341,9 @@ export class ConversationStore {
                 nextRalNumber: loaded.nextRalNumber ?? {},
                 injections: loaded.injections ?? [],
                 messages,
-                metadata: loaded.metadata ?? {},
+                metadata: normalizeLoadedMetadata(
+                    loaded.metadata as ConversationMetadata | Record<string, unknown> | undefined
+                ),
                 agentTodos: loaded.agentTodos ?? {},
                 todoNudgedAgents: loaded.todoNudgedAgents ?? [],
                 // Note: todoRemindedAgents removed in refactor - ignore if present in old files
@@ -410,7 +417,8 @@ export class ConversationStore {
     }
 
     getRootAuthorPubkey(): string | undefined {
-        return this.state.messages[0]?.pubkey;
+        const rootMessage = this.state.messages[0];
+        return rootMessage ? getConversationRecordAuthorPubkey(rootMessage) : undefined;
     }
 
     async save(): Promise<void> {
@@ -485,7 +493,7 @@ export class ConversationStore {
         return index;
     }
 
-    relocateToEnd(eventId: string, updates: Partial<ConversationEntry>): boolean {
+    relocateToEnd(eventId: string, updates: Partial<ConversationRecordInput>): boolean {
         const index = this.state.messages.findIndex(m => m.eventId === eventId);
         if (index === -1) return false;
 
@@ -513,7 +521,11 @@ export class ConversationStore {
     getFirstUserMessage(): (ConversationRecord & { index: number }) | undefined {
         for (let i = 0; i < this.state.messages.length; i++) {
             const msg = this.state.messages[i];
-            if (msg.messageType === "text" && !ConversationStore.agentPubkeys.has(msg.pubkey)) {
+            const authorPubkey = getConversationRecordAuthorPubkey(msg);
+            if (
+                msg.messageType === "text" &&
+                (!authorPubkey || !ConversationStore.agentPubkeys.has(authorPubkey))
+            ) {
                 return { ...msg, index: i };
             }
         }
@@ -610,7 +622,7 @@ export class ConversationStore {
         agentPubkey: string,
         ralNumber?: number
     ): number {
-        const entry: ConversationEntry = {
+        const entry: ConversationRecordInput = {
             pubkey: agentPubkey,
             ral: ralNumber,
             content: "", // Markers have no text content
@@ -807,37 +819,57 @@ export class ConversationStore {
         return this.blockedAgentsSet;
     }
 
-    // Event Message Operations
+    // Envelope Message Operations
 
-    private static extractTargetedPubkeys(event: NDKEvent): string[] {
-        const pTags = event.getMatchingTags("p");
-        if (pTags.length === 0) return [];
-        const targeted: string[] = [];
-        for (const pTag of pTags) {
-            const pubkey = pTag[1];
-            if (pubkey) targeted.push(pubkey);
-        }
-        return targeted;
-    }
+    addEnvelopeMessage(
+        envelope: InboundEnvelope,
+        isFromAgent: boolean,
+        principalContext?: MessagePrincipalContext
+    ): void {
+        const nativeId = envelope.message.nativeId;
+        if (!nativeId) return;
+        if (envelope.metadata.eventKind !== undefined && envelope.metadata.eventKind !== NDKKind.Text) return;
+        if (envelope.metadata.toolName) return;
+        if (this.hasEventId(nativeId)) return;
 
-    addEventMessage(event: NDKEvent, isFromAgent: boolean): void {
-        if (!event.id) return;
-        if (event.kind !== 1) return;
-        if (event.tagValue("tool")) return;
-        if (this.hasEventId(event.id)) return;
+        const targetedPubkeys = envelope.recipients
+            .map((r) => r.linkedPubkey)
+            .filter((pk): pk is string => !!pk);
 
-        const targetedPubkeys = ConversationStore.extractTargetedPubkeys(event);
+        const defaultTargetedPrincipals = targetedPubkeys.length > 0
+            ? envelope.recipients.map((r) => ({
+                  id: r.id,
+                  transport: r.transport,
+                  linkedPubkey: r.linkedPubkey,
+              }))
+            : undefined;
+
+        const targetedPrincipals =
+            principalContext?.targetedPrincipals?.length
+                ? principalContext.targetedPrincipals
+                : defaultTargetedPrincipals;
+
+        const senderPrincipal: PrincipalSnapshot = principalContext?.senderPrincipal ?? {
+            id: envelope.principal.id,
+            transport: envelope.principal.transport,
+            linkedPubkey: envelope.principal.linkedPubkey,
+        };
+        const senderPubkey = senderPrincipal.linkedPubkey ?? envelope.principal.linkedPubkey;
+
         this.addMessage({
-            pubkey: event.pubkey,
-            content: event.content,
+            pubkey: senderPubkey ?? "",
+            content: envelope.content,
             messageType: "text",
-            eventId: event.id,
-            timestamp: event.created_at,
+            eventId: nativeId,
+            timestamp: envelope.occurredAt,
             targetedPubkeys: targetedPubkeys.length > 0 ? targetedPubkeys : undefined,
+            targetedPrincipals,
+            senderPubkey,
+            senderPrincipal,
         });
 
         if (!isFromAgent) {
-            this.state.metadata.last_user_message = event.content;
+            this.state.metadata.lastUserMessage = envelope.content;
         }
     }
 
