@@ -12,15 +12,17 @@ import { z, type ZodRawShape } from "zod";
 export class CodexToolsAdapter {
     static createSdkMcpServer(
         tools: Record<string, AISdkTool>,
-        context: { agentName?: string }
+        context: { agentName?: string; serverName?: string }
     ): SdkMcpServer | undefined {
         const localTools = Object.entries(tools);
+        const serverName = context.serverName ?? "tenex_local_tools";
 
         logger.debug("[CodexToolsAdapter] Input tools analysis:", {
             totalTools: Object.keys(tools).length,
             localToolsCount: localTools.length,
             localToolNames: localTools.map(([name]) => name),
             agentName: context.agentName,
+            serverName,
         });
 
         if (localTools.length === 0) {
@@ -30,13 +32,13 @@ export class CodexToolsAdapter {
         const codexTools = this.convertTools(localTools, tools);
 
         logger.info("[CodexToolsAdapter] Creating SDK MCP server:", {
-            serverName: "tenex",
+            serverName,
             toolCount: codexTools.length,
             toolNames: localTools.map(([name]) => name),
         });
 
         return createSdkMcpServer({
-            name: "tenex",
+            name: serverName,
             tools: codexTools,
         });
     }

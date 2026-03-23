@@ -23,6 +23,7 @@ import { PROVIDER_IDS } from "../provider-ids";
 
 const CODEX_APP_SERVER_METADATA_KEY = "codex-app-server";
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const INTERNAL_TENEX_MCP_SERVER_BASENAME = "tenex_local_tools";
 
 type CodexEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 type CodexSummary = "auto" | "concise" | "detailed" | "none";
@@ -59,6 +60,96 @@ interface CodexAppServerProviderMetadata {
     threadId?: string;
     turnId?: string;
     toolExecutionStats?: CodexToolExecutionStats;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getConfigOverrideMcpServerNames(
+    configOverrides: CodexAppServerSettings["configOverrides"] | undefined
+): string[] {
+    if (!isRecord(configOverrides)) {
+        return [];
+    }
+
+    const mcpServers = configOverrides.mcp_servers;
+    return isRecord(mcpServers) ? Object.keys(mcpServers) : [];
+}
+
+function chooseInternalMcpServerName(
+    reservedNames: Iterable<string>
+): string {
+    const usedNames = new Set(reservedNames);
+    if (!usedNames.has(INTERNAL_TENEX_MCP_SERVER_BASENAME)) {
+        return INTERNAL_TENEX_MCP_SERVER_BASENAME;
+    }
+
+    let suffix = 2;
+    while (usedNames.has(`${INTERNAL_TENEX_MCP_SERVER_BASENAME}_${suffix}`)) {
+        suffix += 1;
+    }
+
+    return `${INTERNAL_TENEX_MCP_SERVER_BASENAME}_${suffix}`;
+}
+
+function normalizeLegacyCodexConfigOverrides(
+    configOverrides: CodexAppServerSettings["configOverrides"] | undefined
+): {
+    configOverrides: CodexAppServerSettings["configOverrides"] | undefined;
+    migratedServerNames: string[];
+} {
+    if (!isRecord(configOverrides)) {
+        return { configOverrides, migratedServerNames: [] };
+    }
+
+    const mcpServers = configOverrides.mcp_servers;
+    if (!isRecord(mcpServers)) {
+        return { configOverrides, migratedServerNames: [] };
+    }
+
+    let changed = false;
+    const migratedServerNames: string[] = [];
+    const normalizedMcpServers: Record<string, unknown> = { ...mcpServers };
+
+    for (const [serverName, rawServerConfig] of Object.entries(mcpServers)) {
+        if (!isRecord(rawServerConfig)) {
+            continue;
+        }
+
+        const bearerToken = rawServerConfig.bearer_token;
+        if (typeof bearerToken !== "string" || bearerToken.length === 0) {
+            continue;
+        }
+
+        const httpHeaders = isRecord(rawServerConfig.http_headers)
+            ? { ...rawServerConfig.http_headers }
+            : {};
+
+        if (typeof httpHeaders.Authorization !== "string") {
+            httpHeaders.Authorization = `Bearer ${bearerToken}`;
+        }
+
+        const { bearer_token: _legacyBearerToken, ...restServerConfig } = rawServerConfig;
+        normalizedMcpServers[serverName] = {
+            ...restServerConfig,
+            http_headers: httpHeaders,
+        };
+        migratedServerNames.push(serverName);
+        changed = true;
+    }
+
+    if (!changed) {
+        return { configOverrides, migratedServerNames: [] };
+    }
+
+    return {
+        configOverrides: {
+            ...configOverrides,
+            mcp_servers: normalizedMcpServers,
+        },
+        migratedServerNames,
+    };
 }
 
 interface ExtendedUsage extends LanguageModelUsage {
@@ -127,10 +218,24 @@ export class CodexProvider extends AgentProvider {
         _modelId: string
     ): CodexAppServerSettings {
         const providerConfig = (context.providerConfig ?? {}) as CodexProviderConfig;
+        const {
+            configOverrides: normalizedConfigOverrides,
+            migratedServerNames,
+        } = normalizeLegacyCodexConfigOverrides(providerConfig.configOverrides);
 
         trace.getActiveSpan()?.addEvent("llm_factory.creating_codex", {
             "agent.name": context.agentName ?? "",
         });
+
+        if (migratedServerNames.length > 0) {
+            logger.warn("[CodexProvider] Normalized legacy MCP bearer_token overrides", {
+                serverNames: migratedServerNames,
+            });
+            trace.getActiveSpan()?.addEvent("codex.config_overrides_normalized", {
+                "mcp.server_count": migratedServerNames.length,
+                "mcp.servers": migratedServerNames.join(", "),
+            });
+        }
 
         const allTools = context.tools;
         const toolNames = allTools ? Object.keys(allTools) : [];
@@ -139,10 +244,17 @@ export class CodexProvider extends AgentProvider {
             ? Object.fromEntries(regularTools.map((name) => [name, allTools[name]]))
             : undefined;
 
+        const reservedMcpServerNames = new Set<string>([
+            ...Object.keys(context.mcpConfig?.servers ?? {}),
+            ...getConfigOverrideMcpServerNames(normalizedConfigOverrides),
+        ]);
+        const internalTenexServerName = chooseInternalMcpServerName(reservedMcpServerNames);
+
         logger.debug("[CodexProvider] Tool analysis", {
             agentName: context.agentName,
             totalToolNames: toolNames.length,
             regularTools: regularTools.length,
+            internalTenexServerName,
         });
 
         const mcpServersConfig: NonNullable<CodexAppServerSettings["mcpServers"]> = {};
@@ -150,11 +262,15 @@ export class CodexProvider extends AgentProvider {
         if (tenexTools && regularTools.length > 0) {
             const tenexServer = CodexToolsAdapter.createSdkMcpServer(
                 tenexTools,
-                { agentName: context.agentName }
+                {
+                    agentName: context.agentName,
+                    serverName: internalTenexServerName,
+                }
             );
             if (tenexServer) {
-                mcpServersConfig.tenex = tenexServer;
+                mcpServersConfig[internalTenexServerName] = tenexServer;
                 logger.debug("[CodexProvider] Added TENEX SDK MCP server", {
+                    serverName: internalTenexServerName,
                     toolCount: regularTools.length,
                 });
             }
@@ -191,7 +307,7 @@ export class CodexProvider extends AgentProvider {
             baseInstructions: providerConfig.baseInstructions,
             mcpServers: Object.keys(mcpServersConfig).length > 0 ? mcpServersConfig : undefined,
             rmcpClient: providerConfig.rmcpClient,
-            configOverrides: providerConfig.configOverrides,
+            configOverrides: normalizedConfigOverrides,
             idleTimeoutMs,
             verbose: false,
             logger: createCodexLogger(),

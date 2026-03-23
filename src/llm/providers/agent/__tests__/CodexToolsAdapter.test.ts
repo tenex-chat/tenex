@@ -40,7 +40,7 @@ describe("CodexToolsAdapter", () => {
 
             expect(createSdkMcpServerCalls).toHaveLength(1);
             const callArgs = createSdkMcpServerCalls[0];
-            expect(callArgs.name).toBe("tenex");
+            expect(callArgs.name).toBe("tenex_local_tools");
             expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
 
             const toolNames = callArgs.tools.map((t: unknown) => (t as { name: string }).name);
@@ -118,6 +118,20 @@ describe("CodexToolsAdapter", () => {
             expect(server).toBeDefined();
             expect(createSdkMcpServerCalls).toHaveLength(1);
             expect(createSdkMcpServerCalls[0].tools).toHaveLength(Object.keys(tools).length);
+        });
+
+        it("should allow overriding the internal server name", () => {
+            const tools: Record<string, AISdkTool> = {
+                fs_read: mockTool,
+            };
+
+            CodexToolsAdapter.createSdkMcpServer(tools, {
+                agentName: "test",
+                serverName: "tenex_local_tools_2",
+            });
+
+            expect(createSdkMcpServerCalls).toHaveLength(1);
+            expect(createSdkMcpServerCalls[0].name).toBe("tenex_local_tools_2");
         });
 
         it("should handle empty tools object", () => {
