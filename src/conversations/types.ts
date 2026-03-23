@@ -133,10 +133,18 @@ export interface ConversationMetadata {
 
 export interface ContextManagementScratchpadState {
     entries?: Record<string, string>;
-    keepLastMessages?: number | null;
+    preserveTurns?: number | null;
+    activeNotice?: ContextManagementScratchpadUseNotice;
     omitToolCallIds: string[];
     updatedAt?: number;
     agentLabel?: string;
+}
+
+export interface ContextManagementScratchpadUseNotice {
+    description: string;
+    toolCallId: string;
+    rawTurnCountAtCall: number;
+    projectedTurnCountAtCall: number;
 }
 
 export interface ContextManagementScratchpadEntry {

@@ -133,6 +133,7 @@ describe("TENEX context management telemetry", () => {
 
         await scratchpadTool.execute(
             {
+                description: "Capture the current parser state in scratchpad",
                 setEntries: {
                     notes: "Track the current parser state",
                 },
@@ -245,7 +246,7 @@ describe("TENEX context management telemetry", () => {
         expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
             "Rendered scratchpad context"
         );
-        expect(scratchpadEvent?.attributes?.["context_management.keep_last_messages"]).toBeUndefined();
+        expect(scratchpadEvent?.attributes?.["context_management.preserve_turns"]).toBeUndefined();
 
         const statusEvent = events.find(
             (event) =>
@@ -261,7 +262,7 @@ describe("TENEX context management telemetry", () => {
         ).toContain("workingBudgetUtilizationPercent");
         expect(
             String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("managedContextTokens");
+        ).toContain("budgetScopedTokens");
         expect(String(statusEvent?.attributes?.["context_management.summary"])).toContain(
             "Inserted context status"
         );

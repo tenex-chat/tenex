@@ -101,9 +101,34 @@ function normalizeContextManagementScratchpadState(
     const legacyNotes = typeof rawState.notes === "string" ? rawState.notes : undefined;
     const entries = normalizeScratchpadEntries(rawEntries)
         ?? normalizeScratchpadEntries(legacyNotes ? { notes: legacyNotes } : undefined);
-    const keepLastMessages = typeof rawState.keepLastMessages === "number"
-        && Number.isFinite(rawState.keepLastMessages)
-        ? Math.max(0, Math.floor(rawState.keepLastMessages))
+    const rawPreserveTurns = typeof rawState.preserveTurns === "number"
+        ? rawState.preserveTurns
+        : rawState.keepLastMessages;
+    const preserveTurns = typeof rawPreserveTurns === "number"
+        && Number.isFinite(rawPreserveTurns)
+        ? Math.max(0, Math.floor(rawPreserveTurns))
+        : undefined;
+    const rawActiveNotice = typeof rawState.activeNotice === "object" && rawState.activeNotice !== null
+        ? rawState.activeNotice as Record<string, unknown>
+        : undefined;
+    const activeNotice = rawActiveNotice
+        && typeof rawActiveNotice.description === "string"
+        && rawActiveNotice.description.trim().length > 0
+        && typeof rawActiveNotice.toolCallId === "string"
+        && rawActiveNotice.toolCallId.trim().length > 0
+        && typeof rawActiveNotice.rawTurnCountAtCall === "number"
+        && Number.isFinite(rawActiveNotice.rawTurnCountAtCall)
+        && typeof rawActiveNotice.projectedTurnCountAtCall === "number"
+        && Number.isFinite(rawActiveNotice.projectedTurnCountAtCall)
+        ? {
+            description: rawActiveNotice.description.trim(),
+            toolCallId: rawActiveNotice.toolCallId.trim(),
+            rawTurnCountAtCall: Math.max(0, Math.floor(rawActiveNotice.rawTurnCountAtCall)),
+            projectedTurnCountAtCall: Math.max(
+                0,
+                Math.floor(rawActiveNotice.projectedTurnCountAtCall)
+            ),
+        }
         : undefined;
     const omitToolCallIds = Array.from(
         new Set(
@@ -121,7 +146,8 @@ function normalizeContextManagementScratchpadState(
 
     return {
         ...(entries ? { entries } : {}),
-        ...(keepLastMessages !== undefined ? { keepLastMessages } : {}),
+        ...(preserveTurns !== undefined ? { preserveTurns } : {}),
+        ...(activeNotice ? { activeNotice } : {}),
         omitToolCallIds,
         ...(updatedAt !== undefined ? { updatedAt } : {}),
         ...(agentLabel ? { agentLabel } : {}),
@@ -566,15 +592,16 @@ export class ConversationStore {
 
         const normalizedState = normalizeContextManagementScratchpadState(state);
         const hasEntries = Object.keys(normalizedState?.entries ?? {}).length > 0;
-        const hasKeepLastMessages = typeof normalizedState?.keepLastMessages === "number";
+        const hasPreserveTurns = typeof normalizedState?.preserveTurns === "number";
+        const hasActiveNotice = normalizedState?.activeNotice !== undefined;
         const hasOmittedToolCalls = (normalizedState?.omitToolCallIds.length ?? 0) > 0;
 
-        if (!hasEntries && !hasKeepLastMessages && !hasOmittedToolCalls) {
+        if (!normalizedState || (!hasEntries && !hasPreserveTurns && !hasActiveNotice && !hasOmittedToolCalls)) {
             delete this.state.contextManagementScratchpads[agentId];
             return;
         }
 
-        this.state.contextManagementScratchpads[agentId] = normalizedState!;
+        this.state.contextManagementScratchpads[agentId] = normalizedState;
     }
 
     listContextManagementScratchpads(): ContextManagementScratchpadEntry[] {

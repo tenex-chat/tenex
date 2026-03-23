@@ -97,6 +97,7 @@ describe("TENEX context management integration", () => {
         };
         await scratchpadTool.execute(
             {
+                description: "Capture the parser focus before continuing",
                 setEntries: {
                     notes: "Focus on the parser errors",
                 },
@@ -418,12 +419,12 @@ describe("TENEX context management integration", () => {
         const contextStatusReminder = reminders.find(
             (reminder) => reminder.type === "context-window-status"
         );
-        expect(contextStatusReminder?.content).toContain("Managed working context:");
+        expect(contextStatusReminder?.content).toContain("managed working budget context:");
         expect(contextStatusReminder?.content).toContain(
-            "Static overhead outside the working budget:"
+            "Static overhead outside the managed working budget:"
         );
         expect(contextStatusReminder?.content).toContain(
-            "Working budget target (managed context only): ~100 tokens"
+            "managed working budget target: ~100 tokens"
         );
     });
 
@@ -599,7 +600,7 @@ describe("TENEX context management integration", () => {
                 expect.objectContaining({
                     type: "context-utilization",
                     content: expect.stringContaining(
-                        "Trim or summarize stale working context before continuing."
+                        "Your managed working budget is getting tight. Trim or summarize stale context before continuing."
                     ),
                 }),
             ])
@@ -672,10 +673,10 @@ describe("TENEX context management integration", () => {
             "Current request after context management:"
         );
         expect(contextStatusReminders[0]?.content).toContain(
-            "Managed working context:"
+            "managed working budget context:"
         );
         expect(contextStatusReminders[0]?.content).toContain(
-            "Working budget target (managed context only): ~400 tokens"
+            "managed working budget target: ~400 tokens"
         );
         expect(contextStatusReminders[0]?.content).toContain(
             "Raw model context window: ~200,000 tokens"
