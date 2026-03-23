@@ -1,7 +1,7 @@
 import { trace } from "@opentelemetry/api";
 import { EventEmitter, type DefaultEventMap } from "tseep";
 import { INJECTION_ABORT_REASON, llmOpsRegistry } from "@/services/LLMOperationsRegistry";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenEventId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { ProjectDTag } from "@/types/project-ids";
@@ -534,7 +534,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       return false;
     }
 
-    delete ral.silentCompletionRequestedAt;
+    ral.silentCompletionRequestedAt = undefined;
     ral.lastActivityAt = Date.now();
 
     trace.getActiveSpan()?.addEvent("ral.silent_completion_cleared", {
@@ -564,7 +564,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       // Include the last user message in telemetry for debugging
       // Truncate to 1000 chars to avoid bloating traces
       const truncatedMessage = lastUserMessage
-        ? (lastUserMessage.length > 1000 ? lastUserMessage.substring(0, 1000) + "..." : lastUserMessage)
+        ? (lastUserMessage.length > 1000 ? `${lastUserMessage.substring(0, 1000)}...` : lastUserMessage)
         : undefined;
 
       trace.getActiveSpan()?.addEvent("ral.llm_stream_started", {
@@ -826,7 +826,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         "delegation.killed_at": pendingDelegation.killedAt,
       });
       logger.info("[RALRegistry.recordCompletion] Rejected completion - delegation was killed", {
-        delegationConversationId: canonicalId.substring(0, 12),
+        delegationConversationId: shortenConversationId(canonicalId),
         killedAt: pendingDelegation.killedAt,
       });
       return undefined;
@@ -1118,7 +1118,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
     if (totalCleared > 0) {
       trace.getActiveSpan()?.addEvent("ral.injections_cleared_after_delivery", {
-        "agent.pubkey": agentPubkey.substring(0, 12),
+        "agent.pubkey": shortenPubkey(agentPubkey),
         "conversation.id": shortenConversationId(conversationId),
         "cleared.count": totalCleared,
       });
@@ -1457,8 +1457,8 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       for (const [canonicalId, pending] of delegations.pending) {
         if (pending.type === "followup" && pending.followupEventId?.toLowerCase() === normalizedId) {
           logger.debug("[RALRegistry.canonicalizeDelegationId] Found canonical via pending scan", {
-            followupId: id.substring(0, 12),
-            canonicalId: canonicalId.substring(0, 12),
+            followupId: shortenEventId(id),
+            canonicalId: shortenConversationId(canonicalId),
           });
           return canonicalId;
         }
@@ -1687,7 +1687,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const killedDelegationCount = this.markAllDelegationsKilled(agentPubkey, conversationId);
     if (killedDelegationCount > 0) {
       trace.getActiveSpan()?.addEvent("ral.delegations_marked_killed_before_abort", {
-        "cascade.agent_pubkey": agentPubkey.substring(0, 12),
+        "cascade.agent_pubkey": shortenPubkey(agentPubkey),
         "cascade.conversation_id": shortenConversationId(conversationId),
         "cascade.killed_delegation_count": killedDelegationCount,
       });
@@ -1731,7 +1731,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_started", {
       "cascade.root_conversation_id": shortenConversationId(conversationId),
-      "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
+      "cascade.root_agent_pubkey": shortenPubkey(agentPubkey),
       "cascade.pending_delegations": pendingDelegations.length,
       "cascade.reason": reason,
     });
@@ -1747,9 +1747,9 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
       logger.info("[RALRegistry] Cascading abort to nested delegation", {
         parentConversation: shortenConversationId(conversationId),
-        parentAgent: agentPubkey.substring(0, 12),
-        childConversation: descendantConvId.substring(0, 12),
-        childAgent: descendantAgentPubkey.substring(0, 12),
+        parentAgent: shortenPubkey(agentPubkey),
+        childConversation: shortenConversationId(descendantConvId),
+        childAgent: shortenPubkey(descendantAgentPubkey),
         projectId: descendantProjectId?.substring(0, 12),
       });
 
@@ -1819,7 +1819,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
     trace.getActiveSpan()?.addEvent("ral.cascade_abort_completed", {
       "cascade.root_conversation_id": shortenConversationId(conversationId),
-      "cascade.root_agent_pubkey": agentPubkey.substring(0, 12),
+      "cascade.root_agent_pubkey": shortenPubkey(agentPubkey),
       "cascade.total_aborted": abortedTuples.length,
     });
 
@@ -1861,7 +1861,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const location = this.delegationToRal.get(delegationConversationId);
     if (!location) {
       logger.debug("[RALRegistry.markDelegationKilled] No delegation found for ID", {
-        delegationConversationId: delegationConversationId.substring(0, 12),
+        delegationConversationId: shortenConversationId(delegationConversationId),
       });
       return false;
     }
@@ -1878,7 +1878,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const pendingDelegation = convDelegations.pending.get(canonicalId);
     if (!pendingDelegation) {
       logger.debug("[RALRegistry.markDelegationKilled] No pending delegation found", {
-        delegationConversationId: canonicalId.substring(0, 12),
+        delegationConversationId: shortenConversationId(canonicalId),
       });
       return false;
     }
@@ -1886,7 +1886,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     // Idempotent: preserve original kill time for audit trail
     if (pendingDelegation.killed) {
       logger.debug("[RALRegistry.markDelegationKilled] Delegation already killed", {
-        delegationConversationId: canonicalId.substring(0, 12),
+        delegationConversationId: shortenConversationId(canonicalId),
         killedAt: pendingDelegation.killedAt,
       });
       return true; // Already killed, but return true to indicate it's in killed state
@@ -1898,12 +1898,12 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
     trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed", {
       "delegation.conversation_id": shortenConversationId(canonicalId),
-      "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+      "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
     });
 
     logger.info("[RALRegistry.markDelegationKilled] Delegation marked as killed", {
-      delegationConversationId: canonicalId.substring(0, 12),
-      recipientPubkey: pendingDelegation.recipientPubkey.substring(0, 12),
+      delegationConversationId: shortenConversationId(canonicalId),
+      recipientPubkey: shortenPubkey(pendingDelegation.recipientPubkey),
     });
 
     return true;
@@ -1959,15 +1959,15 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
 
         trace.getActiveSpan()?.addEvent("ral.delegation_marked_killed_bulk", {
           "delegation.conversation_id": shortenConversationId(delegationId),
-          "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+          "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
         });
       }
     }
 
     if (killedCount > 0) {
       logger.info("[RALRegistry.markAllDelegationsKilled] Marked delegations as killed", {
-        agentPubkey: agentPubkey.substring(0, 12),
-        conversationId: conversationId.substring(0, 12),
+        agentPubkey: shortenPubkey(agentPubkey),
+        conversationId: shortenConversationId(conversationId),
         killedCount,
       });
     }
@@ -1992,13 +1992,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     this.killedAgentConversations.add(key);
 
     trace.getActiveSpan()?.addEvent("ral.agent_conversation_marked_killed", {
-      "agent.pubkey": agentPubkey.substring(0, 12),
+      "agent.pubkey": shortenPubkey(agentPubkey),
       "conversation.id": shortenConversationId(conversationId),
     });
 
     logger.info("[RALRegistry.markAgentConversationKilled] Agent+conversation marked as killed", {
-      agentPubkey: agentPubkey.substring(0, 12),
-      conversationId: conversationId.substring(0, 12),
+      agentPubkey: shortenPubkey(agentPubkey),
+      conversationId: shortenConversationId(conversationId),
     });
   }
 
@@ -2073,7 +2073,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const location = this.delegationToRal.get(delegationConversationId);
     if (!location) {
       logger.debug("[RALRegistry.markParentDelegationKilled] No parent found for delegation", {
-        delegationConversationId: delegationConversationId.substring(0, 12),
+        delegationConversationId: shortenConversationId(delegationConversationId),
       });
       return false;
     }
@@ -2094,7 +2094,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     const pendingDelegation = convDelegations.pending.get(canonicalId);
     if (!pendingDelegation) {
       logger.debug("[RALRegistry.markParentDelegationKilled] No pending delegation found", {
-        delegationConversationId: canonicalId.substring(0, 12),
+        delegationConversationId: shortenConversationId(canonicalId),
       });
       return false;
     }
@@ -2107,13 +2107,13 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
       trace.getActiveSpan()?.addEvent("ral.parent_delegation_marked_killed", {
         "parent.key": location.key.substring(0, 20),
         "delegation.conversation_id": shortenConversationId(canonicalId),
-        "delegation.recipient_pubkey": pendingDelegation.recipientPubkey.substring(0, 12),
+        "delegation.recipient_pubkey": shortenPubkey(pendingDelegation.recipientPubkey),
       });
 
       logger.info("[RALRegistry.markParentDelegationKilled] Parent delegation marked as killed", {
         parentKey: location.key.substring(0, 20),
-        delegationConversationId: canonicalId.substring(0, 12),
-        recipientPubkey: pendingDelegation.recipientPubkey.substring(0, 12),
+        delegationConversationId: shortenConversationId(canonicalId),
+        recipientPubkey: shortenPubkey(pendingDelegation.recipientPubkey),
       });
     }
 
@@ -2220,7 +2220,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
     );
     const newViolations = violations.filter(
       (v) =>
-        !ral.heuristics!.shownViolationIds.has(v.heuristicId) &&
+        !ral.heuristics?.shownViolationIds.has(v.heuristicId) &&
         !pendingHeuristicIds.has(v.heuristicId)
     );
 
@@ -2582,7 +2582,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
           "ral.number": ralNumber,
           "outstanding.pending_delegations": pendingDelegations,
           "outstanding.completed_delegations": completedDelegations,
-          "agent.pubkey": agentPubkey.substring(0, 12),
+          "agent.pubkey": shortenPubkey(agentPubkey),
           "conversation.id": shortenConversationId(conversationId),
         });
       }
@@ -2608,7 +2608,7 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
         "outstanding.queued_injections": queuedInjections,
         "outstanding.pending_delegations": pendingDelegations,
         "outstanding.completed_delegations": completedDelegations,
-        "agent.pubkey": agentPubkey.substring(0, 12),
+        "agent.pubkey": shortenPubkey(agentPubkey),
         "conversation.id": shortenConversationId(conversationId),
       });
     }

@@ -9,7 +9,7 @@ import providerSelectPrompt, {
     type PromptState,
     type ProviderSelectConfig,
 } from "@/llm/utils/provider-select-prompt";
-import { ProviderConfigUI } from "@/llm/utils/ProviderConfigUI";
+import { getProviderDisplayName } from "@/llm/utils/ProviderConfigUI";
 import { inquirerTheme } from "@/utils/cli-theme";
 
 interface ProviderSetupOptions {
@@ -48,7 +48,7 @@ export async function runProviderSetup(
 
         // add-key: ask for the key via a separate prompt
         const { providerId, returnTo, state } = result;
-        const name = ProviderConfigUI.getProviderDisplayName(providerId);
+        const name = getProviderDisplayName(providerId);
         const apiKey = await askForKey(providerId, name, providerHints?.[providerId]);
 
         if (apiKey) {

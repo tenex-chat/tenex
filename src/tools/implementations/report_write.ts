@@ -102,8 +102,7 @@ async function executeReportWrite(
     } catch (error) {
         if (error instanceof InvalidSlugError) {
             throw new Error(
-                `Invalid report slug "${slug}": ${error.message}. ` +
-                    "Slugs can only contain alphanumeric characters, hyphens, and underscores.",
+                `Invalid report slug "${slug}": ${error.message}. Slugs can only contain alphanumeric characters, hyphens, and underscores.`,
                 { cause: error }
             );
         }

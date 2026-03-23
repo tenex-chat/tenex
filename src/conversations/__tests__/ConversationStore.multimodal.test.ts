@@ -10,9 +10,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { mkdtemp, rm } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ImagePart, TextPart } from "ai";
 import { ConversationStore } from "../ConversationStore";
 import * as PubkeyService from "@/services/PubkeyService";

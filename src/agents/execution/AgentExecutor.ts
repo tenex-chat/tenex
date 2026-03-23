@@ -29,7 +29,7 @@ import {
     createTenexSystemReminderContext,
     runWithSystemReminderContext,
 } from "@/llm/system-reminder-context";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenOptionalConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { NostrInboundAdapter } from "@/nostr/NostrInboundAdapter";
 import { AgentPublisher } from "@/nostr/AgentPublisher";
 import { INJECTION_ABORT_REASON } from "@/services/LLMOperationsRegistry";
@@ -192,7 +192,7 @@ export class AgentExecutor {
                     if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
                         span.addEvent("executor.aborted_early_kill", {
                             "ral.number": ralNumber,
-                            "agent.pubkey": context.agent.pubkey.substring(0, 12),
+                            "agent.pubkey": shortenPubkey(context.agent.pubkey),
                             "conversation.id": shortenConversationId(context.conversationId),
                         });
 
@@ -225,7 +225,7 @@ export class AgentExecutor {
                                 await agentPublisher.delegationMarker(marker);
                             } catch (error) {
                                 logger.warn("Failed to publish delegation marker", {
-                                    delegationConversationId: marker.delegationConversationId.substring(0, 12),
+                                    delegationConversationId: shortenConversationId(marker.delegationConversationId),
                                     status: marker.status,
                                     error: formatAnyError(error),
                                 });
@@ -302,7 +302,7 @@ export class AgentExecutor {
                             : "Agent execution failed",
                         context: {
                             agentSlug: context.agent.slug,
-                            conversationId: conversation?.id?.substring(0, 12),
+                            conversationId: shortenOptionalConversationId(conversation?.id),
                             isCreditsError,
                             errorType: isCreditsError ? "insufficient_credits" : "execution_error",
                         },
@@ -520,7 +520,7 @@ export class AgentExecutor {
             logger.error("[AgentExecutor] Missing completion event with no outstanding work", {
                 agent: context.agent.slug,
                 ralNumber,
-                conversationId: context.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(context.conversationId),
                 hasOutstandingWork: outstandingWork.hasWork,
             });
             trace.getActiveSpan()?.addEvent("executor.missing_completion_event_error", {

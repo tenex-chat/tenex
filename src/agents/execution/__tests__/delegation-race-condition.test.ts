@@ -662,7 +662,7 @@ describe("Delegation Race Condition Fix", () => {
       );
 
       // RAL 1 should have work
-      let result1 = ralRegistry.hasOutstandingWork(
+      const result1 = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,
         ralNumber1
@@ -670,7 +670,7 @@ describe("Delegation Race Condition Fix", () => {
       expect(result1.hasWork).toBe(true);
 
       // RAL 2 should NOT have work
-      let result2 = ralRegistry.hasOutstandingWork(
+      const result2 = ralRegistry.hasOutstandingWork(
         AGENT_PUBKEY,
         CONVERSATION_ID,
         ralNumber2

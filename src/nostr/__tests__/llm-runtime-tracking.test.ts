@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import {
     getTotalExecutionTimeSeconds,
     isExecutionActive,

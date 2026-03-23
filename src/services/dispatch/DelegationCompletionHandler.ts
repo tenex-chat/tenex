@@ -2,7 +2,7 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { RALRegistry } from "@/services/ral";
 import { getProjectContext } from "@/services/projects";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { trace, SpanStatusCode, context as otelContext } from "@opentelemetry/api";
 
@@ -60,22 +60,22 @@ export async function handleDelegationCompletion(
             if (senderPubkey !== pendingInfo.pending.recipientPubkey) {
                 span.addEvent("completion_sender_mismatch", {
                     "delegation.event_id": eTag,
-                    "expected.recipient_pubkey": pendingInfo.pending.recipientPubkey.substring(0, 12),
-                    "actual.sender_pubkey": senderPubkey.substring(0, 12),
+                    "expected.recipient_pubkey": shortenPubkey(pendingInfo.pending.recipientPubkey),
+                    "actual.sender_pubkey": shortenPubkey(senderPubkey),
                     "validation.matched": false,
                 });
                 logger.debug("[handleDelegationCompletion] Ignoring event - sender is not the delegated agent", {
                     delegationEventId: eTag.substring(0, 8),
-                    expectedRecipient: pendingInfo.pending.recipientPubkey.substring(0, 12),
-                    actualSender: senderPubkey.substring(0, 12),
+                    expectedRecipient: shortenPubkey(pendingInfo.pending.recipientPubkey),
+                    actualSender: shortenPubkey(senderPubkey),
                 });
                 continue;
             }
 
             span.addEvent("completion_sender_validated", {
                 "delegation.event_id": eTag,
-                "expected.recipient_pubkey": pendingInfo.pending.recipientPubkey.substring(0, 12),
-                "actual.sender_pubkey": senderPubkey.substring(0, 12),
+                "expected.recipient_pubkey": shortenPubkey(pendingInfo.pending.recipientPubkey),
+                "actual.sender_pubkey": shortenPubkey(senderPubkey),
                 "validation.matched": true,
             });
 
@@ -141,8 +141,7 @@ export async function handleDelegationCompletion(
         const resolvedDelegationEventId = delegationEventId;
         if (!resolvedDelegationEventId) {
             const message =
-                `[DelegationCompletionHandler] Missing delegation event id for completion event ` +
-                `${envelope.message.nativeId ?? "unknown"}.`;
+                `[DelegationCompletionHandler] Missing delegation event id for completion event ${envelope.message.nativeId ?? "unknown"}.`;
             span.addEvent("completion_record_missing_delegation_id", {
                 "responder.pubkey": senderPubkey,
                 "completion.event_id": envelope.message.nativeId,

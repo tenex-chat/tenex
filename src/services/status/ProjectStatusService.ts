@@ -13,7 +13,7 @@ import { getDefaultBranchName } from "@/utils/git/initializeGitRepo";
 import { listWorktrees } from "@/utils/git/worktree";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
-import { join } from "path";
+import { join } from "node:path";
 
 /**
  * StatusPublisher handles periodic publishing of status events to Nostr.

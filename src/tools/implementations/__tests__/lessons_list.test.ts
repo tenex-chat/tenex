@@ -312,7 +312,7 @@ describe("Lessons List Tool", () => {
             const tool = createLessonsListTool(context);
 
             const result = await tool.execute({
-                agentPubkey: "abc123-def456-" + "0".repeat(50),
+                agentPubkey: `abc123-def456-${"0".repeat(50)}`,
             });
 
             expect(result).toMatchObject({

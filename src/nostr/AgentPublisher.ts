@@ -6,6 +6,7 @@ import type { RuntimePublishAgent } from "@/events/runtime/RuntimeAgent";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { PendingDelegationsRegistry, RALRegistry } from "@/services/ral";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
@@ -207,15 +208,15 @@ export class AgentPublisher implements AgentRuntimePublisher {
         if (ralRegistry.isAgentConversationKilled(this.agent.pubkey, context.conversationId)) {
             logger.warn("[AgentPublisher.complete] Skipping completion - agent+conversation was killed", {
                 agent: this.agent.slug,
-                agentPubkey: this.agent.pubkey.substring(0, 12),
-                conversationId: context.conversationId.substring(0, 12),
+                agentPubkey: shortenPubkey(this.agent.pubkey),
+                conversationId: shortenConversationId(context.conversationId),
                 ralNumber: context.ralNumber,
             });
 
             trace.getActiveSpan()?.addEvent("publisher.completion_skipped_killed", {
                 "agent.slug": this.agent.slug,
-                "agent.pubkey": this.agent.pubkey.substring(0, 12),
-                "conversation.id": context.conversationId.substring(0, 12),
+                "agent.pubkey": shortenPubkey(this.agent.pubkey),
+                "conversation.id": shortenConversationId(context.conversationId),
                 "ral.number": context.ralNumber,
             });
 
@@ -476,7 +477,7 @@ export class AgentPublisher implements AgentRuntimePublisher {
             logger.warn("[AgentPublisher.streamTextDelta] Failed to publish stream delta (best-effort)", {
                 error: error instanceof Error ? error.message : String(error),
                 agent: this.agent.slug,
-                conversationId: context.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(context.conversationId),
                 ralNumber: context.ralNumber,
                 sequence: intent.sequence,
                 deltaLength: intent.delta.length,

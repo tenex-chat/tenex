@@ -176,10 +176,10 @@ describe("APNsClient", () => {
                 expect(result.success).toBe(true);
                 expect(result.statusCode).toBe(200);
                 expect(calls).toHaveLength(1);
-                expect(calls[0]!.url).toContain("api.sandbox.push.apple.com");
-                expect(calls[0]!.url).toContain("device-token-123");
-                expect(calls[0]!.headers["apns-topic"]).toBe("com.test.app");
-                expect(calls[0]!.headers["authorization"]).toMatch(/^bearer /);
+                expect(calls[0]?.url).toContain("api.sandbox.push.apple.com");
+                expect(calls[0]?.url).toContain("device-token-123");
+                expect(calls[0]?.headers["apns-topic"]).toBe("com.test.app");
+                expect(calls[0]?.headers.authorization).toMatch(/^bearer /);
             } finally {
                 cleanup();
             }
@@ -209,8 +209,8 @@ describe("APNsClient", () => {
                 });
 
                 expect(calls).toHaveLength(1);
-                expect(calls[0]!.url).toContain("api.push.apple.com");
-                expect(calls[0]!.url).not.toContain("sandbox");
+                expect(calls[0]?.url).toContain("api.push.apple.com");
+                expect(calls[0]?.url).not.toContain("sandbox");
             } finally {
                 cleanup();
             }
@@ -340,8 +340,8 @@ describe("APNsClient", () => {
 
                 expect(calls).toHaveLength(2);
                 // Both should use the same JWT (cached)
-                const jwt1 = calls[0]!.headers["authorization"];
-                const jwt2 = calls[1]!.headers["authorization"];
+                const jwt1 = calls[0]?.headers.authorization;
+                const jwt2 = calls[1]?.headers.authorization;
                 expect(jwt1).toBe(jwt2);
             } finally {
                 cleanup();

@@ -33,25 +33,29 @@
 import { afterEach, beforeEach, describe, test, expect, mock } from "bun:test";
 
 // ===== Mock CJS-only modules that cause bun ESM hang =====
+type EventHandler = (...args: unknown[]) => void;
+
 class MockEventEmitter {
-    private _handlers: Map<string, Function[]> = new Map();
-    on(event: string, handler: Function) {
+    private _handlers: Map<string, EventHandler[]> = new Map();
+    on(event: string, handler: EventHandler) {
         const h = this._handlers.get(event) || [];
         h.push(handler);
         this._handlers.set(event, h);
         return this;
     }
-    emit(event: string, ...args: any[]) {
+    emit(event: string, ...args: unknown[]) {
         const h = this._handlers.get(event) || [];
         for (const fn of h) fn(...args);
         return h.length > 0;
     }
-    off(event: string, handler: Function) {
+    off(event: string, handler: EventHandler) {
         const h = this._handlers.get(event) || [];
-        this._handlers.set(event, h.filter(fn => fn !== handler));
+        this._handlers.set(event, h.filter((fn) => fn !== handler));
         return this;
     }
-    removeListener(event: string, handler: Function) { return this.off(event, handler); }
+    removeListener(event: string, handler: EventHandler) {
+        return this.off(event, handler);
+    }
     removeAllListeners(event?: string) {
         if (event) this._handlers.delete(event);
         else this._handlers.clear();

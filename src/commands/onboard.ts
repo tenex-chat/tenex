@@ -13,7 +13,7 @@ import { runProviderSetup } from "@/llm/utils/provider-setup";
 import type { AnyLLMConfiguration, TenexLLMs, TenexProviders } from "@/services/config/types";
 import { isMetaModelConfiguration } from "@/services/config/types";
 import { config } from "@/services/ConfigService";
-import { type EmbeddingConfig, EmbeddingProviderFactory } from "@/services/rag/EmbeddingProviderFactory";
+import { type EmbeddingConfig, loadEmbeddingConfiguration, saveEmbeddingConfiguration } from "@/services/rag/EmbeddingProviderFactory";
 import { ImageGenerationService, OPENROUTER_IMAGE_MODELS, ASPECT_RATIOS, IMAGE_SIZES, type ImageConfig } from "@/services/image/ImageGenerationService";
 import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "@/commands/config/display";
@@ -114,7 +114,7 @@ const relayPrompt = createPrompt<string, {
         return isActive ? theme.style.highlight(label) + desc : label + desc;
     });
 
-    const errorLine = error ? "\n" + chalk.red(error) : "";
+    const errorLine = error ? `\n${chalk.red(error)}` : "";
     return `${prefix} ${message}\n${lines.join("\n")}${errorLine}`;
 });
 
@@ -384,7 +384,7 @@ async function runRoleAssignment(): Promise<void> {
  */
 async function runEmbeddingSetup(providers: TenexProviders): Promise<void> {
     const configuredProviders = Object.keys(providers.providers);
-    const existing = await EmbeddingProviderFactory.loadConfiguration({ scope: "global" });
+    const existing = await loadEmbeddingConfiguration({ scope: "global" });
 
     // Auto-pick the best default
     let defaultProvider: string;
@@ -424,7 +424,7 @@ async function runEmbeddingSetup(providers: TenexProviders): Promise<void> {
     }]);
 
     if (action === "accept") {
-        await EmbeddingProviderFactory.saveConfiguration({ provider, model }, "global");
+        await saveEmbeddingConfiguration({ provider, model }, "global");
         display.success(`Embeddings: ${providerLabel} / ${model}`);
         return;
     }
@@ -485,7 +485,7 @@ async function runEmbeddingSetup(providers: TenexProviders): Promise<void> {
     }
 
     const embeddingConfig: EmbeddingConfig = { provider: chosenProvider, model: chosenModel };
-    await EmbeddingProviderFactory.saveConfiguration(embeddingConfig, "global");
+    await saveEmbeddingConfiguration(embeddingConfig, "global");
     display.success(`Embeddings: ${chosenProvider} / ${chosenModel}`);
 }
 
@@ -597,15 +597,15 @@ async function seedDefaultLLMConfigs(providers: TenexProviders): Promise<void> {
     const hasAnthropic = connected.includes(PROVIDER_IDS.ANTHROPIC);
 
     if (hasAnthropic) {
-        llmsConfig.configurations["Sonnet"] = {
+        llmsConfig.configurations.Sonnet = {
             provider: PROVIDER_IDS.ANTHROPIC,
             model: "claude-sonnet-4-6",
         };
-        llmsConfig.configurations["Opus"] = {
+        llmsConfig.configurations.Opus = {
             provider: PROVIDER_IDS.ANTHROPIC,
             model: "claude-opus-4-6",
         };
-        llmsConfig.configurations["Auto"] = {
+        llmsConfig.configurations.Auto = {
             provider: "meta",
             variants: {
                 fast: {

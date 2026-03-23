@@ -8,6 +8,7 @@ import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 
 const DEBOUNCE_MS = 5000;
 
@@ -47,7 +48,7 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
         const agentPubkey = event.tagValue("p");
         if (!agentPubkey) {
             logger.warn("[AgentDeletion] Event missing required p tag (agent pubkey)", {
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
             });
             return;
         }
@@ -55,7 +56,7 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
         const scope = event.tagValue("r");
         if (!scope || (scope !== "project" && scope !== "global")) {
             logger.warn("[AgentDeletion] Event missing or invalid r tag (scope)", {
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
                 scope,
             });
             return;
@@ -65,16 +66,16 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
         const whitelistedPubkeys = config.getWhitelistedPubkeys();
         if (!whitelistedPubkeys.includes(event.pubkey)) {
             logger.warn("[AgentDeletion] Unauthorized — event author not whitelisted", {
-                eventId: event.id?.substring(0, 12),
-                author: event.pubkey.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
+                author: shortenPubkey(event.pubkey),
             });
             return;
         }
 
         trace.getActiveSpan()?.addEvent("agent_deletion.received", {
-            "deletion.agent_pubkey": agentPubkey.substring(0, 12),
+            "deletion.agent_pubkey": shortenPubkey(agentPubkey),
             "deletion.scope": scope,
-            "deletion.author": event.pubkey.substring(0, 12),
+            "deletion.author": shortenPubkey(event.pubkey),
         });
 
         // 3. Dispatch by scope
@@ -82,7 +83,7 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
             const aTag = event.tagValue("a");
             if (!aTag) {
                 logger.warn("[AgentDeletion] Project-scoped deletion missing required a tag", {
-                    eventId: event.id?.substring(0, 12),
+                    eventId: shortenOptionalEventId(event.id),
                 });
                 return;
             }
@@ -92,7 +93,7 @@ export async function handleAgentDeletion(event: NDKEvent): Promise<void> {
         }
     } catch (error) {
         logger.error("[AgentDeletion] Failed to handle agent deletion event", {
-            eventId: event.id?.substring(0, 12),
+            eventId: shortenOptionalEventId(event.id),
             error: formatAnyError(error),
         });
     }
@@ -110,7 +111,7 @@ async function handleProjectScopedDeletion(
     const parts = aTag.split(":");
     if (parts.length < 3) {
         logger.warn("[AgentDeletion] Invalid a-tag format", {
-            eventId: event.id?.substring(0, 12),
+            eventId: shortenOptionalEventId(event.id),
             aTag,
         });
         return;
@@ -122,7 +123,7 @@ async function handleProjectScopedDeletion(
     const currentProjectDTag = projectContext.project.dTag || projectContext.project.tagValue("d");
     if (projectDTag !== currentProjectDTag) {
         logger.debug("[AgentDeletion] Ignoring deletion for different project", {
-            eventId: event.id?.substring(0, 12),
+            eventId: shortenOptionalEventId(event.id),
             targetProject: projectDTag,
             currentProject: currentProjectDTag,
         });
@@ -132,9 +133,9 @@ async function handleProjectScopedDeletion(
     // Verify event author matches the project owner
     if (event.pubkey !== projectContext.project.pubkey) {
         logger.warn("[AgentDeletion] Event author does not match project owner", {
-            eventId: event.id?.substring(0, 12),
-            eventAuthor: event.pubkey.substring(0, 12),
-            projectOwner: projectContext.project.pubkey.substring(0, 12),
+            eventId: shortenOptionalEventId(event.id),
+            eventAuthor: shortenPubkey(event.pubkey),
+            projectOwner: shortenPubkey(projectContext.project.pubkey),
         });
         return;
     }
@@ -143,7 +144,7 @@ async function handleProjectScopedDeletion(
     const agent = projectContext.getAgentByPubkey(agentPubkey);
     if (!agent) {
         logger.warn("[AgentDeletion] Agent not found in project, no-op", {
-            agentPubkey: agentPubkey.substring(0, 12),
+            agentPubkey: shortenPubkey(agentPubkey),
             projectDTag,
         });
         return;
@@ -155,7 +156,7 @@ async function handleProjectScopedDeletion(
     if (removed) {
         logger.info("[AgentDeletion] Removed agent from project", {
             agentSlug: agent.slug,
-            agentPubkey: agentPubkey.substring(0, 12),
+            agentPubkey: shortenPubkey(agentPubkey),
             projectDTag,
             reason: event.content || undefined,
         });
@@ -188,7 +189,7 @@ async function handleGlobalDeletion(
 
     if (projects.length === 0) {
         logger.warn("[AgentDeletion] Agent has no project associations, no-op", {
-            agentPubkey: agentPubkey.substring(0, 12),
+            agentPubkey: shortenPubkey(agentPubkey),
         });
         return;
     }
@@ -212,8 +213,8 @@ async function handleGlobalDeletion(
         if (event.pubkey !== projectContext.project.pubkey) {
             logger.warn("[AgentDeletion] Event author does not match project owner, skipping", {
                 projectDTag,
-                eventAuthor: event.pubkey.substring(0, 12),
-                projectOwner: projectContext.project.pubkey.substring(0, 12),
+                eventAuthor: shortenPubkey(event.pubkey),
+                projectOwner: shortenPubkey(projectContext.project.pubkey),
             });
             continue;
         }
@@ -222,7 +223,7 @@ async function handleGlobalDeletion(
         if (!agent) {
             // Agent may have already been removed — handle gracefully
             logger.debug("[AgentDeletion] Agent already absent from project registry", {
-                agentPubkey: agentPubkey.substring(0, 12),
+                agentPubkey: shortenPubkey(agentPubkey),
                 projectDTag,
             });
             continue;
@@ -237,14 +238,14 @@ async function handleGlobalDeletion(
 
     if (removedCount > 0) {
         logger.info("[AgentDeletion] Global deletion complete", {
-            agentPubkey: agentPubkey.substring(0, 12),
+            agentPubkey: shortenPubkey(agentPubkey),
             projectsAffected: removedCount,
             totalProjects: projects.length,
             reason: event.content || undefined,
         });
 
         trace.getActiveSpan()?.addEvent("agent_deletion.global_complete", {
-            "deletion.agent_pubkey": agentPubkey.substring(0, 12),
+            "deletion.agent_pubkey": shortenPubkey(agentPubkey),
             "deletion.projects_affected": removedCount,
             "deletion.total_projects": projects.length,
         });
@@ -353,14 +354,14 @@ async function publishUpdatedProjectEvent(
                     eventId: updatedEvent.id,
                 });
                 logger.info("[AgentDeletion] Published owner-signed 31933 update", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
                     projectDTag,
-                    eventId: updatedEvent.id?.substring(0, 12),
+                    eventId: shortenOptionalEventId(updatedEvent.id),
                     agentTagCount: updatedTags.filter((t) => t[0] === "agent").length,
                 });
             } catch (error) {
                 logger.warn("[AgentDeletion] Failed to publish 31933 update", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
                     projectDTag,
                     error: error instanceof Error ? error.message : String(error),
                 });
@@ -369,7 +370,7 @@ async function publishUpdatedProjectEvent(
         }
 
         logger.warn("[AgentDeletion] Skipping 31933 publish — signing failed", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             projectDTag,
             outcome: result.outcome,
             reason: "reason" in result ? result.reason : undefined,

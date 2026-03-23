@@ -19,7 +19,7 @@ import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 
 const tracer = trace.getTracer("tenex.stream-callbacks");
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
-import { MessageCompiler } from "./MessageCompiler";
+import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
 import { updateReminderData } from "./system-reminders";
 import type { FullRuntimeContext, RALExecutionContext } from "./types";

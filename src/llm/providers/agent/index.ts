@@ -5,4 +5,4 @@
  */
 
 export { CodexProvider } from "./CodexProvider";
-export { CodexToolsAdapter } from "./CodexToolsAdapter";
+export { createSdkMcpServer } from "./CodexToolsAdapter";

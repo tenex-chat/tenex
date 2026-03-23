@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { config } from "@/services/ConfigService";
+import { shortenPubkey } from "@/utils/conversation-id";
 
 /**
  * Operations logged by the NIP-46 signing system.
@@ -66,7 +67,7 @@ export class Nip46SigningLog {
         };
 
         try {
-            fs.appendFileSync(this.logPath, JSON.stringify(fullEntry) + "\n");
+            fs.appendFileSync(this.logPath, `${JSON.stringify(fullEntry)}\n`);
         } catch {
             // Silent failure - logging should never crash the daemon
         }
@@ -76,6 +77,6 @@ export class Nip46SigningLog {
      * Convenience: truncate a pubkey to 12 chars for logging.
      */
     static truncatePubkey(pubkey: string): string {
-        return pubkey.substring(0, 12);
+        return shortenPubkey(pubkey);
     }
 }

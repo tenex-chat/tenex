@@ -3,6 +3,7 @@ import { NDKKind } from "@/nostr/kinds";
 import { logger } from "@/utils/logger";
 import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
+import { shortenOptionalEventId } from "@/utils/conversation-id";
 
 const tracer = trace.getTracer("tenex.nudge-whitelist-service");
 
@@ -147,7 +148,7 @@ export class NudgeSkillWhitelistService {
         }
 
         logger.debug("[NudgeSkillWhitelistService] Received whitelist event", {
-            eventId: event.id?.substring(0, 12),
+            eventId: shortenOptionalEventId(event.id),
             author: event.pubkey.substring(0, 8),
         });
 
@@ -201,7 +202,7 @@ export class NudgeSkillWhitelistService {
                         if (!eventToWhitelisters.has(eventId)) {
                             eventToWhitelisters.set(eventId, new Set());
                         }
-                        eventToWhitelisters.get(eventId)!.add(event.pubkey);
+                        eventToWhitelisters.get(eventId)?.add(event.pubkey);
                     }
                 }
 

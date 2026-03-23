@@ -248,7 +248,7 @@ export async function checkPostCompletion(
                 correctionMessage: supervisionResult.correctionAction.message,
                 injectedMessage: false,
             };
-        } else if (supervisionResult.correctionAction.type === "inject-message" &&
+        }if (supervisionResult.correctionAction.type === "inject-message" &&
             supervisionResult.correctionAction.message) {
             getSystemReminderContext().queue({
                 type: "supervision-message",

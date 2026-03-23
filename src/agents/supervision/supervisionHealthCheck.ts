@@ -52,9 +52,9 @@ export function checkSupervisionHealth(): SupervisionHealthCheckResult {
     // FAIL-CLOSED: Both conditions must be met
     if (registrySize === 0) {
         const errorMessage =
-            `FATAL: Supervision system has no heuristics registered! ` +
-            `This indicates a critical configuration error. ` +
-            `The system cannot proceed without supervision.`;
+            "FATAL: Supervision system has no heuristics registered! " +
+            "This indicates a critical configuration error. " +
+            "The system cannot proceed without supervision.";
 
         return {
             healthy: false,
@@ -67,10 +67,7 @@ export function checkSupervisionHealth(): SupervisionHealthCheckResult {
 
     if (postCompletionCount === 0) {
         const errorMessage =
-            `FATAL: No post-completion heuristics registered! ` +
-            `Registry has ${registrySize} total heuristics: [${heuristicIds.join(", ")}], ` +
-            `but none are post-completion type. ` +
-            `Supervision system is misconfigured - refusing to proceed without post-completion checks.`;
+            `FATAL: No post-completion heuristics registered! Registry has ${registrySize} total heuristics: [${heuristicIds.join(", ")}], but none are post-completion type. Supervision system is misconfigured - refusing to proceed without post-completion checks.`;
 
         return {
             healthy: false,

@@ -40,7 +40,7 @@ const createTelegramEnvelope = (messageId: string) =>
 
 describe("TelegramRuntimePublisherService", () => {
     beforeEach(() => {
-        Object.values(nostrPublisherMethods).forEach((method) => method.mockReset());
+        for (const method of Object.values(nostrPublisherMethods)) method.mockReset();
         nostrPublisherMethods.complete.mockImplementation(async () => undefined);
         nostrPublisherMethods.conversation.mockImplementation(async () => ({}) as any);
         nostrPublisherMethods.delegate.mockImplementation(async () => "delegation-id");

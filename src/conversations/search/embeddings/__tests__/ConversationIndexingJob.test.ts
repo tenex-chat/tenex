@@ -6,8 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as constantsModule from "@/constants";
 import * as conversationEmbeddingServiceModule from "../ConversationEmbeddingService";
 import { RAGService } from "@/services/rag/RAGService";
-import { join } from "path";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
+import { join } from "node:path";
+import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 
 const mockInitialize = vi.fn().mockResolvedValue(undefined);
 const mockBuildDocument = vi.fn().mockReturnValue({ kind: "ok", document: { id: "doc-1", content: "test" } });

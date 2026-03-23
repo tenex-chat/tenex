@@ -106,7 +106,7 @@ export class SupervisorLLMService {
                                         : JSON.stringify(toolResult.result);
                                     // Truncate individual tool results if they exceed limit
                                     if (resultStr.length > toolResultMaxLength) {
-                                        resultStr = resultStr.slice(0, toolResultMaxLength) + "... [truncated]";
+                                        resultStr = `${resultStr.slice(0, toolResultMaxLength)}... [truncated]`;
                                     }
                                     return `[Tool Result] ${toolResult.toolName}: ${resultStr}`;
                                 }
@@ -122,7 +122,7 @@ export class SupervisorLLMService {
                 // Truncate very long messages for the prompt
                 const maxLength = 25000;
                 if (content.length > maxLength) {
-                    content = content.slice(0, maxLength) + "... [truncated]";
+                    content = `${content.slice(0, maxLength)}... [truncated]`;
                 }
 
                 return `[${index + 1}] ${role}:\n${content}`;

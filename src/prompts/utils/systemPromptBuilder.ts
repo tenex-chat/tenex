@@ -168,7 +168,7 @@ async function addCoreAgentFragments(
 
     if (hasSchedulingTools) {
         try {
-            let t0 = performance.now();
+            const t0 = performance.now();
             const schedulerService = SchedulerService.getInstance();
             const allTasks = await schedulerService.getTasks();
             parentSpan?.addEvent("scheduled_tasks_fetched", { "duration_ms": Math.round(performance.now() - t0) });

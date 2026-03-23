@@ -17,10 +17,11 @@
  * The heavy lifting is delegated to individual ConversationStore instances.
  */
 
-import { existsSync, readdirSync } from "fs";
-import { basename, dirname, join } from "path";
+import { existsSync, readdirSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { getTenexBasePath } from "@/constants";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 // Import directly from the module file (not the barrel) to avoid circular
 // dependency: barrel re-exports ProjectContext → @/agents → ConversationStore
@@ -206,7 +207,9 @@ class ConversationRegistryImpl {
         if (isHexPrefix(conversationId)) {
             const resolved = resolvePrefixToId(conversationId);
             if (resolved) {
-                logger.debug(`[ConversationRegistry] Resolved prefix ${conversationId} to ${resolved.substring(0, 12)}...`);
+                logger.debug(
+                    `[ConversationRegistry] Resolved prefix ${conversationId} to ${shortenConversationId(resolved)}...`
+                );
                 return resolved;
             }
             // Fall through to return original if resolution fails
@@ -550,7 +553,7 @@ class ConversationRegistryImpl {
         const queryLower = query.toLowerCase();
         for (const store of this.stores.values()) {
             const title = store.getTitle();
-            if (title && title.toLowerCase().includes(queryLower)) {
+            if (title?.toLowerCase().includes(queryLower)) {
                 results.push(store);
             }
         }
@@ -565,7 +568,7 @@ class ConversationRegistryImpl {
      * @param limit - Maximum number of results (default: 20)
      * @returns AdvancedSearchResult with explicit success/error information
      */
-    searchAdvanced(input: RawSearchInput, limit: number = 20): AdvancedSearchResult {
+    searchAdvanced(input: RawSearchInput, limit = 20): AdvancedSearchResult {
         const currentProjectId = this.resolveProjectId();
         if (!currentProjectId) {
             logger.warn("[ConversationRegistry] searchAdvanced called before initialization");

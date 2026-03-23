@@ -39,13 +39,13 @@ export function parseTimestamp(value: string | number): number {
 
     // Try parsing as numeric string (Unix timestamp)
     const numericValue = Number(value);
-    if (!isNaN(numericValue) && value.trim() === String(numericValue)) {
+    if (!Number.isNaN(numericValue) && value.trim() === String(numericValue)) {
         return numericValue;
     }
 
     // Try parsing as date string
     const date = new Date(value);
-    if (isNaN(date.getTime())) {
+    if (Number.isNaN(date.getTime())) {
         throw new Error(`Invalid date format: "${value}". Expected Unix timestamp or ISO 8601 date.`);
     }
 

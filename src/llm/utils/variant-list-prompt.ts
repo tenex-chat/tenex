@@ -228,7 +228,7 @@ async function editVariantDetail(
             if (keywords.length > 0) {
                 variant.keywords = keywords;
             } else {
-                delete variant.keywords;
+                variant.keywords = undefined;
             }
         } else if (field === "description") {
             const { desc } = await inquirer.prompt([{
@@ -241,7 +241,7 @@ async function editVariantDetail(
             if (desc) {
                 variant.description = desc;
             } else {
-                delete variant.description;
+                variant.description = undefined;
             }
         } else if (field === "systemPrompt") {
             const { prompt } = await inquirer.prompt([{
@@ -254,7 +254,7 @@ async function editVariantDetail(
             if (prompt) {
                 variant.systemPrompt = prompt;
             } else {
-                delete variant.systemPrompt;
+                variant.systemPrompt = undefined;
             }
         }
     }

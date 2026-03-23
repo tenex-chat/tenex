@@ -53,7 +53,7 @@ describe("Delegate Tool - Nudge Propagation", () => {
             delegate: async (config: any) => {
                 // Track the delegate call to verify nudge propagation
                 delegateCallArgs.push({ nudges: config.nudges });
-                return "mock-delegation-id-" + Math.random().toString(36).substring(7);
+                return `mock-delegation-id-${Math.random().toString(36).substring(7)}`;
             },
             delegationMarker: async () => ({ id: "marker-id" }),
         } as any,

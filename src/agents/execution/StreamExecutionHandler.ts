@@ -7,12 +7,12 @@
  */
 
 import { formatAnyError, formatStreamError } from "@/lib/error-formatter";
-import {
-    type ChunkTypeChangeEvent,
-    type CompleteEvent,
-    type ContentEvent,
-    type ReasoningEvent,
-    type StreamErrorEvent,
+import type {
+    ChunkTypeChangeEvent,
+    CompleteEvent,
+    ContentEvent,
+    ReasoningEvent,
+    StreamErrorEvent,
 } from "@/llm/types";
 import { shortenConversationId } from "@/utils/conversation-id";
 import type { EventContext } from "@/nostr/types";
@@ -718,7 +718,7 @@ export class StreamExecutionHandler {
             .catch((error) => {
                 logger.warn("[StreamExecutionHandler] Failed to flush stream text deltas", {
                     error: formatAnyError(error),
-                    conversationId: this.config.context.conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(this.config.context.conversationId),
                     agent: this.config.context.agent.slug,
                     ralNumber: this.config.ralNumber,
                 });

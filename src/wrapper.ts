@@ -88,7 +88,7 @@ class DaemonWrapper {
     private setupSignalHandlers(): void {
         // Forward SIGHUP to child process
         process.on("SIGHUP", () => {
-            if (this.child && this.child.pid) {
+            if (this.child?.pid) {
                 console.log("[Wrapper] SIGHUP received - forwarding to daemon");
                 this.child.kill("SIGHUP");
             }
@@ -104,13 +104,13 @@ class DaemonWrapper {
             console.log(`[Wrapper] ${signal} received - shutting down`);
             this.isShuttingDown = true;
 
-            if (this.child && this.child.pid) {
+            if (this.child?.pid) {
                 // Forward the signal to child
                 this.child.kill(signal === "SIGTERM" ? "SIGTERM" : "SIGINT");
 
                 // Give child some time to shutdown, then force kill
                 setTimeout(() => {
-                    if (this.child && this.child.pid) {
+                    if (this.child?.pid) {
                         console.log("[Wrapper] Child still running after timeout - forcing kill");
                         this.child.kill("SIGKILL");
                     }

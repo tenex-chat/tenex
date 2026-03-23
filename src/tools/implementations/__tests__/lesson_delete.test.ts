@@ -23,12 +23,12 @@ let lastCreatedEvent: any = null;
 mock.module("@nostr-dev-kit/ndk", () => ({
     NDKEvent: class MockNDKEvent {
         ndk: any;
-        id: string = "";
-        pubkey: string = "";
+        id = "";
+        pubkey = "";
         created_at: number = Math.floor(Date.now() / 1000);
         kind: number | undefined;
         tags: string[][] = [];
-        content: string = "";
+        content = "";
 
         constructor(ndk: any) {
             this.ndk = ndk;

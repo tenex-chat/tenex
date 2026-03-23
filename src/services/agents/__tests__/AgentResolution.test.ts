@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, spyOn } from "bun:test";
 import { resolveAgentSlug, resolveRecipientToPubkey } from "../AgentResolution";
 import * as projectsModule from "@/services/projects";
+import { shortenPubkey } from "@/utils/conversation-id";
 
 describe("AgentResolution", () => {
     describe("resolveAgentSlug", () => {
@@ -87,7 +88,7 @@ describe("AgentResolution", () => {
             });
 
             it("should return null for 12-char hex prefix (not a registered slug)", () => {
-                const prefix = mockAgentPubkey.substring(0, 12);
+                const prefix = shortenPubkey(mockAgentPubkey);
                 const result = resolveAgentSlug(prefix);
                 expect(result.pubkey).toBe(null);
             });

@@ -17,10 +17,10 @@ import chalk from "chalk";
 import { inquirerTheme } from "@/utils/cli-theme";
 import * as display from "@/commands/config/display";
 import { llmServiceFactory } from "./LLMServiceFactory";
-import { ConfigurationManager } from "./utils/ConfigurationManager";
-import { ConfigurationTester } from "./utils/ConfigurationTester";
+import { addConfiguration, addMultiModalConfiguration } from "./utils/ConfigurationManager";
+import { runConfigurationTest } from "./utils/ConfigurationTester";
 import type { TestResult } from "./utils/ConfigurationTester";
-import { ProviderConfigUI } from "./utils/ProviderConfigUI";
+import { displayProviders } from "./utils/ProviderConfigUI";
 
 type LLMConfigWithProviders = TenexLLMs & {
     providers: Record<string, { apiKey: string | string[] }>;
@@ -83,11 +83,11 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
 
         if (isEnterKey(key)) {
             if (active < doneIndex) {
-                done(actions[active]!.value);
+                done(actions[active]?.value);
             } else if (active === doneIndex) {
                 done("done");
             } else {
-                done(items[active - doneIndex - 1]!.value);
+                done(items[active - doneIndex - 1]?.value);
             }
         } else if (isUpKey(key) || isDownKey(key)) {
             rl.clearLine(0);
@@ -185,7 +185,7 @@ export class LLMConfigEditor {
 
         display.blank();
         display.step(0, 0, "LLM Configuration");
-        ProviderConfigUI.displayProviders(llmsConfig);
+        displayProviders(llmsConfig);
 
         const configNames = Object.keys(llmsConfig.configurations);
         const items: ListItem[] = configNames.map((name) => {
@@ -216,17 +216,17 @@ export class LLMConfigEditor {
             message: "Configurations",
             items,
             actions,
-            onTest: (configName) => ConfigurationTester.runTest(llmsConfig, configName),
+            onTest: (configName) => runConfigurationTest(llmsConfig, configName),
         });
 
         if (action.startsWith("delete:")) {
             const configName = action.slice("delete:".length);
             await this.deleteConfig(llmsConfig, configName);
         } else if (action === "add") {
-            await ConfigurationManager.add(llmsConfig, this.advanced);
+            await addConfiguration(llmsConfig, this.advanced);
             await this.saveConfig(llmsConfig);
         } else if (action === "addMultiModal") {
-            await ConfigurationManager.addMultiModal(llmsConfig);
+            await addMultiModalConfiguration(llmsConfig);
             await this.saveConfig(llmsConfig);
         } else if (action === "done") {
             return;

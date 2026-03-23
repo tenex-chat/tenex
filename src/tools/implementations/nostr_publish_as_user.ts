@@ -1,3 +1,4 @@
+import { shortenPubkey } from "@/utils/conversation-id";
 /**
  * Nostr Publish As User Tool
  *
@@ -107,13 +108,13 @@ async function connectNip46Signer(
 
     if (!bunkerUri?.startsWith("bunker://")) {
         throw new Error(
-            `Invalid bunker URI for owner ${ownerPubkey.substring(0, 12)}: ` +
+            `Invalid bunker URI for owner ${shortenPubkey(ownerPubkey)}: ` +
             `expected "bunker://" URI but got "${bunkerUri || "(empty)"}"`
         );
     }
 
     logger.info("[nostr_publish_as_user] Creating NIP-46 signer", {
-        ownerPubkey: ownerPubkey.substring(0, 12),
+        ownerPubkey: shortenPubkey(ownerPubkey),
         bunkerUri: bunkerUri.substring(0, 60),
     });
 
@@ -121,7 +122,7 @@ async function connectNip46Signer(
 
     signer.on("authUrl", (url: string) => {
         logger.info("[nostr_publish_as_user] NIP-46 auth URL required", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             url,
         });
     });
@@ -190,8 +191,7 @@ async function executeNostrPublishAsUser(
     const agentSigner: unknown = context.agent.signer;
     if (!(agentSigner instanceof NDKPrivateKeySigner)) {
         throw new Error(
-            `Expected agent signer to be NDKPrivateKeySigner for NIP-46 signing, ` +
-            `got ${(agentSigner as { constructor?: { name?: string } })?.constructor?.name ?? "undefined"}.`
+            `Expected agent signer to be NDKPrivateKeySigner for NIP-46 signing, got ${(agentSigner as { constructor?: { name?: string } })?.constructor?.name ?? "undefined"}.`
         );
     }
 
@@ -217,8 +217,8 @@ async function executeNostrPublishAsUser(
     logger.info("[nostr_publish_as_user] Requesting user signature", {
         description,
         kind: ndkEvent.kind,
-        ownerPubkey: ownerPubkey.substring(0, 12),
-        agentPubkey: context.agent.pubkey.substring(0, 12),
+        ownerPubkey: shortenPubkey(ownerPubkey),
+        agentPubkey: shortenPubkey(context.agent.pubkey),
         tagCount: ndkEvent.tags.length,
     });
 
@@ -257,7 +257,7 @@ async function executeNostrPublishAsUser(
     // Strip the root-level tenex_explanation property now that signing is done.
     // This is purely cosmetic cleanup — the property was never part of the
     // event hash or signature.
-    delete (ndkEvent as any).tenex_explanation;
+    (ndkEvent as any).tenex_explanation = undefined;
 
     // Validate timestamp is in seconds, not milliseconds
     if (ndkEvent.created_at && ndkEvent.created_at > 1_000_000_000_000) {
@@ -296,7 +296,7 @@ async function executeNostrPublishAsUser(
     logger.info("[nostr_publish_as_user] Event published successfully", {
         eventId: ndkEvent.id,
         kind: ndkEvent.kind,
-        ownerPubkey: ownerPubkey.substring(0, 12),
+        ownerPubkey: shortenPubkey(ownerPubkey),
         description,
     });
 

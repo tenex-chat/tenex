@@ -4,6 +4,7 @@ import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { logger } from "@/utils/logger";
 import { NDKEvent, NDKPrivateKeySigner, type NDKSubscription } from "@nostr-dev-kit/ndk";
+import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 
 const DEBOUNCE_MS = 5000;
 
@@ -237,7 +238,7 @@ export class OwnerAgentListService {
         this.ownerAgentSets.set(event.pubkey, merged);
 
         logger.debug("[OwnerAgentListService] Updated from relay event", {
-            ownerPubkey: event.pubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(event.pubkey),
             pTagCount: ptagPubkeys.length,
             pendingCount: this.pendingAdditions.size,
         });
@@ -314,13 +315,13 @@ export class OwnerAgentListService {
                     eventId: ev.id,
                 });
                 logger.info("[OwnerAgentListService] Published owner-signed 14199", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
-                    eventId: ev.id?.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
+                    eventId: shortenOptionalEventId(ev.id),
                     pTagCount,
                 });
             } catch (error) {
                 logger.warn("[OwnerAgentListService] Failed to publish owner-signed 14199", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
@@ -328,7 +329,7 @@ export class OwnerAgentListService {
         }
 
         logger.warn("[OwnerAgentListService] Skipping 14199 publish — signing failed", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             outcome: result.outcome,
             reason: "reason" in result ? result.reason : undefined,
         });
@@ -347,7 +348,7 @@ export class OwnerAgentListService {
         } catch (error) {
             logger.warn("[OwnerAgentListService] Failed to publish backend-signed 14199", {
                 error: error instanceof Error ? error.message : String(error),
-                eventId: ev.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(ev.id),
             });
         }
     }

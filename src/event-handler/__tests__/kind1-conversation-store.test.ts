@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import * as pubkeyServiceModule from "@/services/PubkeyService";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";

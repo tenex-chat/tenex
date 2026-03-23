@@ -26,6 +26,24 @@ const mockAgentCapabilities: ProviderCapabilities = {
     mcpSupport: true,
 };
 
+/** Creates an async generator that immediately throws the given error on first iteration */
+function throwingStream(error: unknown): AsyncGenerator<never> {
+    return {
+        [Symbol.asyncIterator]() {
+            return this;
+        },
+        async next(): Promise<IteratorResult<never>> {
+            throw error;
+        },
+        async return(): Promise<IteratorResult<never>> {
+            return { done: true, value: undefined as never };
+        },
+        async throw(e: unknown): Promise<IteratorResult<never>> {
+            throw e;
+        },
+    };
+}
+
 // Mock the AI SDK functions
 const mockStreamText = mock(() => ({
     textStream: (async function* () {
@@ -1358,9 +1376,7 @@ describe("LLMService key rotation retry", () => {
                 callCount++;
                 if (callCount === 1) {
                     return {
-                        fullStream: (async function* () {
-                            throw Object.assign(new Error("Unauthorized"), { status: 401 });
-                        })(),
+                        fullStream: throwingStream(Object.assign(new Error("Unauthorized"), { status: 401 })),
                     };
                 }
                 return {
@@ -1498,9 +1514,7 @@ describe("LLMService key rotation retry", () => {
                 callCount++;
                 if (callCount === 1) {
                     return {
-                        fullStream: (async function* () {
-                            throw Object.assign(new Error("Forbidden"), { status: 403 });
-                        })(),
+                        fullStream: throwingStream(Object.assign(new Error("Forbidden"), { status: 403 })),
                     };
                 }
                 return {
@@ -1529,9 +1543,7 @@ describe("LLMService key rotation retry", () => {
                 callCount++;
                 if (callCount === 1) {
                     return {
-                        fullStream: (async function* () {
-                            throw Object.assign(new Error("Forbidden"), { status: 403 });
-                        })(),
+                        fullStream: throwingStream(Object.assign(new Error("Forbidden"), { status: 403 })),
                     };
                 }
                 return {
@@ -1558,9 +1570,7 @@ describe("LLMService key rotation retry", () => {
 
         test("propagates error and rotates when retry also fails", async () => {
             mockStreamText.mockImplementation(() => ({
-                fullStream: (async function* () {
-                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
-                })(),
+                fullStream: throwingStream(Object.assign(new Error("Unauthorized"), { status: 401 })),
             }));
 
             const service = createServiceWithRotation();
@@ -1580,9 +1590,7 @@ describe("LLMService key rotation retry", () => {
 
         test("does not retry for non-retryable errors", async () => {
             mockStreamText.mockImplementation(() => ({
-                fullStream: (async function* () {
-                    throw Object.assign(new Error("Server error"), { status: 500 });
-                })(),
+                fullStream: throwingStream(Object.assign(new Error("Server error"), { status: 500 })),
             }));
 
             const service = createServiceWithRotation();
@@ -1599,9 +1607,7 @@ describe("LLMService key rotation retry", () => {
 
         test("does not retry when no key rotation handler is configured", async () => {
             mockStreamText.mockImplementation(() => ({
-                fullStream: (async function* () {
-                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
-                })(),
+                fullStream: throwingStream(Object.assign(new Error("Unauthorized"), { status: 401 })),
             }));
 
             // Service without rotation handler
@@ -1620,9 +1626,7 @@ describe("LLMService key rotation retry", () => {
 
         test("does not retry when rotation fails", async () => {
             mockStreamText.mockImplementation(() => ({
-                fullStream: (async function* () {
-                    throw Object.assign(new Error("Unauthorized"), { status: 401 });
-                })(),
+                fullStream: throwingStream(Object.assign(new Error("Unauthorized"), { status: 401 })),
             }));
 
             mockRotationHandler.mockImplementation(() => Promise.resolve(false));

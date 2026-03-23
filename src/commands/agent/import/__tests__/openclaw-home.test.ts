@@ -30,7 +30,7 @@ describe("createHomeDir", () => {
         if (originalEnv !== undefined) {
             process.env.TENEX_BASE_DIR = originalEnv;
         } else {
-            delete process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = undefined;
         }
         await fs.rm(tempBase, { recursive: true, force: true });
     });

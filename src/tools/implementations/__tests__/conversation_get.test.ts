@@ -134,9 +134,7 @@ function decodeXmlEntities(value: string): string {
 
 function parseAttributes(rawAttrs: string): Record<string, string> {
     const attrs: Record<string, string> = {};
-    const attrRegex = /([a-zA-Z0-9_-]+)="([^"]*)"/g;
-    let match: RegExpExecArray | null;
-    while ((match = attrRegex.exec(rawAttrs)) !== null) {
+    for (const match of rawAttrs.matchAll(/([a-zA-Z0-9_-]+)="([^"]*)"/g)) {
         attrs[match[1]] = decodeXmlEntities(match[2]);
     }
     return attrs;
@@ -144,9 +142,7 @@ function parseAttributes(rawAttrs: string): Record<string, string> {
 
 function parseTranscriptXml(xml: string): TranscriptNode[] {
     const nodes: TranscriptNode[] = [];
-    const nodeRegex = /<message\s+([^>]*)>([\s\S]*?)<\/message>|<tool\s+([^>]*)\/>/g;
-    let match: RegExpExecArray | null;
-    while ((match = nodeRegex.exec(xml)) !== null) {
+    for (const match of xml.matchAll(/<message\s+([^>]*)>([\s\S]*?)<\/message>|<tool\s+([^>]*)\/>/g)) {
         if (match[1] !== undefined) {
             nodes.push({
                 tag: "message",

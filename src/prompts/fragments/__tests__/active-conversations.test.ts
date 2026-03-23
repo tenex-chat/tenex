@@ -16,7 +16,7 @@ import { IdentityService } from "@/services/identity/IdentityService";
 import * as PubkeyServiceModule from "@/services/PubkeyService";
 
 // Mock agent for testing
-const createMockAgent = (pubkey: string = "agent-pubkey-123"): AgentInstance =>
+const createMockAgent = (pubkey = "agent-pubkey-123"): AgentInstance =>
     ({
         pubkey,
         slug: "test-agent",
@@ -836,8 +836,8 @@ describe("activeConversationsFragment", () => {
             });
 
             // Should be truncated with "..." and total length should be <= 200
-            expect(result).toContain("A".repeat(197) + "...");
-            expect(result).not.toContain("A".repeat(198) + "...");
+            expect(result).toContain(`${"A".repeat(197)}...`);
+            expect(result).not.toContain(`${"A".repeat(198)}...`);
         });
     });
 

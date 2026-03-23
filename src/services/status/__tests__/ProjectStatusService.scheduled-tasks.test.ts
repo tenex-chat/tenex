@@ -123,7 +123,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         expect(intent.scheduledTasks).toBeDefined();
         expect(intent.scheduledTasks).toHaveLength(1);
 
-        const task = intent.scheduledTasks![0];
+        const task = intent.scheduledTasks?.[0];
         expect(task.id).toBe("task-1");
         expect(task.title).toBe("Daily standup");
         expect(task.schedule).toBe("0 9 * * *");
@@ -167,7 +167,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
 
         expect(intent.scheduledTasks).toHaveLength(1);
 
-        const task = intent.scheduledTasks![0];
+        const task = intent.scheduledTasks?.[0];
         expect(task.id).toBe("task-oneoff-1");
         expect(task.type).toBe("oneoff");
         expect(task.schedule).toBe("2026-03-01T12:00:00.000Z");
@@ -207,7 +207,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
 
         expect(intent.scheduledTasks).toHaveLength(1);
         // Should fall back to first 8 chars of pubkey
-        expect(intent.scheduledTasks![0].targetAgent).toBe("abcdef12");
+        expect(intent.scheduledTasks?.[0].targetAgent).toBe("abcdef12");
     });
 
     it("should use prompt substring as title when title is missing", async () => {
@@ -240,7 +240,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
         });
 
         expect(intent.scheduledTasks).toHaveLength(1);
-        expect(intent.scheduledTasks![0].title).toBe(
+        expect(intent.scheduledTasks?.[0].title).toBe(
             "A very long prompt that describes what the agent s"
         );
     });
@@ -276,7 +276,7 @@ describe("ProjectStatusService scheduled task gathering", () => {
             await callGatherScheduledTaskInfo(service, intent);
         });
 
-        expect(intent.scheduledTasks![0].type).toBe("cron");
+        expect(intent.scheduledTasks?.[0].type).toBe("cron");
     });
 
     it("should gather multiple tasks from the same project", async () => {
@@ -334,9 +334,9 @@ describe("ProjectStatusService scheduled task gathering", () => {
         });
 
         expect(intent.scheduledTasks).toHaveLength(3);
-        expect(intent.scheduledTasks![0].targetAgent).toBe("reporter");
-        expect(intent.scheduledTasks![1].targetAgent).toBe("architect");
-        expect(intent.scheduledTasks![2].type).toBe("oneoff");
+        expect(intent.scheduledTasks?.[0].targetAgent).toBe("reporter");
+        expect(intent.scheduledTasks?.[1].targetAgent).toBe("architect");
+        expect(intent.scheduledTasks?.[2].type).toBe("oneoff");
     });
 
     it("should pass the correct projectTagId to SchedulerService.getTasks", async () => {

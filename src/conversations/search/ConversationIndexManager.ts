@@ -8,8 +8,8 @@
  * - Atomic writes (temp file + rename)
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "fs";
-import { join, dirname } from "path";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { logger } from "@/utils/logger";
 import type {
     ConversationIndex,
@@ -114,7 +114,7 @@ export class ConversationIndexManager {
     private saveToDisk(index: ConversationIndex): void {
         this.ensureDirectory();
         const indexPath = this.getIndexPath();
-        const tempPath = indexPath + ".tmp";
+        const tempPath = `${indexPath}.tmp`;
 
         try {
             // Write to temp file

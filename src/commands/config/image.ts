@@ -56,7 +56,7 @@ export const imageCommand = new Command("image")
                 return;
             }
 
-            console.log(chalk.green("✓") + chalk.bold(" OpenRouter API key found") + "\n");
+            console.log(`${chalk.green("✓") + chalk.bold(" OpenRouter API key found")}\n`);
 
             // Build model choices
             const modelChoices = OPENROUTER_IMAGE_MODELS.map((m) => ({
@@ -157,8 +157,8 @@ export const imageCommand = new Command("image")
             const modelInfo = OPENROUTER_IMAGE_MODELS.find((m) => m.value === model);
             const modelDisplayName = modelInfo ? modelInfo.name : model;
 
-            console.log("\n" + chalk.green("✓") + chalk.bold(` Image generation configured for ${scope}`));
-            console.log(chalk.gray(`   Provider: OpenRouter`));
+            console.log(`\n${chalk.green("✓")}${chalk.bold(` Image generation configured for ${scope}`)}`);
+            console.log(chalk.gray("   Provider: OpenRouter"));
             console.log(chalk.gray(`   Model: ${modelDisplayName} (${model})`));
             console.log(chalk.gray(`   Default aspect ratio: ${aspectRatio}`));
             console.log(chalk.gray(`   Default image size: ${imageSize}`));

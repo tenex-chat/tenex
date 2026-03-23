@@ -15,7 +15,7 @@
 import { logger } from "@/utils/logger";
 import { RAGService, type RAGDocument, type RAGQueryResult } from "@/services/rag/RAGService";
 import { buildProjectFilter } from "@/services/search/projectFilter";
-import { ConversationStore } from "@/conversations/ConversationStore";
+import type { ConversationStore } from "@/conversations/ConversationStore";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
 import type { ProjectDTag } from "@/types/project-ids";
 
@@ -164,7 +164,7 @@ export class ConversationEmbeddingService {
         if (lastUserMessage) {
             // Truncate if too long
             const truncated = lastUserMessage.length > 500
-                ? lastUserMessage.substring(0, 500) + "..."
+                ? `${lastUserMessage.substring(0, 500)}...`
                 : lastUserMessage;
             parts.push(`Last message: ${truncated}`);
         }
@@ -189,18 +189,16 @@ export class ConversationEmbeddingService {
     ): BuildDocumentResult {
         try {
             // Load store if not provided
-            if (!store) {
-                store = conversationRegistry.get(conversationId);
-                if (!store) {
-                    // Not in registry means zero messages loaded — genuinely no content to embed
-                    logger.debug(`Conversation ${conversationId.substring(0, 8)} not in registry, no content`);
-                    return { kind: "noContent" };
-                }
+            const resolvedStore = store ?? conversationRegistry.get(conversationId);
+            if (!resolvedStore) {
+                // Not in registry means zero messages loaded — genuinely no content to embed
+                logger.debug(`Conversation ${conversationId.substring(0, 8)} not in registry, no content`);
+                return { kind: "noContent" };
             }
 
-            const messages = store.getAllMessages();
-            const metadata = store.metadata;
-            const title = metadata.title ?? store.title;
+            const messages = resolvedStore.getAllMessages();
+            const metadata = resolvedStore.metadata;
+            const title = metadata.title ?? resolvedStore.title;
             const summary = metadata.summary;
             const lastUserMessage = metadata.lastUserMessage;
 

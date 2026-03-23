@@ -107,16 +107,16 @@ describe("report_read identifier handling", () => {
     describe("kind validation", () => {
         it("should accept kind 30023 (NDKArticle)", () => {
             const validKinds = [30023];
-            validKinds.forEach((kind) => {
+            for (const kind of validKinds) {
                 expect(kind).toBe(30023);
-            });
+            }
         });
 
         it("should identify non-30023 kinds", () => {
             const invalidKinds = [0, 1, 30000, 30001, 30009, 30022, 30024];
-            invalidKinds.forEach((kind) => {
+            for (const kind of invalidKinds) {
                 expect(kind).not.toBe(30023);
-            });
+            }
         });
     });
 

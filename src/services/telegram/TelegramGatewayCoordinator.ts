@@ -11,11 +11,11 @@ import {
     getIdentityBindingStore,
     type AuthorizedIdentityService,
 } from "@/services/identity";
-import {
-    type TelegramBotIdentity,
-    type TelegramGatewayBinding,
-    type TelegramMessage,
-    type TelegramUpdate,
+import type {
+    TelegramBotIdentity,
+    TelegramGatewayBinding,
+    TelegramMessage,
+    TelegramUpdate,
 } from "@/services/telegram/types";
 import { projectContextStore } from "@/services/projects";
 import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";

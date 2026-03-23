@@ -7,6 +7,7 @@ import { PubkeyService } from "@/services/PubkeyService";
 import { getTrustPubkeyService } from "@/services/trust-pubkeys/TrustPubkeyService";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 /** Default timeout for user response: 5 minutes */
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -503,7 +504,7 @@ export class InterventionService {
         // Skip if the completing agent IS the intervention agent (prevents feedback loop)
         if (resolution.status === "resolved" && agentPubkey === resolution.pubkey) {
             logger.debug("InterventionService: skipping intervention, completing agent is the intervention agent", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 agentPubkey: agentPubkey.substring(0, 8),
             });
 
@@ -527,7 +528,7 @@ export class InterventionService {
         if (!trustResult.trusted || trustResult.reason !== "whitelisted") {
             // The "user" is not a whitelisted human user - it's an agent or unknown
             logger.debug("InterventionService: skipping intervention, user is not whitelisted", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 userPubkey: userPubkey.substring(0, 8),
                 trustReason: trustResult.reason ?? "not-trusted",
             });
@@ -548,7 +549,7 @@ export class InterventionService {
 
             if (timeSinceLastUserMessageMs < thresholdMs) {
                 logger.debug("InterventionService: skipping intervention, user was recently active", {
-                    conversationId: conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(conversationId),
                     timeSinceLastUserMessageMs,
                     thresholdMs,
                     lastUserMessageTime,
@@ -570,7 +571,7 @@ export class InterventionService {
             const hasActiveDelegations = this.activeDelegationChecker(agentPubkey, conversationId);
             if (hasActiveDelegations) {
                 logger.debug("InterventionService: skipping intervention, agent has active delegations", {
-                    conversationId: conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(conversationId),
                     agentPubkey: agentPubkey.substring(0, 8),
                 });
 
@@ -627,7 +628,7 @@ export class InterventionService {
         const notifiedAt = this.notifiedConversations.get(conversationId);
         if (notifiedAt !== undefined) {
             logger.debug("InterventionService: skipping already-notified conversation", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 notifiedAt,
             });
 
@@ -643,7 +644,7 @@ export class InterventionService {
         const existing = this.pendingInterventions.get(conversationId);
         if (existing) {
             logger.debug("Updating existing pending intervention", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 previousCompletedAt: existing.completedAt,
                 newCompletedAt: completedAt,
             });
@@ -665,7 +666,7 @@ export class InterventionService {
         this.saveState();
 
         logger.info("Agent completion detected, starting intervention timer", {
-            conversationId: conversationId.substring(0, 12),
+            conversationId: shortenConversationId(conversationId),
             agentPubkey: agentPubkey.substring(0, 8),
             userPubkey: userPubkey.substring(0, 8),
             timeoutMs: this.timeoutMs,
@@ -743,7 +744,7 @@ export class InterventionService {
         // Only cancel if response is AFTER completion
         if (responseAt <= pending.completedAt) {
             logger.debug("User response before completion, not cancelling timer", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 responseAt,
                 completedAt: pending.completedAt,
             });
@@ -755,7 +756,7 @@ export class InterventionService {
         const timeoutExpiry = pending.completedAt + this.timeoutMs;
         if (responseAt >= timeoutExpiry) {
             logger.debug("User response at or after timeout window, not cancelling timer", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 responseAt,
                 timeoutExpiry,
                 delayMs: responseAt - timeoutExpiry,
@@ -766,7 +767,7 @@ export class InterventionService {
         // Verify it's the same user we're waiting on
         if (userPubkey !== pending.userPubkey) {
             logger.debug("Response from different user, not cancelling timer", {
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 responsePubkey: userPubkey.substring(0, 8),
                 expectedPubkey: pending.userPubkey.substring(0, 8),
             });
@@ -779,7 +780,7 @@ export class InterventionService {
         this.saveState();
 
         logger.info("User responded, cancelled intervention timer", {
-            conversationId: conversationId.substring(0, 12),
+            conversationId: shortenConversationId(conversationId),
             userPubkey: userPubkey.substring(0, 8),
             responseDelayMs: responseAt - pending.completedAt,
         });
@@ -804,7 +805,7 @@ export class InterventionService {
         // currently loaded, it's a leftover timer that should be silently discarded.
         if (pending.projectId !== this.currentProjectId) {
             logger.debug("InterventionService: stale timer from different project, skipping", {
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
                 pendingProjectId: pending.projectId.substring(0, 12),
                 currentProjectId: this.currentProjectId?.substring(0, 12) ?? "none",
             });
@@ -814,7 +815,7 @@ export class InterventionService {
         // Guard against concurrent triggerIntervention for the same conversation
         if (this.triggeringConversations.has(pending.conversationId)) {
             logger.debug("InterventionService: triggerIntervention already in progress, skipping", {
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
             });
             return;
         }
@@ -824,7 +825,7 @@ export class InterventionService {
         const notifiedAt = this.notifiedConversations.get(pending.conversationId);
         if (notifiedAt !== undefined && (Date.now() - notifiedAt) < NOTIFIED_TTL_MS) {
             logger.debug("InterventionService: conversation already notified, skipping trigger", {
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
             });
             this.pendingInterventions.delete(pending.conversationId);
             this.saveState();
@@ -863,11 +864,11 @@ export class InterventionService {
                 this.pendingInterventions.set(pending.conversationId, pending);
                 this.saveState();
 
-                const backoffMs = DEFAULT_RETRY_INTERVAL_MS * Math.pow(2, retryCount);
+                const backoffMs = DEFAULT_RETRY_INTERVAL_MS * 2 ** retryCount;
                 this.scheduleRetry(pending, backoffMs);
 
                 logger.info("Runtime unavailable, scheduled retry for intervention", {
-                    conversationId: pending.conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(pending.conversationId),
                     projectId: pending.projectId.substring(0, 12),
                     retryCount: pending.retryCount,
                     nextRetryMs: backoffMs,
@@ -881,7 +882,7 @@ export class InterventionService {
                 });
             } else {
                 logger.error("Max retry attempts reached for intervention (runtime unavailable)", {
-                    conversationId: pending.conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(pending.conversationId),
                     projectId: pending.projectId.substring(0, 12),
                     maxRetries: MAX_RETRY_ATTEMPTS,
                 });
@@ -896,7 +897,7 @@ export class InterventionService {
             logger.error("Cannot trigger intervention: agent not found in project", {
                 projectId: pending.projectId.substring(0, 12),
                 slug: this.interventionAgentSlug,
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
             });
             // Permanent failure - remove from pending
             this.pendingInterventions.delete(pending.conversationId);
@@ -909,7 +910,7 @@ export class InterventionService {
         const retryCount = pending.retryCount ?? 0;
 
         logger.info("Triggering intervention review", {
-            conversationId: pending.conversationId.substring(0, 12),
+            conversationId: shortenConversationId(pending.conversationId),
             userPubkey: pending.userPubkey.substring(0, 8),
             agentPubkey: pending.agentPubkey.substring(0, 8),
             interventionAgentPubkey: interventionAgentPubkey.substring(0, 8),
@@ -944,7 +945,7 @@ export class InterventionService {
 
             logger.info("Intervention review request published", {
                 eventId: eventId.substring(0, 8),
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
             });
 
             // Record as notified to prevent duplicate notifications
@@ -956,7 +957,7 @@ export class InterventionService {
         } catch (error) {
             logger.error("Failed to publish intervention review request", {
                 error,
-                conversationId: pending.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(pending.conversationId),
                 retryCount,
             });
 
@@ -968,17 +969,17 @@ export class InterventionService {
                 this.saveState();
 
                 // Re-arm timer with exponential backoff
-                const backoffMs = DEFAULT_RETRY_INTERVAL_MS * Math.pow(2, retryCount);
+                const backoffMs = DEFAULT_RETRY_INTERVAL_MS * 2 ** retryCount;
                 this.scheduleRetry(pending, backoffMs);
 
                 logger.info("Scheduled retry for failed intervention", {
-                    conversationId: pending.conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(pending.conversationId),
                     retryCount: pending.retryCount,
                     nextRetryMs: backoffMs,
                 });
             } else {
                 logger.error("Max retry attempts reached for intervention", {
-                    conversationId: pending.conversationId.substring(0, 12),
+                    conversationId: shortenConversationId(pending.conversationId),
                     maxRetries: MAX_RETRY_ATTEMPTS,
                 });
                 // Remove from pending - we've exhausted retries
@@ -1000,7 +1001,7 @@ export class InterventionService {
         this.timers.set(pending.conversationId, timer);
 
         logger.debug("Intervention retry scheduled", {
-            conversationId: pending.conversationId.substring(0, 12),
+            conversationId: shortenConversationId(pending.conversationId),
             delayMs,
         });
     }
@@ -1027,7 +1028,7 @@ export class InterventionService {
         this.timers.set(pending.conversationId, timer);
 
         logger.debug("Intervention timer started", {
-            conversationId: pending.conversationId.substring(0, 12),
+            conversationId: shortenConversationId(pending.conversationId),
             remainingMs: remaining,
         });
     }

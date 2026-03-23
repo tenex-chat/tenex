@@ -7,6 +7,7 @@ import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type { ProjectRuntime } from "@/daemon/ProjectRuntime";
+import { shortenEventId, shortenOptionalEventId, shortenOptionalPubkey, shortenPubkey } from "@/utils/conversation-id";
 
 /**
  * Callback to get all active runtimes for reloading agents.
@@ -280,19 +281,19 @@ export class AgentDefinitionMonitor {
                             changed = true;
                             logger.info("[AgentDefinitionMonitor] Recovered definitionAuthor from relay", {
                                 slug: agent.slug,
-                                eventId: agent.eventId.substring(0, 12),
-                                definitionAuthor: agent.definitionAuthor.substring(0, 12),
+                                eventId: shortenEventId(agent.eventId),
+                                definitionAuthor: shortenPubkey(agent.definitionAuthor),
                             });
                         } else {
                             logger.warn("[AgentDefinitionMonitor] Could not fetch event for legacy agent — skipping author recovery", {
                                 slug: agent.slug,
-                                eventId: agent.eventId.substring(0, 12),
+                                eventId: shortenEventId(agent.eventId),
                             });
                         }
                     } catch (fetchError) {
                         logger.warn("[AgentDefinitionMonitor] Failed to fetch event for legacy agent — skipping author recovery", {
                             slug: agent.slug,
-                            eventId: agent.eventId.substring(0, 12),
+                            eventId: shortenEventId(agent.eventId),
                             error: fetchError instanceof Error ? fetchError.message : String(fetchError),
                         });
                     }
@@ -303,7 +304,7 @@ export class AgentDefinitionMonitor {
                     logger.info("[AgentDefinitionMonitor] Migrated legacy agent", {
                         slug: agent.slug,
                         definitionDTag: agent.definitionDTag,
-                        definitionAuthor: agent.definitionAuthor?.substring(0, 12) ?? "(unknown)",
+                        definitionAuthor: shortenOptionalPubkey(agent.definitionAuthor) ?? "(unknown)",
                     });
                 }
             } catch (error) {
@@ -357,7 +358,7 @@ export class AgentDefinitionMonitor {
         const dTag = event.tagValue("d");
         if (!dTag) {
             logger.debug("[AgentDefinitionMonitor] Ignoring event without d-tag", {
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
             });
             return;
         }
@@ -369,7 +370,7 @@ export class AgentDefinitionMonitor {
         if (!monitoredAgent) {
             logger.debug("[AgentDefinitionMonitor] Event d-tag does not match any monitored agent", {
                 dTag,
-                author: author?.substring(0, 12),
+                author: shortenOptionalPubkey(author),
             });
             return;
         }
@@ -379,8 +380,8 @@ export class AgentDefinitionMonitor {
         if (!this.isAuthorized(author, monitoredAgent.definitionAuthor)) {
             logger.debug("[AgentDefinitionMonitor] Ignoring event from unauthorized author", {
                 dTag,
-                author: author?.substring(0, 12),
-                expectedAuthor: monitoredAgent.definitionAuthor.substring(0, 12),
+                author: shortenOptionalPubkey(author),
+                expectedAuthor: shortenPubkey(monitoredAgent.definitionAuthor),
                 agentSlug: monitoredAgent.slug,
             });
             return;
@@ -390,14 +391,14 @@ export class AgentDefinitionMonitor {
 
         logger.debug("[AgentDefinitionMonitor] New definition event detected", {
             dTag,
-            author: author?.substring(0, 12),
-            eventId: event.id?.substring(0, 12),
+            author: shortenOptionalPubkey(author),
+            eventId: shortenOptionalEventId(event.id),
             createdAt: event.created_at,
         });
 
         // Store in pending events (keep only the latest per key)
         const existingPending = this.pendingEvents.get(key);
-        if (existingPending && existingPending.created_at && event.created_at) {
+        if (existingPending?.created_at && event.created_at) {
             if (event.created_at <= existingPending.created_at) {
                 logger.debug("[AgentDefinitionMonitor] Skipping older pending event", {
                     dTag,
@@ -427,21 +428,33 @@ export class AgentDefinitionMonitor {
         this.pendingEvents.clear();
         this.debounceTimer = null;
 
+        const batchStart = Date.now();
         logger.info("[AgentDefinitionMonitor] Processing pending definition events", {
             count: pendingEntries.size,
         });
 
         for (const [key, event] of pendingEntries) {
             try {
+                const eventStart = Date.now();
                 await this.processDefinitionEvent(key, event);
+                logger.info("[AgentDefinitionMonitor] Processed definition event", {
+                    key,
+                    eventId: shortenOptionalEventId(event.id),
+                    durationMs: Date.now() - eventStart,
+                });
             } catch (error) {
                 logger.error("[AgentDefinitionMonitor] Failed to process definition event", {
                     key,
-                    eventId: event.id?.substring(0, 12),
+                    eventId: shortenOptionalEventId(event.id),
                     error: error instanceof Error ? error.message : String(error),
                 });
             }
         }
+
+        logger.info("[AgentDefinitionMonitor] Finished processing pending definition events", {
+            count: pendingEntries.size,
+            totalDurationMs: Date.now() - batchStart,
+        });
     }
 
     /**
@@ -468,16 +481,21 @@ export class AgentDefinitionMonitor {
         if (monitoredAgent.currentEventId === event.id) {
             logger.debug("[AgentDefinitionMonitor] Event is the same as current, skipping", {
                 dTag,
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
             });
             return;
         }
 
         // Load current agent from storage to compare timestamps
+        const loadStart = Date.now();
         const storedAgent = await this.storage.loadAgent(monitoredAgent.pubkey);
+        logger.debug("[AgentDefinitionMonitor] loadAgent", {
+            slug: monitoredAgent.slug,
+            durationMs: Date.now() - loadStart,
+        });
         if (!storedAgent) {
             logger.warn("[AgentDefinitionMonitor] Monitored agent not found in storage", {
-                pubkey: monitoredAgent.pubkey.substring(0, 12),
+                pubkey: shortenPubkey(monitoredAgent.pubkey),
                 slug: monitoredAgent.slug,
             });
             return;
@@ -489,7 +507,7 @@ export class AgentDefinitionMonitor {
             if (event.created_at <= storedAgent.definitionCreatedAt) {
                 logger.debug("[AgentDefinitionMonitor] Skipping event older than current definition", {
                     dTag,
-                    eventId: event.id?.substring(0, 12),
+                    eventId: shortenOptionalEventId(event.id),
                     eventCreatedAt: event.created_at,
                     storedCreatedAt: storedAgent.definitionCreatedAt,
                     agentSlug: monitoredAgent.slug,
@@ -514,7 +532,7 @@ export class AgentDefinitionMonitor {
         // Check whitelist
         if (this.config.whitelistedPubkeys.includes(author)) {
             logger.debug("[AgentDefinitionMonitor] Author authorized via whitelist", {
-                author: author.substring(0, 12),
+                author: shortenPubkey(author),
             });
             return true;
         }
@@ -534,7 +552,7 @@ export class AgentDefinitionMonitor {
 
         // Capture before state for logging
         const beforeState = {
-            eventId: storedAgent.eventId?.substring(0, 12),
+            eventId: shortenOptionalEventId(storedAgent.eventId),
             name: storedAgent.name,
             role: storedAgent.role,
         };
@@ -621,13 +639,18 @@ export class AgentDefinitionMonitor {
             logger.info("[AgentDefinitionMonitor] No changes detected in definition update", {
                 agentSlug: monitoredAgent.slug,
                 dTag: monitoredAgent.definitionDTag,
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
             });
             return;
         }
 
         // Save the updated agent
+        const saveStart = Date.now();
         await this.storage.saveAgent(storedAgent);
+        logger.debug("[AgentDefinitionMonitor] saveAgent", {
+            slug: monitoredAgent.slug,
+            durationMs: Date.now() - saveStart,
+        });
 
         // Update monitored agent tracking
         monitoredAgent.currentEventId = event.id;
@@ -635,19 +658,19 @@ export class AgentDefinitionMonitor {
 
         // Capture after state for logging
         const afterState = {
-            eventId: storedAgent.eventId?.substring(0, 12),
+            eventId: shortenOptionalEventId(storedAgent.eventId),
             name: storedAgent.name,
             role: storedAgent.role,
         };
 
         logger.info("[AgentDefinitionMonitor] Upgrading agent definition", {
             agentSlug: monitoredAgent.slug,
-            agentPubkey: monitoredAgent.pubkey.substring(0, 12),
+            agentPubkey: shortenPubkey(monitoredAgent.pubkey),
             dTag: monitoredAgent.definitionDTag,
             beforeState,
             afterState,
             changedFields,
-            newEventId: event.id?.substring(0, 12),
+            newEventId: shortenOptionalEventId(event.id),
             upgradeTimestamp: new Date().toISOString(),
         });
 
@@ -659,6 +682,7 @@ export class AgentDefinitionMonitor {
      * Reload an agent in all active project runtimes that contain it.
      */
     private async reloadAgentInRuntimes(pubkey: string, slug: string): Promise<void> {
+        const reloadStart = Date.now();
         const activeRuntimes = this.getActiveRuntimes();
         let reloadCount = 0;
 
@@ -670,17 +694,24 @@ export class AgentDefinitionMonitor {
             if (!agent) continue;
 
             try {
+                const registryStart = Date.now();
                 await context.agentRegistry.reloadAgent(pubkey);
                 reloadCount++;
-
-                if (context.statusPublisher) {
-                    await context.statusPublisher.publishImmediately();
-                }
-
-                logger.debug("[AgentDefinitionMonitor] Reloaded agent in runtime", {
+                logger.debug("[AgentDefinitionMonitor] reloadAgent in registry", {
                     agentSlug: slug,
                     projectId,
+                    durationMs: Date.now() - registryStart,
                 });
+
+                if (context.statusPublisher) {
+                    const publishStart = Date.now();
+                    await context.statusPublisher.publishImmediately();
+                    logger.debug("[AgentDefinitionMonitor] publishImmediately", {
+                        agentSlug: slug,
+                        projectId,
+                        durationMs: Date.now() - publishStart,
+                    });
+                }
             } catch (error) {
                 logger.error("[AgentDefinitionMonitor] Failed to reload agent in runtime", {
                     agentSlug: slug,
@@ -694,6 +725,7 @@ export class AgentDefinitionMonitor {
             agentSlug: slug,
             reloadCount,
             totalRuntimes: activeRuntimes.size,
+            durationMs: Date.now() - reloadStart,
         });
     }
 

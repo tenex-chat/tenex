@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:te
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKKind } from "@/nostr/kinds";
-import { TagExtractor } from "@/nostr/TagExtractor";
+import * as TagExtractor from "@/nostr/TagExtractor";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
 import type { UpdateDefaultConfigOptions } from "@/agents/AgentStorage";
 import * as projectsModule from "@/services/projects";

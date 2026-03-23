@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import * as projectsModule from "@/services/projects";
 import { createMockInboundEnvelope } from "@/test-utils/mock-factories";

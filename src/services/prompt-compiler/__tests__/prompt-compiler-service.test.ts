@@ -325,7 +325,7 @@ describe("PromptCompilerService", () => {
 
             // Simulate EOSE
             const waitPromise = service.waitForEOSE();
-            eoseCallbacks.forEach((cb) => cb());
+            for (const cb of eoseCallbacks) cb();
 
             await expect(waitPromise).resolves.toBeUndefined();
         });
@@ -335,7 +335,7 @@ describe("PromptCompilerService", () => {
             service.subscribe();
 
             // Trigger EOSE first
-            eoseCallbacks.forEach((cb) => cb());
+            for (const cb of eoseCallbacks) cb();
 
             // Should resolve immediately
             await expect(service.waitForEOSE()).resolves.toBeUndefined();
@@ -354,7 +354,7 @@ describe("PromptCompilerService", () => {
             service.subscribe();
 
             // Trigger EOSE
-            eoseCallbacks.forEach((cb) => cb());
+            for (const cb of eoseCallbacks) cb();
             await service.waitForEOSE();
 
             // Stop clears EOSE state
@@ -371,7 +371,7 @@ describe("PromptCompilerService", () => {
 
             // First subscription cycle
             service.subscribe();
-            eoseCallbacks.forEach((cb) => cb());
+            for (const cb of eoseCallbacks) cb();
 
             // Stop and clear callbacks
             service.stop();
@@ -408,7 +408,7 @@ describe("PromptCompilerService", () => {
             };
 
             // Trigger the event callback
-            eventCallbacks.forEach((cb) => cb(mockEvent));
+            for (const cb of eventCallbacks) cb(mockEvent);
 
             // Comment should be added
             const comments = service.getCommentsForLesson("lesson456");
@@ -436,7 +436,7 @@ describe("PromptCompilerService", () => {
                 },
             };
 
-            eventCallbacks.forEach((cb) => cb(mockEvent));
+            for (const cb of eventCallbacks) cb(mockEvent);
 
             // Comment should NOT be added
             const comments = service.getCommentsForLesson("lesson456");
@@ -463,7 +463,7 @@ describe("PromptCompilerService", () => {
                 },
             };
 
-            eventCallbacks.forEach((cb) => cb(mockEvent));
+            for (const cb of eventCallbacks) cb(mockEvent);
 
             // No comments should be added
             expect(service.getCommentsForLesson("lesson456")).toHaveLength(0);

@@ -1,3 +1,4 @@
+import { shortenConversationId } from "@/utils/conversation-id";
 /**
  * McpSubscriptionService - Manages MCP resource subscriptions with notification delivery
  *
@@ -198,7 +199,7 @@ export class McpSubscriptionService {
             agent: params.agentSlug,
             server: params.serverName,
             resource: params.resourceUri,
-            conversation: params.conversationId.substring(0, 12),
+            conversation: shortenConversationId(params.conversationId),
         });
 
         trace.getActiveSpan()?.addEvent("mcp_subscription.created", {
@@ -404,7 +405,7 @@ export class McpSubscriptionService {
                 const projectCtx = getProjectContext();
                 const mcpManager = projectCtx.mcpManager;
 
-                if (mcpManager && mcpManager.isServerRunning(subscription.serverName)) {
+                if (mcpManager?.isServerRunning(subscription.serverName)) {
                     await mcpManager.unsubscribeFromResource(
                         subscription.serverName,
                         subscription.resourceUri

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createRAGCreateCollectionTool } from "../rag_create_collection";
 import { createMockExecutionEnvironment } from "@/test-utils";
-import { tmpdir } from "os";
+import { tmpdir } from "node:os";
 
 describe("ragCreateCollectionTool - schema validation", () => {
     const mockContext = createMockExecutionEnvironment({

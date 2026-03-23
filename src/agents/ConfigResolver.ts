@@ -186,7 +186,7 @@ export function deduplicateProjectConfig(
 
     // Dedup model: if project model == default model, clear it
     if (cleaned.model !== undefined && cleaned.model === defaultConfig.model) {
-        delete cleaned.model;
+        cleaned.model = undefined;
     }
 
     // Dedup tools: resolve, normalize delta, and compare
@@ -196,7 +196,7 @@ export function deduplicateProjectConfig(
 
         // Compare resolved tools to default tools (order-insensitive)
         if (arraysEqualUnordered(resolvedProjectTools ?? [], defaultToolsResolved)) {
-            delete cleaned.tools;
+            cleaned.tools = undefined;
         } else {
             // Normalize: recompute the minimal delta from the fully-resolved tool list.
             cleaned.tools = computeToolsDelta(defaultToolsResolved, resolvedProjectTools ?? []);
@@ -208,7 +208,7 @@ export function deduplicateProjectConfig(
         defaultConfig.telegram &&
         JSON.stringify(cleaned.telegram) === JSON.stringify(defaultConfig.telegram)
     ) {
-        delete cleaned.telegram;
+        cleaned.telegram = undefined;
     }
 
     return cleaned;

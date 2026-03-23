@@ -64,7 +64,7 @@ describe("Type Guards", () => {
         });
 
         test("should return false for 65-char string", () => {
-            expect(isFullEventId(VALID_FULL_ID + "0")).toBe(false);
+            expect(isFullEventId(`${VALID_FULL_ID}0`)).toBe(false);
         });
 
         test("should return false for string with non-hex characters", () => {
@@ -90,7 +90,7 @@ describe("Type Guards", () => {
         });
 
         test("should return false for 13-char string", () => {
-            expect(isShortEventId(VALID_SHORT_ID + "0")).toBe(false);
+            expect(isShortEventId(`${VALID_SHORT_ID}0`)).toBe(false);
         });
 
         test("should return false for non-hex characters", () => {
@@ -257,7 +257,7 @@ describe("Conversion Functions", () => {
         test("should return first 12 characters of full ID", () => {
             const fullId = createFullEventId(VALID_FULL_ID);
             const shortId = shortenEventId(fullId);
-            expect(shortId).toBe(VALID_FULL_ID.substring(0, 12));
+            expect(shortId).toBe(shortenEventId(VALID_FULL_ID));
             expect(isShortEventId(shortId)).toBe(true);
         });
 
@@ -340,22 +340,22 @@ describe("Utility Functions", () => {
         test("should parse full event ID", () => {
             const result = parseEventId(VALID_FULL_ID);
             expect(result).not.toBeNull();
-            expect(result!.type).toBe("full");
-            expect(result!.id).toBe(VALID_FULL_ID);
+            expect(result?.type).toBe("full");
+            expect(result?.id).toBe(VALID_FULL_ID);
         });
 
         test("should parse short event ID", () => {
             const result = parseEventId(VALID_SHORT_ID);
             expect(result).not.toBeNull();
-            expect(result!.type).toBe("short");
-            expect(result!.id).toBe(VALID_SHORT_ID);
+            expect(result?.type).toBe("short");
+            expect(result?.id).toBe(VALID_SHORT_ID);
         });
 
         test("should parse shell task ID", () => {
             const result = parseEventId(VALID_SHELL_ID);
             expect(result).not.toBeNull();
-            expect(result!.type).toBe("shell");
-            expect(result!.id).toBe(VALID_SHELL_ID);
+            expect(result?.type).toBe("shell");
+            expect(result?.id).toBe(VALID_SHELL_ID);
         });
 
         test("should return null for unrecognized format", () => {
@@ -366,13 +366,13 @@ describe("Utility Functions", () => {
         test("should trim whitespace", () => {
             const result = parseEventId(`  ${VALID_FULL_ID}  `);
             expect(result).not.toBeNull();
-            expect(result!.id).toBe(VALID_FULL_ID);
+            expect(result?.id).toBe(VALID_FULL_ID);
         });
 
         test("should normalize to lowercase", () => {
             const result = parseEventId(VALID_FULL_ID.toUpperCase());
             expect(result).not.toBeNull();
-            expect(result!.id).toBe(VALID_FULL_ID);
+            expect(result?.id).toBe(VALID_FULL_ID);
         });
     });
 });

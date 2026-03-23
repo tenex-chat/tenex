@@ -8,7 +8,7 @@ import type { AgentInstance } from "@/agents/types";
 import { AgentMetadataStore } from "@/services/agents";
 import { DEFAULT_AGENT_LLM_CONFIG } from "@/llm/constants";
 import type { MCPConfig } from "@/llm/providers/types";
-import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
+import { publishAgentProfile } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
 import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
@@ -218,7 +218,7 @@ export async function loadAgentIntoRegistry(
             const projectTitle = ndkProject.tagValue("title") || "Untitled Project";
             const whitelistedPubkeys = config.getWhitelistedPubkeys();
 
-            AgentProfilePublisher.publishAgentProfile(
+            publishAgentProfile(
                 signer,
                 freshAgent.name,
                 freshAgent.role,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createShellTool } from "../shell";
 import { createMockExecutionEnvironment } from "@/test-utils";
-import { tmpdir } from "os";
+import { tmpdir } from "node:os";
 
 describe("shellTool - simple test", () => {
     // Create tool instance using factory with mock context

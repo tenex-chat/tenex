@@ -8,4 +8,11 @@
  * @module
  */
 
-export { MetaModelResolver, type MetaModelResolution, type ResolveOptions } from "./MetaModelResolver";
+export {
+    resolve as resolveMetaModel,
+    resolveToVariant,
+    generateSystemPromptFragment,
+    isMetaModel,
+    type MetaModelResolution,
+    type ResolveOptions,
+} from "./MetaModelResolver";

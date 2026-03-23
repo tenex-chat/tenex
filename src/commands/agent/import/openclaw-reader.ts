@@ -191,5 +191,5 @@ export async function readOpenClawCredentials(stateDir: string): Promise<OpenCla
 export function convertModelFormat(openClawModel: string): string {
     const firstSlash = openClawModel.indexOf("/");
     if (firstSlash === -1) return openClawModel;
-    return openClawModel.slice(0, firstSlash) + ":" + openClawModel.slice(firstSlash + 1);
+    return `${openClawModel.slice(0, firstSlash)}:${openClawModel.slice(firstSlash + 1)}`;
 }

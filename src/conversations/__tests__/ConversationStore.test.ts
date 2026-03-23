@@ -11,9 +11,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ToolCallPart, ToolResultPart } from "ai";
 import { NDKKind } from "@nostr-dev-kit/ndk";
 import * as pubkeyServiceModule from "@/services/PubkeyService";

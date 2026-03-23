@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 
 mock.module("@/prompts/fragments/06-agent-todos", () => ({
     agentTodosFragment: {

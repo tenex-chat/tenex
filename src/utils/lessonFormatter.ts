@@ -1,4 +1,5 @@
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
+import { shortenEventId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 
 /**
@@ -23,7 +24,7 @@ export function formatLessonsForAgent(lessons: NDKAgentLesson[]): string {
             const hashtags = lesson.hashtags;
             const hasDetailed = !!lesson.detailed;
             // Get 12-char prefix for convenient lookup (lesson_get accepts prefixes)
-            const idPrefix = lesson.id ? lesson.id.substring(0, 12) : null;
+            const idPrefix = lesson.id ? shortenEventId(lesson.id) : null;
 
             // Build metadata line
             let metadata = "";

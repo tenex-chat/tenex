@@ -1,3 +1,4 @@
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 /**
  * Message builder for converting ConversationStore entries to LLM messages.
  *
@@ -242,7 +243,7 @@ export function computeAttributionPrefix(
     viewingAgentPubkey: string,
     agentPubkeys: Set<string>,
     resolveDisplayName?: (pubkey: string) => string,
-    multipleHumanSenders: boolean = false
+    multipleHumanSenders = false
 ): string {
     // Determine the actual sender (injected messages track original sender via senderPubkey)
     const senderPubkey = getConversationRecordAuthorPubkey(entry);
@@ -325,7 +326,7 @@ async function entryToMessage(
     agentPubkeys: Set<string>,
     imageTracker: ImageTracker,
     multipleHumanSenders: boolean,
-    enableMultimodal: boolean = true
+    enableMultimodal = true
 ): Promise<EntryMessageBuildResult> {
     const role = deriveRole(entry, viewingAgentPubkey);
 
@@ -479,7 +480,7 @@ async function formatNestedDelegationMarker(
 ): Promise<ModelMessage> {
     const recipientName = await resolveDisplayName(marker.recipientPubkey);
 
-    const shortConversationId = marker.delegationConversationId.substring(0, 12);
+    const shortConversationId = shortenConversationId(marker.delegationConversationId);
 
     // Simple one-line format: [Delegation to @recipient (conv: abc123...) - status]
     let statusSuffix: string;
@@ -738,8 +739,8 @@ export async function buildMessagesFromEntries(
             // If missing, log a warning and skip - this indicates a bug in the caller
             if (!ctx.conversationId) {
                 trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_skipped", {
-                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
-                    "delegation.parent_conversation_id": marker.parentConversationId.substring(0, 12),
+                    "delegation.conversation_id": shortenConversationId(marker.delegationConversationId),
+                    "delegation.parent_conversation_id": shortenConversationId(marker.parentConversationId),
                     "skip.reason": "missing_conversation_id",
                     "skip.severity": "warning",
                 });
@@ -781,7 +782,7 @@ export async function buildMessagesFromEntries(
                 }
 
                 trace.getActiveSpan?.()?.addEvent("conversation.delegation_marker_expanded", {
-                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
+                    "delegation.conversation_id": shortenConversationId(marker.delegationConversationId),
                     "delegation.status": marker.status,
                     "delegation.transcript_found": !!delegationMessages,
                     "delegation.deferred": pendingToolCalls.size > 0,
@@ -813,11 +814,11 @@ export async function buildMessagesFromEntries(
                 }
 
                 trace.getActiveSpan?.()?.addEvent("conversation.nested_delegation_marker_displayed", {
-                    "delegation.conversation_id": marker.delegationConversationId.substring(0, 12),
-                    "delegation.parent_conversation_id": marker.parentConversationId.substring(0, 12),
-                    "current.conversation_id": ctx.conversationId.substring(0, 12),
+                    "delegation.conversation_id": shortenConversationId(marker.delegationConversationId),
+                    "delegation.parent_conversation_id": shortenConversationId(marker.parentConversationId),
+                    "current.conversation_id": shortenConversationId(ctx.conversationId),
                     "delegation.status": marker.status,
-                    "delegation.recipient_pubkey": marker.recipientPubkey.substring(0, 12),
+                    "delegation.recipient_pubkey": shortenPubkey(marker.recipientPubkey),
                     "delegation.deferred": pendingToolCalls.size > 0,
                 });
             }

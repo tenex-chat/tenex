@@ -27,7 +27,7 @@ export interface UpdateDefaultConfigOptions {
     clearProjectOverrides?: boolean;
 }
 
-function hasOwnProperty<T extends object>(value: T, key: PropertyKey): boolean {
+function hasProp<T extends object>(value: T, key: PropertyKey): boolean {
     return Object.prototype.hasOwnProperty.call(value, key);
 }
 
@@ -636,8 +636,7 @@ export class AgentStorage {
         if (!agent) return;
 
         logger.warn(
-            `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - ` +
-            "this permanently destroys agent identity. Consider using removeAgentFromProject instead."
+            `deleteAgent called for ${agent.slug} (${pubkey.substring(0, 8)}) - this permanently destroys agent identity. Consider using removeAgentFromProject instead.`
         );
 
         // Delete file
@@ -917,7 +916,7 @@ export class AgentStorage {
 
         if (isPM === undefined || isPM === false) {
             // Clear the flag if it exists
-            delete agent.isPM;
+            agent.isPM = undefined;
         } else {
             agent.isPM = true;
         }
@@ -983,27 +982,27 @@ export class AgentStorage {
             if (updates.tools.length > 0) {
                 agent.default.tools = updates.tools;
             } else {
-                delete agent.default.tools;
+                agent.default.tools = undefined;
             }
         }
 
-        if (hasOwnProperty(updates, "telegram")) {
+        if (hasProp(updates, "telegram")) {
             if (updates.telegram) {
                 agent.default.telegram = updates.telegram;
             } else {
-                delete agent.default.telegram;
+                agent.default.telegram = undefined;
             }
 
         }
 
         // Clean up empty default block
         if (agent.default && Object.keys(agent.default).length === 0) {
-            delete agent.default;
+            agent.default = undefined;
         }
 
         // Clear all project overrides when a global config update is received
         if (options?.clearProjectOverrides && agent.projectOverrides) {
-            delete agent.projectOverrides;
+            agent.projectOverrides = undefined;
             logger.info(`Cleared projectOverrides for agent ${agent.name} (global config update)`);
         }
 
@@ -1045,7 +1044,7 @@ export class AgentStorage {
             if (agent.projectOverrides) {
                 delete agent.projectOverrides[projectDTag];
                 if (Object.keys(agent.projectOverrides).length === 0) {
-                    delete agent.projectOverrides;
+                    agent.projectOverrides = undefined;
                 }
             }
             logger.info(`Cleared project override for agent ${agent.name}`, { projectDTag });
@@ -1067,7 +1066,7 @@ export class AgentStorage {
             if (Object.keys(deduplicated).length === 0) {
                 delete agent.projectOverrides[projectDTag];
                 if (Object.keys(agent.projectOverrides).length === 0) {
-                    delete agent.projectOverrides;
+                    agent.projectOverrides = undefined;
                 }
                 logger.info(`Project override for ${projectDTag} cleared (all fields match defaults)`, {
                     agentSlug: agent.slug,
@@ -1163,11 +1162,11 @@ export class AgentStorage {
         } else {
             const override = agent.projectOverrides?.[projectDTag];
             if (override) {
-                delete override.isPM;
+                override.isPM = undefined;
                 if (Object.keys(override).length === 0) {
-                    delete agent.projectOverrides![projectDTag];
+                    delete agent.projectOverrides?.[projectDTag];
                     if (Object.keys(agent.projectOverrides!).length === 0) {
-                        delete agent.projectOverrides;
+                        agent.projectOverrides = undefined;
                     }
                 }
             }

@@ -18,7 +18,7 @@
 
 import { logger } from "@/utils/logger";
 import { getTenexBasePath } from "@/constants";
-import { join } from "path";
+import { join } from "node:path";
 import { getConversationEmbeddingService } from "./ConversationEmbeddingService";
 import type { BuildDocumentResult } from "./ConversationEmbeddingService";
 import { IndexingStateManager } from "./IndexingStateManager";

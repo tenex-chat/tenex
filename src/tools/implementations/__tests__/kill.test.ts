@@ -755,8 +755,8 @@ describe("kill tool", () => {
             expect(result.success).toBe(true);
             expect(result.message).toContain("Pre-emptive kill");
             expect(result.abortedTuples).toBeDefined();
-            expect(result.abortedTuples!.length).toBe(1);
-            expect(result.abortedTuples![0].agentPubkey).toBe(delegateAgentPubkey);
+            expect(result.abortedTuples?.length).toBe(1);
+            expect(result.abortedTuples?.[0].agentPubkey).toBe(delegateAgentPubkey);
 
             // Verify that the agent is marked as killed
             expect(ralRegistry.isAgentConversationKilled(delegateAgentPubkey, delegationConversationId)).toBe(true);

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import type { AgentInstance } from "@/agents/types";
 import { MessageCompiler } from "@/agents/execution/MessageCompiler";

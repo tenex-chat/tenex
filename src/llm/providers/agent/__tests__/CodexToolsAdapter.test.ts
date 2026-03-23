@@ -21,7 +21,7 @@ mock.module("ai-sdk-provider-codex-cli", () => ({
     tool: (config: { name: string; description: string; parameters: unknown; execute: unknown }) => config,
 }));
 
-import { CodexToolsAdapter } from "../CodexToolsAdapter";
+import { createSdkMcpServer } from "../CodexToolsAdapter";
 
 describe("CodexToolsAdapter", () => {
     const mockTool: AISdkTool = {
@@ -45,11 +45,11 @@ describe("CodexToolsAdapter", () => {
                 ask: mockTool,
             };
 
-            CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            createSdkMcpServer(tools, { agentName: "test" });
 
             expect(createLocalMcpServerCalls).toHaveLength(0);
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
-            const config = await server!._start();
+            const server = createSdkMcpServer(tools, { agentName: "test" });
+            const config = await server?._start();
             const callArgs = createLocalMcpServerCalls[0];
             expect(callArgs.name).toBe("tenex_local_tools");
             expect(callArgs.tools).toHaveLength(Object.keys(tools).length);
@@ -77,8 +77,8 @@ describe("CodexToolsAdapter", () => {
                 fs_read: mockTool,
             };
 
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
-            await server!._start();
+            const server = createSdkMcpServer(tools, { agentName: "test" });
+            await server?._start();
 
             expect(createLocalMcpServerCalls).toHaveLength(1);
             const callArgs = createLocalMcpServerCalls[0];
@@ -114,8 +114,8 @@ describe("CodexToolsAdapter", () => {
                 fs_edit: mockTool,
             };
 
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
-            await server!._start();
+            const server = createSdkMcpServer(tools, { agentName: "test" });
+            await server?._start();
 
             expect(createLocalMcpServerCalls).toHaveLength(1);
             const callArgs = createLocalMcpServerCalls[0];
@@ -133,8 +133,8 @@ describe("CodexToolsAdapter", () => {
                 fs_write: mockTool,
             };
 
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
-            const config = await server!._start();
+            const server = createSdkMcpServer(tools, { agentName: "test" });
+            const config = await server?._start();
 
             expect(server).toBeDefined();
             expect(createLocalMcpServerCalls).toHaveLength(1);
@@ -147,11 +147,11 @@ describe("CodexToolsAdapter", () => {
                 fs_read: mockTool,
             };
 
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, {
+            const server = createSdkMcpServer(tools, {
                 agentName: "test",
                 serverName: "tenex_local_tools_2",
             });
-            await server!._start();
+            await server?._start();
 
             expect(createLocalMcpServerCalls).toHaveLength(1);
             expect(createLocalMcpServerCalls[0].name).toBe("tenex_local_tools_2");
@@ -160,7 +160,7 @@ describe("CodexToolsAdapter", () => {
         it("should handle empty tools object", () => {
             const tools: Record<string, AISdkTool> = {};
 
-            const server = CodexToolsAdapter.createSdkMcpServer(tools, { agentName: "test" });
+            const server = createSdkMcpServer(tools, { agentName: "test" });
 
             expect(server).toBeUndefined();
             expect(createLocalMcpServerCalls).toHaveLength(0);

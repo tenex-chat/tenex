@@ -33,7 +33,7 @@ describe("RAGCollectionRegistry", () => {
         RAGCollectionRegistry.resetInstance();
         // Restore env
         if (origEnv === undefined) {
-            delete process.env.LANCEDB_DATA_DIR;
+            process.env.LANCEDB_DATA_DIR = undefined;
         } else {
             process.env.LANCEDB_DATA_DIR = origEnv;
         }
@@ -57,10 +57,10 @@ describe("RAGCollectionRegistry", () => {
 
         const metadata = registry.get("test_collection");
         expect(metadata).toBeDefined();
-        expect(metadata!.scope).toBe("project");
-        expect(metadata!.projectId).toBe("project-123");
-        expect(metadata!.agentPubkey).toBe("agent-abc");
-        expect(metadata!.createdAt).toBeGreaterThan(0);
+        expect(metadata?.scope).toBe("project");
+        expect(metadata?.projectId).toBe("project-123");
+        expect(metadata?.agentPubkey).toBe("agent-abc");
+        expect(metadata?.createdAt).toBeGreaterThan(0);
     });
 
     it("returns undefined for unregistered collections", () => {
@@ -82,7 +82,7 @@ describe("RAGCollectionRegistry", () => {
         const registry = RAGCollectionRegistry.getInstance();
 
         registry.register("test", { scope: "global" });
-        const firstCreatedAt = registry.get("test")!.createdAt;
+        const firstCreatedAt = registry.get("test")?.createdAt;
 
         // Re-register with different scope
         registry.register("test", { scope: "project", projectId: "p1" });
@@ -214,7 +214,7 @@ describe("RAGCollectionRegistry", () => {
 
         const metadata = newRegistry.get("persistent_coll");
         expect(metadata).toBeDefined();
-        expect(metadata!.scope).toBe("project");
-        expect(metadata!.projectId).toBe("p1");
+        expect(metadata?.scope).toBe("project");
+        expect(metadata?.projectId).toBe("p1");
     });
 });

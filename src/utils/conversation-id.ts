@@ -1,12 +1,16 @@
 /**
- * Conversation ID Utilities
+ * Nostr ID Shortening Utilities
  *
- * Centralized utilities for handling conversation IDs throughout the system.
+ * Centralized helpers for shortening conversation IDs, event IDs, and pubkeys.
  */
 
-import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
 import type { ShortEventId, FullEventId } from "@/types/event-ids";
 import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
+import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
+
+function shortenHexIdentifier(value: string | FullEventId): ShortEventId {
+    return value.substring(0, SHORT_EVENT_ID_LENGTH).toLowerCase() as ShortEventId;
+}
 
 /**
  * Shorten a conversation ID for Jaeger span attributes.
@@ -20,7 +24,31 @@ import { SHORT_EVENT_ID_LENGTH } from "@/types/event-ids";
  * @returns Shortened ID (first 12 characters) as ShortEventId
  */
 export function shortenConversationId(conversationId: string | FullEventId): ShortEventId {
-    return conversationId.substring(0, SHORT_EVENT_ID_LENGTH).toLowerCase() as ShortEventId;
+    return shortenHexIdentifier(conversationId);
+}
+
+export function shortenOptionalConversationId(
+    conversationId?: string | FullEventId | null
+): ShortEventId | undefined {
+    return conversationId ? shortenConversationId(conversationId) : undefined;
+}
+
+export function shortenEventId(eventId: string | FullEventId): ShortEventId {
+    return shortenHexIdentifier(eventId);
+}
+
+export function shortenOptionalEventId(
+    eventId?: string | FullEventId | null
+): ShortEventId | undefined {
+    return eventId ? shortenEventId(eventId) : undefined;
+}
+
+export function shortenPubkey(pubkey: string): string {
+    return shortenHexIdentifier(pubkey);
+}
+
+export function shortenOptionalPubkey(pubkey?: string | null): string | undefined {
+    return pubkey ? shortenPubkey(pubkey) : undefined;
 }
 
 // Re-export PREFIX_LENGTH for backward compatibility

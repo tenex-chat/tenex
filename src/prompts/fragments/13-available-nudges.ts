@@ -1,6 +1,7 @@
 import { NudgeSkillWhitelistService } from "@/services/nudge";
 import type { WhitelistItem } from "@/services/nudge";
 import type { PromptFragment } from "../core/types";
+import { shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Escape text for safe inclusion in prompt output.
@@ -17,11 +18,11 @@ function escapePromptText(value: string): string {
 const MAX_DESCRIPTION_LENGTH = 150;
 
 function formatItem(item: WhitelistItem): string {
-    const name = item.name || item.eventId.substring(0, 12);
+    const name = item.name || shortenEventId(item.eventId);
     const description = item.description
         ? item.description.replace(/\n/g, " ").substring(0, MAX_DESCRIPTION_LENGTH)
         : "No description";
-    return `  - **${escapePromptText(name)}** (${item.eventId.substring(0, 12)}): ${escapePromptText(description)}`;
+    return `  - **${escapePromptText(name)}** (${shortenEventId(item.eventId)}): ${escapePromptText(description)}`;
 }
 
 /**
@@ -80,7 +81,7 @@ export const availableNudgesAndSkillsFragment: PromptFragment<Record<string, nev
             sections.push(skills.map(formatItem).join("\n"));
         }
 
-        const exampleId = (hasNudges ? nudges[0] : skills[0]).eventId.substring(0, 12);
+        const exampleId = shortenEventId((hasNudges ? nudges[0] : skills[0]).eventId);
         sections.push("");
         sections.push("Example usage:");
         sections.push("```");

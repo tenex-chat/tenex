@@ -18,7 +18,7 @@ import type {
     ProviderRuntimeContext,
 } from "../types";
 import { AgentProvider, type AgentProviderFunction } from "../base/AgentProvider";
-import { CodexToolsAdapter } from "./CodexToolsAdapter";
+import { createSdkMcpServer } from "./CodexToolsAdapter";
 import { PROVIDER_IDS } from "../provider-ids";
 
 const CODEX_APP_SERVER_METADATA_KEY = "codex-app-server";
@@ -260,7 +260,7 @@ export class CodexProvider extends AgentProvider {
         const mcpServersConfig: NonNullable<CodexAppServerSettings["mcpServers"]> = {};
 
         if (tenexTools && regularTools.length > 0) {
-            const tenexServer = CodexToolsAdapter.createSdkMcpServer(
+            const tenexServer = createSdkMcpServer(
                 tenexTools,
                 {
                     agentName: context.agentName,

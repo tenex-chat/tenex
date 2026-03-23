@@ -1,6 +1,6 @@
 import type { AgentInstance } from "@/agents/types";
 import { createAgentInstance, loadAgentIntoRegistry } from "@/agents/agent-loader";
-import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
+import { publishAgentProfile, publishProjectAgentSnapshot } from "@/nostr/AgentProfilePublisher";
 import { loadEscalationAgentIntoRegistry } from "@/services/agents/EscalationService";
 import { config } from "@/services/ConfigService";
 import { logger } from "@/utils/logger";
@@ -222,7 +222,7 @@ export class AgentRegistry {
 
                 const signer = new NDKPrivateKeySigner(storedAgent.nsec);
 
-                await AgentProfilePublisher.publishAgentProfile(
+                await publishAgentProfile(
                     signer,
                     agent.name,
                     agent.role,
@@ -354,7 +354,7 @@ export class AgentRegistry {
         logger.info(`Removed agent ${slug} from project ${this.projectDTag}`);
 
         // Schedule debounced 14199 snapshot re-publish so the removed agent's p-tag is dropped
-        AgentProfilePublisher.publishProjectAgentSnapshot(this.projectDTag);
+        publishProjectAgentSnapshot(this.projectDTag);
 
         return true;
     }

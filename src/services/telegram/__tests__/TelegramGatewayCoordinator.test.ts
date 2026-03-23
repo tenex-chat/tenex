@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { projectContextStore } from "@/services/projects";
-import { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
+import type { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import {
     TELEGRAM_CONFIG_BOT_COMMANDS,

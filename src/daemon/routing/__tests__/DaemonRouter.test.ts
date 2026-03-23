@@ -5,7 +5,7 @@
  */
 
 import { describe, test, expect, beforeEach, mock } from "bun:test";
-import { DaemonRouter } from "../DaemonRouter";
+import { determineTargetProject } from "../DaemonRouter";
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import type { ProjectRuntime } from "../../ProjectRuntime";
 import { createProjectDTag, type ProjectDTag } from "@/types/project-ids";
@@ -20,7 +20,7 @@ mock.module("@/utils/logger", () => ({
     },
 }));
 
-describe("DaemonRouter.determineTargetProject", () => {
+describe("determineTargetProject", () => {
     // Shared test data
     const projectAPubkey = "aaaa0000000000000000000000000000000000000000000000000000000000aa";
     const projectBPubkey = "bbbb0000000000000000000000000000000000000000000000000000000000bb";
@@ -69,7 +69,7 @@ describe("DaemonRouter.determineTargetProject", () => {
         } as unknown as ProjectRuntime;
     }
 
-    function createMockEvent(tags: string[][], pubkey: string = "some-pubkey"): NDKEvent {
+    function createMockEvent(tags: string[][], pubkey = "some-pubkey"): NDKEvent {
         return {
             id: "test-event-id-1234567890abcdef1234567890abcdef1234567890abcdef",
             pubkey,
@@ -88,7 +88,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["a", projectAAddress],   // A-tag explicitly pointing to Project A
             ], agentYPubkey);
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -106,7 +106,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["a", projectAAddress],   // A-tag to Project A
             ], agentYPubkey);
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -129,7 +129,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["p", agentXPubkey], // P-tag to Agent X (only Project A running)
             ], agentYPubkey);
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -149,7 +149,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 // No A-tag - ambiguous!
             ], "external-pubkey");
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -173,7 +173,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 // No A-tag
             ], "external-pubkey");
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -200,7 +200,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["a", unknownProjectId],  // A-tag to unknown project
             ], "external-pubkey");
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -219,7 +219,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["a", projectAAddress], // lowercase 'a'
             ]);
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -237,7 +237,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["A", projectADTag], // uppercase 'A' - should NOT match
             ]);
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 event,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -265,7 +265,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["delegation", "parent-conversation-id"], // Delegation marker
             ], agentYPubkey); // Author: Agent Y (only in Project A)
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 delegationEvent,
                 knownProjects,
                 agentPubkeyToProjects as any,
@@ -290,7 +290,7 @@ describe("DaemonRouter.determineTargetProject", () => {
                 ["e", "delegation-event-id"],
             ], agentXPubkey); // Author: Agent X (in both A and B)
 
-            const result = DaemonRouter.determineTargetProject(
+            const result = determineTargetProject(
                 completionEvent,
                 knownProjects,
                 agentPubkeyToProjects as any,

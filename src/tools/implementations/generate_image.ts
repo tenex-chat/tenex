@@ -69,8 +69,7 @@ const generateImageSchema = z.object({
         .enum(validModelIds)
         .optional()
         .describe(
-            "Override the default model. Options: " +
-            OPENROUTER_IMAGE_MODELS.map((m) => `${m.value} (${m.description})`).join(", ")
+            `Override the default model. Options: ${OPENROUTER_IMAGE_MODELS.map((m) => `${m.value} (${m.description})`).join(", ")}`
         ),
 });
 
@@ -110,7 +109,7 @@ async function executeGenerateImage(
 ): Promise<GenerateImageOutput> {
     const { prompt, aspect_ratio, image_size, model } = input;
 
-    logger.info(`Generating image`, {
+    logger.info("Generating image", {
         promptPreview: prompt.slice(0, 100) + (prompt.length > 100 ? "..." : ""),
         aspectRatio: aspect_ratio,
         imageSize: image_size,
@@ -134,7 +133,7 @@ async function executeGenerateImage(
     // Convert base64 to Buffer for upload
     const imageData = Buffer.from(result.base64, "base64");
 
-    logger.info(`Image generated, uploading to Blossom`, {
+    logger.info("Image generated, uploading to Blossom", {
         size: imageData.length,
         mimeType: result.mimeType,
     });
@@ -148,7 +147,7 @@ async function executeGenerateImage(
         description: `Generated image: ${prompt.slice(0, 100)}`,
     });
 
-    logger.info(`Image uploaded to Blossom`, {
+    logger.info("Image uploaded to Blossom", {
         url: uploadResult.url,
         sha256: uploadResult.sha256,
         size: uploadResult.size,
@@ -218,12 +217,7 @@ export function createGenerateImageTool(context: ToolExecutionContext): AISdkToo
 
     const toolInstance = tool({
         description:
-            `Generate an image from a text description using OpenRouter's image-capable models. ` +
-            `The image is automatically uploaded to Blossom storage and a URL is returned. ` +
-            `For best results, provide detailed prompts describing ` +
-            `the subject, style, composition, colors, lighting, and mood. ` +
-            `Available models: ${modelList}. ` +
-            `IMPORTANT: Image generation costs money. Use sparingly and only when the user explicitly requests image generation.`,
+            `Generate an image from a text description using OpenRouter's image-capable models. The image is automatically uploaded to Blossom storage and a URL is returned. For best results, provide detailed prompts describing the subject, style, composition, colors, lighting, and mood. Available models: ${modelList}. IMPORTANT: Image generation costs money. Use sparingly and only when the user explicitly requests image generation.`,
 
         inputSchema: generateImageSchema,
 

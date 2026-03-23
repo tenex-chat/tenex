@@ -25,7 +25,7 @@ describe("findOpenClawStateDir", () => {
     beforeEach(async () => {
         tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-test-"));
         originalEnv = process.env.OPENCLAW_STATE_DIR;
-        delete process.env.OPENCLAW_STATE_DIR;
+        process.env.OPENCLAW_STATE_DIR = undefined;
     });
 
     afterEach(async () => {
@@ -33,12 +33,12 @@ describe("findOpenClawStateDir", () => {
         if (originalEnv !== undefined) {
             process.env.OPENCLAW_STATE_DIR = originalEnv;
         } else {
-            delete process.env.OPENCLAW_STATE_DIR;
+            process.env.OPENCLAW_STATE_DIR = undefined;
         }
     });
 
     it("returns null when no installation found", async () => {
-        const result = await findOpenClawStateDir([tempDir + "/nonexistent"]);
+        const result = await findOpenClawStateDir([`${tempDir}/nonexistent`]);
         expect(result).toBeNull();
     });
 

@@ -2,6 +2,7 @@ import { config } from "@/services/ConfigService";
 import { projectContextStore } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent } from "@nostr-dev-kit/ndk";
+import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 
 /**
  * Reason why a pubkey is trusted
@@ -75,7 +76,7 @@ export class TrustPubkeyService {
         // 1. Check whitelisted pubkeys from config
         if (this.isWhitelisted(pubkey)) {
             logger.debug("[TRUST_PUBKEY] Pubkey trusted: whitelisted", {
-                pubkey: pubkey.substring(0, 12),
+                pubkey: shortenPubkey(pubkey),
             });
             return { trusted: true, reason: "whitelisted" };
         }
@@ -84,7 +85,7 @@ export class TrustPubkeyService {
         const backendPubkey = await this.getBackendPubkey();
         if (backendPubkey && pubkey === backendPubkey) {
             logger.debug("[TRUST_PUBKEY] Pubkey trusted: backend", {
-                pubkey: pubkey.substring(0, 12),
+                pubkey: shortenPubkey(pubkey),
             });
             return { trusted: true, reason: "backend" };
         }
@@ -92,14 +93,14 @@ export class TrustPubkeyService {
         // 3. Check if it's an agent in the system
         if (this.isAgentPubkey(pubkey)) {
             logger.debug("[TRUST_PUBKEY] Pubkey trusted: agent", {
-                pubkey: pubkey.substring(0, 12),
+                pubkey: shortenPubkey(pubkey),
             });
             return { trusted: true, reason: "agent" };
         }
 
         // Not trusted
         logger.debug("[TRUST_PUBKEY] Pubkey not trusted", {
-            pubkey: pubkey.substring(0, 12),
+            pubkey: shortenPubkey(pubkey),
         });
         return { trusted: false };
     }
@@ -174,7 +175,7 @@ export class TrustPubkeyService {
         const pubkey = await this.getBackendPubkey();
         if (pubkey) {
             logger.debug("[TRUST_PUBKEY] Backend pubkey cache initialized", {
-                pubkey: pubkey.substring(0, 12),
+                pubkey: shortenPubkey(pubkey),
             });
         }
         // Note: getBackendPubkey already logs debug message on failure
@@ -265,7 +266,7 @@ export class TrustPubkeyService {
 
         if (!pubkey) {
             logger.debug("[TRUST_PUBKEY] Event has no pubkey", {
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
             });
             return undefined;
         }

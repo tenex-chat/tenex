@@ -60,10 +60,10 @@ async function simulateEvent(pubkey: string, decryptedContent: string): Promise<
     expect(capturedEventHandler).not.toBeNull();
     // onEvent fires synchronously but handleConfigUpdateEvent is async and caught via .catch()
     // We need to wait for the async handler to settle
-    capturedEventHandler!({
+    capturedEventHandler?.({
         pubkey,
         content: "encrypted",
-        id: "ev-" + Math.random().toString(36).slice(2, 6),
+        id: `ev-${Math.random().toString(36).slice(2, 6)}`,
     });
     // Allow microtask queue to flush (the .catch() handler)
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -307,7 +307,7 @@ describe("APNsService", () => {
             );
 
             expect(capturedEventHandler).not.toBeNull();
-            capturedEventHandler!({
+            capturedEventHandler?.({
                 pubkey: "user-1",
                 content: "bad-encrypted-content",
                 id: "ev-1",
@@ -327,7 +327,7 @@ describe("APNsService", () => {
             );
 
             expect(capturedEventHandler).not.toBeNull();
-            capturedEventHandler!({
+            capturedEventHandler?.({
                 pubkey: "user-1",
                 content: "encrypted",
                 id: "ev-1",

@@ -109,7 +109,7 @@ function isExpectedNonZeroExit(command: string, exitCode: number): { expected: b
     const baseCommand = extractBaseCommand(command);
     const config = COMMANDS_WITH_EXPECTED_NON_ZERO_EXIT[baseCommand];
 
-    if (config && config.exitCodes.includes(exitCode)) {
+    if (config?.exitCodes.includes(exitCode)) {
         return { expected: true, explanation: config.description };
     }
 
@@ -148,7 +148,7 @@ const shellSchema = z.object({
             z.number().nullable().optional()
         )
         .describe(
-            `Command timeout in seconds (default: 30, max: 600). Optional for background processes.`
+            "Command timeout in seconds (default: 30, max: 600). Optional for background processes."
         ),
     run_in_background: z
         .boolean()
@@ -208,9 +208,7 @@ async function executeShell(input: ShellInput, context: ToolExecutionContext): P
 
     // Validate working directory - fail fast if it's empty
     if (!workingDir) {
-        const errorMsg = "Shell command cannot run: workingDirectory is empty. " +
-            `Context projectBasePath: "${context.projectBasePath}", ` +
-            `Context workingDirectory: "${context.workingDirectory}"`;
+        const errorMsg = `Shell command cannot run: workingDirectory is empty. Context projectBasePath: "${context.projectBasePath}", Context workingDirectory: "${context.workingDirectory}"`;
         span?.addEvent("shell.error", { error: errorMsg });
         throw new Error(errorMsg);
     }

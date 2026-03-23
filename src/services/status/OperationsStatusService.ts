@@ -7,7 +7,7 @@ import {
 import { formatAnyError } from "@/lib/error-formatter";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { RALRegistry } from "@/services/ral";
+import type { RALRegistry } from "@/services/ral";
 import type { RALRegistryEntry } from "@/services/ral";
 import type { ProjectDTag } from "@/types/project-ids";
 import { config } from "@/services/ConfigService";

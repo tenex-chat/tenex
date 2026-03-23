@@ -114,7 +114,7 @@ describe("fs_grep tool", () => {
         });
 
         it("should block paths that look similar but are outside", async () => {
-            const similarDir = testDir + "-backup";
+            const similarDir = `${testDir}-backup`;
             mkdirSync(similarDir, { recursive: true });
             writeFileSync(path.join(similarDir, "sneaky.txt"), "findme content");
 
@@ -259,7 +259,7 @@ describe("fs_grep tool", () => {
 
             for (let i = 0; i < 1500; i++) {
                 const fileName = `very-long-filename-to-increase-path-length-${i.toString().padStart(5, "0")}.txt`;
-                writeFileSync(path.join(subDir, fileName), `pattern\n`);
+                writeFileSync(path.join(subDir, fileName), "pattern\n");
             }
 
             const result = await tools.fs_grep.execute({
@@ -330,7 +330,7 @@ describe("fs_grep tool", () => {
 
             for (let i = 0; i < 1500; i++) {
                 const fileName = `very-long-filename-that-makes-path-bigger-${i.toString().padStart(5, "0")}.txt`;
-                writeFileSync(path.join(subDir, fileName), `pattern\n`);
+                writeFileSync(path.join(subDir, fileName), "pattern\n");
             }
 
             const result = await tools.fs_grep.execute({
@@ -351,7 +351,7 @@ describe("fs_grep tool", () => {
 
             for (let i = 0; i < 50; i++) {
                 const fileName = `file-${i}.txt`;
-                writeFileSync(path.join(subDir, fileName), `pattern match\n`);
+                writeFileSync(path.join(subDir, fileName), "pattern match\n");
             }
 
             const result = await tools.fs_grep.execute({

@@ -55,9 +55,7 @@ async function executeReadResource(
 
     if (!agentMcpServers.includes(serverName)) {
         return createExpectedError(
-            `You do not have access to MCP server '${serverName}'. ` +
-                `You can only read resources from servers you have tools from. ` +
-                `Your accessible servers: ${agentMcpServers.length > 0 ? agentMcpServers.join(", ") : "none"}`
+            `You do not have access to MCP server '${serverName}'. You can only read resources from servers you have tools from. Your accessible servers: ${agentMcpServers.length > 0 ? agentMcpServers.join(", ") : "none"}`
         );
     }
 
@@ -76,8 +74,7 @@ async function executeReadResource(
     // Check if URI still has unfilled placeholders
     if (expandedUri.includes("{") && expandedUri.includes("}")) {
         return createExpectedError(
-            `Resource URI contains unfilled template parameters: ${expandedUri}. ` +
-                "Please provide all required parameters via templateParams."
+            `Resource URI contains unfilled template parameters: ${expandedUri}. Please provide all required parameters via templateParams.`
         );
     }
 
@@ -120,8 +117,7 @@ async function executeReadResource(
             errorMessage.toLowerCase().includes("does not exist")
         ) {
             return createExpectedError(
-                `Resource '${expandedUri}' not found on MCP server '${serverName}'. ` +
-                    `Please verify the URI is correct.`
+                `Resource '${expandedUri}' not found on MCP server '${serverName}'. Please verify the URI is correct.`
             );
         }
 

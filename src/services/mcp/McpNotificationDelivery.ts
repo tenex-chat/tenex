@@ -1,3 +1,4 @@
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 /**
  * McpNotificationDelivery - Delivers MCP subscription notifications to conversations
  *
@@ -42,7 +43,7 @@ export async function deliverMcpNotification(
     const agent = projectCtx.getAgentByPubkey(subscription.agentPubkey);
     if (!agent) {
         throw new Error(
-            `Agent not found for MCP notification delivery: pubkey=${subscription.agentPubkey.substring(0, 12)}`
+            `Agent not found for MCP notification delivery: pubkey=${shortenPubkey(subscription.agentPubkey)}`
         );
     }
 
@@ -159,7 +160,7 @@ export async function deliverMcpNotification(
     logger.info("Delivered MCP notification via direct AgentExecutor invocation", {
         subscriptionId: subscription.id,
         agent: agent.slug,
-        conversationId: subscription.conversationId.substring(0, 12),
+        conversationId: shortenConversationId(subscription.conversationId),
         contentLength: content.length,
     });
 

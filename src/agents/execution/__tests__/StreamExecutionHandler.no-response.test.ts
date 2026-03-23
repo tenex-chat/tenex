@@ -17,11 +17,11 @@ import { StreamExecutionHandler } from "../StreamExecutionHandler";
 class MockLLMService {
     provider = "openrouter";
     model = "test-model";
-    private handlers = new Map<string, Function[]>();
+    private handlers = new Map<string, ((...args: unknown[]) => unknown)[]>();
 
     constructor(private readonly completionMode: "throw" | "return" = "throw") {}
 
-    on(event: string, handler: Function): void {
+    on(event: string, handler: (...args: unknown[]) => unknown): void {
         const existing = this.handlers.get(event) ?? [];
         existing.push(handler);
         this.handlers.set(event, existing);

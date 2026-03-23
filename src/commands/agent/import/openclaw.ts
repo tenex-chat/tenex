@@ -226,7 +226,7 @@ export const openclawImportCommand = new Command("openclaw")
                 await importOneAgent(agent, llmConfigs, { noSync: options.noSync });
 
                 if (!userMdProcessed && agent.workspaceFiles.user) {
-                    console.log(chalk.blue(`\nDistilling user context from USER.md...`));
+                    console.log(chalk.blue("\nDistilling user context from USER.md..."));
                     await appendUserMdToGlobalPrompt(agent.workspaceFiles.user, llmConfigs);
                     console.log(chalk.green("  ✓ USER.md distilled and appended to global system prompt"));
                     userMdProcessed = true;

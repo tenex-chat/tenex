@@ -78,13 +78,13 @@ describe("MCP Config Merge", () => {
 
             // Both servers should be present in merged config
             expect(capturedMcpConfig).toBeDefined();
-            expect(capturedMcpConfig!.enabled).toBe(true);
-            expect(capturedMcpConfig!.servers["project-server"]).toBeDefined();
-            expect(capturedMcpConfig!.servers["agent-server"]).toBeDefined();
-            expect(capturedMcpConfig!.servers["project-server"].command).toBe(
+            expect(capturedMcpConfig?.enabled).toBe(true);
+            expect(capturedMcpConfig?.servers["project-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["agent-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["project-server"].command).toBe(
                 "project-mcp-server"
             );
-            expect(capturedMcpConfig!.servers["agent-server"].command).toBe(
+            expect(capturedMcpConfig?.servers["agent-server"].command).toBe(
                 "agent-mcp-server"
             );
         });
@@ -124,10 +124,10 @@ describe("MCP Config Merge", () => {
 
             // Agent-specific config should win the collision
             expect(capturedMcpConfig).toBeDefined();
-            expect(capturedMcpConfig!.servers["shared-server"].command).toBe(
+            expect(capturedMcpConfig?.servers["shared-server"].command).toBe(
                 "agent-version"
             );
-            expect(capturedMcpConfig!.servers["shared-server"].args).toEqual([
+            expect(capturedMcpConfig?.servers["shared-server"].args).toEqual([
                 "--agent-specific",
             ]);
         });
@@ -160,7 +160,7 @@ describe("MCP Config Merge", () => {
 
             // Should use project config directly
             expect(capturedMcpConfig).toBeDefined();
-            expect(capturedMcpConfig!.servers["project-only-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["project-only-server"]).toBeDefined();
         });
 
         it("should use only agent MCP config when no project config passed", () => {
@@ -187,7 +187,7 @@ describe("MCP Config Merge", () => {
 
             // Should use agent config directly
             expect(capturedMcpConfig).toBeDefined();
-            expect(capturedMcpConfig!.servers["agent-only-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["agent-only-server"]).toBeDefined();
         });
 
         it("should have undefined MCP config when neither agent nor project has config", () => {
@@ -243,10 +243,10 @@ describe("MCP Config Merge", () => {
 
             // Merged config should have enabled: false (respecting project-level)
             expect(capturedMcpConfig).toBeDefined();
-            expect(capturedMcpConfig!.enabled).toBe(false);
+            expect(capturedMcpConfig?.enabled).toBe(false);
             // Servers should still be merged
-            expect(capturedMcpConfig!.servers["project-server"]).toBeDefined();
-            expect(capturedMcpConfig!.servers["agent-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["project-server"]).toBeDefined();
+            expect(capturedMcpConfig?.servers["agent-server"]).toBeDefined();
         });
     });
 });

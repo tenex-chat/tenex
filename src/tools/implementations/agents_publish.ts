@@ -12,6 +12,7 @@ import { logger } from "@/utils/logger";
 import { NDKEvent, NDKNip46Signer, NDKPrivateKeySigner, type NDKSigner } from "@nostr-dev-kit/ndk";
 import { tool } from "ai";
 import { z } from "zod";
+import { shortenOptionalEventId, shortenOptionalPubkey, shortenPubkey } from "@/utils/conversation-id";
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 const UPLOAD_TIMEOUT_MS = 60_000;
@@ -223,7 +224,7 @@ async function createFileMetadataEvent(
     await event.sign(signer);
     await event.publish();
 
-    logger.info(`Published kind:1063 file metadata event`, {
+    logger.info("Published kind:1063 file metadata event", {
         eventId: event.id,
         name,
         url,
@@ -266,7 +267,7 @@ async function uploadFileAndCreateMetadata(
     const mimeType = detectMimeType(filePath);
     const sha256 = calculateSHA256(data);
 
-    logger.info(`Uploading file to Blossom`, {
+    logger.info("Uploading file to Blossom", {
         path: filePath,
         name,
         size: data.length,
@@ -283,7 +284,7 @@ async function uploadFileAndCreateMetadata(
         authEvent
     );
 
-    logger.info(`File uploaded to Blossom`, {
+    logger.info("File uploaded to Blossom", {
         name,
         url: uploadResult.url,
         sha256: uploadResult.sha256,
@@ -318,13 +319,13 @@ async function createAgentNip46Signer(
 
     if (!bunkerUri || !bunkerUri.startsWith("bunker://")) {
         throw new Error(
-            `Invalid bunker URI for owner ${ownerPubkey.substring(0, 12)}: ` +
+            `Invalid bunker URI for owner ${shortenPubkey(ownerPubkey)}: ` +
             `expected a "bunker://" URI but got "${bunkerUri || "(empty)"}"`
         );
     }
 
     logger.info("[agents_publish] Creating NIP-46 signer for remote signing", {
-        ownerPubkey: ownerPubkey.substring(0, 12),
+        ownerPubkey: shortenPubkey(ownerPubkey),
         bunkerUri: bunkerUri.substring(0, 60),
     });
 
@@ -332,7 +333,7 @@ async function createAgentNip46Signer(
 
     signer.on("authUrl", (url: string) => {
         logger.info("[agents_publish] NIP-46 auth URL required", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             url,
         });
     });
@@ -477,16 +478,14 @@ async function executeAgentsPublish(
         const agentSigner: unknown = context.agent.signer;
         if (!(agentSigner instanceof NDKPrivateKeySigner)) {
             throw new Error(
-                `Expected agent signer to be NDKPrivateKeySigner for NIP-46 signing, ` +
-                `but got ${(agentSigner as { constructor?: { name?: string } })?.constructor?.name ?? "undefined"}. ` +
-                `Agent "${slug}" may have an incompatible signer configuration.`
+                `Expected agent signer to be NDKPrivateKeySigner for NIP-46 signing, but got ${(agentSigner as { constructor?: { name?: string } })?.constructor?.name ?? "undefined"}. Agent "${slug}" may have an incompatible signer configuration.`
             );
         }
 
-        logger.info(`Publishing agent definition as user via NIP-46`, {
+        logger.info("Publishing agent definition as user via NIP-46", {
             slug,
-            ownerPubkey: ownerPubkey.substring(0, 12),
-            agentPubkey: context.agent.pubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
+            agentPubkey: shortenPubkey(context.agent.pubkey),
         });
 
         // Create NIP-46 signer using the agent's own signer as local key
@@ -541,7 +540,7 @@ async function executeAgentsPublish(
 
         logger.info(`Successfully published backend-signed agent definition for "${agent.name}" (${slug})`, {
             eventId: agentDefinition.id,
-            pubkey: backendSigner!.pubkey,
+            pubkey: backendSigner?.pubkey,
             signerType: "backend",
             filesAttached: fileMetadataEvents.length,
         });
@@ -562,14 +561,14 @@ async function executeAgentsPublish(
 
             logger.info("[agents_publish] Synced publish metadata to local storage", {
                 slug,
-                eventId: agentDefinition.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(agentDefinition.id),
                 definitionDTag: storedAgent.definitionDTag,
-                definitionAuthor: storedAgent.definitionAuthor?.substring(0, 12),
+                definitionAuthor: shortenOptionalPubkey(storedAgent.definitionAuthor),
             });
         } else {
             logger.warn("[agents_publish] Could not find stored agent to sync publish metadata", {
                 slug,
-                pubkey: agent.pubkey?.substring(0, 12),
+                pubkey: shortenOptionalPubkey(agent.pubkey),
             });
         }
     } catch (error) {

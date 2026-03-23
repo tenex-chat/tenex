@@ -25,7 +25,7 @@ export const summarizationCommand = new Command("summarization")
             }]);
 
             existingConfig.summarization = {
-                inactivityTimeout: parseInt(timeout),
+                inactivityTimeout: Number.parseInt(timeout),
             };
 
             await configService.saveGlobalConfig(existingConfig);

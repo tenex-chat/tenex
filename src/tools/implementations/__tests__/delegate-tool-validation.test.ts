@@ -4,6 +4,7 @@ import type { AgentRegistry } from "@/agents/AgentRegistry";
 import type { AgentInstance } from "@/agents/types";
 import type { ProjectContext } from "@/services/projects";
 import * as nostrModule from "@/nostr";
+import { shortenConversationId } from "@/utils/conversation-id";
 
 import { RALRegistry } from "@/services/ral";
 import { createDelegateTool } from "@/tools/implementations/delegate";
@@ -405,7 +406,7 @@ describe("Delegation tools - RALRegistry state verification", () => {
         conversationId,
         triggeringEnvelope: createTriggeringEnvelope(),
         agentPublisher: {
-            delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
+            delegate: async () => `mock-delegation-id-${Math.random().toString(36).substring(7)}`,
         } as any,
         ralNumber,
         projectBasePath: "/tmp/test",
@@ -596,7 +597,7 @@ describe("Delegation tools - Circular delegation soft warning", () => {
             conversationId,
             triggeringEnvelope: createTriggeringEnvelope(),
             agentPublisher: {
-                delegate: async () => "mock-delegation-id-" + Math.random().toString(36).substring(7),
+                delegate: async () => `mock-delegation-id-${Math.random().toString(36).substring(7)}`,
                 delegationMarker: async () => ({ id: "mock-marker-id" }),
             } as any,
             ralNumber,
@@ -849,7 +850,7 @@ describe("delegate_followup - Full ID canonicalization", () => {
         // and successfully find the delegation
         const result = await followupTool.execute(input);
         expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12)); // Shortened canonical ID
+        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId)); // Shortened canonical ID
     });
 
     it("should canonicalize nostr:nevent1 NIP-19 format to canonical delegation ID", async () => {
@@ -884,7 +885,7 @@ describe("delegate_followup - Full ID canonicalization", () => {
 
         const result = await followupTool.execute(input);
         expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
     });
 
     it("should canonicalize note1 NIP-19 format to canonical delegation ID", async () => {
@@ -918,7 +919,7 @@ describe("delegate_followup - Full ID canonicalization", () => {
 
         const result = await followupTool.execute(input);
         expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
     });
 
     it("should handle invalid NIP-19 format gracefully", async () => {
@@ -971,7 +972,7 @@ describe("delegate_followup - Full ID canonicalization", () => {
         const result = await followupTool.execute(input);
         expect(result.success).toBe(true);
         // Should use the same canonical ID (canonicalization returns it unchanged)
-        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
     });
 
     it("should canonicalize uppercase hex IDs to lowercase", async () => {
@@ -1000,6 +1001,6 @@ describe("delegate_followup - Full ID canonicalization", () => {
 
         const result = await followupTool.execute(input);
         expect(result.success).toBe(true);
-        expect(result.delegationConversationId).toBe(canonicalId.substring(0, 12));
+        expect(result.delegationConversationId).toBe(shortenConversationId(canonicalId));
     });
 });

@@ -9,7 +9,7 @@ import { config } from "@/services/ConfigService";
 import type { TenexMCP } from "@/services/config/types";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { NDKMCPTool } from "@/events/NDKMCPTool";
+import type { NDKMCPTool } from "@/events/NDKMCPTool";
 
 describe("mcpInstaller", () => {
     const testMetadataPath = "/tmp/test-metadata-path";

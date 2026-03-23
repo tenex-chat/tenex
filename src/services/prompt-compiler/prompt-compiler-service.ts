@@ -24,11 +24,11 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { NDKEvent, NDKSubscription, Hexpubkey } from "@nostr-dev-kit/ndk";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
 import type { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
+import { publishCompiledInstructions } from "@/nostr/AgentProfilePublisher";
 import { config } from "@/services/ConfigService";
 import { llmServiceFactory } from "@/llm";
 import { logger } from "@/utils/logger";
@@ -132,7 +132,7 @@ export class PromptCompilerService {
     private cachedEffectiveInstructions: EffectiveInstructionsCacheEntry | null = null;
 
     /** Base agent instructions (stored for sync retrieval and recompilation) */
-    private baseAgentInstructions: string = "";
+    private baseAgentInstructions = "";
 
     /** Agent definition event ID (stored for cache hash calculation) */
     private agentDefinitionEventId?: string;
@@ -142,19 +142,19 @@ export class PromptCompilerService {
     private currentCompilationPromise: Promise<void> | null = null;
 
     /** Timestamp of last compilation trigger (for debouncing) */
-    private lastCompilationTrigger: number = 0;
+    private lastCompilationTrigger = 0;
 
     /** Minimum interval between compilation triggers (ms) - debounce rapid lesson arrivals */
     private static readonly COMPILATION_DEBOUNCE_MS = 5000;
 
     /** Flag indicating a recompilation is pending (set when trigger arrives during active compilation or debounce) */
-    private pendingRecompile: boolean = false;
+    private pendingRecompile = false;
 
     /** Timer for debounced compilation (to ensure triggers aren't dropped when idle) */
     private debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
     /** Flag indicating if initialize() has been called */
-    private initialized: boolean = false;
+    private initialized = false;
 
     /** Agent metadata for kind:0 publishing (set via setAgentMetadata) */
     private agentSigner: NDKPrivateKeySigner | null = null;
@@ -820,7 +820,7 @@ Please rewrite and compile this into unified, cohesive Effective Agent Instructi
                 // Publish kind:0 with compiled instructions (fire-and-forget)
                 // Only publish if agent metadata was provided
                 if (this.agentSigner && this.agentName && this.agentRole && this.projectTitle) {
-                    void AgentProfilePublisher.publishCompiledInstructions(
+                    void publishCompiledInstructions(
                         this.agentSigner,
                         effectiveInstructions,
                         this.agentName,

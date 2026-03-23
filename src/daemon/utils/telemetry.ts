@@ -10,8 +10,8 @@ import {
     type SpanContext,
 } from "@opentelemetry/api";
 import { shortenConversationId } from "@/utils/conversation-id";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { TagExtractor } from "@/nostr/TagExtractor";
+import { getReplyTarget } from "@/nostr/AgentEventDecoder";
+import { getFirstETag } from "@/nostr/TagExtractor";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 
 /**
@@ -51,7 +51,7 @@ function createContextFromNostrEvent(event: NDKEvent): {
 } {
     // 1. Determine conversationId (becomes traceID)
     // For root events (no e tag), use the event's own ID as conversation root
-    const conversationId = AgentEventDecoder.getReplyTarget(event) || event.id;
+    const conversationId = getReplyTarget(event) || event.id;
     if (!conversationId || !isHexNostrId(conversationId)) {
         return { context: ROOT_CONTEXT, parentSpanId: undefined, traceId: "" };
     }
@@ -59,7 +59,7 @@ function createContextFromNostrEvent(event: NDKEvent): {
     const traceId = nostrIdToTraceId(conversationId);
 
     // 2. Determine parent event ID from e-tag (the event this is replying to)
-    const parentEventId = TagExtractor.getFirstETag(event);
+    const parentEventId = getFirstETag(event);
     const parentSpanId = isHexNostrId(parentEventId) ? nostrIdToSpanId(parentEventId) : undefined;
 
     // 3. Create span context - if we have a parent, use its spanId; otherwise this is root
@@ -92,7 +92,7 @@ export function createEventSpan(event: NDKEvent): Span {
     // First check for explicit trace_context tag (backwards compat with delegations)
     const traceContextTag = event.tags.find((t) => t[0] === "trace_context");
 
-    let conversationId = AgentEventDecoder.getReplyTarget(event);
+    let conversationId = getReplyTarget(event);
     let derivedTraceId: string | undefined;
 
     let parentContext: Context;
@@ -112,7 +112,7 @@ export function createEventSpan(event: NDKEvent): Span {
     }
 
     // Get reply-to event for attribute logging
-    const replyToEventId = TagExtractor.getFirstETag(event);
+    const replyToEventId = getFirstETag(event);
 
     // Create span with conversation-aware context
     if (!conversationId) {
@@ -135,7 +135,7 @@ export function createEventSpan(event: NDKEvent): Span {
                 "event.reply_to": replyToEventId || "",
                 "event.reply_to_is_hex": isHexNostrId(replyToEventId),
                 "conversation.id": conversationId ? shortenConversationId(conversationId) : "unknown",
-                "conversation.is_root": !AgentEventDecoder.getReplyTarget(event),
+                "conversation.is_root": !getReplyTarget(event),
                 "trace.derived_from_nostr": !traceContextTag && !!derivedTraceId,
             },
         },

@@ -134,7 +134,7 @@ export class KeyManager {
 
         if (health.failures.length >= this.config.failureThreshold) {
             health.disabledUntil = now + this.config.disableDurationMs;
-            const keyPreview = apiKey.slice(0, 8) + "...";
+            const keyPreview = `${apiKey.slice(0, 8)}...`;
             logger.warn(
                 `[KeyManager] Key ${keyPreview} for "${providerId}" temporarily disabled ` +
                 `(${health.failures.length} failures in ${this.config.failureWindowMs}ms window). ` +

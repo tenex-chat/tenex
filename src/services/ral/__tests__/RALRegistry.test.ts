@@ -1903,7 +1903,7 @@ describe("RALRegistry", () => {
       expect(convDelegations).toBeDefined();
 
       // Manually add to completed (simulating the edge case)
-      convDelegations!.completed.set(delegationId, {
+      convDelegations?.completed.set(delegationId, {
         delegationConversationId: delegationId,
         recipientPubkey: "recipient-1",
         senderPubkey: agentPubkey,
@@ -1914,8 +1914,8 @@ describe("RALRegistry", () => {
       });
 
       // Now the same ID is in BOTH pending and completed maps
-      expect(convDelegations!.pending.has(delegationId)).toBe(true);
-      expect(convDelegations!.completed.has(delegationId)).toBe(true);
+      expect(convDelegations?.pending.has(delegationId)).toBe(true);
+      expect(convDelegations?.completed.has(delegationId)).toBe(true);
 
       // resolveDelegationPrefix should dedupe and return a single match, not 2
       const resolved = registry.resolveDelegationPrefix("deadbeef1234");

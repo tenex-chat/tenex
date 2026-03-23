@@ -305,7 +305,7 @@ async function executeAsk(input: AskInput, context: ToolExecutionContext): Promi
   try {
     const apnsService = APNsService.getInstance();
     if (apnsService.isEnabled()) {
-      const bodyPreview = askContext.length > 100 ? askContext.substring(0, 100) + "…" : askContext;
+      const bodyPreview = askContext.length > 100 ? `${askContext.substring(0, 100)}…` : askContext;
       await apnsService.notifyIfNeeded(ownerPubkey, {
         title: "Agent needs your input",
         body: bodyPreview,

@@ -1,7 +1,7 @@
 import type { NDKEvent, NDKProject } from "@nostr-dev-kit/ndk";
 import { NDKMCPTool } from "../events/NDKMCPTool";
 import { getNDK } from "../nostr";
-import { TagExtractor } from "../nostr/TagExtractor";
+import { getTagValue, getTagValues, getDTag } from "../nostr/TagExtractor";
 import { getProjectContext } from "@/services/projects";
 import {
     getInstalledMCPEventIds,
@@ -22,14 +22,14 @@ import { trace } from "@opentelemetry/api";
  * 5. Updates the ProjectContext with the new configuration
  */
 export async function handleProjectEvent(event: NDKEvent): Promise<void> {
-    const title = TagExtractor.getTagValue(event, "title") || "Untitled";
+    const title = getTagValue(event, "title") || "Untitled";
 
     // Extract agent event IDs from the project
-    const agentEventIds = TagExtractor.getTagValues(event, "agent")
+    const agentEventIds = getTagValues(event, "agent")
         .filter((id): id is string => typeof id === "string");
 
     // Extract MCP tool event IDs from the project
-    const mcpEventIds = TagExtractor.getTagValues(event, "mcp")
+    const mcpEventIds = getTagValues(event, "mcp")
         .filter((id): id is string => typeof id === "string");
 
     trace.getActiveSpan()?.addEvent("project.update_received", {
@@ -44,7 +44,7 @@ export async function handleProjectEvent(event: NDKEvent): Promise<void> {
 
         // Check if this is the same project that's currently loaded
         const currentProjectDTag = currentContext.project.dTag;
-        const eventDTag = TagExtractor.getDTag(event);
+        const eventDTag = getDTag(event);
 
         if (currentProjectDTag !== eventDTag) {
             return;

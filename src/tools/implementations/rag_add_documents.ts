@@ -435,8 +435,6 @@ function coerceToDocumentMetadata(record: Record<string, unknown>): DocumentMeta
                 // JSON round-trip validates serializability and clones deeply
                 result[key] = JSON.parse(JSON.stringify(value));
             } catch {
-                // Non-serializable object (circular refs, etc.) - skip
-                continue;
             }
         }
     }

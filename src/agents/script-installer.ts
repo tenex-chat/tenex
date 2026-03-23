@@ -236,12 +236,12 @@ export async function installAgentScripts(
     const failCount = results.filter((r) => !r.success).length;
 
     if (failCount > 0) {
-        logger.warn(`Script installation completed with errors`, {
+        logger.warn("Script installation completed with errors", {
             success: successCount,
             failed: failCount,
         });
     } else {
-        logger.info(`All scripts installed successfully`, { count: successCount });
+        logger.info("All scripts installed successfully", { count: successCount });
     }
 
     return results;

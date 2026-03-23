@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import type { ToolCallPart, ToolResultPart } from "ai";
 
 // Mock PubkeyService for attribution tests

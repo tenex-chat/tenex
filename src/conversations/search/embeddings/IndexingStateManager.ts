@@ -12,9 +12,9 @@
  * - No unbounded growth: old entries naturally expire
  */
 
-import { createHash } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "@/utils/logger";
 import { readLightweightMetadata } from "@/conversations/ConversationDiskReader";
 import type { ProjectDTag } from "@/types/project-ids";

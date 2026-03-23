@@ -21,7 +21,7 @@ describe("agent-home utilities", () => {
 
     afterEach(() => {
         if (originalTenexBaseDir === undefined) {
-            delete process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = undefined;
         } else {
             process.env.TENEX_BASE_DIR = originalTenexBaseDir;
         }

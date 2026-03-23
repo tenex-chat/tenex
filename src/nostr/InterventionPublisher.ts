@@ -1,7 +1,7 @@
 import { config } from "@/services/ConfigService";
 import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
-import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
+import type { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
 import { trace } from "@opentelemetry/api";
 import { AgentEventEncoder } from "./AgentEventEncoder";
 import { injectTraceContext } from "./trace-context";

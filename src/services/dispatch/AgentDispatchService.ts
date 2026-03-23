@@ -16,7 +16,7 @@ import {
     isFromAgent,
 } from "@/events/runtime/envelope-classifier";
 import { formatAnyError } from "@/lib/error-formatter";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenPubkey } from "@/utils/conversation-id";
 import { config } from "@/services/ConfigService";
 import { llmOpsRegistry } from "@/services/LLMOperationsRegistry";
 import { getProjectContext, type ProjectContext } from "@/services/projects";
@@ -815,15 +815,15 @@ export class AgentDispatchService {
         if (cooldownRegistry.isInCooldown(projectId, conversationId, agentPubkey)) {
             logger.info(`[dispatch] ${eventType === "delegation_completion" ? "Delegation completion routing" : "Routing"} blocked due to cooldown`, {
                 projectId: projectId.substring(0, 12),
-                conversationId: conversationId.substring(0, 12),
+                conversationId: shortenConversationId(conversationId),
                 agentSlug,
-                agentPubkey: agentPubkey.substring(0, 12),
+                agentPubkey: shortenPubkey(agentPubkey),
             });
 
             span.addEvent(`dispatch.${eventType}_blocked_cooldown`, {
                 "cooldown.project_id": projectId.substring(0, 12),
                 "cooldown.conversation_id": shortenConversationId(conversationId),
-                "cooldown.agent_pubkey": agentPubkey.substring(0, 12),
+                "cooldown.agent_pubkey": shortenPubkey(agentPubkey),
                 "cooldown.agent_slug": agentSlug,
             });
             span.setStatus({ code: SpanStatusCode.OK });

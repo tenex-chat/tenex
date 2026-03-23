@@ -11,9 +11,9 @@
  * File location: ~/.tenex/projects/{projectId}/conversations/{conversationId}.json
  */
 
-import { existsSync, mkdirSync, readFileSync } from "fs";
-import { writeFile } from "fs/promises";
-import { join } from "path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ModelMessage, ToolCallPart, ToolResultPart } from "ai";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";

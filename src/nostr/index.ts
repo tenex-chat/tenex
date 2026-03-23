@@ -1,6 +1,34 @@
 // Agent event system
 
-export { AgentEventDecoder } from "./AgentEventDecoder";
+export {
+    isDirectedToSystem,
+    isEventFromAgent as isEventFromAgentByMap,
+    getReplyTarget,
+    getMentionedPubkeys,
+    isAgentInternalMessage,
+    isDelegationRequest,
+    isDelegationCompletion,
+    getDelegationRequestId,
+    isStatusEvent,
+    getErrorType,
+    hasTool,
+    getToolTags,
+    getParticipants,
+    extractNudgeEventIds,
+    extractSkillEventIds,
+    isNeverRouteKind,
+    isProjectEvent,
+    isLessonEvent,
+    extractProjectId,
+    extractAgentDefinitionIdFromLesson,
+    hasProjectATags,
+    extractProjectATags,
+    classifyForDaemon,
+    isLessonCommentEvent,
+    isConfigUpdate,
+    isMetadata,
+    isStopCommand,
+} from "./AgentEventDecoder";
 
 // Blossom upload service
 export { BlossomService, calculateSHA256, getExtensionFromMimeType } from "./BlossomService";
@@ -16,7 +44,13 @@ export type {
 } from "./types";
 export { AgentEventEncoder } from "./AgentEventEncoder";
 export { AgentConfigPublisher } from "./AgentConfigPublisher";
-export { AgentProfilePublisher } from "./AgentProfilePublisher";
+export {
+    publishProjectAgentSnapshot,
+    publishAgentProfile,
+    publishContactList,
+    publishBackendProfile,
+    publishCompiledInstructions,
+} from "./AgentProfilePublisher";
 export { AgentPublisher } from "./AgentPublisher";
 export { InterventionPublisher } from "./InterventionPublisher";
 export { injectTraceContext, type EventWithTags } from "./trace-context";

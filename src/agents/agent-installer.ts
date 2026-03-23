@@ -159,8 +159,7 @@ export async function installAgentFromNostrEvent(
         const existingAgent = await agentStorage.getAgentByEventId(event.id);
         if (existingAgent) {
             logger.debug(
-                `Agent with eventId ${event.id} already exists as "${existingAgent.slug}", ` +
-                `preserving existing configuration`
+                `Agent with eventId ${event.id} already exists as "${existingAgent.slug}", preserving existing configuration`
             );
             return existingAgent;
         }

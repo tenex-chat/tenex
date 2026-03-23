@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import type { AgentInstance } from "@/agents/types";
 import { resetSystemReminders } from "@/agents/execution/system-reminders";
 import { ConversationStore } from "@/conversations/ConversationStore";
@@ -92,7 +92,7 @@ describe("TENEX context management integration", () => {
         expect(contextManagement).toBeDefined();
         expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
 
-        const scratchpadTool = contextManagement!.optionalTools.scratchpad as {
+        const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
             execute: (input: unknown, options: { experimental_context: Record<string, unknown> }) => Promise<unknown>;
         };
         await scratchpadTool.execute(
@@ -104,7 +104,7 @@ describe("TENEX context management integration", () => {
             },
             {
                 experimental_context: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             }
         );
@@ -118,7 +118,7 @@ describe("TENEX context management integration", () => {
             })
         );
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -136,7 +136,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -221,11 +221,11 @@ describe("TENEX context management integration", () => {
             content: [{ type: "text", text: "Continue." }],
         });
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: prompt as any,
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -272,7 +272,7 @@ describe("TENEX context management integration", () => {
 
         expect(contextManagement).toBeDefined();
 
-        const shortPrompt = await contextManagement!.middleware.transformParams?.({
+        const shortPrompt = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -282,7 +282,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -306,7 +306,7 @@ describe("TENEX context management integration", () => {
             "context-window-status",
         ]);
 
-        const longPrompt = await contextManagement!.middleware.transformParams?.({
+        const longPrompt = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -321,7 +321,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -379,7 +379,7 @@ describe("TENEX context management integration", () => {
 
         expect(contextManagement).toBeDefined();
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     {
@@ -392,7 +392,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -451,7 +451,7 @@ describe("TENEX context management integration", () => {
 
         expect(contextManagement).toBeDefined();
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -461,7 +461,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -483,7 +483,7 @@ describe("TENEX context management integration", () => {
             toolName: "scratchpad",
         });
 
-        const postScratchpadPrompt = await contextManagement!.middleware.transformParams?.({
+        const postScratchpadPrompt = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -515,7 +515,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -564,7 +564,7 @@ describe("TENEX context management integration", () => {
         expect(contextManagement).toBeDefined();
         expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -574,7 +574,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -633,7 +633,7 @@ describe("TENEX context management integration", () => {
 
         expect(contextManagement).toBeDefined();
 
-        const transformed = await contextManagement!.middleware.transformParams?.({
+        const transformed = await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -643,7 +643,7 @@ describe("TENEX context management integration", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {

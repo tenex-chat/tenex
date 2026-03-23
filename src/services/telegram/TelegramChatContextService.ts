@@ -3,7 +3,7 @@ import type {
     TelegramSeenParticipantMetadata,
 } from "@/events/runtime/InboundEnvelope";
 import {
-    TelegramChatContextStore,
+    type TelegramChatContextStore,
     getTelegramChatContextStore,
     type TelegramChatContextRecord,
 } from "@/services/telegram/TelegramChatContextStoreService";

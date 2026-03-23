@@ -45,8 +45,7 @@ async function executeSubscribe(
     // Validate URI format upfront
     if (!isValidResourceUri(resourceUri)) {
         return createExpectedError(
-            `Invalid resource URI '${resourceUri}'. ` +
-                "Resource URIs must have a valid scheme (e.g., 'nostr://feed/global', 'file:///path')."
+            `Invalid resource URI '${resourceUri}'. Resource URIs must have a valid scheme (e.g., 'nostr://feed/global', 'file:///path').`
         );
     }
 
@@ -65,9 +64,7 @@ async function executeSubscribe(
 
     if (!agentMcpServers.includes(serverName)) {
         return createExpectedError(
-            `You do not have access to MCP server '${serverName}'. ` +
-                "You can only subscribe to resources from servers you have tools from. " +
-                `Your accessible servers: ${agentMcpServers.length > 0 ? agentMcpServers.join(", ") : "none"}`
+            `You do not have access to MCP server '${serverName}'. You can only subscribe to resources from servers you have tools from. Your accessible servers: ${agentMcpServers.length > 0 ? agentMcpServers.join(", ") : "none"}`
         );
     }
 

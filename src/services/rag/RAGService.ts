@@ -1,6 +1,6 @@
 import { logger } from "@/utils/logger";
 import type { EmbeddingProvider } from "@/services/embedding";
-import { EmbeddingProviderFactory } from "./EmbeddingProviderFactory";
+import { createEmbeddingProvider } from "./EmbeddingProviderFactory";
 import { RAGDatabaseService } from "./RAGDatabaseService";
 import { RAGOperations } from "./RAGOperations";
 import type { BulkUpsertResult, LanceDBSchema, RAGCollection, RAGDocument, RAGQueryResult } from "./RAGOperations";
@@ -47,7 +47,7 @@ export class RAGService {
             logger.debug("Initializing RAGService components");
 
             this.dbManager = new RAGDatabaseService();
-            this.embeddingProvider = await EmbeddingProviderFactory.create(undefined, {
+            this.embeddingProvider = await createEmbeddingProvider(undefined, {
                 scope: "global",
             });
             this.operations = new RAGOperations(this.dbManager, this.embeddingProvider);

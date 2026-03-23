@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-import { mkdirSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { AgentInstance } from "@/agents/types";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { AgentMetadataStore } from "@/services/agents";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
-import { join } from "path";
+import { join } from "node:path";
 import { MessageCompiler } from "../MessageCompiler";
 import {
     initializeReminderProviders,

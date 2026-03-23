@@ -55,8 +55,8 @@ export const interventionCommand = new Command("intervention")
                 existingConfig.intervention = {
                     enabled: true,
                     agent: answers.agent || undefined,
-                    timeout: parseInt(answers.timeout),
-                    conversationInactivityTimeoutSeconds: parseInt(answers.skipWithin),
+                    timeout: Number.parseInt(answers.timeout),
+                    conversationInactivityTimeoutSeconds: Number.parseInt(answers.skipWithin),
                 };
             } else {
                 existingConfig.intervention = {

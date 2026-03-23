@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
-import { AgentEventDecoder } from "../AgentEventDecoder";
+import { extractSkillEventIds, extractNudgeEventIds } from "../AgentEventDecoder";
 
 describe("AgentEventDecoder.extractSkillEventIds", () => {
     function createMockEvent(tags: string[][]): NDKEvent {
@@ -15,7 +15,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["e", "someeventid"],
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual([]);
     });
@@ -26,7 +26,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["skill", "skill123456789"],
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["skill123456789"]);
     });
@@ -40,7 +40,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["skill", "skill3"],
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["skill1", "skill2", "skill3"]);
     });
@@ -52,7 +52,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["skill"], // No value at all
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["valid-skill"]);
     });
@@ -65,7 +65,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["p", "pubkey123"],
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["skill123"]);
     });
@@ -73,7 +73,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
     it("should handle event with no tags", () => {
         const event = createMockEvent([]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual([]);
     });
@@ -85,7 +85,7 @@ describe("AgentEventDecoder.extractSkillEventIds", () => {
             ["skill", "second"],
         ]);
 
-        const result = AgentEventDecoder.extractSkillEventIds(event);
+        const result = extractSkillEventIds(event);
 
         expect(result).toEqual(["third", "first", "second"]);
     });
@@ -104,7 +104,7 @@ describe("AgentEventDecoder.extractNudgeEventIds", () => {
             ["e", "someeventid"],
         ]);
 
-        const result = AgentEventDecoder.extractNudgeEventIds(event);
+        const result = extractNudgeEventIds(event);
 
         expect(result).toEqual([]);
     });
@@ -115,7 +115,7 @@ describe("AgentEventDecoder.extractNudgeEventIds", () => {
             ["nudge", "nudge123456789"],
         ]);
 
-        const result = AgentEventDecoder.extractNudgeEventIds(event);
+        const result = extractNudgeEventIds(event);
 
         expect(result).toEqual(["nudge123456789"]);
     });
@@ -127,7 +127,7 @@ describe("AgentEventDecoder.extractNudgeEventIds", () => {
             ["nudge", "nudge2"],
         ]);
 
-        const result = AgentEventDecoder.extractNudgeEventIds(event);
+        const result = extractNudgeEventIds(event);
 
         expect(result).toEqual(["nudge1", "nudge2"]);
     });
@@ -138,7 +138,7 @@ describe("AgentEventDecoder.extractNudgeEventIds", () => {
             ["nudge", "nudge123"],
         ]);
 
-        const result = AgentEventDecoder.extractNudgeEventIds(event);
+        const result = extractNudgeEventIds(event);
 
         expect(result).toEqual(["nudge123"]);
     });

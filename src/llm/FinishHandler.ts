@@ -151,7 +151,7 @@ export function createFinishHandler(
             const lastUserMessage = state.getLastUserMessage();
             if (lastUserMessage) {
                 const truncatedPrompt = lastUserMessage.length > 2000
-                    ? lastUserMessage.substring(0, 2000) + "... [truncated]"
+                    ? `${lastUserMessage.substring(0, 2000)}... [truncated]`
                     : lastUserMessage;
                 activeSpan?.addEvent("llm.prompt", {
                     "prompt.text": truncatedPrompt,
@@ -165,7 +165,7 @@ export function createFinishHandler(
             if (e.text) {
                 // Truncate to avoid massive log entries (OTel has limits)
                 const truncatedText = e.text.length > 4000
-                    ? e.text.substring(0, 4000) + "... [truncated]"
+                    ? `${e.text.substring(0, 4000)}... [truncated]`
                     : e.text;
                 activeSpan?.addEvent("llm.response", {
                     "response.text": truncatedText,

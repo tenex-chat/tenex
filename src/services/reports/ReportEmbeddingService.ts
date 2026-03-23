@@ -147,7 +147,7 @@ export class ReportEmbeddingService {
             // Truncate very long content to avoid excessive embedding costs
             const truncated =
                 report.content.length > 2000
-                    ? report.content.substring(0, 2000) + "..."
+                    ? `${report.content.substring(0, 2000)}...`
                     : report.content;
             parts.push(`Content: ${truncated}`);
         }

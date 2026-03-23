@@ -1,6 +1,7 @@
 import type { AgentInstance } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { conversationRegistry } from "@/conversations/ConversationRegistry";
+import type { Daemon } from "@/daemon/Daemon";
 import { getDaemon } from "@/daemon";
 import { RALRegistry } from "@/services/ral/RALRegistry";
 import { getPubkeyService } from "@/services/PubkeyService";
@@ -91,7 +92,7 @@ async function loadOtherProjectsContext(
         }
 
         // Get daemon for known projects info
-        let daemon;
+        let daemon: Daemon;
         try {
             daemon = getDaemon();
         } catch {

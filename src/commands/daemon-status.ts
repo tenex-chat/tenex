@@ -79,9 +79,9 @@ export const daemonStatusCommand = new Command("status")
                 }
 
                 const startedAgo =
-                    formatDuration(Date.now() - new Date(runtime.startTime).getTime()) + " ago";
+                    `${formatDuration(Date.now() - new Date(runtime.startTime).getTime())} ago`;
                 const lastEventAgo = runtime.lastEventTime
-                    ? formatDuration(Date.now() - new Date(runtime.lastEventTime).getTime()) + " ago"
+                    ? `${formatDuration(Date.now() - new Date(runtime.lastEventTime).getTime())} ago`
                     : "never";
 
                 console.log(`   ${chalk.cyan(runtime.title)}`);

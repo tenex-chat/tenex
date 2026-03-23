@@ -20,7 +20,7 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import { tool } from "ai";
 import { z } from "zod";
 import { logger } from "@/utils/logger";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenEventId, shortenPubkey } from "@/utils/conversation-id";
 import { trace } from "@opentelemetry/api";
 import { resolvePrefixToId, normalizeNostrIdentifier } from "@/utils/nostr-entity-parser";
 import { nip19 } from "nostr-tools";
@@ -74,7 +74,7 @@ async function resolveTargetId(input: string): Promise<{
         if (resolved) {
             logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via PrefixKVStore", {
                 prefix: trimmed,
-                fullId: resolved.substring(0, 12),
+                fullId: shortenEventId(resolved),
             });
             return { id: resolved, type: 'conversation', wasResolved: true };
         }
@@ -85,7 +85,7 @@ async function resolveTargetId(input: string): Promise<{
         if (ralResolved) {
             logger.debug("[kill.resolveTargetId] Resolved 12-char prefix via RALRegistry", {
                 prefix: trimmed,
-                fullId: ralResolved.substring(0, 12),
+                fullId: shortenEventId(ralResolved),
             });
             return { id: ralResolved, type: 'conversation', wasResolved: true };
         }
@@ -241,7 +241,7 @@ async function executeKill(input: KillInput, context: ToolExecutionContext): Pro
 
         if (projectConversations.length > 0) {
             errorMessage += ` Active conversations in this project: ${projectConversations
-                .map((c) => c.id.substring(0, 12))
+                .map((c) => shortenConversationId(c.id))
                 .join(", ")}.`;
         } else if (projectTasks.length === 0) {
             errorMessage += " No active tasks or conversations found in this project.";
@@ -274,7 +274,7 @@ async function killAgent(
     if (!conversation) {
         return {
             success: false,
-            message: `Conversation ${conversationId.substring(0, 12)} not found`,
+            message: `Conversation ${shortenConversationId(conversationId)} not found`,
             target: conversationId,
             targetType: "agent",
         };
@@ -301,7 +301,7 @@ async function killAgent(
     if (!projectId) {
         return {
             success: false,
-            message: `Cannot abort: conversation ${conversationId.substring(0, 12)} has no project ID`,
+            message: `Cannot abort: conversation ${shortenConversationId(conversationId)} has no project ID`,
             target: conversationId,
             targetType: "agent",
         };
@@ -317,7 +317,7 @@ async function killAgent(
     if (!callerProjectId) {
         logger.warn("[kill] Authorization check failed: caller has no project context", {
             callerAgent: context.agent.slug,
-            targetConversationId: conversationId.substring(0, 12),
+            targetConversationId: shortenConversationId(conversationId),
             targetProjectId: projectId.substring(0, 12),
         });
 
@@ -329,7 +329,7 @@ async function killAgent(
 
         return {
             success: false,
-            message: `Authorization failed: cannot kill agents without project context`,
+            message: "Authorization failed: cannot kill agents without project context",
             target: conversationId,
             targetType: "agent",
         };
@@ -339,7 +339,7 @@ async function killAgent(
         logger.warn("[kill] Authorization check failed: cross-project kill attempt blocked", {
             callerAgent: context.agent.slug,
             callerProjectId: callerProjectId.substring(0, 12),
-            targetConversationId: conversationId.substring(0, 12),
+            targetConversationId: shortenConversationId(conversationId),
             targetProjectId: projectId.substring(0, 12),
         });
 
@@ -371,13 +371,13 @@ async function killAgent(
 
             trace.getActiveSpan()?.addEvent("kill.pre_emptive_kill", {
                 "kill.conversation_id": shortenConversationId(conversationId),
-                "kill.recipient_pubkey": delegationRecipient.substring(0, 12),
+                "kill.recipient_pubkey": shortenPubkey(delegationRecipient),
                 "kill.reason": reason ?? "pre-emptive kill via kill tool",
             });
 
             logger.info("[kill] Pre-emptive kill: agent will be aborted when it starts", {
                 conversationId: shortenConversationId(conversationId),
-                recipientPubkey: delegationRecipient.substring(0, 12),
+                recipientPubkey: shortenPubkey(delegationRecipient),
                 reason,
             });
 
@@ -390,7 +390,7 @@ async function killAgent(
 
             return {
                 success: true,
-                message: `Pre-emptive kill: agent will be aborted when it starts in conversation ${conversationId.substring(0, 12)}`,
+                message: `Pre-emptive kill: agent will be aborted when it starts in conversation ${shortenConversationId(conversationId)}`,
                 target: conversationId,
                 targetType: "agent",
                 cascadeAbortCount: 1,
@@ -401,7 +401,7 @@ async function killAgent(
         // No active agents and not a known delegation - nothing to kill
         return {
             success: false,
-            message: `No active agents found in conversation ${conversationId.substring(0, 12)}`,
+            message: `No active agents found in conversation ${shortenConversationId(conversationId)}`,
             target: conversationId,
             targetType: "agent",
         };
@@ -417,7 +417,7 @@ async function killAgent(
     trace.getActiveSpan()?.addEvent("kill.agent_abort_starting", {
         "kill.project_id": projectId.substring(0, 12),
         "kill.conversation_id": shortenConversationId(conversationId),
-        "kill.agent_pubkey": agentPubkey.substring(0, 12),
+        "kill.agent_pubkey": shortenPubkey(agentPubkey),
         "kill.reason": reason,
         "kill.cascade_enabled": true,
     });
@@ -425,7 +425,7 @@ async function killAgent(
     logger.info("[kill] Aborting agent with cascade", {
         projectId: projectId.substring(0, 12),
         conversationId: shortenConversationId(conversationId),
-        agentPubkey: agentPubkey.substring(0, 12),
+        agentPubkey: shortenPubkey(agentPubkey),
         reason,
     });
 
@@ -440,7 +440,7 @@ async function killAgent(
 
     trace.getActiveSpan()?.addEvent("kill.agent_abort_completed", {
         "kill.conversation_id": shortenConversationId(conversationId),
-        "kill.agent_pubkey": agentPubkey.substring(0, 12),
+        "kill.agent_pubkey": shortenPubkey(agentPubkey),
         "kill.direct_aborted": result.abortedCount,
         "kill.cascade_aborted": result.descendantConversations.length,
         "kill.total_aborted": result.abortedCount + result.descendantConversations.length,
@@ -450,7 +450,7 @@ async function killAgent(
 
     return {
         success: true,
-        message: `Aborted agent in conversation ${conversationId.substring(0, 12)} with ${result.descendantConversations.length} cascaded aborts`,
+        message: `Aborted agent in conversation ${shortenConversationId(conversationId)} with ${result.descendantConversations.length} cascaded aborts`,
         target: conversationId,
         targetType: "agent",
         cascadeAbortCount: totalAborted,
@@ -493,7 +493,7 @@ function killShellTask(taskId: string, context: ToolExecutionContext): KillOutpu
 
         return {
             success: false,
-            message: `Authorization failed: cannot kill shell tasks without project context`,
+            message: "Authorization failed: cannot kill shell tasks without project context",
             target: taskId,
             targetType: "shell",
         };

@@ -1,4 +1,5 @@
 import { getNDK } from "@/nostr";
+import type { ProjectContext } from "@/services/projects/ProjectContext";
 import { getProjectContext } from "@/services/projects";
 import { logger } from "@/utils/logger";
 import { PREFIX_LENGTH } from "@/utils/nostr-entity-parser";
@@ -90,7 +91,7 @@ export class PubkeyService {
      * Uses AgentRegistry's getAgentByPubkey for efficient O(1) lookup.
      */
     private getAgentSlug(pubkey: Hexpubkey): string | undefined {
-        let projectCtx;
+        let projectCtx: ProjectContext;
         try {
             projectCtx = getProjectContext();
         } catch {

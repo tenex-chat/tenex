@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { isDirectedToSystem, isEventFromAgent } from "@/nostr/AgentEventDecoder";
 import { projectContextStore } from "@/services/projects/ProjectContextStore";
 
 /**
@@ -10,9 +10,9 @@ import { projectContextStore } from "@/services/projects/ProjectContextStore";
  * to local agents, even when the sender is not in the local system.
  *
  * The key issue being fixed:
- * - AgentEventDecoder.isDirectedToSystem() should return true if ANY p-tagged agent
+ * - isDirectedToSystem() should return true if ANY p-tagged agent
  *   is in the local system, regardless of whether the sender is a local agent.
- * - The check "!isDirectedToSystem && isFromAgent" should not block cross-project replies.
+ * - The check "!directedToSystem && fromAgent" should not block cross-project replies.
  */
 
 describe("Cross-Project Integration: handleChatMessage Routing", () => {
@@ -75,20 +75,20 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
             } as any;
 
             // Act: Check if this event is directed to the system
-            const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(externalAgentEvent, mockProjectContext.agents);
-            const isFromAgent = AgentEventDecoder.isEventFromAgent(externalAgentEvent, mockProjectContext.agents);
+            const directedToSystem = isDirectedToSystem(externalAgentEvent, mockProjectContext.agents);
+            const fromAgent = isEventFromAgent(externalAgentEvent, mockProjectContext.agents);
 
             // Assert: Should be directed to system (because Agent A is p-tagged)
             // and not from an agent (because sender is external)
-            expect(isDirectedToSystem).toBe(true);
-            expect(isFromAgent).toBe(false);
+            expect(directedToSystem).toBe(true);
+            expect(fromAgent).toBe(false);
         });
     });
 
     it("should NOT block routing when event is from external agent but directed to local agent", async () => {
         await projectContextStore.run(mockProjectContext, async () => {
             // The critical logic in handleChatMessage:
-            // if (!isDirectedToSystem && isFromAgent) { return; }
+            // if (!directedToSystem && fromAgent) { return; }
             //
             // This test ensures that EXTERNAL agents can send to LOCAL agents.
             // The condition should only block when:
@@ -96,8 +96,8 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
             // - IS from an agent
             //
             // In cross-project scenario:
-            // - isDirectedToSystem = true (Agent A is p-tagged and local)
-            // - isFromAgent = false (Agent B is external)
+            // - directedToSystem = true (Agent A is p-tagged and local)
+            // - fromAgent = false (Agent B is external)
             // - Condition: !true && false = false && false = false (don't block)
 
             const externalAgentEvent: NDKEvent = {
@@ -121,15 +121,15 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
                 },
             } as any;
 
-            const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(externalAgentEvent, mockProjectContext.agents);
-            const isFromAgent = AgentEventDecoder.isEventFromAgent(externalAgentEvent, mockProjectContext.agents);
+            const directedToSystem = isDirectedToSystem(externalAgentEvent, mockProjectContext.agents);
+            const fromAgent = isEventFromAgent(externalAgentEvent, mockProjectContext.agents);
 
             // The problematic condition from handleChatMessage
-            const shouldBlock = !isDirectedToSystem && isFromAgent;
+            const shouldBlock = !directedToSystem && fromAgent;
 
             // Assert: Should NOT block this event
-            expect(isDirectedToSystem).toBe(true);
-            expect(isFromAgent).toBe(false);
+            expect(directedToSystem).toBe(true);
+            expect(fromAgent).toBe(false);
             expect(shouldBlock).toBe(false); // Should NOT block
         });
     });
@@ -167,12 +167,12 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
                 },
             } as any;
 
-            const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(agentToAgentEvent, mockProjectContext.agents);
-            const isFromAgent = AgentEventDecoder.isEventFromAgent(agentToAgentEvent, mockProjectContext.agents);
+            const directedToSystem = isDirectedToSystem(agentToAgentEvent, mockProjectContext.agents);
+            const fromAgent = isEventFromAgent(agentToAgentEvent, mockProjectContext.agents);
 
             // Agent B is sending to Agent A (both local)
-            expect(isDirectedToSystem).toBe(true);
-            expect(isFromAgent).toBe(true);
+            expect(directedToSystem).toBe(true);
+            expect(fromAgent).toBe(true);
             // Even though it's from an agent, it IS directed to system, so:
             // !true && true = false && true = false (don't block)
         });
@@ -181,8 +181,8 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
     it("should properly handle orphaned agent messages (agent sending without p-tags)", async () => {
         await projectContextStore.run(mockProjectContext, async () => {
             // When an agent sends without p-tags to any system member:
-            // - isDirectedToSystem = false
-            // - isFromAgent = true
+            // - directedToSystem = false
+            // - fromAgent = true
             // - shouldBlock = true (correct behavior - add to history but don't process)
 
             const agentB = {
@@ -210,13 +210,13 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
                 },
             } as any;
 
-            const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(orphanedAgentEvent, mockProjectContext.agents);
-            const isFromAgent = AgentEventDecoder.isEventFromAgent(orphanedAgentEvent, mockProjectContext.agents);
-            const shouldBlock = !isDirectedToSystem && isFromAgent;
+            const directedToSystem = isDirectedToSystem(orphanedAgentEvent, mockProjectContext.agents);
+            const fromAgent = isEventFromAgent(orphanedAgentEvent, mockProjectContext.agents);
+            const shouldBlock = !directedToSystem && fromAgent;
 
             // Should block orphaned agent messages
-            expect(isDirectedToSystem).toBe(false);
-            expect(isFromAgent).toBe(true);
+            expect(directedToSystem).toBe(false);
+            expect(fromAgent).toBe(true);
             expect(shouldBlock).toBe(true); // Should block
         });
     });
@@ -224,8 +224,8 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
     it("should NOT block external user messages (not from agent, p-tags local agent)", async () => {
         await projectContextStore.run(mockProjectContext, async () => {
             // User (not an agent) sends message to local Agent A
-            // - isDirectedToSystem = true (Agent A is p-tagged)
-            // - isFromAgent = false (sender is not an agent)
+            // - directedToSystem = true (Agent A is p-tagged)
+            // - fromAgent = false (sender is not an agent)
             // - shouldBlock = false (don't block)
 
             const userEvent: NDKEvent = {
@@ -247,13 +247,13 @@ describe("Cross-Project Integration: handleChatMessage Routing", () => {
                 },
             } as any;
 
-            const isDirectedToSystem = AgentEventDecoder.isDirectedToSystem(userEvent, mockProjectContext.agents);
-            const isFromAgent = AgentEventDecoder.isEventFromAgent(userEvent, mockProjectContext.agents);
-            const shouldBlock = !isDirectedToSystem && isFromAgent;
+            const directedToSystem = isDirectedToSystem(userEvent, mockProjectContext.agents);
+            const fromAgent = isEventFromAgent(userEvent, mockProjectContext.agents);
+            const shouldBlock = !directedToSystem && fromAgent;
 
             // Should NOT block user messages to agents
-            expect(isDirectedToSystem).toBe(true);
-            expect(isFromAgent).toBe(false);
+            expect(directedToSystem).toBe(true);
+            expect(fromAgent).toBe(false);
             expect(shouldBlock).toBe(false); // Don't block
         });
     });

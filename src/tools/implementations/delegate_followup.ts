@@ -162,10 +162,7 @@ async function executeDelegateFollowup(
     const resolved = resolveDelegationPrefix(inputConversationId);
     if (!resolved) {
       throw new Error(
-        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include: ` +
-          "delegationConversationId (from delegate response), followupEventId (from delegate_followup response), " +
-          "full 64-char hex IDs, 12-char prefixes, or NIP-19 formats (note1..., nevent1...) with or without 'nostr:' prefix. " +
-          "The prefix may be ambiguous or no matching delegation was found."
+        `Could not resolve prefix "${inputConversationId}" to a delegation. Valid inputs include: delegationConversationId (from delegate response), followupEventId (from delegate_followup response), full 64-char hex IDs, 12-char prefixes, or NIP-19 formats (note1..., nevent1...) with or without 'nostr:' prefix. The prefix may be ambiguous or no matching delegation was found.`
       );
     }
     delegation_conversation_id = resolved;
@@ -178,7 +175,7 @@ async function executeDelegateFollowup(
       const canonicalized = ralRegistry.canonicalizeDelegationId(decodedNip19);
       if (canonicalized !== decodedNip19) {
         logger.info("[delegate_followup] Canonicalized NIP-19 followup ID", {
-          inputFormat: inputConversationId.substring(0, 20) + "...",
+          inputFormat: `${inputConversationId.substring(0, 20)}...`,
           decodedHex: decodedNip19.substring(0, PREFIX_LENGTH),
           canonicalId: canonicalized.substring(0, PREFIX_LENGTH),
         });

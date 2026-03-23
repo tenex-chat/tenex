@@ -121,7 +121,7 @@ export class BlossomService {
         logger.debug("[BlossomService] Preparing upload", {
             size: data.length,
             mimeType,
-            sha256: sha256Hash.slice(0, 12) + "...",
+            sha256: `${sha256Hash.slice(0, 12)}...`,
             serverUrl,
         });
 

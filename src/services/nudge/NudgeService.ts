@@ -1,5 +1,5 @@
 import { getNDK } from "@/nostr";
-import { TagExtractor } from "@/nostr/TagExtractor";
+import { getTagValues } from "@/nostr/TagExtractor";
 import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
@@ -197,15 +197,15 @@ export class NudgeService {
 
         for (const nudge of nudges) {
             // Extract only-tool tags
-            const onlyToolValues = TagExtractor.getTagValues(nudge, "only-tool");
+            const onlyToolValues = getTagValues(nudge, "only-tool");
             onlyTools.push(...onlyToolValues);
 
             // Extract allow-tool tags
-            const allowToolValues = TagExtractor.getTagValues(nudge, "allow-tool");
+            const allowToolValues = getTagValues(nudge, "allow-tool");
             allowTools.push(...allowToolValues);
 
             // Extract deny-tool tags
-            const denyToolValues = TagExtractor.getTagValues(nudge, "deny-tool");
+            const denyToolValues = getTagValues(nudge, "deny-tool");
             denyTools.push(...denyToolValues);
         }
 

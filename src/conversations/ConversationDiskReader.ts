@@ -2,8 +2,8 @@
  * Utilities for reading conversation data from disk without full store loading.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
-import { join } from "path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { ProjectDTag } from "@/types/project-ids";
 import { logger } from "@/utils/logger";
 import { getConversationRecordAuthorPubkey } from "./record-author";

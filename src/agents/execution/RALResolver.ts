@@ -57,7 +57,7 @@ export async function resolveRAL(ctx: RALResolutionContext): Promise<RALResoluti
 
     let ralNumber: number;
     let isResumption = false;
-    let markersToPublish: Array<{
+    const markersToPublish: Array<{
         delegationConversationId: string;
         recipientPubkey: string;
         parentConversationId: string;

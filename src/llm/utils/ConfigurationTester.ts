@@ -27,65 +27,63 @@ function silenceConsole(): () => void {
     };
 }
 
-export class ConfigurationTester {
-    /**
-     * Run a silent test against a configuration. Returns pass/fail result.
-     * All console output is suppressed during the test.
-     */
-    static async runTest(llmsConfig: TenexLLMsWithProviders, configName: string): Promise<TestResult> {
-        if (!llmsConfig.configurations[configName]) {
-            return { success: false, error: "configuration not found" };
+/**
+ * Run a silent test against a configuration. Returns pass/fail result.
+ * All console output is suppressed during the test.
+ */
+export async function runConfigurationTest(llmsConfig: TenexLLMsWithProviders, configName: string): Promise<TestResult> {
+    if (!llmsConfig.configurations[configName]) {
+        return { success: false, error: "configuration not found" };
+    }
+
+    const restoreConsole = silenceConsole();
+
+    try {
+        await configService.loadConfig();
+        const llmConfig = configService.getLLMConfig(configName);
+
+        await llmServiceFactory.initializeProviders(llmsConfig.providers);
+        const service = llmServiceFactory.createService(llmConfig, {
+            agentName: "configuration-tester",
+        });
+
+        service.on("content", (_event: ContentEvent) => {});
+
+        const completePromise = new Promise<CompleteEvent>((resolve) => {
+            service.once("complete", resolve);
+        });
+        const errorPromise = new Promise<never>((_resolve, reject) => {
+            service.once("stream-error", (event: StreamErrorEvent) => {
+                reject(event.error);
+            });
+        });
+        const timeoutPromise = new Promise<never>((_resolve, reject) =>
+            setTimeout(() => reject(new Error("timed out after 30s")), 30_000)
+        );
+
+        await Promise.all([
+            service.stream(
+                [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
+                {}
+            ),
+            Promise.race([completePromise, errorPromise, timeoutPromise]),
+        ]);
+
+        return { success: true };
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        let hint = errorMessage;
+        if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
+            hint = "invalid or expired API key";
+        } else if (errorMessage?.includes("404")) {
+            hint = "model not available";
+        } else if (errorMessage?.includes("rate limit")) {
+            hint = "rate limited";
         }
-
-        const restoreConsole = silenceConsole();
-
-        try {
-            await configService.loadConfig();
-            const llmConfig = configService.getLLMConfig(configName);
-
-            await llmServiceFactory.initializeProviders(llmsConfig.providers);
-            const service = llmServiceFactory.createService(llmConfig, {
-                agentName: "configuration-tester",
-            });
-
-            service.on("content", (_event: ContentEvent) => {});
-
-            const completePromise = new Promise<CompleteEvent>((resolve) => {
-                service.once("complete", resolve);
-            });
-            const errorPromise = new Promise<never>((_resolve, reject) => {
-                service.once("stream-error", (event: StreamErrorEvent) => {
-                    reject(event.error);
-                });
-            });
-            const timeoutPromise = new Promise<never>((_resolve, reject) =>
-                setTimeout(() => reject(new Error("timed out after 30s")), 30_000)
-            );
-
-            await Promise.all([
-                service.stream(
-                    [{ role: "user", content: "Say 'Hello, TENEX!' in exactly those words." }],
-                    {}
-                ),
-                Promise.race([completePromise, errorPromise, timeoutPromise]),
-            ]);
-
-            return { success: true };
-        } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            let hint = errorMessage;
-            if (errorMessage?.includes("401") || errorMessage?.includes("Unauthorized")) {
-                hint = "invalid or expired API key";
-            } else if (errorMessage?.includes("404")) {
-                hint = "model not available";
-            } else if (errorMessage?.includes("rate limit")) {
-                hint = "rate limited";
-            }
-            return { success: false, error: hint };
-        } finally {
-            // Delay restore so async logger stragglers are swallowed
-            await new Promise((resolve) => setTimeout(resolve, 200));
-            restoreConsole();
-        }
+        return { success: false, error: hint };
+    } finally {
+        // Delay restore so async logger stragglers are swallowed
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        restoreConsole();
     }
 }

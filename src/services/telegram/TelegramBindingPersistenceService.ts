@@ -2,7 +2,7 @@ import { AgentStorage } from "@/agents/AgentStorage";
 import type { TelegramChatBinding } from "@/agents/types/storage";
 import type { ProjectContext } from "@/services/projects";
 import {
-    TelegramChannelBindingStore,
+    type TelegramChannelBindingStore,
     getTelegramChannelBindingStore,
 } from "@/services/telegram/TelegramChannelBindingStoreService";
 import type {

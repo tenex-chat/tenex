@@ -802,7 +802,7 @@ class QueuedScratchpadStrategy implements ContextManagementStrategy {
 
     async apply(
         state: ContextManagementStrategyState
-    ): Promise<ContextManagementStrategyExecution | void> {
+    ): Promise<ContextManagementStrategyExecution | undefined> {
         const execution = await this.delegate.apply(state);
         const reminderText = getString(execution?.payloads, "reminderText");
 

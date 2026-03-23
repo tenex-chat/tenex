@@ -325,8 +325,7 @@ export function resolveHomeScopedPath(inputPath: string, agentPubkey: string): s
     // Validate the resolved path is within home directory
     if (!isPathWithinDirectory(resolvedPath, homeDir)) {
         throw new HomeScopeViolationError(
-            `Path "${inputPath}" is outside your home directory. ` +
-            `You can only access files within your home directory.`
+            `Path "${inputPath}" is outside your home directory. You can only access files within your home directory.`
         );
     }
 

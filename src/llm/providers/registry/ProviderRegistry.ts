@@ -228,7 +228,7 @@ export class ProviderRegistry {
             // Rebuild the AI SDK registry to reflect the new provider instance
             this.buildAiSdkRegistry();
 
-            const keyPreview = newKey.slice(0, 8) + "...";
+            const keyPreview = `${newKey.slice(0, 8)}...`;
             logger.info(`[ProviderRegistry] Re-initialized "${providerId}" with key ${keyPreview}`);
             return true;
         } catch (error) {

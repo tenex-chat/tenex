@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKEvent, NDKPrivateKeySigner, NDKProject } from "@nostr-dev-kit/ndk";
-import { AgentProfilePublisher } from "../AgentProfilePublisher";
+import * as AgentProfilePublisherModule from "../AgentProfilePublisher";
 import * as ndkClientModule from "../ndkClient";
 import { getNDK } from "../ndkClient";
 import { config } from "@/services/ConfigService";
@@ -19,21 +19,10 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     let getWhitelistedPubkeysSpy: ReturnType<typeof spyOn>;
     let ensureBackendPrivateKeySpy: ReturnType<typeof spyOn>;
     let capturedEvents: NDKEvent[] = [];
-    const clearSnapshotTimers = () => {
-        const timers = (AgentProfilePublisher as any).snapshotDebounceTimers as Map<
-            string,
-            ReturnType<typeof setTimeout>
-        >;
-        for (const timer of timers.values()) {
-            clearTimeout(timer);
-        }
-        timers.clear();
-    };
 
     beforeEach(() => {
         capturedEvents = [];
         mockSyncWhitelistFile.mockClear();
-        clearSnapshotTimers();
 
         // Mock NDKEvent to capture all published events
         mockPublish = mock();
@@ -65,7 +54,6 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
     });
 
     afterEach(() => {
-        clearSnapshotTimers();
         publishSpy.mockRestore();
         signSpy.mockRestore();
         getConfigSpy.mockRestore();
@@ -84,7 +72,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.tagValue = mock(() => "Test Project");
             projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -113,7 +101,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 useCriteria: "Use when testing is needed",
             };
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -180,7 +168,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
 
             const ndkAgentEventId = "a".repeat(64); // Valid hex event ID
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -238,7 +226,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.tagValue = mock(() => "Test Project");
             projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -265,7 +253,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.tagValue = mock(() => "Test Project");
             projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -298,7 +286,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 useCriteria: "When testing",
             };
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -340,7 +328,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.tagValue = mock(() => "Test Project");
             projectEvent.tagReference = mock(() => ["a", "31933:pubkey:d-tag"]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -370,7 +358,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             // 64 characters but contains invalid hex characters (g, h, etc.)
             const invalidHexId = "ghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmn";
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -403,7 +391,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 useCriteria: "When hex validation fails",
             };
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -453,7 +441,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             // 64 characters but contains invalid hex characters
             const invalidHexId = "ghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmnghijklmn";
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -494,7 +482,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             const validEventId = "a".repeat(64);
             const eventIdWithWhitespace = `  ${validEventId}  `;
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -527,7 +515,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
                 // No instructions or useCriteria
             };
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -577,7 +565,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             signer.pubkey, // This should be filtered out
         ];
 
-        await AgentProfilePublisher.publishAgentProfile(
+        await AgentProfilePublisherModule.publishAgentProfile(
             signer,
             "TestAgent",
             "Tester",
@@ -630,7 +618,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.pubkey = ownerPubkey;
             projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:${currentDTag}`]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -679,7 +667,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.pubkey = undefined as unknown as string;
             projectEvent.tagReference = mock(() => ["a", `31933:undefined:${currentDTag}`]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -716,7 +704,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             // tagReference would produce invalid a-tag like "31933:pubkey:" (empty d-tag)
             projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:`]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -753,7 +741,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             projectEvent.pubkey = ownerPubkey;
             projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:`]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",
@@ -791,7 +779,7 @@ describe("AgentProfilePublisher - Agent Metadata in Kind:0", () => {
             // Simulate what NDKProject.tagReference would return
             projectEvent.tagReference = mock(() => ["a", `31933:${ownerPubkey}:${currentDTag}`]);
 
-            await AgentProfilePublisher.publishAgentProfile(
+            await AgentProfilePublisherModule.publishAgentProfile(
                 signer,
                 "TestAgent",
                 "Tester",

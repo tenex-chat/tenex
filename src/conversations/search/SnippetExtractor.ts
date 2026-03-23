@@ -114,7 +114,7 @@ export function extractSnippet(content: string, searchText: string): SnippetResu
         const truncateLength = MAX_SNIPPET_LENGTH - 3;
         const truncated = matchedText.substring(0, truncateLength);
         return {
-            snippet: truncated + "...",
+            snippet: `${truncated}...`,
             matchedText: truncated,
             matchStart,
             matchEnd: matchStart + truncated.length,
@@ -190,10 +190,10 @@ export function extractSnippet(content: string, searchText: string): SnippetResu
     }
 
     if (needsPrefixEllipsis) {
-        snippet = "..." + snippet;
+        snippet = `...${snippet}`;
     }
     if (needsSuffixEllipsis) {
-        snippet = snippet + "...";
+        snippet = `${snippet}...`;
     }
 
     return {
@@ -232,7 +232,7 @@ function extractSnippetAtPosition(content: string, matchStart: number, matchLeng
         const truncateLength = MAX_SNIPPET_LENGTH - 3;
         const truncated = matchedText.substring(0, truncateLength);
         return {
-            snippet: truncated + "...",
+            snippet: `${truncated}...`,
             matchedText: truncated,
             matchStart,
             matchEnd: matchStart + truncated.length,
@@ -296,10 +296,10 @@ function extractSnippetAtPosition(content: string, matchStart: number, matchLeng
     }
 
     if (needsPrefixEllipsis) {
-        snippet = "..." + snippet;
+        snippet = `...${snippet}`;
     }
     if (needsSuffixEllipsis) {
-        snippet = snippet + "...";
+        snippet = `${snippet}...`;
     }
 
     return {
@@ -321,7 +321,7 @@ function extractSnippetAtPosition(content: string, matchStart: number, matchLeng
 export function extractAllSnippets(
     content: string,
     searchText: string,
-    maxSnippets: number = 3
+    maxSnippets = 3
 ): SnippetResult[] {
     if (!content || !searchText) return [];
 

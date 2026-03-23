@@ -26,16 +26,14 @@ async function executeStop(
 
     if (!subscription) {
         return createExpectedError(
-            `Subscription '${subscriptionId}' not found. ` +
-                "Please verify the subscription ID is correct."
+            `Subscription '${subscriptionId}' not found. Please verify the subscription ID is correct.`
         );
     }
 
     // Authorization: only the agent that created the subscription can stop it
     if (subscription.agentPubkey !== context.agent.pubkey) {
         return createExpectedError(
-            `You are not authorized to stop subscription '${subscriptionId}'. ` +
-                "Only the agent that created the subscription can stop it."
+            `You are not authorized to stop subscription '${subscriptionId}'. Only the agent that created the subscription can stop it.`
         );
     }
 

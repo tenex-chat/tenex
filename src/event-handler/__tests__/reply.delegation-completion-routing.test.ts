@@ -19,8 +19,8 @@ describe("Delegation Completion Routing - Architectural Validation", () => {
         // Fix: Remove the delegation-waiting logic from the event handler.
         // The AgentExecutor will check its own RAL's state when it runs.
 
-        const fs = await import("fs");
-        const path = await import("path");
+        const fs = await import("node:fs");
+        const path = await import("node:path");
         const replySource = fs.readFileSync(
             path.join(import.meta.dir, "../reply.ts"),
             "utf-8"

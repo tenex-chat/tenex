@@ -1590,7 +1590,7 @@ describe("InterventionService", () => {
 
         it("should retry at trigger time when runtime becomes available", async () => {
             // Start with unavailable runtime
-            let customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
+            const customAgents = new Map<string, Array<{ slug: string; pubkey: string }>>();
 
             const service = InterventionService.getInstance();
             service.setAgentResolver(createMockResolver(customAgents));

@@ -2,7 +2,8 @@ import * as fileSystem from "@/lib/fs";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
 import {
     type EmbeddingConfig,
-    EmbeddingProviderFactory,
+    loadEmbeddingConfiguration,
+    saveEmbeddingConfiguration,
 } from "@/services/rag/EmbeddingProviderFactory";
 import { config as configService } from "@/services/ConfigService";
 import { inquirerTheme } from "@/utils/cli-theme";
@@ -72,7 +73,7 @@ export const embedCommand = new Command("embed")
             }
 
             // Load existing configuration
-            const existing = await EmbeddingProviderFactory.loadConfiguration({
+            const existing = await loadEmbeddingConfiguration({
                 scope,
                 projectPath: scope === "project" ? projectPath : undefined,
             });
@@ -208,11 +209,11 @@ export const embedCommand = new Command("embed")
             };
 
             // Save model selection to embed.json
-            await EmbeddingProviderFactory.saveConfiguration(embeddingConfig, scope, {
+            await saveEmbeddingConfiguration(embeddingConfig, scope, {
                 projectPath: scope === "project" ? projectPath : undefined,
             });
 
-            console.log("\n" + chalk.green("✓") + chalk.bold(` Embedding configuration saved to ${scope} config`));
+            console.log(`\n${chalk.green("✓")}${chalk.bold(` Embedding configuration saved to ${scope} config`)}`);
             console.log(chalk.gray(`   Provider: ${provider}`));
             console.log(chalk.gray(`   Model: ${model}`));
         } catch (error: unknown) {

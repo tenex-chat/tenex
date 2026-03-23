@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import { getNDK } from "@/nostr/ndkClient";
 import { getRelayUrls } from "@/nostr/relays";
 import { config } from "@/services/ConfigService";
+import { shortenOptionalEventId, shortenOptionalPubkey, shortenPubkey } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import {
     type NDKEvent,
@@ -157,7 +158,7 @@ export class Nip46SigningService {
         const bunkerUri = this.getBunkerUri(ownerPubkey);
 
         logger.info("[NIP-46] Creating signer for owner", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             bunkerUri: bunkerUri.substring(0, 60),
         });
 
@@ -166,7 +167,7 @@ export class Nip46SigningService {
         // Handle auth URL — log it so operator can approve if needed
         signer.on("authUrl", (url: string) => {
             logger.info("[NIP-46] Auth URL required", {
-                ownerPubkey: ownerPubkey.substring(0, 12),
+                ownerPubkey: shortenPubkey(ownerPubkey),
                 url,
             });
             this.signingLog.log({
@@ -211,7 +212,7 @@ export class Nip46SigningService {
             const durationMs = Date.now() - startMs;
 
             logger.info("[NIP-46] Signer connected", {
-                ownerPubkey: ownerPubkey.substring(0, 12),
+                ownerPubkey: shortenPubkey(ownerPubkey),
                 durationMs,
             });
 
@@ -228,7 +229,7 @@ export class Nip46SigningService {
             const errorMsg = error instanceof Error ? error.message : String(error);
 
             logger.error("[NIP-46] Signer connection failed", {
-                ownerPubkey: ownerPubkey.substring(0, 12),
+                ownerPubkey: shortenPubkey(ownerPubkey),
                 error: errorMsg,
                 durationMs,
             });
@@ -239,7 +240,7 @@ export class Nip46SigningService {
                 component: "Nip46SigningService",
                 message: "NIP-46 signer connection failed",
                 context: {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
                     durationMs,
                 },
                 error: errorMsg,
@@ -269,8 +270,10 @@ export class Nip46SigningService {
      */
     private async withOwnerLock<T>(ownerPubkey: string, fn: () => Promise<T>): Promise<T> {
         const existing = this.ownerLocks.get(ownerPubkey) ?? Promise.resolve();
-        let resolve: () => void;
-        const next = new Promise<void>((r) => (resolve = r));
+        let resolve: () => void = () => {};
+        const next = new Promise<void>((r) => {
+            resolve = r;
+        });
         this.ownerLocks.set(ownerPubkey, next);
 
         await existing;
@@ -278,7 +281,7 @@ export class Nip46SigningService {
         try {
             return await fn();
         } finally {
-            resolve!();
+            resolve?.();
             if (this.ownerLocks.get(ownerPubkey) === next) {
                 this.ownerLocks.delete(ownerPubkey);
             }
@@ -332,7 +335,7 @@ export class Nip46SigningService {
                     requestId,
                     attempt,
                     kind: event.kind,
-                    pubkey: event.pubkey?.substring(0, 12),
+                    pubkey: shortenOptionalPubkey(event.pubkey),
                     tags: JSON.stringify(event.tags),
                     content: event.content,
                 });
@@ -356,9 +359,9 @@ export class Nip46SigningService {
                 });
 
                 logger.info("[NIP-46] Event signed successfully", {
-                    ownerPubkey: ownerPubkey.substring(0, 12),
+                    ownerPubkey: shortenPubkey(ownerPubkey),
                     eventKind: event.kind,
-                    eventId: event.id?.substring(0, 12),
+                    eventId: shortenOptionalEventId(event.id),
                     durationMs,
                     attempt,
                 });
@@ -382,7 +385,7 @@ export class Nip46SigningService {
                     });
 
                     logger.warn("[NIP-46] Signing rejected by user", {
-                        ownerPubkey: ownerPubkey.substring(0, 12),
+                        ownerPubkey: shortenPubkey(ownerPubkey),
                         eventKind: event.kind,
                         error: errorMsg,
                     });
@@ -393,7 +396,7 @@ export class Nip46SigningService {
                 // Timeout or relay error — retry if attempts remain
                 if (attempt < maxRetries) {
                     logger.warn("[NIP-46] Signing failed, retrying", {
-                        ownerPubkey: ownerPubkey.substring(0, 12),
+                        ownerPubkey: shortenPubkey(ownerPubkey),
                         eventKind: event.kind,
                         attempt: attempt + 1,
                         maxRetries,
@@ -405,8 +408,6 @@ export class Nip46SigningService {
                         this.signers.delete(ownerPubkey);
                         this.connectedOwners.delete(ownerPubkey);
                     }
-
-                    continue;
                 }
             }
         }
@@ -436,7 +437,7 @@ export class Nip46SigningService {
         }
 
         logger.error("[NIP-46] Signing failed after all retries", {
-            ownerPubkey: ownerPubkey.substring(0, 12),
+            ownerPubkey: shortenPubkey(ownerPubkey),
             eventKind: event.kind,
             retries: maxRetries,
             error: errorMsg,
@@ -449,7 +450,7 @@ export class Nip46SigningService {
             component: "Nip46SigningService",
             message: `NIP-46 signing failed after ${maxRetries} retries`,
             context: {
-                ownerPubkey: ownerPubkey.substring(0, 12),
+                ownerPubkey: shortenPubkey(ownerPubkey),
                 eventKind: event.kind,
                 retries: maxRetries,
                 durationMs,

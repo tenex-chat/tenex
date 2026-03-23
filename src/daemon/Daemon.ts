@@ -4,9 +4,9 @@ import { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import type { AgentInstance, AgentDefaultConfig } from "@/agents/types";
 import { agentStorage } from "@/agents/AgentStorage";
 import { NDKAgentLesson } from "@/events/NDKAgentLesson";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
-import { TagExtractor } from "@/nostr/TagExtractor";
-import { AgentProfilePublisher } from "@/nostr/AgentProfilePublisher";
+import { getReplyTarget, classifyForDaemon, isConfigUpdate } from "@/nostr/AgentEventDecoder";
+import { getToolTags } from "@/nostr/TagExtractor";
+import { publishBackendProfile } from "@/nostr/AgentProfilePublisher";
 import { getNDK, initNDK } from "@/nostr/ndkClient";
 import { config } from "@/services/ConfigService";
 import { prefixKVStore } from "@/services/storage";
@@ -21,10 +21,15 @@ import { context as otelContext, trace, type Span } from "@opentelemetry/api";
 import { getConversationSpanManager } from "@/telemetry/ConversationSpanManager";
 import { shutdownTelemetry } from "@/telemetry/setup";
 import type { RoutingDecision } from "./routing/DaemonRouter";
+import {
+    shouldTraceEvent,
+    isAgentEvent,
+    hasPTagsToSystemEntities,
+    determineTargetProject,
+} from "./routing/DaemonRouter";
 import type { ProjectRuntime } from "./ProjectRuntime";
 import { RuntimeLifecycle } from "./RuntimeLifecycle";
 import { SubscriptionManager } from "./SubscriptionManager";
-import { DaemonRouter } from "./routing/DaemonRouter";
 import type { DaemonStatus } from "./types";
 import { createEventSpan, endSpanSuccess, endSpanError, addRoutingEvent } from "./utils/telemetry";
 import { logDropped, logRouted } from "./utils/routing-log";
@@ -256,7 +261,7 @@ export class Daemon {
             const backendSigner = await config.getBackendSigner();
             this.ndk.signer = backendSigner;
             const backendName = loadedConfig.backendName || "tenex backend";
-            await AgentProfilePublisher.publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
+            await publishBackendProfile(backendSigner, backendName, this.whitelistedPubkeys);
 
             // 6b. Initialize NIP-46 signing service (lazy — signers created on first use)
             if (loadedConfig.nip46?.enabled) {
@@ -441,7 +446,7 @@ export class Daemon {
         const knownAgentPubkeys = new Set(this.agentPubkeyToProjects.keys());
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
         if (
-            !DaemonRouter.shouldTraceEvent(
+            !shouldTraceEvent(
                 event,
                 this.knownProjects,
                 knownAgentPubkeys,
@@ -454,10 +459,14 @@ export class Daemon {
         }
 
         // Drop agent events without p-tags silently — no span needed
-        const isRootEvent = !AgentEventDecoder.getReplyTarget(event);
+        const isRootEvent = !getReplyTarget(event);
         if (
-            DaemonRouter.isAgentEvent(event, this.agentPubkeyToProjects) &&
-            !DaemonRouter.hasPTagsToSystemEntities(event, this.whitelistedPubkeys, this.agentPubkeyToProjects) &&
+            isAgentEvent(event, this.agentPubkeyToProjects) &&
+            !hasPTagsToSystemEntities(
+                event,
+                this.whitelistedPubkeys,
+                this.agentPubkeyToProjects
+            ) &&
             !isRootEvent
         ) {
             return;
@@ -493,7 +502,7 @@ export class Daemon {
         span: Span
     ): Promise<void> {
         // Classify event type
-        const eventType = AgentEventDecoder.classifyForDaemon(event);
+        const eventType = classifyForDaemon(event);
 
         // Handle project events (kind 31933)
         if (eventType === "project") {
@@ -522,7 +531,7 @@ export class Daemon {
         // Handle global agent config updates (kind 24020 without a-tag) at daemon level.
         // These update the agent's default config in storage and don't need project context.
         // With a-tag: falls through to normal A-tag routing for project-scoped updates.
-        if (AgentEventDecoder.isConfigUpdate(event) && !event.tagValue("a")) {
+        if (isConfigUpdate(event) && !event.tagValue("a")) {
             addRoutingEvent(span, "agent_config_global", { reason: "kind_24020_no_a_tag" });
             await this.handleGlobalAgentConfigUpdate(event);
             return;
@@ -530,7 +539,7 @@ export class Daemon {
 
         // Determine target project
         const activeRuntimes = this.runtimeLifecycle?.getActiveRuntimes() || new Map();
-        const routingResult = DaemonRouter.determineTargetProject(
+        const routingResult = determineTargetProject(
             event,
             this.knownProjects,
             this.agentPubkeyToProjects,
@@ -687,7 +696,7 @@ export class Daemon {
         const eventTimestamp = (event.created_at || 0) * 1000; // Convert to ms
 
         // Get conversation ID from the event (e-tag or reply target)
-        const replyTarget = AgentEventDecoder.getReplyTarget(event);
+        const replyTarget = getReplyTarget(event);
         if (!replyTarget) {
             // This is a root event, not a reply - no intervention needed
             return;
@@ -1037,7 +1046,7 @@ export class Daemon {
 
         // Extract config from event tags
         const newModel = event.tagValue("model");
-        const toolTags = TagExtractor.getToolTags(event);
+        const toolTags = getToolTags(event);
         const newToolNames = toolTags.map((tool) => tool.name).filter(Boolean);
         const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
 
@@ -1484,7 +1493,7 @@ export class Daemon {
          * @param exitCode - Exit code to use (default: 0)
          * @param isGracefulRestart - If true, persist restart state before shutdown
          */
-        const shutdown = async (exitCode: number = 0, isGracefulRestart: boolean = false): Promise<void> => {
+        const shutdown = async (exitCode = 0, isGracefulRestart = false): Promise<void> => {
             if (isGracefulRestart) {
                 console.log("\n[Daemon] Triggering graceful restart...");
             } else {

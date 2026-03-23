@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { join } from "path";
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "fs";
+import { join } from "node:path";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { IndexingStateManager } from "../IndexingStateManager";
 import * as conversationDiskReader from "@/conversations/ConversationDiskReader";
 

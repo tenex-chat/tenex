@@ -4,7 +4,7 @@ import { recentConversationsFragment } from "../09-recent-conversations";
 import type { AgentInstance } from "@/agents/types";
 
 // Mock agent for testing
-const createMockAgent = (pubkey: string = "agent-pubkey-123"): AgentInstance =>
+const createMockAgent = (pubkey = "agent-pubkey-123"): AgentInstance =>
     ({
         pubkey,
         slug: "test-agent",
@@ -229,8 +229,8 @@ describe("recentConversationsFragment", () => {
 
             // Should be truncated with "..." and total length should be <= 200
             // 197 chars + "..." = 200 chars
-            expect(result).toContain("A".repeat(197) + "...");
-            expect(result).not.toContain("A".repeat(198) + "...");
+            expect(result).toContain(`${"A".repeat(197)}...`);
+            expect(result).not.toContain(`${"A".repeat(198)}...`);
         });
     });
 

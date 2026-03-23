@@ -1,3 +1,4 @@
+import { shortenPubkey } from "@/utils/conversation-id";
 /**
  * UnifiedSearchService - Orchestrates search across all RAG collections.
  *
@@ -61,7 +62,7 @@ export class UnifiedSearchService {
             minScore,
             prompt: prompt ? `${prompt.substring(0, 50)}...` : undefined,
             collections: collections || "all (scope-aware)",
-            agentPubkey: agentPubkey ? `${agentPubkey.substring(0, 12)}...` : undefined,
+            agentPubkey: agentPubkey ? `${shortenPubkey(agentPubkey)}...` : undefined,
         });
 
         // Resolve providers: static (specialized) + dynamic (generic for discovered RAG collections)
@@ -287,10 +288,7 @@ export class UnifiedSearchService {
                 "Reference results by their number when citing information.";
 
             const userPrompt =
-                `Search query: "${query}"\n\n` +
-                `Extraction prompt: ${prompt}\n\n` +
-                `Search results:\n${resultContext}\n\n` +
-                "Based on these search results, provide a focused extraction addressing the prompt.";
+                `Search query: "${query}"\n\nExtraction prompt: ${prompt}\n\nSearch results:\n${resultContext}\n\nBased on these search results, provide a focused extraction addressing the prompt.`;
 
             const result = await llmService.generateText([
                 { role: "system", content: systemPrompt },

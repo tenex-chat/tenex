@@ -112,7 +112,7 @@ describe("fs_glob tool", () => {
         });
 
         it("should block paths that look similar but are outside", async () => {
-            const similarDir = testDir + "-backup";
+            const similarDir = `${testDir}-backup`;
             mkdirSync(similarDir, { recursive: true });
             writeFileSync(path.join(similarDir, "sneaky.txt"), "content");
 

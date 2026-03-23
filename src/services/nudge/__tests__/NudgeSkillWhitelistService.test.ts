@@ -454,7 +454,7 @@ describe("NudgeSkillWhitelistService", () => {
 
             // Emit event and wait for debounce + timeout (10s timeout in code, but the
             // test mock never resolves so Promise.race will fire the timeout)
-            capturedEventHandler!(wl2);
+            capturedEventHandler?.(wl2);
             // Wait for debounce (500ms) + fetch timeout (10s) + small buffer
             await Bun.sleep(11_000);
 

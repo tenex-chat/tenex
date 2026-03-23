@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { CONFIG_FILE, LLMS_FILE, MCP_CONFIG_FILE, PROVIDERS_FILE, TENEX_DIR, getTenexBasePath } from "@/constants";
 import { ensureDirectory, fileExists, readJsonFile, writeJsonFile } from "@/lib/fs";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
-import { MetaModelResolver } from "@/llm/meta";
+import { resolveMetaModel, resolveToVariant, generateSystemPromptFragment, type MetaModelResolution } from "@/llm/meta";
 import { ensureCacheLoaded as ensureModelsDevCacheLoaded } from "@/llm/utils/models-dev-cache";
 import type { MCPConfig } from "@/llm/providers/types";
 import type { LLMService } from "@/llm/service";
@@ -345,7 +345,7 @@ export class ConfigService {
 
         // If it's a meta model, resolve to the default variant
         if (isMetaModelConfiguration(config)) {
-            const resolution = MetaModelResolver.resolve(config);
+            const resolution = resolveMetaModel(config);
             // Recursively get the underlying config
             return this.getLLMConfig(resolution.configName);
         }
@@ -441,13 +441,13 @@ export class ConfigService {
         // It's a meta model - resolve based on override or keywords
         const metaConfig = rawConfig as MetaModelConfiguration;
 
-        let resolution;
+        let resolution: MetaModelResolution;
         if (variantOverride) {
             // Use the override variant directly (from change_model tool)
-            resolution = MetaModelResolver.resolveToVariant(metaConfig, variantOverride);
+            resolution = resolveToVariant(metaConfig, variantOverride);
         } else {
             // Resolve based on keywords in the message
-            resolution = MetaModelResolver.resolve(metaConfig, firstMessage, {
+            resolution = resolveMetaModel(metaConfig, firstMessage, {
                 stripKeywords: true,
             });
         }
@@ -456,7 +456,7 @@ export class ConfigService {
         const resolvedConfig = this.getLLMConfig(resolution.configName);
 
         // Generate the system prompt fragment for model descriptions
-        const metaModelSystemPrompt = MetaModelResolver.generateSystemPromptFragment(metaConfig);
+        const metaModelSystemPrompt = generateSystemPromptFragment(metaConfig);
 
         logger.info("[ConfigService] Resolved meta model", {
             originalConfig: configName,
@@ -726,8 +726,7 @@ export class ConfigService {
                 error: errorMessage,
             });
             throw new Error(
-                `Failed to load config file "${filePath}": ${errorMessage}. ` +
-                    "Fix the file or delete it to use defaults.",
+                `Failed to load config file "${filePath}": ${errorMessage}. Fix the file or delete it to use defaults.`,
                 { cause: error }
             );
         }

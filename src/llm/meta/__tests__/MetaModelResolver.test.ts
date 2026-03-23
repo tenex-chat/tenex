@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MetaModelResolver } from "../MetaModelResolver";
+import { resolve, generateSystemPromptFragment, isMetaModel } from "../MetaModelResolver";
 import type { MetaModelConfiguration } from "@/services/config/types";
 
 // Sample meta model configuration for testing
@@ -30,7 +30,7 @@ describe("MetaModelResolver", () => {
     describe("resolve", () => {
         it("should return default variant when no message is provided", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config);
+            const result = resolve(config);
 
             expect(result.variantName).toBe("standard");
             expect(result.configName).toBe("claude-sonnet");
@@ -39,7 +39,7 @@ describe("MetaModelResolver", () => {
 
         it("should return default variant when message has no keywords", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "How do we implement authentication?");
+            const result = resolve(config, "How do we implement authentication?");
 
             expect(result.variantName).toBe("standard");
             expect(result.configName).toBe("claude-sonnet");
@@ -48,7 +48,7 @@ describe("MetaModelResolver", () => {
 
         it("should resolve variant based on keyword at start of message", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "ultrathink how do we implement authentication?");
+            const result = resolve(config, "ultrathink how do we implement authentication?");
 
             expect(result.variantName).toBe("deep");
             expect(result.configName).toBe("claude-opus");
@@ -57,7 +57,7 @@ describe("MetaModelResolver", () => {
 
         it("should strip keywords from message when stripKeywords is true", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "ultrathink how do we implement authentication?", {
+            const result = resolve(config, "ultrathink how do we implement authentication?", {
                 stripKeywords: true,
             });
 
@@ -67,7 +67,7 @@ describe("MetaModelResolver", () => {
         it("should preserve original message when stripKeywords is false", () => {
             const config = createTestConfig();
             const originalMessage = "ultrathink how do we implement authentication?";
-            const result = MetaModelResolver.resolve(config, originalMessage, {
+            const result = resolve(config, originalMessage, {
                 stripKeywords: false,
             });
 
@@ -79,7 +79,7 @@ describe("MetaModelResolver", () => {
             const config = createTestConfig();
             // When "think" is at the start, it matches the standard tier (tier 2)
             // "ultrathink" is not at the start, so it doesn't match
-            const result = MetaModelResolver.resolve(config, "think ultrathink what's going on?");
+            const result = resolve(config, "think ultrathink what's going on?");
 
             // "think" matches and resolves to standard variant
             expect(result.variantName).toBe("standard");
@@ -89,7 +89,7 @@ describe("MetaModelResolver", () => {
         it("should select ultrathink when it is the first keyword", () => {
             const config = createTestConfig();
             // When "ultrathink" is at the start, it matches tier 3
-            const result = MetaModelResolver.resolve(config, "ultrathink think what's going on?");
+            const result = resolve(config, "ultrathink think what's going on?");
 
             expect(result.variantName).toBe("deep");
             expect(result.configName).toBe("claude-opus");
@@ -97,7 +97,7 @@ describe("MetaModelResolver", () => {
 
         it("should be case-insensitive for keyword matching", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "ULTRATHINK what should we do?");
+            const result = resolve(config, "ULTRATHINK what should we do?");
 
             expect(result.variantName).toBe("deep");
             expect(result.configName).toBe("claude-opus");
@@ -105,14 +105,14 @@ describe("MetaModelResolver", () => {
 
         it("should include systemPrompt from variant", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "ultrathink analyze this");
+            const result = resolve(config, "ultrathink analyze this");
 
             expect(result.systemPrompt).toBe("Take your time and reason step by step.");
         });
 
         it("should handle keywords with leading whitespace", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "   fast what's 2+2?");
+            const result = resolve(config, "   fast what's 2+2?");
 
             expect(result.variantName).toBe("fast");
             expect(result.configName).toBe("claude-haiku");
@@ -120,7 +120,7 @@ describe("MetaModelResolver", () => {
 
         it("should not match keyword in middle of message", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "please think about this carefully");
+            const result = resolve(config, "please think about this carefully");
 
             // "think" is in the middle, should not match
             expect(result.variantName).toBe("standard");
@@ -129,7 +129,7 @@ describe("MetaModelResolver", () => {
 
         it("should handle empty message", () => {
             const config = createTestConfig();
-            const result = MetaModelResolver.resolve(config, "");
+            const result = resolve(config, "");
 
             expect(result.variantName).toBe("standard");
             expect(result.configName).toBe("claude-sonnet");
@@ -139,7 +139,7 @@ describe("MetaModelResolver", () => {
     describe("generateSystemPromptFragment", () => {
         it("should generate system prompt with all variants", () => {
             const config = createTestConfig();
-            const fragment = MetaModelResolver.generateSystemPromptFragment(config);
+            const fragment = generateSystemPromptFragment(config);
 
             expect(fragment).toContain("You have access to the following models");
             expect(fragment).toContain("fast");
@@ -151,14 +151,14 @@ describe("MetaModelResolver", () => {
 
         it("should not include preamble description", () => {
             const config = createTestConfig();
-            const fragment = MetaModelResolver.generateSystemPromptFragment(config);
+            const fragment = generateSystemPromptFragment(config);
 
             expect(fragment).toStartWith("You have access to the following models");
         });
 
         it("should include keywords in variant descriptions", () => {
             const config = createTestConfig();
-            const fragment = MetaModelResolver.generateSystemPromptFragment(config);
+            const fragment = generateSystemPromptFragment(config);
 
             expect(fragment).toContain("trigger: fast, quick");
             expect(fragment).toContain("trigger: ultrathink, deep");
@@ -168,7 +168,7 @@ describe("MetaModelResolver", () => {
     describe("isMetaModel", () => {
         it("should return true for valid meta model config", () => {
             const config = createTestConfig();
-            expect(MetaModelResolver.isMetaModel(config)).toBe(true);
+            expect(isMetaModel(config)).toBe(true);
         });
 
         it("should return false for standard LLM config", () => {
@@ -176,17 +176,17 @@ describe("MetaModelResolver", () => {
                 provider: "anthropic",
                 model: "claude-sonnet-4",
             };
-            expect(MetaModelResolver.isMetaModel(config)).toBe(false);
+            expect(isMetaModel(config)).toBe(false);
         });
 
         it("should return false for null/undefined", () => {
-            expect(MetaModelResolver.isMetaModel(null)).toBe(false);
-            expect(MetaModelResolver.isMetaModel(undefined)).toBe(false);
+            expect(isMetaModel(null)).toBe(false);
+            expect(isMetaModel(undefined)).toBe(false);
         });
 
         it("should return false for non-object", () => {
-            expect(MetaModelResolver.isMetaModel("string")).toBe(false);
-            expect(MetaModelResolver.isMetaModel(123)).toBe(false);
+            expect(isMetaModel("string")).toBe(false);
+            expect(isMetaModel(123)).toBe(false);
         });
     });
 });

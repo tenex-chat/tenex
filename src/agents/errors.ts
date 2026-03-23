@@ -1,3 +1,4 @@
+import { shortenPubkey } from "@/utils/conversation-id";
 /**
  * Agent-specific error types for better error handling
  */
@@ -30,9 +31,7 @@ export class AgentSlugConflictError extends AgentError {
     ) {
         const message = `Agent slug conflict: slug "${slug}" already claimed by different agent`;
         const details = existingPubkey && attemptedPubkey
-            ? `\nExisting agent: ${existingPubkey.substring(0, 12)}...` +
-              `\nAttempted agent: ${attemptedPubkey.substring(0, 12)}...` +
-              `\n\nSuggestion: Remove the existing agent from overlapping projects or use a different slug.`
+            ? `\nExisting agent: ${shortenPubkey(existingPubkey)}...\nAttempted agent: ${shortenPubkey(attemptedPubkey)}...\n\nSuggestion: Remove the existing agent from overlapping projects or use a different slug.`
             : "";
 
         super(message + details);

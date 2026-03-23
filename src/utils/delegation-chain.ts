@@ -406,7 +406,7 @@ export function formatDelegationChain(
         const convId = shortenConversationId(recipient.conversationId);
 
         // Build the line with proper indentation
-        const indent = i === 0 ? "" : "  ".repeat(i) + "-> ";
+        const indent = i === 0 ? "" : `${"  ".repeat(i)}-> `;
         const line = `${indent}[${sender.displayName} -> ${recipientName}] [conversation ${convId}]`;
         lines.push(line);
     }

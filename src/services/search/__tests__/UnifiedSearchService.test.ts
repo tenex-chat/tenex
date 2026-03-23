@@ -202,7 +202,7 @@ describe("UnifiedSearchService", () => {
         expect(result.collectionsSearched).toEqual(["reports"]);
         expect(result.collectionsErrored).toEqual(["conversations"]);
         expect(result.warnings).toBeDefined();
-        expect(result.warnings![0]).toContain("conversations");
+        expect(result.warnings?.[0]).toContain("conversations");
     });
 
     it("filters by specified collections", async () => {
@@ -368,8 +368,8 @@ describe("UnifiedSearchService", () => {
             // Verify generic result is included and properly formatted
             const customResult = result.results.find((r) => r.source === "custom_knowledge");
             expect(customResult).toBeDefined();
-            expect(customResult!.id).toBe("doc-1");
-            expect(customResult!.retrievalTool).toBe("rag_search");
+            expect(customResult?.id).toBe("doc-1");
+            expect(customResult?.retrievalTool).toBe("rag_search");
         });
 
         it("does not create generic providers for specialized collection names", async () => {

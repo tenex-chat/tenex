@@ -303,8 +303,6 @@ async function executeConversationSearch(
             }
             break;
         }
-
-        case "keyword":
         default:
             conversations = keywordSearch(query, limit);
             searchType = "full-text";

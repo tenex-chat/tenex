@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 
 const addEvent = mock(() => {});
 const mockSpan = {
@@ -124,7 +124,7 @@ describe("TENEX context management telemetry", () => {
 
         expect(contextManagement).toBeDefined();
 
-        const scratchpadTool = contextManagement!.optionalTools.scratchpad as {
+        const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
             execute: (
                 input: unknown,
                 options: { toolCallId?: string; experimental_context: Record<string, unknown> }
@@ -141,12 +141,12 @@ describe("TENEX context management telemetry", () => {
             {
                 toolCallId: "tool-call-1",
                 experimental_context: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             }
         );
 
-        await contextManagement!.middleware.transformParams?.({
+        await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -161,7 +161,7 @@ describe("TENEX context management telemetry", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {
@@ -352,7 +352,7 @@ describe("TENEX context management telemetry", () => {
             conversationStore: store,
         });
 
-        await contextManagement!.middleware.transformParams?.({
+        await contextManagement?.middleware.transformParams?.({
             params: {
                 prompt: [
                     { role: "system", content: "You are helpful." },
@@ -362,7 +362,7 @@ describe("TENEX context management telemetry", () => {
                     },
                 ],
                 providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement!.requestContext,
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
                 },
             },
             model: {

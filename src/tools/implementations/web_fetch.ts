@@ -100,9 +100,7 @@ async function executeWebFetch(input: WebFetchInput): Promise<string | { type: "
         const result = await fetchUrl(url);
 
         return (
-            `Content-Type: ${result.contentType}\n` +
-            `URL: ${result.finalUrl}\n\n` +
-            result.content
+            `Content-Type: ${result.contentType}\nURL: ${result.finalUrl}\n\n${result.content}`
         );
     } catch (error) {
         // Check for expected HTTP errors (4xx client errors like 404)

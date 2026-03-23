@@ -58,7 +58,7 @@ function matchesDateFilter(conversation: ConversationIndexEntry, sinceTimestamp?
 function findMatchingMessages(
     conversation: ConversationIndexEntry,
     searchText: string,
-    maxMatches: number = 3
+    maxMatches = 3
 ): MessageMatch[] {
     const matches: MessageMatch[] = [];
     const searchLower = searchText.toLowerCase();
@@ -92,7 +92,7 @@ function findMatchingMessages(
 export function search(
     query: SearchQuery,
     index: ConversationIndex,
-    limit: number = 20
+    limit = 20
 ): SearchResult[] {
     const results: SearchResult[] = [];
     const sinceTimestamp = getEffectiveSinceTimestamp(query.filters);
@@ -143,13 +143,13 @@ export function search(
 export function searchByTitleOnly(
     query: string,
     index: ConversationIndex,
-    limit: number = 20
+    limit = 20
 ): SearchResult[] {
     const results: SearchResult[] = [];
     const queryLower = query.toLowerCase();
 
     for (const conversation of index.conversations) {
-        if (conversation.title && conversation.title.toLowerCase().includes(queryLower)) {
+        if (conversation.title?.toLowerCase().includes(queryLower)) {
             results.push({
                 conversationId: conversation.conversationId,
                 title: conversation.title,

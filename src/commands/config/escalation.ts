@@ -23,7 +23,7 @@ export const escalationCommand = new Command("escalation")
             }]);
 
             if (agent.trim() === "") {
-                delete existingConfig.escalation;
+                existingConfig.escalation = undefined;
             } else {
                 existingConfig.escalation = { agent: agent.trim() };
             }

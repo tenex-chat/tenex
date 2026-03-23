@@ -231,18 +231,14 @@ function resolveWithParameter(withValue: string, isAllProjects: boolean): string
             return parsedPubkey;
         }
         throw new Error(
-            `Failed to resolve 'with' parameter: "${withValue}". ` +
-            `The value looks like a pubkey but could not be parsed. ` +
-            `Please provide a valid 64-character hex pubkey or npub format.`
+            `Failed to resolve 'with' parameter: "${withValue}". The value looks like a pubkey but could not be parsed. Please provide a valid 64-character hex pubkey or npub format.`
         );
     }
 
     // It looks like a slug - check if we're in all-projects mode
     if (isAllProjects) {
         throw new Error(
-            `Agent slugs are not supported when projectId='all'. ` +
-            `The slug "${withValue}" can only be resolved within the current project. ` +
-            `Please provide a pubkey (hex or npub format) instead.`
+            `Agent slugs are not supported when projectId='all'. The slug "${withValue}" can only be resolved within the current project. Please provide a pubkey (hex or npub format) instead.`
         );
     }
 

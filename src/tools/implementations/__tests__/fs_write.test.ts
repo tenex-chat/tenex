@@ -18,7 +18,7 @@ function createTestFsTools(workingDirectory: string, agentPubkey: string, report
             ? (toolName: FsToolName, input: Record<string, unknown>) => {
                 const p = input.path as string | undefined;
                 if (p && (toolName === "fs_write" || toolName === "fs_edit")) {
-                    if (p.startsWith(reportsDir + "/") || p === reportsDir) {
+                    if (p.startsWith(`${reportsDir}/`) || p === reportsDir) {
                         throw new Error(
                             `Cannot write to reports directory directly. Path "${p}" is within the protected reports directory. Use the report_write tool instead.`
                         );
@@ -125,7 +125,7 @@ describe("fs_write tool", () => {
         });
 
         it("should block paths that look similar but are outside", async () => {
-            const similarDir = testDir + "-backup";
+            const similarDir = `${testDir}-backup`;
             mkdirSync(similarDir, { recursive: true });
             const outsideFile = path.join(similarDir, "sneaky.txt");
 

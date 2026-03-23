@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, mock, spyOn } from "bun:test";
-import { AgentRegistry } from "@/agents/AgentRegistry";
+import type { AgentRegistry } from "@/agents/AgentRegistry";
 import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { ChannelSessionStore } from "@/services/ingress/ChannelSessionStoreService";

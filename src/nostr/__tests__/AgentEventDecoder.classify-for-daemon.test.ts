@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { NDKKind } from "@/nostr/kinds";
-import { AgentEventDecoder } from "../AgentEventDecoder";
+import { classifyForDaemon } from "../AgentEventDecoder";
 
 describe("AgentEventDecoder.classifyForDaemon", () => {
     it("classifies TenexAgentConfigUpdate as config_update", () => {
@@ -10,7 +10,7 @@ describe("AgentEventDecoder.classifyForDaemon", () => {
         event.tags = [["p", "agent-pubkey"]];
         event.content = "";
 
-        expect(AgentEventDecoder.classifyForDaemon(event)).toBe("config_update");
+        expect(classifyForDaemon(event)).toBe("config_update");
     });
 
     it("classifies EventMetadata as conversation for project routing", () => {
@@ -19,6 +19,15 @@ describe("AgentEventDecoder.classifyForDaemon", () => {
         event.tags = [["a", "31933:owner-pubkey:project-d-tag"], ["e", "conversation-event-id"]];
         event.content = "";
 
-        expect(AgentEventDecoder.classifyForDaemon(event)).toBe("conversation");
+        expect(classifyForDaemon(event)).toBe("conversation");
+    });
+
+    it("classifies report events as other so they can fall through to project routing", () => {
+        const event = new NDKEvent();
+        event.kind = 30023;
+        event.tags = [["a", "31933:owner-pubkey:project-d-tag"]];
+        event.content = "report";
+
+        expect(classifyForDaemon(event)).toBe("other");
     });
 });

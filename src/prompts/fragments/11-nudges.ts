@@ -47,7 +47,7 @@ function renderToolPermissionsHeader(permissions: NudgeToolPermissions): string 
     if (isOnlyToolMode(permissions)) {
         // only-tool mode: restricted to specific tools only
         lines.push(
-            `Your available tools are restricted to: ${permissions.onlyTools!.join(", ")}`
+            `Your available tools are restricted to: ${permissions.onlyTools?.join(", ")}`
         );
     } else {
         // allow/deny mode

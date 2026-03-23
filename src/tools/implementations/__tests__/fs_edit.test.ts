@@ -327,7 +327,7 @@ modified line 3`,
         });
 
         it("should block paths that look similar but are outside", async () => {
-            const similarDir = testDir + "-backup";
+            const similarDir = `${testDir}-backup`;
             mkdirSync(similarDir, { recursive: true });
             const outsideFile = path.join(similarDir, "sneaky.txt");
             writeFileSync(outsideFile, "original content");

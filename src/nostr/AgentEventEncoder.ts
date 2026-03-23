@@ -3,7 +3,7 @@ import type { LLMMetadata, LanguageModelUsageWithCostUsd } from "@/llm/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
 import { getProjectContext } from "@/services/projects";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenOptionalConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
@@ -64,7 +64,7 @@ export class AgentEventEncoder {
         // Use pre-resolved recipient if available (set by createEventContext from delegation chain)
         if (context.completionRecipientPubkey) {
             logger.debug("Completion routing via pre-resolved recipient", {
-                conversationId: context.conversationId.substring(0, 12),
+                conversationId: shortenConversationId(context.conversationId),
                 recipientPubkey: context.completionRecipientPubkey.substring(0, 8),
                 triggeringEventPubkey: fallbackPubkey?.substring(0, 8),
                 usingPreResolved: context.completionRecipientPubkey !== fallbackPubkey,
@@ -115,7 +115,7 @@ export class AgentEventEncoder {
             event.tag(["p", recipientPubkey]);
         } else {
             logger.warn("Completion event published without recipient p-tag", {
-                conversationId: context.conversationId?.substring(0, 12),
+                conversationId: shortenOptionalConversationId(context.conversationId),
                 triggeringPrincipalId: context.triggeringEnvelope.principal.id,
                 transport: context.triggeringEnvelope.transport,
             });
@@ -146,7 +146,7 @@ export class AgentEventEncoder {
             eventId: event.id,
             recipientPubkey: recipientPubkey?.substring(0, 8),
             triggeringEventPubkey: context.triggeringEnvelope.principal.linkedPubkey?.substring(0, 8),
-            conversationId: context.conversationId?.substring(0, 12),
+            conversationId: shortenOptionalConversationId(context.conversationId),
         });
 
         return event;
@@ -386,7 +386,7 @@ export class AgentEventEncoder {
             event.tag(["p", recipientPubkey]);
         } else {
             logger.warn("Error event published without recipient p-tag", {
-                conversationId: context.conversationId?.substring(0, 12),
+                conversationId: shortenOptionalConversationId(context.conversationId),
                 triggeringPrincipalId: context.triggeringEnvelope.principal.id,
                 transport: context.triggeringEnvelope.transport,
             });
@@ -758,8 +758,8 @@ export class AgentEventEncoder {
         this.aTagProject(event);
 
         logger.debug("Encoded delegation marker event", {
-            delegationConversationId: intent.delegationConversationId.substring(0, 12),
-            parentConversationId: intent.parentConversationId.substring(0, 12),
+            delegationConversationId: shortenConversationId(intent.delegationConversationId),
+            parentConversationId: shortenConversationId(intent.parentConversationId),
             recipientPubkey: intent.recipientPubkey.substring(0, 8),
             status: intent.status,
         });

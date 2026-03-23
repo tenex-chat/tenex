@@ -53,7 +53,7 @@ describe("AgentDefinitionMonitor", () => {
                 definitionAuthor: "author-pubkey-abc",
             });
             // Explicitly ensure definitionDTag is missing
-            delete (agent as any).definitionDTag;
+            (agent as any).definitionDTag = undefined;
 
             await storage.saveAgent(agent);
 
@@ -69,8 +69,8 @@ describe("AgentDefinitionMonitor", () => {
 
             const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
-            expect(saved!.definitionDTag).toBe("legacy-bot");
-            expect(saved!.definitionAuthor).toBe("author-pubkey-abc");
+            expect(saved?.definitionDTag).toBe("legacy-bot");
+            expect(saved?.definitionAuthor).toBe("author-pubkey-abc");
 
             monitor.stop();
         });
@@ -87,8 +87,8 @@ describe("AgentDefinitionMonitor", () => {
                 role: "assistant",
                 eventId: fakeEventId,
             });
-            delete (agent as any).definitionDTag;
-            delete (agent as any).definitionAuthor;
+            (agent as any).definitionDTag = undefined;
+            (agent as any).definitionAuthor = undefined;
 
             await storage.saveAgent(agent);
 
@@ -109,9 +109,9 @@ describe("AgentDefinitionMonitor", () => {
 
             const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
-            expect(saved!.definitionDTag).toBe("orphan-bot");
-            expect(saved!.definitionAuthor).toBe(fakeAuthorPubkey);
-            expect(saved!.definitionCreatedAt).toBe(1700000000);
+            expect(saved?.definitionDTag).toBe("orphan-bot");
+            expect(saved?.definitionAuthor).toBe(fakeAuthorPubkey);
+            expect(saved?.definitionCreatedAt).toBe(1700000000);
 
             expect(ndk.fetchEvent).toHaveBeenCalledWith(fakeEventId);
 
@@ -126,9 +126,9 @@ describe("AgentDefinitionMonitor", () => {
                 name: "Local Only",
                 role: "assistant",
             });
-            delete (agent as any).definitionDTag;
-            delete (agent as any).definitionAuthor;
-            delete (agent as any).eventId;
+            (agent as any).definitionDTag = undefined;
+            (agent as any).definitionAuthor = undefined;
+            (agent as any).eventId = undefined;
 
             await storage.saveAgent(agent);
 
@@ -144,8 +144,8 @@ describe("AgentDefinitionMonitor", () => {
 
             const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
-            expect(saved!.definitionDTag).toBeUndefined();
-            expect(saved!.definitionAuthor).toBeUndefined();
+            expect(saved?.definitionDTag).toBeUndefined();
+            expect(saved?.definitionAuthor).toBeUndefined();
             expect(ndk.fetchEvent).not.toHaveBeenCalled();
 
             monitor.stop();
@@ -160,8 +160,8 @@ describe("AgentDefinitionMonitor", () => {
                 role: "assistant",
                 eventId: "event-that-fails",
             });
-            delete (agent as any).definitionDTag;
-            delete (agent as any).definitionAuthor;
+            (agent as any).definitionDTag = undefined;
+            (agent as any).definitionAuthor = undefined;
 
             await storage.saveAgent(agent);
 
@@ -180,9 +180,9 @@ describe("AgentDefinitionMonitor", () => {
             const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             // definitionDTag should still be inferred from slug
-            expect(saved!.definitionDTag).toBe("flaky-bot");
+            expect(saved?.definitionDTag).toBe("flaky-bot");
             // definitionAuthor should remain undefined since fetch returned null
-            expect(saved!.definitionAuthor).toBeUndefined();
+            expect(saved?.definitionAuthor).toBeUndefined();
 
             monitor.stop();
         });
@@ -196,8 +196,8 @@ describe("AgentDefinitionMonitor", () => {
                 role: "assistant",
                 eventId: "event-that-throws",
             });
-            delete (agent as any).definitionDTag;
-            delete (agent as any).definitionAuthor;
+            (agent as any).definitionDTag = undefined;
+            (agent as any).definitionAuthor = undefined;
 
             await storage.saveAgent(agent);
 
@@ -219,9 +219,9 @@ describe("AgentDefinitionMonitor", () => {
             const saved = await storage.loadAgent(signer.pubkey);
             expect(saved).not.toBeNull();
             // definitionDTag should still be inferred from slug despite fetchEvent throwing
-            expect(saved!.definitionDTag).toBe("error-bot");
+            expect(saved?.definitionDTag).toBe("error-bot");
             // definitionAuthor should remain undefined since fetch threw
-            expect(saved!.definitionAuthor).toBeUndefined();
+            expect(saved?.definitionAuthor).toBeUndefined();
 
             expect(ndk.fetchEvent).toHaveBeenCalledWith("event-that-throws");
 
@@ -256,9 +256,9 @@ describe("AgentDefinitionMonitor", () => {
             expect(ndk.fetchEvent).not.toHaveBeenCalled();
 
             const saved = await storage.loadAgent(signer.pubkey);
-            expect(saved!.definitionDTag).toBe("complete-bot");
-            expect(saved!.definitionAuthor).toBe("existing-author");
-            expect(saved!.definitionCreatedAt).toBe(1600000000);
+            expect(saved?.definitionDTag).toBe("complete-bot");
+            expect(saved?.definitionAuthor).toBe("existing-author");
+            expect(saved?.definitionCreatedAt).toBe(1600000000);
 
             monitor.stop();
         });
@@ -273,8 +273,8 @@ describe("AgentDefinitionMonitor", () => {
                 role: "assistant",
                 eventId: "soon-event-id",
             });
-            delete (agent as any).definitionDTag;
-            delete (agent as any).definitionAuthor;
+            (agent as any).definitionDTag = undefined;
+            (agent as any).definitionAuthor = undefined;
 
             await storage.saveAgent(agent);
 

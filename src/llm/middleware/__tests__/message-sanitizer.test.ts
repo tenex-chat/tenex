@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:
 import type { LanguageModelV3Message } from "@ai-sdk/provider";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import * as constantsModule from "@/constants";
-import { existsSync, readFileSync, rmSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 
 const testBaseDir = join(import.meta.dir, ".test-tenex-base");
 

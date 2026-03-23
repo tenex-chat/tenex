@@ -1,5 +1,5 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
-import { AgentEventDecoder } from "@/nostr/AgentEventDecoder";
+import { getReplyTarget, getMentionedPubkeys } from "@/nostr/AgentEventDecoder";
 import { isProjectAddress } from "@/types/project-ids";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 
@@ -32,8 +32,8 @@ function getProjectBinding(event: NDKEvent): string | undefined {
 
 export class NostrInboundAdapter {
     toEnvelope(event: NDKEvent): InboundEnvelope {
-        const replyTarget = AgentEventDecoder.getReplyTarget(event) ?? getTagValue(event, "e");
-        const mentionedPubkeys = AgentEventDecoder.getMentionedPubkeys(event);
+        const replyTarget = getReplyTarget(event) ?? getTagValue(event, "e");
+        const mentionedPubkeys = getMentionedPubkeys(event);
         const recipients = mentionedPubkeys.length > 0 ? mentionedPubkeys : getTagValues(event, "p");
         const projectBinding = getProjectBinding(event);
         const nativeMessageId = event.id ?? buildFallbackMessageId(event);

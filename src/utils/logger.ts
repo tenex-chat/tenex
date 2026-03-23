@@ -109,7 +109,7 @@ function writeToWarnLog(entry: WarnLogEntry): void {
     if (!warnLogFilePath) return;
     try {
         rotateWarnLogIfNeeded();
-        fs.appendFileSync(warnLogFilePath, JSON.stringify(entry) + "\n");
+        fs.appendFileSync(warnLogFilePath, `${JSON.stringify(entry)}\n`);
     } catch {
         // Swallow — we can't let warn.log failures crash the system
     }

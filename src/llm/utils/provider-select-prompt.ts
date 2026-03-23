@@ -17,7 +17,7 @@ import { cursorHide } from "@inquirer/ansi";
 import chalk from "chalk";
 import type { ProviderCredentials } from "@/services/config/types";
 import { PROVIDER_IDS } from "@/llm/providers/provider-ids";
-import { ProviderConfigUI } from "@/llm/utils/ProviderConfigUI";
+import { getProviderDisplayName } from "@/llm/utils/ProviderConfigUI";
 import * as display from "@/commands/config/display";
 
 // --- Public types ---
@@ -226,7 +226,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
     function renderBrowseView(out: string[]) {
         for (let i = 0; i < providerIds.length; i++) {
             const pid = providerIds[i]!;
-            const name = ProviderConfigUI.getProviderDisplayName(pid);
+            const name = getProviderDisplayName(pid);
             const pfx = i === active ? `${CURSOR} ` : "  ";
             const enabled = pid in providers;
             const hint = config.providerHints?.[pid];
@@ -252,7 +252,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
     }
 
     function renderKeysView(out: string[], pid: string) {
-        const name = ProviderConfigUI.getProviderDisplayName(pid);
+        const name = getProviderDisplayName(pid);
         const keys = getKeys(providers[pid]?.apiKey);
         const addIndex = keys.length;
         const backIndex = keys.length + 1;

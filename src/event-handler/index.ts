@@ -1,5 +1,5 @@
 import { NDKKind } from "@/nostr/kinds";
-import { TagExtractor } from "@/nostr/TagExtractor";
+import { getToolTags } from "@/nostr/TagExtractor";
 import { formatAnyError } from "@/lib/error-formatter";
 import { type NDKEvent, NDKArticle, NDKProject } from "@nostr-dev-kit/ndk";
 import type { AgentProjectConfig, AgentDefaultConfig } from "@/agents/types";
@@ -16,7 +16,7 @@ import { config } from "@/services/ConfigService";
 import { RALRegistry } from "@/services/ral";
 import { prefixKVStore } from "@/services/storage";
 import { logger } from "../utils/logger";
-import { shortenConversationId } from "@/utils/conversation-id";
+import { shortenConversationId, shortenOptionalEventId } from "@/utils/conversation-id";
 import { shouldTrustLesson } from "@/utils/lessonTrust";
 import { getPubkeyGateService } from "@/services/pubkey-gate";
 import { handleAgentDeletion } from "./agentDeletion";
@@ -45,7 +45,7 @@ async function indexEventForPrefixLookup(event: NDKEvent): Promise<void> {
         } catch (error) {
             // Log but don't abort - indexing is a sidecar feature
             logger.warn("[EventHandler] Failed to index event for prefix lookup", {
-                eventId: event.id?.substring(0, 12),
+                eventId: shortenOptionalEventId(event.id),
                 error: error instanceof Error ? error.message : String(error),
             });
         }
@@ -240,19 +240,19 @@ export class EventHandler {
 
             // Parse summary tag
             const summaryTag = event.tags.find((tag: string[]) => tag[0] === "summary");
-            if (summaryTag && summaryTag[1]) {
+            if (summaryTag?.[1]) {
                 updates.summary = summaryTag[1];
             }
 
             // Parse status-label tag
             const statusLabelTag = event.tags.find((tag: string[]) => tag[0] === "status-label");
-            if (statusLabelTag && statusLabelTag[1]) {
+            if (statusLabelTag?.[1]) {
                 updates.statusLabel = statusLabelTag[1];
             }
 
             // Parse status-current-activity tag
             const statusActivityTag = event.tags.find((tag: string[]) => tag[0] === "status-current-activity");
-            if (statusActivityTag && statusActivityTag[1]) {
+            if (statusActivityTag?.[1]) {
                 updates.statusCurrentActivity = statusActivityTag[1];
             }
 
@@ -329,7 +329,7 @@ export class EventHandler {
 
             // Extract configuration values from the event
             const newModel = event.tagValue("model");
-            const toolTags = TagExtractor.getToolTags(event);
+            const toolTags = getToolTags(event);
             const rawToolNames = toolTags.map((tool) => tool.name).filter((name) => name);
             // Expand FS capability groups: fs_read implies glob+grep, fs_write implies edit
             const newToolNames = expandFsCapabilities(rawToolNames);
@@ -372,7 +372,7 @@ export class EventHandler {
                     // Tool tags represent the exhaustive desired list for this project.
                     // We convert it to a delta against the agent's default tools for compact storage.
                     // Use RAW TAG PRESENCE (event.tags.some) not TagExtractor output length:
-                    // TagExtractor.getToolTags() filters out empty tool names, so when an event
+                    // getToolTags() filters out empty tool names, so when an event
                     // carries ["tool", ""] to "clear all tools", toolTags.length would be 0 and
                     // the guard would silently skip delta computation. By checking the raw event
                     // tags we correctly detect "tool tag is present" regardless of the name value.

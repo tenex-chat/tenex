@@ -149,7 +149,7 @@ describe("AgentStorage", () => {
                 role: "assistant",
             };
             // Explicitly remove status to simulate legacy data
-            delete (agent as Record<string, unknown>).status;
+            (agent as Record<string, unknown>).status = undefined;
 
             expect(isAgentActive(agent)).toBe(true);
         });
@@ -1658,8 +1658,8 @@ describe("AgentStorage", () => {
             // Manually corrupt the index to simulate the bug scenario
             // Add both agents to the same project with same slug
             const indexPath = path.join(tempDir, "index.json");
-            let indexContent = await fs.readFile(indexPath, "utf-8");
-            let index = JSON.parse(indexContent);
+            const indexContent = await fs.readFile(indexPath, "utf-8");
+            const index = JSON.parse(indexContent);
 
             // Force both pubkeys into project-1
             index.byProject["project-1"].push(signer2.pubkey);

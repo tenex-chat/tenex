@@ -108,7 +108,7 @@ const URL_PATTERN = /https?:\/\/[^\s<>"]+/gi;
  */
 function normalizeImageUrl(rawUrl: string): { rawUrl: string; normalizedUrl: string } | null {
     // Remove trailing punctuation that might have been captured (., ), ], etc.)
-    let cleanUrl = rawUrl.replace(/[).,\]]+$/, "");
+    const cleanUrl = rawUrl.replace(/[).,\]]+$/, "");
 
     try {
         // Validate and normalize via URL constructor
@@ -220,11 +220,10 @@ export function processToolResultWithImageTracking(
                     totalReplacedCount++;
                     uniqueReplacedUrls.add(normalizedUrl);
                     return createImagePlaceholder(normalizedUrl, eventId);
-                } else {
+                }
                     // First time seeing this image - mark as seen but preserve URL
                     tracker.markAsSeen(normalizedUrl);
                     return rawUrl;
-                }
             }
         );
 

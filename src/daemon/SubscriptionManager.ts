@@ -2,7 +2,8 @@ import type { EventRoutingLogger } from "@/logging/EventRoutingLogger";
 import { logger } from "@/utils/logger";
 import type { Hexpubkey, NDKEvent, NDKFilter, NDKSubscription } from "@nostr-dev-kit/ndk";
 import type NDK from "@nostr-dev-kit/ndk";
-import { SubscriptionFilterBuilder } from "./filters/SubscriptionFilterBuilder";
+import { buildStaticFilters, buildProjectTaggedFilter, buildReportFilter, buildAgentMentionsFilter, buildLessonFilter } from "./filters/SubscriptionFilterBuilder";
+import { shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Manages independent subscriptions for different event categories.
@@ -65,7 +66,7 @@ export class SubscriptionManager {
             whitelistedPubkeys: Array.from(this.whitelistedPubkeys).map((p) => p.slice(0, 8)),
         });
 
-        const filters = SubscriptionFilterBuilder.buildStaticFilters(this.whitelistedPubkeys);
+        const filters = buildStaticFilters(this.whitelistedPubkeys);
         if (filters.length > 0) {
             this.staticSubscription = this.createSub(filters, "static", this.onStaticEoseCallback);
         }
@@ -100,10 +101,10 @@ export class SubscriptionManager {
 
         const filters: NDKFilter[] = [];
 
-        const taggedFilter = SubscriptionFilterBuilder.buildProjectTaggedFilter(knownProjects, since);
+        const taggedFilter = buildProjectTaggedFilter(knownProjects, since);
         if (taggedFilter) filters.push(taggedFilter);
 
-        const reportFilter = SubscriptionFilterBuilder.buildReportFilter(knownProjects);
+        const reportFilter = buildReportFilter(knownProjects);
         if (reportFilter) filters.push(reportFilter);
 
         if (filters.length > 0) {
@@ -151,7 +152,7 @@ export class SubscriptionManager {
         const since = this.lastAgentMentionsSubCreatedAt ?? undefined;
         this.lastAgentMentionsSubCreatedAt = Math.floor(Date.now() / 1000);
 
-        const filter = SubscriptionFilterBuilder.buildAgentMentionsFilter(pubkeys, since);
+        const filter = buildAgentMentionsFilter(pubkeys, since);
         if (filter) {
             this.agentMentionsSubscription = this.createSub([filter], "agent-mentions");
             logger.debug("Agent mentions subscription updated", {
@@ -170,7 +171,7 @@ export class SubscriptionManager {
             return;
         }
 
-        const filter = SubscriptionFilterBuilder.buildLessonFilter(definitionId);
+        const filter = buildLessonFilter(definitionId);
         const sub = this.ndk.subscribe([filter], {
             closeOnEose: false,
             groupable: true,
@@ -179,7 +180,7 @@ export class SubscriptionManager {
 
         this.lessonSubscriptions.set(definitionId, sub);
         logger.debug("Lesson subscription added", {
-            definitionId: definitionId.substring(0, 12),
+            definitionId: shortenEventId(definitionId),
             totalLessonSubs: this.lessonSubscriptions.size,
         });
     }
@@ -193,7 +194,7 @@ export class SubscriptionManager {
             sub.stop();
             this.lessonSubscriptions.delete(definitionId);
             logger.debug("Lesson subscription removed", {
-                definitionId: definitionId.substring(0, 12),
+                definitionId: shortenEventId(definitionId),
                 totalLessonSubs: this.lessonSubscriptions.size,
             });
         }

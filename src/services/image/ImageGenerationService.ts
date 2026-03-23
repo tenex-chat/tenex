@@ -209,8 +209,7 @@ export class ImageGenerationService {
                 const textPart = contentParts.find((part) => part.type === "text");
                 if (textPart) {
                     throw new Error(
-                        `Model returned text instead of image: "${textPart.text?.slice(0, 100) || 'unknown'}". ` +
-                        "This model may not support image generation."
+                        `Model returned text instead of image: "${textPart.text?.slice(0, 100) || 'unknown'}". This model may not support image generation.`
                     );
                 }
                 throw new Error("No image found in model response");
@@ -220,7 +219,7 @@ export class ImageGenerationService {
                 throw new Error("Image part found but contains no data");
             }
 
-            logger.info(`Image generated successfully`, {
+            logger.info("Image generated successfully", {
                 model: modelId,
                 mediaType: imagePart.mediaType,
                 hasData: !!imagePart.data,

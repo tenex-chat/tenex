@@ -9,6 +9,7 @@ import { logger } from "@/utils/logger";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { SpanStatusCode, context as otelContext, trace } from "@opentelemetry/api";
 import type { SkillResult, SkillData, SkillFileInfo, SkillFileInstallResult } from "./types";
+import { shortenEventId } from "@/utils/conversation-id";
 
 const tracer = trace.getTracer("tenex.skill-service");
 
@@ -174,7 +175,7 @@ export class SkillService {
         const content = event.content.trim();
         const title = event.tagValue("title") || undefined;
         const name = event.tagValue("name") || undefined;
-        const shortId = event.id.substring(0, 12);
+        const shortId = shortenEventId(event.id);
 
         // Extract e-tags that reference kind:1063 (NIP-94 file metadata) events
         const fileETags = this.extractFileETags(event);
@@ -266,13 +267,13 @@ export class SkillService {
         const failCount = results.filter((r) => !r.success).length;
 
         if (failCount > 0) {
-            logger.warn(`[SkillService] Skill file installation completed with errors`, {
+            logger.warn("[SkillService] Skill file installation completed with errors", {
                 skillId: shortId,
                 success: successCount,
                 failed: failCount,
             });
         } else if (successCount > 0) {
-            logger.info(`[SkillService] All skill files installed successfully`, {
+            logger.info("[SkillService] All skill files installed successfully", {
                 skillId: shortId,
                 count: successCount,
             });
@@ -416,7 +417,7 @@ export class SkillService {
             // Check Content-Length header first if available
             const contentLength = response.headers.get("Content-Length");
             if (contentLength) {
-                const declaredSize = parseInt(contentLength, 10);
+                const declaredSize = Number.parseInt(contentLength, 10);
                 if (declaredSize > MAX_DOWNLOAD_SIZE_BYTES) {
                     throw new Error(
                         `File too large: ${declaredSize} bytes exceeds ${MAX_DOWNLOAD_SIZE_BYTES} byte limit`

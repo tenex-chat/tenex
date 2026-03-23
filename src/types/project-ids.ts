@@ -75,8 +75,7 @@ export function createProjectDTag(value: string): ProjectDTag {
     }
     if (isProjectAddress(value)) {
         throw new Error(
-            `Invalid ProjectDTag: "${value}" looks like a NIP-33 address. ` +
-            `Use extractDTagFromAddress() to extract the d-tag.`
+            `Invalid ProjectDTag: "${value}" looks like a NIP-33 address. Use extractDTagFromAddress() to extract the d-tag.`
         );
     }
     return value as ProjectDTag;

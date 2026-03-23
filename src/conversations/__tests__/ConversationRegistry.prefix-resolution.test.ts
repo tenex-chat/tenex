@@ -6,8 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { conversationRegistry } from "../ConversationRegistry";
 import { prefixKVStore, PrefixKVStore } from "@/services/storage";
 
@@ -79,7 +80,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
         if (originalTenexBaseDir !== undefined) {
             process.env.TENEX_BASE_DIR = originalTenexBaseDir;
         } else {
-            delete process.env.TENEX_BASE_DIR;
+            process.env.TENEX_BASE_DIR = undefined;
         }
         // Restore mocks
         mock.restore();
@@ -96,7 +97,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
 
         it("should resolve 12-char prefix when PrefixKVStore has the mapping", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             // Create a conversation so it exists in the registry
             await conversationRegistry.create(
@@ -118,19 +119,19 @@ describe("ConversationRegistry Prefix Resolution", () => {
 
         it("should return undefined for unknown 12-char prefix", () => {
             // Use a prefix that's unlikely to exist
-            const unknownPrefix = generateUniqueTestId().substring(0, 12);
+            const unknownPrefix = shortenConversationId(generateUniqueTestId());
             const result = conversationRegistry.get(unknownPrefix);
             expect(result).toBeUndefined();
         });
 
         it("has() should return false for unknown prefix", () => {
-            const unknownPrefix = generateUniqueTestId().substring(0, 12);
+            const unknownPrefix = shortenConversationId(generateUniqueTestId());
             expect(conversationRegistry.has(unknownPrefix)).toBe(false);
         });
 
         it("should handle case-insensitive prefixes via ConversationRegistry", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             // Create a conversation so it exists in the registry
             await conversationRegistry.create(
@@ -168,7 +169,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
         it("should allow lookup by prefix after create", async () => {
             // Create a mock NDKEvent with a unique ID for this test
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             await conversationRegistry.create(
                 createEnvelope(testId, "Test message for prefix lookup")
@@ -215,7 +216,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
 
         it("has() with 12-char prefix returns true when conversation exists", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             await conversationRegistry.create(createEnvelope(testId, "Test"));
 
@@ -227,7 +228,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
     describe("getOrLoad() prefix resolution", () => {
         it("getOrLoad() should resolve 12-char prefix to full ID", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             await conversationRegistry.create(
                 createEnvelope(testId, "Test message for getOrLoad prefix")
@@ -245,7 +246,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
 
         it("getOrLoad() should handle uppercase prefix", async () => {
             const testId = generateUniqueTestId();
-            const upperCasePrefix = testId.substring(0, 12).toUpperCase();
+            const upperCasePrefix = shortenConversationId(testId).toUpperCase();
 
             await conversationRegistry.create(
                 createEnvelope(testId, "Test message for getOrLoad uppercase")
@@ -265,7 +266,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
     describe("on-disk resolution after cache clear", () => {
         it("should resolve prefix after clearing in-memory cache (simulating reload)", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
 
             await conversationRegistry.create(
                 createEnvelope(testId, "Test message for disk persistence")
@@ -295,7 +296,7 @@ describe("ConversationRegistry Prefix Resolution", () => {
 
         it("should resolve uppercase prefix after cache clear", async () => {
             const testId = generateUniqueTestId();
-            const testPrefix = testId.substring(0, 12);
+            const testPrefix = shortenConversationId(testId);
             const upperCasePrefix = testPrefix.toUpperCase();
 
             await conversationRegistry.create(

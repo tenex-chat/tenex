@@ -14,7 +14,7 @@ import { MCPManager } from "@/services/mcp/MCPManager";
 import { McpSubscriptionService } from "@/services/mcp/McpSubscriptionService";
 import { deliverMcpNotification } from "@/services/mcp/McpNotificationDelivery";
 import { installMCPServerFromEvent } from "@/services/mcp/mcpInstaller";
-import { createLocalReportStore, LocalReportStore } from "@/services/reports";
+import { createLocalReportStore, type LocalReportStore } from "@/services/reports";
 import { ProjectStatusService } from "@/services/status/ProjectStatusService";
 import { OperationsStatusService } from "@/services/status/OperationsStatusService";
 import { prefixKVStore } from "@/services/storage";
@@ -31,6 +31,7 @@ import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import type { NDKProject } from "@nostr-dev-kit/ndk";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import chalk from "chalk";
+import { shortenEventId } from "@/utils/conversation-id";
 
 /**
  * Self-contained runtime for a single project.
@@ -457,13 +458,13 @@ export class ProjectRuntime {
             for (const eventId of mcpEventIds) {
                 try {
                     trace.getActiveSpan()?.addEvent("project_runtime.mcp_fetching", {
-                        "mcp.event_id": eventId.substring(0, 12),
+                        "mcp.event_id": shortenEventId(eventId),
                     });
                     const mcpEvent = await ndk.fetchEvent(eventId);
 
                     if (!mcpEvent) {
                         logger.warn(
-                            `[ProjectRuntime] MCP tool event not found: ${eventId.substring(0, 12)}`
+                            `[ProjectRuntime] MCP tool event not found: ${shortenEventId(eventId)}`
                         );
                         installedCount.failed++;
                         continue;
@@ -472,7 +473,7 @@ export class ProjectRuntime {
                     const mcpTool = NDKMCPTool.from(mcpEvent);
                     trace.getActiveSpan()?.addEvent("project_runtime.mcp_installing", {
                         "mcp.name": mcpTool.name ?? "unnamed",
-                        "mcp.event_id": eventId.substring(0, 12),
+                        "mcp.event_id": shortenEventId(eventId),
                     });
 
                     await installMCPServerFromEvent(this.metadataPath, mcpTool);
@@ -484,7 +485,7 @@ export class ProjectRuntime {
                     });
                 } catch (error) {
                     logger.error("[ProjectRuntime] Failed to install MCP tool", {
-                        eventId: eventId.substring(0, 12),
+                        eventId: shortenEventId(eventId),
                         error: error instanceof Error ? error.message : String(error),
                     });
                     installedCount.failed++;

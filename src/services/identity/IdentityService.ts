@@ -1,6 +1,6 @@
 import { getPubkeyService } from "@/services/PubkeyService";
 import {
-    IdentityBindingStore,
+    type IdentityBindingStore,
     getIdentityBindingStore,
 } from "@/services/identity/IdentityBindingStoreService";
 import type { IdentityBinding, IdentityLookup } from "@/services/identity/types";
