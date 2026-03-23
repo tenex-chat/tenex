@@ -772,9 +772,11 @@ describe("Executor Finalization Guard", () => {
      * Returns false if executor should defer (return undefined).
      */
     function shouldFinalize(
-      hasMessageContent: boolean,
+      completionMessage: string | undefined,
       outstandingWork: { hasWork: boolean; details: { queuedInjections: number; pendingDelegations: number; completedDelegations: number } }
     ): boolean {
+      const hasMessageContent = (completionMessage?.trim().length ?? 0) > 0;
+
       // From AgentExecutor.executeOnce():
       // if (!hasMessageContent && outstandingWork.hasWork) {
       //   return undefined; // Don't finalize
@@ -803,10 +805,8 @@ describe("Executor Finalization Guard", () => {
       );
 
       // Executor receives empty completion (no message content)
-      const hasMessageContent = false;
-
       // CRITICAL: Should NOT finalize because there's queued work
-      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(false);
+      expect(shouldFinalize("", outstandingWork)).toBe(false);
     });
 
     test("defers finalization when pending delegations exist and no message content", () => {
@@ -832,10 +832,27 @@ describe("Executor Finalization Guard", () => {
         ralNumber
       );
 
-      const hasMessageContent = false;
-
       // Should NOT finalize because delegation is still pending
-      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(false);
+      expect(shouldFinalize("", outstandingWork)).toBe(false);
+    });
+
+    test("treats whitespace-only completion messages as empty when outstanding work exists", () => {
+      const ralNumber = ralRegistry.create(AGENT_PUBKEY, CONVERSATION_ID, PROJECT_ID);
+
+      ralRegistry.queueUserMessage(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber,
+        "Delegation result arrived"
+      );
+
+      const outstandingWork = ralRegistry.hasOutstandingWork(
+        AGENT_PUBKEY,
+        CONVERSATION_ID,
+        ralNumber
+      );
+
+      expect(shouldFinalize("   \n\t  ", outstandingWork)).toBe(false);
     });
 
     test("allows finalization when message content exists (even with outstanding work)", () => {
@@ -856,11 +873,9 @@ describe("Executor Finalization Guard", () => {
       );
 
       // Executor has actual message content to publish
-      const hasMessageContent = true;
-
       // Should finalize because there's content to publish
       // (the outstanding work will be processed in next iteration)
-      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+      expect(shouldFinalize("Visible reply", outstandingWork)).toBe(true);
     });
 
     test("allows finalization when no outstanding work and no message content", () => {
@@ -872,10 +887,8 @@ describe("Executor Finalization Guard", () => {
         ralNumber
       );
 
-      const hasMessageContent = false;
-
       // Should finalize (though will throw error for missing completion event)
-      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+      expect(shouldFinalize("", outstandingWork)).toBe(true);
       expect(outstandingWork.hasWork).toBe(false);
     });
 
@@ -888,10 +901,8 @@ describe("Executor Finalization Guard", () => {
         ralNumber
       );
 
-      const hasMessageContent = true;
-
       // Normal finalization path - has content, no outstanding work
-      expect(shouldFinalize(hasMessageContent, outstandingWork)).toBe(true);
+      expect(shouldFinalize("Visible reply", outstandingWork)).toBe(true);
     });
 
     /**
@@ -924,7 +935,7 @@ describe("Executor Finalization Guard", () => {
         CONVERSATION_ID,
         ralNumber
       );
-      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+      expect(shouldFinalize("", outstandingWork)).toBe(false);
 
       // Step 2: Delegation completes, moves from pending to completed
       ralRegistry.recordCompletion({
@@ -956,7 +967,7 @@ describe("Executor Finalization Guard", () => {
       expect(outstandingWork.details.queuedInjections).toBe(1);   // Result queued!
 
       // Executor should NOT finalize - the queued result needs processing
-      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+      expect(shouldFinalize("", outstandingWork)).toBe(false);
 
       // Step 5: After injection is consumed, still has completed delegation
       ralRegistry.getAndConsumeInjections(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
@@ -968,7 +979,7 @@ describe("Executor Finalization Guard", () => {
 
       expect(outstandingWork.hasWork).toBe(true); // Completed delegation still unprocessed
       expect(outstandingWork.details.completedDelegations).toBe(1);
-      expect(shouldFinalize(false, outstandingWork)).toBe(false);
+      expect(shouldFinalize("", outstandingWork)).toBe(false);
 
       // Step 6: After completed delegations are consumed (by resolveRAL), finalization is allowed
       ralRegistry.clearCompletedDelegations(AGENT_PUBKEY, CONVERSATION_ID, ralNumber);
@@ -979,7 +990,7 @@ describe("Executor Finalization Guard", () => {
       );
 
       expect(outstandingWork.hasWork).toBe(false);
-      expect(shouldFinalize(false, outstandingWork)).toBe(true);
+      expect(shouldFinalize("", outstandingWork)).toBe(true);
     });
   });
 });

@@ -62,6 +62,11 @@ describe("LocalInboundAdapter", () => {
                 kind: "agent",
             },
         ]);
+        expect(envelope.capabilities).toEqual([
+            "local-gateway",
+            "project-routing",
+            "linked-nostr-identity",
+        ]);
         expect(envelope.metadata.eventKind).toBe(1);
         expect(envelope.metadata.eventTagCount).toBe(2);
     });

@@ -1,5 +1,5 @@
 import type { AgentMetadataStore } from "@/services/agents";
-import type { TelegramAgentConfig } from "@/events/runtime/RuntimeAgent";
+import type { TelegramAgentConfig } from "./storage";
 import type { LLMService } from "@/llm/service";
 import type { MCPConfig, MCPServerConfig } from "@/llm/providers/types";
 import type { OnStreamStartCallback } from "@/llm/types";

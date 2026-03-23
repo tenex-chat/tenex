@@ -1,6 +1,15 @@
 import type { ChannelRef, InboundEnvelope, PrincipalRef } from "@/events/runtime/InboundEnvelope";
 import { NDKKind } from "@/nostr/kinds";
 
+const LOCAL_GATEWAY_CAPABILITY = "local-gateway";
+const PROJECT_ROUTING_CAPABILITY = "project-routing";
+const LINKED_NOSTR_IDENTITY_CAPABILITY = "linked-nostr-identity";
+const DEFAULT_LOCAL_INBOUND_CAPABILITIES = [
+    LOCAL_GATEWAY_CAPABILITY,
+    PROJECT_ROUTING_CAPABILITY,
+    LINKED_NOSTR_IDENTITY_CAPABILITY,
+] as const;
+
 interface LocalInboundActorInput {
     id: string;
     linkedPubkey?: string;
@@ -65,11 +74,7 @@ export class LocalInboundAdapter {
             recipients: payload.recipients.map(toPrincipalRef),
             content: payload.content,
             occurredAt: payload.occurredAt ?? Math.floor(Date.now() / 1000),
-            capabilities: payload.capabilities ?? [
-                "local-gateway",
-                "project-routing",
-                "linked-nostr-identity",
-            ],
+            capabilities: payload.capabilities ?? [...DEFAULT_LOCAL_INBOUND_CAPABILITIES],
             metadata: {
                 eventKind: NDKKind.Text,
                 eventTagCount: equivalentTagCount,

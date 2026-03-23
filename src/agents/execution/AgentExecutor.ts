@@ -60,6 +60,25 @@ interface AgentExecutorOptions {
     publisherFactory?: AgentRuntimePublisherFactory;
 }
 
+function failSchemaOnlyAccess(methodName: string): never {
+    throw new Error(`${methodName}() called in schema-only context`);
+}
+
+function createSchemaOnlyPublisher(): AgentRuntimePublisher {
+    return {
+        complete: async () => failSchemaOnlyAccess("agentPublisher.complete"),
+        conversation: async () => failSchemaOnlyAccess("agentPublisher.conversation"),
+        delegate: async () => failSchemaOnlyAccess("agentPublisher.delegate"),
+        ask: async () => failSchemaOnlyAccess("agentPublisher.ask"),
+        delegateFollowup: async () => failSchemaOnlyAccess("agentPublisher.delegateFollowup"),
+        error: async () => failSchemaOnlyAccess("agentPublisher.error"),
+        lesson: async () => failSchemaOnlyAccess("agentPublisher.lesson"),
+        toolUse: async () => failSchemaOnlyAccess("agentPublisher.toolUse"),
+        streamTextDelta: async () => failSchemaOnlyAccess("agentPublisher.streamTextDelta"),
+        delegationMarker: async () => failSchemaOnlyAccess("agentPublisher.delegationMarker"),
+    };
+}
+
 export class AgentExecutor {
     private readonly publisherFactory: AgentRuntimePublisherFactory;
 
@@ -109,9 +128,7 @@ export class AgentExecutor {
             projectBasePath: projectPath || "",
             workingDirectory: projectPath || "",
             currentBranch: "main",
-            agentPublisher: new Proxy({} as AgentRuntimePublisher, {
-                get: (_, prop) => { throw new Error(`agentPublisher.${String(prop)} called in schema-only context`); },
-            }),
+            agentPublisher: createSchemaOnlyPublisher(),
             ralNumber: 0,
             conversationStore: new Proxy({} as ConversationStore, {
                 get: (_, prop) => { throw new Error(`conversationStore.${String(prop)} called in schema-only context`); },
@@ -464,7 +481,7 @@ export class AgentExecutor {
         // INVARIANT GUARD: If there's outstanding work (queued injections, pending delegations,
         // or completed delegations not yet consumed), we should NOT finalize.
         const trimmedCompletionMessage = completionEvent?.message?.trim() ?? "";
-        const hasMessageContent = completionEvent?.message && completionEvent.message.length > 0;
+        const hasMessageContent = trimmedCompletionMessage.length > 0;
         if (!hasMessageContent && outstandingWork.hasWork) {
             if (silentCompletionRequested) {
                 ralRegistry.clearSilentCompletionRequest(

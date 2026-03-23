@@ -1,4 +1,5 @@
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+import { toNativeId } from "@/events/runtime/envelope-classifier";
 import {
     parseTelegramChannelId,
     parseTelegramNativeMessageId,
@@ -12,11 +13,6 @@ export interface DiagnosticEventSnapshot {
     tags: string[][];
 }
 
-function unwrapQualifiedMessageId(messageId: string): string {
-    const separatorIndex = messageId.indexOf(":");
-    return separatorIndex === -1 ? messageId : messageId.substring(separatorIndex + 1);
-}
-
 export function buildDiagnosticEventSnapshot(
     envelope: InboundEnvelope
 ): DiagnosticEventSnapshot {
@@ -27,7 +23,7 @@ export function buildDiagnosticEventSnapshot(
     }
 
     if (envelope.message.replyToId) {
-        tags.push(["e", unwrapQualifiedMessageId(envelope.message.replyToId)]);
+        tags.push(["e", toNativeId(envelope.message.replyToId)]);
     }
 
     for (const recipient of envelope.recipients) {

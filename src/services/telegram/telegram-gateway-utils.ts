@@ -1,5 +1,5 @@
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
-import type { TelegramChatBinding } from "@/events/runtime/RuntimeAgent";
+import type { TelegramChatBinding } from "@/agents/types/storage";
 import type {
     TelegramMessage,
     TelegramUpdate,

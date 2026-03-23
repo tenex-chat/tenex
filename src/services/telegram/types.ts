@@ -4,9 +4,8 @@ import type {
 } from "@/events/runtime/InboundEnvelope";
 import type {
     RuntimeAgentRef,
-    TelegramAgentConfig,
-    TelegramChatBinding,
 } from "@/events/runtime/RuntimeAgent";
+import type { TelegramAgentConfig, TelegramChatBinding } from "@/agents/types/storage";
 
 export interface TelegramUser {
     id: number;
