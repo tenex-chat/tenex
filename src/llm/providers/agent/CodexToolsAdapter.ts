@@ -1,13 +1,16 @@
 import type { AISdkTool } from "@/tools/types";
 import { logger } from "@/utils/logger";
 import {
-    createSdkMcpServer,
+    createLocalMcpServer,
     tool,
+    type LocalMcpServer,
     type LocalTool as Tool,
     type LocalToolDefinition as ToolDefinition,
     type SdkMcpServer,
 } from "ai-sdk-provider-codex-cli";
 import { z, type ZodRawShape } from "zod";
+
+const SDK_MCP_SERVER_MARKER = Symbol.for("ai-sdk-provider-codex-cli.sdkMcpServer");
 
 export class CodexToolsAdapter {
     static createSdkMcpServer(
@@ -37,10 +40,106 @@ export class CodexToolsAdapter {
             toolNames: localTools.map(([name]) => name),
         });
 
-        return createSdkMcpServer({
+        return this.createHttpHeaderAuthenticatedSdkServer({
             name: serverName,
             tools: codexTools,
         });
+    }
+
+    private static createHttpHeaderAuthenticatedSdkServer(options: {
+        name: string;
+        tools: Tool[];
+    }): SdkMcpServer {
+        let server: LocalMcpServer | undefined;
+        let startPromise: Promise<LocalMcpServer> | undefined;
+        let stopPromise: Promise<void> | undefined;
+        const toHttpHeaderConfig = (localServer: LocalMcpServer): LocalMcpServer["config"] => {
+            const authorizationHeader = localServer.config.bearerToken
+                ? { Authorization: `Bearer ${localServer.config.bearerToken}` }
+                : undefined;
+
+            return {
+                transport: "http",
+                url: localServer.config.url,
+                httpHeaders: authorizationHeader,
+            };
+        };
+
+        return {
+            [SDK_MCP_SERVER_MARKER]: true,
+            name: options.name,
+            tools: options.tools,
+            get _server() {
+                return server;
+            },
+            set _server(nextServer: LocalMcpServer | undefined) {
+                server = nextServer;
+            },
+            async _start() {
+                while (true) {
+                    if (server) {
+                        return toHttpHeaderConfig(server);
+                    }
+
+                    if (startPromise) {
+                        const started = await startPromise;
+                        return toHttpHeaderConfig(started);
+                    }
+
+                    if (stopPromise) {
+                        await stopPromise;
+                        continue;
+                    }
+
+                    const startup = (async () => {
+                        const created = await createLocalMcpServer({
+                            name: options.name,
+                            tools: options.tools,
+                        });
+                        server = created;
+                        return created;
+                    })();
+
+                    startPromise = startup;
+                    try {
+                        const started = await startup;
+                        return toHttpHeaderConfig(started);
+                    } finally {
+                        if (startPromise === startup) {
+                            startPromise = undefined;
+                        }
+                    }
+                }
+            },
+            async _stop() {
+                if (stopPromise) {
+                    await stopPromise;
+                    return;
+                }
+
+                const stopping = (async () => {
+                    if (startPromise) {
+                        await startPromise.catch(() => undefined);
+                    }
+
+                    const serverToStop = server;
+                    server = undefined;
+                    if (serverToStop) {
+                        await serverToStop.stop();
+                    }
+                })();
+
+                stopPromise = stopping;
+                try {
+                    await stopping;
+                } finally {
+                    if (stopPromise === stopping) {
+                        stopPromise = undefined;
+                    }
+                    startPromise = undefined;
+                }
+            },
+        } as unknown as SdkMcpServer;
     }
 
     /**

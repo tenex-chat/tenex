@@ -12,9 +12,15 @@ const createCodexAppServerMock = mock(() => mock(() => ({
 
 mock.module("ai-sdk-provider-codex-cli", () => ({
     createCodexAppServer: createCodexAppServerMock,
-    createSdkMcpServer: (args: { name: string; tools: unknown[] }) => ({
-        name: args.name,
-        tools: args.tools,
+    createLocalMcpServer: async (args: { name: string; tools: unknown[] }) => ({
+        config: {
+            transport: "http",
+            url: `http://127.0.0.1/${args.name}`,
+            bearerToken: "test-token",
+        },
+        url: `http://127.0.0.1/${args.name}`,
+        port: 8080,
+        stop: async () => undefined,
     }),
     tool: (config: {
         name: string;
