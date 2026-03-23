@@ -43,6 +43,9 @@ export interface ExecutionContextManagement {
     requestContext: ContextManagementRequestContext;
 }
 
+const TENEX_EMPTY_SCRATCHPAD_GUIDANCE =
+    "If helpful, some commonly useful scratchpad keys in TENEX are: objective, findings, notes, side-effects, next-steps, errors, types, patterns, files, commands, and code. Use whatever keys fit the task.";
+
 function createSummarizationModel(options: {
     conversationId: string;
     agent: AgentInstance;
@@ -137,6 +140,7 @@ function createConversationContextManagementRuntime(options: {
                             : [],
                 },
                 reminderTone: "informational",
+                emptyStateGuidance: TENEX_EMPTY_SCRATCHPAD_GUIDANCE,
                 budgetProfile: managedBudgetProfile,
                 forceToolThresholdRatio: settings.forceScratchpadEnabled
                     ? settings.forceScratchpadThresholdPercent / 100
