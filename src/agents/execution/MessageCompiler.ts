@@ -53,6 +53,8 @@ export interface MessageCompilerContext {
     metaModelSystemPrompt?: string;
     /** Variant-specific system prompt to inject when a meta model variant is active */
     variantSystemPrompt?: string;
+    /** Include MCP resource discovery in the system prompt. Defaults to true. */
+    includeMcpResources?: boolean;
 }
 
 export interface CompiledMessages {

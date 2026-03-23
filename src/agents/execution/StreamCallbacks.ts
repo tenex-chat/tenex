@@ -235,6 +235,7 @@ export function createPrepareStep(
                     pendingDelegations,
                     completedDelegations,
                     ralNumber,
+                    includeMcpResources: false,
                 });
 
                 updateReminderData({

@@ -24,6 +24,19 @@ import type { Tool as CoreTool } from "ai";
 
 type MCPToolSet = Record<string, CoreTool<Record<string, unknown>, string>>;
 
+interface CachedListEntry<T> {
+    value: T[];
+    expiresAt: number;
+}
+
+export interface MCPListOptions {
+    timeoutMs?: number;
+    preferCache?: boolean;
+    allowStale?: boolean;
+}
+
+const MCP_METADATA_CACHE_TTL_MS = 30_000;
+
 interface MCPClientEntry {
     client: Client;
     transport: StdioClientTransport;
@@ -39,6 +52,10 @@ export class MCPManager {
     private metadataPath?: string;
     private workingDirectory?: string;
     private cachedTools: MCPToolSet = {};
+    private resourceListCache = new Map<string, CachedListEntry<Resource>>();
+    private resourceTemplateCache = new Map<string, CachedListEntry<ResourceTemplate>>();
+    private resourceListInFlight = new Map<string, Promise<Resource[]>>();
+    private resourceTemplateInFlight = new Map<string, Promise<ResourceTemplate[]>>();
     /** Per-server list of notification handlers (dispatcher pattern to avoid clobbering) */
     private resourceNotificationHandlers: Map<string, ResourceNotificationHandler[]> = new Map();
 
@@ -317,6 +334,10 @@ export class MCPManager {
         await Promise.all(shutdownPromises);
         this.clients.clear();
         this.cachedTools = {};
+        this.resourceListCache.clear();
+        this.resourceTemplateCache.clear();
+        this.resourceListInFlight.clear();
+        this.resourceTemplateInFlight.clear();
         // Clear notification handlers so reload() re-registers them on new clients
         this.resourceNotificationHandlers.clear();
         this.isInitialized = false;
@@ -393,23 +414,7 @@ export class MCPManager {
      * @returns Array of resources from that server
      */
     async listResources(serverName: string): Promise<Resource[]> {
-        const entry = this.clients.get(serverName);
-        if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
-        }
-
-        try {
-            const result = await entry.client.listResources();
-            return result.resources;
-        } catch (error) {
-            logger.error(`Failed to list resources from '${serverName}':`, formatAnyError(error));
-            throw error;
-        }
+        return this.listResourcesWithOptions(serverName);
     }
 
     /**
@@ -441,26 +446,41 @@ export class MCPManager {
      * @returns Array of resource templates from that server
      */
     async listResourceTemplates(serverName: string): Promise<ResourceTemplate[]> {
-        const entry = this.clients.get(serverName);
-        if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
-        }
+        return this.listResourceTemplatesWithOptions(serverName);
+    }
 
-        try {
-            const result = await entry.client.listResourceTemplates();
-            return result.resourceTemplates;
-        } catch (error) {
-            logger.error(
-                `Failed to list resource templates from '${serverName}':`,
-                formatAnyError(error)
-            );
-            throw error;
-        }
+    async listResourcesWithOptions(
+        serverName: string,
+        options: MCPListOptions = {}
+    ): Promise<Resource[]> {
+        return this.fetchCachedMetadata<Resource>(
+            serverName,
+            this.resourceListCache,
+            this.resourceListInFlight,
+            async (entry) => {
+                const result = await entry.client.listResources();
+                return result.resources;
+            },
+            "resources",
+            options
+        );
+    }
+
+    async listResourceTemplatesWithOptions(
+        serverName: string,
+        options: MCPListOptions = {}
+    ): Promise<ResourceTemplate[]> {
+        return this.fetchCachedMetadata<ResourceTemplate>(
+            serverName,
+            this.resourceTemplateCache,
+            this.resourceTemplateInFlight,
+            async (entry) => {
+                const result = await entry.client.listResourceTemplates();
+                return result.resourceTemplates;
+            },
+            "resource_templates",
+            options
+        );
     }
 
     /**
@@ -496,15 +516,7 @@ export class MCPManager {
         serverName: string,
         uri: string
     ): Promise<ReadResourceResult> {
-        const entry = this.clients.get(serverName);
-        if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
-        }
+        const entry = this.getClientEntry(serverName);
 
         try {
             return await entry.client.readResource({ uri });
@@ -554,15 +566,7 @@ export class MCPManager {
      * @param resourceUri - URI of the resource to subscribe to
      */
     async subscribeToResource(serverName: string, resourceUri: string): Promise<void> {
-        const entry = this.clients.get(serverName);
-        if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
-        }
+        const entry = this.getClientEntry(serverName);
 
         try {
             // Official SDK method - properly supported
@@ -587,15 +591,7 @@ export class MCPManager {
      * @param resourceUri - URI of the resource to unsubscribe from
      */
     async unsubscribeFromResource(serverName: string, resourceUri: string): Promise<void> {
-        const entry = this.clients.get(serverName);
-        if (!entry) {
-            const validServers = this.getRunningServers();
-            const serverList =
-                validServers.length > 0
-                    ? `Valid servers: ${validServers.join(", ")}`
-                    : "No MCP servers are currently running";
-            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
-        }
+        const entry = this.getClientEntry(serverName);
 
         try {
             // Official SDK method - properly supported
@@ -676,6 +672,196 @@ export class MCPManager {
                 }
             }
         };
+    }
+
+    private getClientEntry(serverName: string): MCPClientEntry {
+        const entry = this.clients.get(serverName);
+        if (!entry) {
+            const validServers = this.getRunningServers();
+            const serverList =
+                validServers.length > 0
+                    ? `Valid servers: ${validServers.join(", ")}`
+                    : "No MCP servers are currently running";
+            throw new Error(`MCP server '${serverName}' not found. ${serverList}`);
+        }
+
+        return entry;
+    }
+
+    private getCachedListValue<T>(
+        cache: Map<string, CachedListEntry<T>>,
+        serverName: string,
+        allowStale = false
+    ): T[] | undefined {
+        const cached = cache.get(serverName);
+        if (!cached) {
+            return undefined;
+        }
+
+        if (allowStale || cached.expiresAt > Date.now()) {
+            return cached.value;
+        }
+
+        return undefined;
+    }
+
+    private setCachedListValue<T>(
+        cache: Map<string, CachedListEntry<T>>,
+        serverName: string,
+        value: T[]
+    ): void {
+        cache.set(serverName, {
+            value,
+            expiresAt: Date.now() + MCP_METADATA_CACHE_TTL_MS,
+        });
+    }
+
+    private async withOptionalTimeout<T>(
+        operation: Promise<T>,
+        timeoutMs?: number
+    ): Promise<T> {
+        if (!timeoutMs || timeoutMs <= 0) {
+            return await operation;
+        }
+
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        const timeoutPromise = new Promise<T>((_, reject) => {
+            timeoutHandle = setTimeout(
+                () => reject(new Error(`Request timed out after ${timeoutMs}ms`)),
+                timeoutMs
+            );
+        });
+
+        try {
+            return await Promise.race([operation, timeoutPromise]);
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
+    private async fetchCachedMetadata<T>(
+        serverName: string,
+        cache: Map<string, CachedListEntry<T>>,
+        inFlight: Map<string, Promise<T[]>>,
+        fetcher: (entry: MCPClientEntry) => Promise<T[]>,
+        metadataKind: "resources" | "resource_templates",
+        options: MCPListOptions = {}
+    ): Promise<T[]> {
+        const { timeoutMs, preferCache = false, allowStale = false } = options;
+        const cachedValue = preferCache
+            ? this.getCachedListValue(cache, serverName)
+            : undefined;
+        if (cachedValue) {
+            this.addMetadataTelemetryEvent("mcp.metadata_cache_hit", {
+                "server.name": serverName,
+                "mcp.metadata.kind": metadataKind,
+                "mcp.cache.prefer": preferCache,
+                "mcp.cache.allow_stale": allowStale,
+                "mcp.fetch.source": "cache",
+                "mcp.result.count": cachedValue.length,
+                ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+            });
+            return cachedValue;
+        }
+
+        const existingInFlight = inFlight.get(serverName);
+        const requestPromise = existingInFlight ?? (async () => {
+            const entry = this.getClientEntry(serverName);
+            this.addMetadataTelemetryEvent("mcp.metadata_fetch_started", {
+                "server.name": serverName,
+                "mcp.metadata.kind": metadataKind,
+                "mcp.cache.prefer": preferCache,
+                "mcp.cache.allow_stale": allowStale,
+                "mcp.fetch.source": "network",
+                ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+            });
+
+            try {
+                const value = await fetcher(entry);
+                this.setCachedListValue(cache, serverName, value);
+                this.addMetadataTelemetryEvent("mcp.metadata_fetch_succeeded", {
+                    "server.name": serverName,
+                    "mcp.metadata.kind": metadataKind,
+                    "mcp.cache.prefer": preferCache,
+                    "mcp.cache.allow_stale": allowStale,
+                    "mcp.fetch.source": "network",
+                    "mcp.result.count": value.length,
+                    ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+                });
+                return value;
+            } catch (error) {
+                this.addMetadataTelemetryEvent("mcp.metadata_fetch_failed", {
+                    "server.name": serverName,
+                    "mcp.metadata.kind": metadataKind,
+                    "mcp.cache.prefer": preferCache,
+                    "mcp.cache.allow_stale": allowStale,
+                    "mcp.fetch.source": "network",
+                    "mcp.error": formatAnyError(error),
+                    ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+                });
+                logger.error(
+                    `Failed to list ${metadataKind} from '${serverName}':`,
+                    formatAnyError(error)
+                );
+                throw error;
+            } finally {
+                inFlight.delete(serverName);
+            }
+        })();
+
+        if (!existingInFlight) {
+            inFlight.set(serverName, requestPromise);
+        }
+
+        try {
+            return await this.withOptionalTimeout(requestPromise, timeoutMs);
+        } catch (error) {
+            const formattedError = formatAnyError(error);
+            if (formattedError.includes("Request timed out after")) {
+                this.addMetadataTelemetryEvent("mcp.metadata_fetch_failed", {
+                    "server.name": serverName,
+                    "mcp.metadata.kind": metadataKind,
+                    "mcp.cache.prefer": preferCache,
+                    "mcp.cache.allow_stale": allowStale,
+                    "mcp.fetch.source": "network",
+                    "mcp.error": formattedError,
+                    ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+                });
+            }
+
+            const staleValue = this.getCachedListValue(cache, serverName, allowStale);
+            if (staleValue) {
+                this.addMetadataTelemetryEvent("mcp.metadata_stale_cache_fallback", {
+                    "server.name": serverName,
+                    "mcp.metadata.kind": metadataKind,
+                    "mcp.cache.prefer": preferCache,
+                    "mcp.cache.allow_stale": allowStale,
+                    "mcp.fetch.source": "stale_cache_fallback",
+                    "mcp.result.count": staleValue.length,
+                    "mcp.error": formattedError,
+                    ...(timeoutMs ? { "mcp.timeout_ms": timeoutMs } : {}),
+                });
+                logger.warn(
+                    `Using stale cached ${metadataKind} for MCP server '${serverName}' after fetch failure`,
+                    {
+                        error: formattedError,
+                        timeoutMs,
+                    }
+                );
+                return staleValue;
+            }
+
+            throw error;
+        }
+    }
+
+    private addMetadataTelemetryEvent(
+        eventName: string,
+        attributes: Record<string, string | number | boolean>
+    ): void {
+        trace.getActiveSpan()?.addEvent(eventName, attributes);
     }
 }
 

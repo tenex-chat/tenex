@@ -113,6 +113,8 @@ export interface BuildSystemPromptOptions {
     skillContent?: string;
     /** Individual skill data for rendering with files */
     skills?: SkillData[];
+    /** Include MCP resource discovery in the system prompt. Defaults to true. */
+    includeMcpResources?: boolean;
 }
 
 
@@ -149,7 +151,8 @@ async function addCoreAgentFragments(
     agent: AgentInstance,
     conversation?: ConversationStore,
     mcpManager?: MCPManager,
-    parentSpan?: import("@opentelemetry/api").Span
+    parentSpan?: import("@opentelemetry/api").Span,
+    includeMcpResources = true
 ): Promise<void> {
     // Add referenced article context if present
     if (conversation?.metadata?.referencedArticle) {
@@ -240,7 +243,7 @@ async function addCoreAgentFragments(
 
 
     // Add MCP resources if agent has any MCP tools and mcpManager is available
-    if (mcpManager) {
+    if (includeMcpResources && mcpManager) {
         const t0 = performance.now();
         const resourcesPerServer = await fetchAgentMcpResources(agent.tools, mcpManager);
         parentSpan?.addEvent("mcp_resources_fetched", { "duration_ms": Math.round(performance.now() - t0) });
@@ -548,6 +551,7 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
         nudgeToolPermissions,
         skillContent,
         skills,
+        includeMcpResources = true,
     } = options;
 
     // Lazily instantiate PromptCompilerService for this agent (TIN-10).
@@ -749,7 +753,14 @@ async function buildMainSystemPrompt(options: BuildSystemPromptOptions, parentSp
 
     // Add core agent fragments using shared composition
     t0 = performance.now();
-    await addCoreAgentFragments(systemPromptBuilder, agentForFragments, conversation, mcpManager, parentSpan);
+    await addCoreAgentFragments(
+        systemPromptBuilder,
+        agentForFragments,
+        conversation,
+        mcpManager,
+        parentSpan,
+        includeMcpResources
+    );
     parentSpan?.addEvent("core_agent_fragments_added", { "duration_ms": Math.round(performance.now() - t0) });
 
     // Handle lessons: ONLY add via fragment if NOT using PromptCompilerService

@@ -220,6 +220,24 @@ describe("MessageCompiler", () => {
         expect(second.counts.conversation).toBe(4);
     });
 
+    it("can skip MCP resource discovery for prompt rebuilds", async () => {
+        conversationStore.addMessage({
+            pubkey: userPubkey,
+            content: "hello",
+            messageType: "text",
+        });
+        const ralNumber = conversationStore.createRal(agentPubkey);
+
+        await compile(ralNumber, {
+            includeMcpResources: false,
+        });
+
+        expect(buildSystemPromptMessages).toHaveBeenCalledTimes(1);
+        expect(buildSystemPromptMessages.mock.calls[0]?.[0]).toMatchObject({
+            includeMcpResources: false,
+        });
+    });
+
     it("includes meta-model and variant prompts in the rebuilt system prompt", async () => {
         conversationStore.addMessage({
             pubkey: userPubkey,

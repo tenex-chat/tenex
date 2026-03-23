@@ -4,6 +4,8 @@ import { logger } from "@/utils/logger";
 import { fragmentRegistry } from "../core/FragmentRegistry";
 import type { PromptFragment } from "../core/types";
 
+const MCP_PROMPT_FETCH_TIMEOUT_MS = 2_000;
+
 // Use official SDK types
 type MCPResource = Resource;
 type MCPResourceTemplate = ResourceTemplate;
@@ -64,8 +66,16 @@ export async function fetchAgentMcpResources(
         agentRunningServers.map(async (serverName: string) => {
             try {
                 const [resources, templates] = await Promise.all([
-                    mcpManager.listResources(serverName),
-                    mcpManager.listResourceTemplates(serverName),
+                    mcpManager.listResourcesWithOptions(serverName, {
+                        timeoutMs: MCP_PROMPT_FETCH_TIMEOUT_MS,
+                        preferCache: true,
+                        allowStale: true,
+                    }),
+                    mcpManager.listResourceTemplatesWithOptions(serverName, {
+                        timeoutMs: MCP_PROMPT_FETCH_TIMEOUT_MS,
+                        preferCache: true,
+                        allowStale: true,
+                    }),
                 ]);
                 logger.debug(
                     `Fetched ${resources.length} resources and ${templates.length} templates from '${serverName}'`
