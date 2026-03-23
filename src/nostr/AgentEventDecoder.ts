@@ -303,11 +303,12 @@ export class AgentEventDecoder {
      */
     static classifyForDaemon(
         event: NDKEvent
-    ): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" {
+    ): "never_route" | "project" | "lesson" | "lesson_comment" | "conversation" | "boot" | "config_update" {
         if (this.isNeverRouteKind(event)) return "never_route";
         if (this.isProjectEvent(event)) return "project";
         if (this.isLessonEvent(event)) return "lesson";
         if (this.isLessonCommentEvent(event)) return "lesson_comment";
+        if (this.isConfigUpdate(event)) return "config_update";
         if (event.kind === NDKKind.Text) {
             return "conversation";
         }
