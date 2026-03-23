@@ -4,6 +4,7 @@ import { AnthropicProvider } from "../standard/AnthropicProvider";
 import { OpenAIProvider } from "../standard/OpenAIProvider";
 import { OllamaProvider } from "../standard/OllamaProvider";
 import { CodexProvider } from "../agent/CodexProvider";
+import { ClaudeProvider } from "../agent/ClaudeProvider";
 
 describe("Provider Metadata", () => {
     describe("standard providers", () => {
@@ -41,6 +42,14 @@ describe("Provider Metadata", () => {
             expect(CodexProvider.METADATA.capabilities.mcpSupport).toBe(true);
             expect(CodexProvider.METADATA.capabilities.requiresApiKey).toBe(false);
         });
+
+        it("ClaudeProvider has correct static METADATA", () => {
+            expect(ClaudeProvider.METADATA.id).toBe("claude");
+            expect(ClaudeProvider.METADATA.category).toBe("agent");
+            expect(ClaudeProvider.METADATA.capabilities.builtInTools).toBe(true);
+            expect(ClaudeProvider.METADATA.capabilities.mcpSupport).toBe(true);
+            expect(ClaudeProvider.METADATA.capabilities.requiresApiKey).toBe(false);
+        });
     });
 
     describe("instance metadata matches static", () => {
@@ -53,6 +62,9 @@ describe("Provider Metadata", () => {
 
             const codex = new CodexProvider();
             expect(codex.metadata).toBe(CodexProvider.METADATA);
+
+            const claude = new ClaudeProvider();
+            expect(claude.metadata).toBe(ClaudeProvider.METADATA);
         });
     });
 });
@@ -64,6 +76,7 @@ describe("Provider ID conventions", () => {
             AnthropicProvider.METADATA,
             OpenAIProvider.METADATA,
             OllamaProvider.METADATA,
+            ClaudeProvider.METADATA,
             CodexProvider.METADATA,
         ];
 
@@ -95,6 +108,7 @@ describe("Provider Registration Array", () => {
         expect(ids).toContain("anthropic");
         expect(ids).toContain("openai");
         expect(ids).toContain("ollama");
+        expect(ids).toContain("claude");
         expect(ids).toContain("codex");
     });
 });

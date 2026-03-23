@@ -62,7 +62,7 @@ export class LLMServiceFactory {
 
         // Also ensure agent providers are initialized (they don't need API keys).
         // Add them with empty configs if not already present.
-        const agentProviders = [PROVIDER_IDS.CODEX];
+        const agentProviders = [PROVIDER_IDS.CODEX, PROVIDER_IDS.CLAUDE];
         for (const providerId of agentProviders) {
             if (!configs[providerId]) {
                 configs[providerId] = {};
