@@ -36,31 +36,30 @@ const OAUTH_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for C
  * Wraps fetch for OAuth token requests to inject the mandatory Claude Code system prompt.
  * The Anthropic API enforces this identity check for setup-token (sk-ant-oat*) auth.
  */
-const oauthFetch: typeof globalThis.fetch = Object.assign(
-    async (...[url, init]: Parameters<typeof globalThis.fetch>): Promise<Response> => {
-        if (init?.body && typeof init.body === "string") {
-            try {
-                const body = JSON.parse(init.body) as Record<string, unknown>;
-                const existing = body.system;
-                if (typeof existing === "string" && existing.length > 0) {
-                    body.system = [
-                        { type: "text", text: OAUTH_SYSTEM_PROMPT },
-                        { type: "text", text: existing },
-                    ];
-                } else if (Array.isArray(existing)) {
-                    body.system = [{ type: "text", text: OAUTH_SYSTEM_PROMPT }, ...existing];
-                } else {
-                    body.system = [{ type: "text", text: OAUTH_SYSTEM_PROMPT }];
-                }
-                init = { ...init, body: JSON.stringify(body) };
-            } catch {
-                // not JSON, leave as-is
+const oauthFetch = (async (...[url, init]: Parameters<typeof globalThis.fetch>): Promise<Response> => {
+    if (init?.body && typeof init.body === "string") {
+        try {
+            const body = JSON.parse(init.body) as Record<string, unknown>;
+            const existing = body.system;
+            if (typeof existing === "string" && existing.length > 0) {
+                body.system = [
+                    { type: "text", text: OAUTH_SYSTEM_PROMPT },
+                    { type: "text", text: existing },
+                ];
+            } else if (Array.isArray(existing)) {
+                body.system = [{ type: "text", text: OAUTH_SYSTEM_PROMPT }, ...existing];
+            } else {
+                body.system = [{ type: "text", text: OAUTH_SYSTEM_PROMPT }];
             }
+            init = { ...init, body: JSON.stringify(body) };
+        } catch {
+            // not JSON, leave as-is
         }
-        return globalThis.fetch(url, init);
-    },
-    { preconnect: (globalThis.fetch as { preconnect?: unknown }).preconnect },
-);
+    }
+    return globalThis.fetch(url, init);
+}) as typeof globalThis.fetch;
+
+oauthFetch.preconnect = globalThis.fetch.preconnect;
 
 function isOAuthToken(key: string): boolean {
     return key.startsWith("sk-ant-oat");
