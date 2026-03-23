@@ -5,8 +5,12 @@ import type { MCPManager } from "@/services/mcp/MCPManager";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
 import { listWorktrees, createWorktree } from "@/utils/git/worktree";
 import { getCurrentBranchWithFallback } from "@/utils/git/initializeGitRepo";
+import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import type { ExecutionContext } from "./types";
+
+const tracer = trace.getTracer("tenex.execution-context");
 
 /**
  * Create an ExecutionContext with environment resolution from event
@@ -37,76 +41,135 @@ export async function createExecutionContext(params: {
      */
     mcpManager?: MCPManager;
 }): Promise<ExecutionContext> {
-    // Extract branch tag from event
-    const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
+    return tracer.startActiveSpan("tenex.execution_context.create", async (span) => {
+        const branchTag = params.triggeringEvent.tags.find(t => t[0] === "branch")?.[1];
 
-    // Resolve execution environment
-    let workingDirectory: string;
-    let currentBranch: string;
-
-    if (branchTag) {
-        // Branch specified in event - check if it's in a worktree
-        const worktrees = await listWorktrees(params.projectBasePath);
-        const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
-
-        if (matchingWorktree) {
-            // Found the worktree
-            workingDirectory = matchingWorktree.path;
-            currentBranch = branchTag;
-            logger.info("Using worktree from branch tag", {
-                branch: branchTag,
-                path: matchingWorktree.path
-            });
-        } else {
-            // Worktree not found - create it now
-            const baseBranch = await getCurrentBranchWithFallback(params.projectBasePath);
-
-            logger.info("Branch tag specified but worktree not found, creating it", {
-                branch: branchTag,
-                baseBranch,
-            });
-
-            try {
-                workingDirectory = await createWorktree(params.projectBasePath, branchTag, baseBranch);
-                currentBranch = branchTag;
-
-                logger.info("Created worktree for delegation", {
-                    branch: branchTag,
-                    path: workingDirectory,
-                    baseBranch,
-                });
-            } catch (error) {
-                // If worktree creation fails, fall back to project root with a warning
-                logger.error("Failed to create worktree, falling back to project root", {
-                    branch: branchTag,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-                workingDirectory = params.projectBasePath;
-                currentBranch = baseBranch;
-            }
-        }
-    } else {
-        // No branch tag - use project root (default branch)
-        workingDirectory = params.projectBasePath;
-        currentBranch = await getCurrentBranchWithFallback(params.projectBasePath);
-        logger.info("Using project root as working directory", {
-            path: workingDirectory,
-            branch: currentBranch
+        span.setAttributes({
+            "agent.slug": params.agent.slug,
+            "conversation.id": shortenConversationId(params.conversationId),
+            "execution.project_base_path": params.projectBasePath,
+            "execution.branch_tag_present": !!branchTag,
         });
-    }
 
-    return {
-        agent: params.agent,
-        conversationId: params.conversationId,
-        projectBasePath: params.projectBasePath,
-        workingDirectory,
-        currentBranch,
-        triggeringEvent: params.triggeringEvent,
-        agentPublisher: params.agentPublisher,
-        isDelegationCompletion: params.isDelegationCompletion,
-        hasPendingDelegations: params.hasPendingDelegations,
-        debug: params.debug,
-        mcpManager: params.mcpManager,
-        getConversation: () => ConversationStore.get(params.conversationId),
-    };
+        if (branchTag) {
+            span.setAttribute("execution.branch_tag", branchTag);
+        }
+
+        try {
+            let workingDirectory: string;
+            let currentBranch: string;
+
+            if (branchTag) {
+                span.addEvent("execution_context.worktree_lookup_started", {
+                    "branch.tag": branchTag,
+                });
+
+                const worktrees = await listWorktrees(params.projectBasePath);
+                const matchingWorktree = worktrees.find(wt => wt.branch === branchTag);
+
+                if (matchingWorktree) {
+                    workingDirectory = matchingWorktree.path;
+                    currentBranch = branchTag;
+
+                    span.addEvent("execution_context.worktree_found", {
+                        "branch.tag": branchTag,
+                        "worktree.path": matchingWorktree.path,
+                    });
+
+                    logger.info("Using worktree from branch tag", {
+                        branch: branchTag,
+                        path: matchingWorktree.path
+                    });
+                } else {
+                    span.addEvent("execution_context.worktree_missing", {
+                        "branch.tag": branchTag,
+                    });
+
+                    const baseBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+                    span.addEvent("execution_context.base_branch_resolved", {
+                        "branch.base": baseBranch,
+                    });
+
+                    logger.info("Branch tag specified but worktree not found, creating it", {
+                        branch: branchTag,
+                        baseBranch,
+                    });
+
+                    try {
+                        workingDirectory = await createWorktree(params.projectBasePath, branchTag, baseBranch);
+                        currentBranch = branchTag;
+
+                        span.addEvent("execution_context.worktree_created", {
+                            "branch.tag": branchTag,
+                            "branch.base": baseBranch,
+                            "worktree.path": workingDirectory,
+                        });
+
+                        logger.info("Created worktree for delegation", {
+                            branch: branchTag,
+                            path: workingDirectory,
+                            baseBranch,
+                        });
+                    } catch (error) {
+                        logger.error("Failed to create worktree, falling back to project root", {
+                            branch: branchTag,
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+
+                        workingDirectory = params.projectBasePath;
+                        currentBranch = baseBranch;
+
+                        span.addEvent("execution_context.worktree_create_failed_fallback", {
+                            "branch.tag": branchTag,
+                            "branch.base": baseBranch,
+                            "error": error instanceof Error ? error.message : String(error),
+                        });
+                    }
+                }
+            } else {
+                workingDirectory = params.projectBasePath;
+                currentBranch = await getCurrentBranchWithFallback(params.projectBasePath);
+
+                span.addEvent("execution_context.project_root_selected", {
+                    "branch.current": currentBranch,
+                    "working_directory": workingDirectory,
+                });
+
+                logger.info("Using project root as working directory", {
+                    path: workingDirectory,
+                    branch: currentBranch
+                });
+            }
+
+            span.setAttributes({
+                "execution.working_directory": workingDirectory,
+                "execution.current_branch": currentBranch,
+            });
+            span.setStatus({ code: SpanStatusCode.OK });
+
+            return {
+                agent: params.agent,
+                conversationId: params.conversationId,
+                projectBasePath: params.projectBasePath,
+                workingDirectory,
+                currentBranch,
+                triggeringEvent: params.triggeringEvent,
+                agentPublisher: params.agentPublisher,
+                isDelegationCompletion: params.isDelegationCompletion,
+                hasPendingDelegations: params.hasPendingDelegations,
+                debug: params.debug,
+                mcpManager: params.mcpManager,
+                getConversation: () => ConversationStore.get(params.conversationId),
+            };
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+        } finally {
+            span.end();
+        }
+    });
 }

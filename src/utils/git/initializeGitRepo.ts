@@ -3,8 +3,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { logger } from "@/utils/logger";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 const execAsync = promisify(exec);
+const tracer = trace.getTracer("tenex.git");
 
 /**
  * Result from git repository initialization or cloning.
@@ -175,30 +177,76 @@ export async function cloneGitRepository(
  * Get current git branch name
  */
 export async function getCurrentBranch(repoPath: string): Promise<string> {
-    try {
-        const { stdout } = await execAsync("git branch --show-current", { cwd: repoPath });
-        return stdout.trim();
-    } catch (error) {
-        logger.error("Failed to get current branch", { repoPath, error });
-        throw error;
-    }
+    return tracer.startActiveSpan("tenex.git.get_current_branch", async (span) => {
+        span.setAttribute("git.repo_path", repoPath);
+        span.addEvent("git.command_started", {
+            "git.command": "git branch --show-current",
+        });
+
+        try {
+            const { stdout } = await execAsync("git branch --show-current", { cwd: repoPath });
+            const branch = stdout.trim();
+            span.setAttribute("git.branch", branch);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return branch;
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            logger.error("Failed to get current branch", { repoPath, error });
+            throw error;
+        } finally {
+            span.end();
+        }
+    });
 }
 
 /**
  * Get current branch with fallback to main/master if detection fails
  */
 export async function getCurrentBranchWithFallback(projectPath: string): Promise<string> {
-    try {
-        return await getCurrentBranch(projectPath);
-    } catch (error) {
-        logger.warn("Failed to get current branch, trying fallbacks", { projectPath, error });
+    return tracer.startActiveSpan("tenex.git.get_current_branch_with_fallback", async (span) => {
+        span.setAttribute("git.project_path", projectPath);
 
-        // Try fallback branch names
         try {
-            await fs.access(path.join(projectPath, ".git/refs/heads/main"));
-            return "main";
-        } catch {
-            return "master";
+            const branch = await getCurrentBranch(projectPath);
+            span.setAttribute("git.branch", branch);
+            span.setAttribute("git.branch.fallback_used", false);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return branch;
+        } catch (error) {
+            logger.warn("Failed to get current branch, trying fallbacks", { projectPath, error });
+
+            span.addEvent("git.current_branch_lookup_failed", {
+                "error": error instanceof Error ? error.message : String(error),
+            });
+
+            try {
+                await fs.access(path.join(projectPath, ".git/refs/heads/main"));
+                span.setAttributes({
+                    "git.branch": "main",
+                    "git.branch.fallback_used": true,
+                });
+                span.addEvent("git.current_branch_fallback_selected", {
+                    "git.branch": "main",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return "main";
+            } catch {
+                span.setAttributes({
+                    "git.branch": "master",
+                    "git.branch.fallback_used": true,
+                });
+                span.addEvent("git.current_branch_fallback_selected", {
+                    "git.branch": "master",
+                });
+                span.setStatus({ code: SpanStatusCode.OK });
+                return "master";
+            }
+        } finally {
+            span.end();
         }
-    }
+    });
 }

@@ -3,9 +3,11 @@ import * as path from "node:path";
 import { promisify } from "node:util";
 import { exec } from "node:child_process";
 import { logger } from "@/utils/logger";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { ensureWorktreesGitignore } from "./gitignore";
 
 const execAsync = promisify(exec);
+const tracer = trace.getTracer("tenex.git");
 
 /** Directory name for worktrees (relative to project root) */
 export const WORKTREES_DIR = ".worktrees";
@@ -46,44 +48,58 @@ export interface WorktreeMetadata {
  * @returns Array of worktrees with branch name and path
  */
 export async function listWorktrees(projectPath: string): Promise<Array<{ branch: string; path: string }>> {
-    try {
-        const { stdout } = await execAsync("git worktree list --porcelain", { cwd: projectPath });
+    return tracer.startActiveSpan("tenex.git.list_worktrees", async (span) => {
+        span.setAttribute("git.project_path", projectPath);
+        span.addEvent("git.command_started", {
+            "git.command": "git worktree list --porcelain",
+        });
 
-        const worktrees: Array<{ branch: string; path: string }> = [];
-        const lines = stdout.trim().split("\n");
+        try {
+            const { stdout } = await execAsync("git worktree list --porcelain", { cwd: projectPath });
 
-        let currentWorktree: { path?: string; branch?: string } = {};
+            const worktrees: Array<{ branch: string; path: string }> = [];
+            const lines = stdout.trim().split("\n");
 
-        for (const line of lines) {
-            if (line.startsWith("worktree ")) {
-                currentWorktree.path = line.substring(9);
-            } else if (line.startsWith("branch ")) {
-                currentWorktree.branch = line.substring(7).replace("refs/heads/", "");
-            } else if (line === "") {
-                // Empty line marks end of worktree entry
-                if (currentWorktree.path && currentWorktree.branch) {
-                    worktrees.push({
-                        path: currentWorktree.path,
-                        branch: currentWorktree.branch,
-                    });
+            let currentWorktree: { path?: string; branch?: string } = {};
+
+            for (const line of lines) {
+                if (line.startsWith("worktree ")) {
+                    currentWorktree.path = line.substring(9);
+                } else if (line.startsWith("branch ")) {
+                    currentWorktree.branch = line.substring(7).replace("refs/heads/", "");
+                } else if (line === "") {
+                    if (currentWorktree.path && currentWorktree.branch) {
+                        worktrees.push({
+                            path: currentWorktree.path,
+                            branch: currentWorktree.branch,
+                        });
+                    }
+                    currentWorktree = {};
                 }
-                currentWorktree = {};
             }
-        }
 
-        // Handle last entry if no trailing newline
-        if (currentWorktree.path && currentWorktree.branch) {
-            worktrees.push({
-                path: currentWorktree.path,
-                branch: currentWorktree.branch,
+            if (currentWorktree.path && currentWorktree.branch) {
+                worktrees.push({
+                    path: currentWorktree.path,
+                    branch: currentWorktree.branch,
+                });
+            }
+
+            span.setAttribute("git.worktree_count", worktrees.length);
+            span.setStatus({ code: SpanStatusCode.OK });
+            return worktrees;
+        } catch (error) {
+            span.recordException(error as Error);
+            span.setStatus({
+                code: SpanStatusCode.ERROR,
+                message: error instanceof Error ? error.message : String(error),
             });
+            logger.error("Failed to list worktrees", { projectPath, error });
+            return [];
+        } finally {
+            span.end();
         }
-
-        return worktrees;
-    } catch (error) {
-        logger.error("Failed to list worktrees", { projectPath, error });
-        return [];
-    }
+    });
 }
 
 /**
@@ -257,4 +273,3 @@ export async function trackWorktreeCreation(
     conversationId: metadata.conversationId.substring(0, 8)
   });
 }
-
