@@ -145,5 +145,6 @@ describe("TelegramInboundAdapter", () => {
                 lastSeenAt: 123,
             }],
         });
+        expect(result.envelope.metadata.eventTagCount).toBe(3);
     });
 });

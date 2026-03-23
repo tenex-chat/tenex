@@ -39,4 +39,35 @@ describe("diagnostic-event-snapshot", () => {
         expect(getDiagnosticTagValue(snapshot, "e")).toBe("reply-id");
         expect(getDiagnosticTagValue(snapshot, "p")).toBe("agent-pubkey");
     });
+
+    it("omits sender linked pubkey when the envelope principal is transport-only", () => {
+        const snapshot = buildDiagnosticEventSnapshot(
+            createMockInboundEnvelope({
+                transport: "telegram",
+                principal: {
+                    id: "telegram:user:1234",
+                    transport: "telegram",
+                    linkedPubkey: undefined,
+                    kind: "human",
+                },
+                message: {
+                    id: "telegram:tg_n2001_5678",
+                    transport: "telegram",
+                    nativeId: "tg_n2001_5678",
+                },
+                channel: {
+                    id: "telegram:group:-2001:topic:55",
+                    transport: "telegram",
+                    kind: "topic",
+                    projectBinding: `31933:${"a".repeat(64)}:demo-project`,
+                },
+            })
+        );
+
+        expect(snapshot.senderLinkedPubkey).toBeUndefined();
+        expect(snapshot.tags).not.toContainEqual(["senderLinkedPubkey", "undefined"]);
+        expect(getDiagnosticTagValue(snapshot, "telegram-chat-id")).toBe("-2001");
+        expect(getDiagnosticTagValue(snapshot, "telegram-thread-id")).toBe("55");
+        expect(getDiagnosticTagValue(snapshot, "telegram-message-id")).toBe("5678");
+    });
 });

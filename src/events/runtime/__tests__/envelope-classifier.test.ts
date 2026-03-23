@@ -1,4 +1,3 @@
-import type { AgentInstance } from "@/agents/types";
 import {
     isDirectedToSystem,
     toNativeId,
@@ -22,7 +21,7 @@ describe("envelope-classifier", () => {
         expect(
             isDirectedToSystem(
                 envelope,
-                new Map<string, AgentInstance>(),
+                new Map<string, { pubkey: string }>(),
                 "project-manager-pubkey"
             )
         ).toBe(true);

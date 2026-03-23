@@ -32,7 +32,18 @@ import {
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
-import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import {
+    isSupportedTelegramChatType,
+    isTextualTelegramMessage,
+    matchesTelegramChatBinding,
+    normalizeTelegramChatId,
+    normalizeTelegramMessage,
+    normalizeTelegramTopicId,
+    runTelegramPollingLoop,
+    sendUnauthorizedTelegramConfigReply,
+    skipTelegramBacklog,
+} from "@/services/telegram/telegram-gateway-utils";
+import { createTelegramChannelId } from "@/utils/telegram-identifiers";
 import type {
     TelegramBotIdentity,
     TelegramGatewayBinding,
@@ -64,54 +75,6 @@ interface ActivePoller {
     nextOffset?: number;
     abortController?: AbortController;
     loopPromise: Promise<void>;
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function normalizeChatId(chatId: string | number): string {
-    return String(chatId);
-}
-
-function normalizeTopicId(topicId: string | number | undefined): string | undefined {
-    return topicId === undefined ? undefined : String(topicId);
-}
-
-function isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === "AbortError";
-}
-
-function isTextualMessage(message: TelegramMessage): boolean {
-    return Boolean(message.text?.trim() || message.caption?.trim());
-}
-
-function isSupportedChatType(message: TelegramMessage): boolean {
-    return message.chat.type === "private" ||
-        message.chat.type === "group" ||
-        message.chat.type === "supergroup";
-}
-
-function matchesChatBinding(
-    binding: TelegramGatewayBinding,
-    chatId: string,
-    topicId?: string
-): boolean {
-    if ((binding.chatBindings?.length ?? 0) === 0) {
-        return false;
-    }
-
-    return binding.chatBindings.some((chatBinding) => {
-        if (chatBinding.chatId !== chatId) {
-            return false;
-        }
-
-        if (!chatBinding.topicId) {
-            return true;
-        }
-
-        return chatBinding.topicId === topicId;
-    });
 }
 
 function recordTelegramOutcome(
@@ -151,6 +114,11 @@ export class TelegramGatewayService {
     private readonly errorBackoffMs: number;
     private readonly pollers = new Map<string, ActivePoller>();
     private running = false;
+
+    /**
+     * Single-project compatibility harness retained for isolated tests and project-scoped
+     * workflows. Production shared-bot polling uses TelegramGatewayCoordinator.
+     */
 
     constructor(private readonly options: TelegramGatewayOptions) {
         this.runtimeIngressService = options.runtimeIngressService ?? new RuntimeIngressService();
@@ -273,7 +241,7 @@ export class TelegramGatewayService {
 
                 await this.configCommandService.handleCallback({
                     callbackContext,
-                    client: this.getClientForBinding(binding),
+                    client: this.clientFactory(binding),
                     update,
                 });
                 recordTelegramOutcome(
@@ -283,7 +251,7 @@ export class TelegramGatewayService {
                 return;
             }
 
-            const normalizedMessage = update.message ?? update.edited_message;
+            const normalizedMessage = normalizeTelegramMessage(update);
             if (!normalizedMessage?.from) {
                 recordTelegramOutcome("dropped", "missing_sender");
                 return;
@@ -296,14 +264,14 @@ export class TelegramGatewayService {
                 return;
             }
 
-            if (!isSupportedChatType(normalizedMessage)) {
+            if (!isSupportedTelegramChatType(normalizedMessage)) {
                 recordTelegramOutcome("dropped", "unsupported_chat_type", {
                     "telegram.chat.type": normalizedMessage.chat.type,
                 });
                 return;
             }
 
-            if (!isTextualMessage(normalizedMessage)) {
+            if (!isTextualTelegramMessage(normalizedMessage)) {
                 recordTelegramOutcome("dropped", "non_text_message", {
                     "telegram.message.id": String(normalizedMessage.message_id),
                 });
@@ -311,9 +279,9 @@ export class TelegramGatewayService {
             }
 
             const isPrivateChat = normalizedMessage.chat.type === "private";
-            const chatId = normalizeChatId(normalizedMessage.chat.id);
-            const topicId = normalizeTopicId(normalizedMessage.message_thread_id);
-            const channelId = createTelegramChannelId(chatId, normalizedMessage.message_thread_id);
+            const chatId = normalizeTelegramChatId(normalizedMessage.chat.id);
+            const topicId = normalizeTelegramTopicId(normalizedMessage.message_thread_id);
+            const channelId = createTelegramChannelId(chatId, topicId);
             const principalId = `telegram:user:${normalizedMessage.from.id}`;
             const identityBinding = getIdentityBindingStore().getBinding(principalId);
             const content = getTelegramUpdateContent(update);
@@ -372,15 +340,19 @@ export class TelegramGatewayService {
                         binding.config.authorizedIdentityIds
                     )
                 ) {
-                    await this.sendUnauthorizedConfigReply(
-                        this.getClientForBinding(binding),
+                    await sendUnauthorizedTelegramConfigReply(
+                        this.clientFactory(binding),
                         normalizedMessage
                     );
                     recordTelegramOutcome("dropped", "unauthorized_config_command");
                     return;
                 }
 
-                const matchesStaticBinding = matchesChatBinding(binding, chatId, topicId);
+                const matchesStaticBinding = matchesTelegramChatBinding(
+                    binding.chatBindings,
+                    chatId,
+                    topicId
+                );
                 const matchesDynamicBinding = dynamicBinding?.projectId === this.options.projectId;
 
                 if (dynamicBinding && !matchesDynamicBinding) {
@@ -405,7 +377,7 @@ export class TelegramGatewayService {
             const projectBinding = this.options.projectContext.project.tagReference()[1];
             if (commandKind) {
                 if (commandUsage) {
-                    await this.getClientForBinding(binding).sendMessage({
+                    await this.clientFactory(binding).sendMessage({
                         chatId,
                         text: commandUsage,
                         replyToMessageId: String(normalizedMessage.message_id),
@@ -419,7 +391,7 @@ export class TelegramGatewayService {
                     const agent = binding.agent as AgentInstance;
                     await this.configCommandService.openCommandMenu({
                         binding,
-                        client: this.getClientForBinding(binding),
+                        client: this.clientFactory(binding),
                         commandKind,
                         currentModel: agent.llmConfig,
                         currentTools: agent.tools,
@@ -538,10 +510,6 @@ export class TelegramGatewayService {
             }));
     }
 
-    private getClientForBinding(binding: TelegramGatewayBinding): TelegramBotClient {
-        return this.clientFactory(binding);
-    }
-
     private async buildTransportMetadata(params: {
         binding: TelegramGatewayBinding;
         channelId: string;
@@ -556,7 +524,7 @@ export class TelegramGatewayService {
                 agentPubkey: params.binding.agent.pubkey,
                 channelId: params.channelId,
                 message: params.message,
-                client: this.getClientForBinding(params.binding),
+                client: this.clientFactory(params.binding),
             });
 
         return buildTelegramTransportMetadata(
@@ -592,20 +560,6 @@ export class TelegramGatewayService {
         }
     }
 
-    private async sendUnauthorizedConfigReply(
-        client: TelegramBotClient,
-        message: TelegramMessage
-    ): Promise<void> {
-        await client.sendMessage({
-            chatId: String(message.chat.id),
-            text: "You are not allowed to change this agent's Telegram config.",
-            replyToMessageId: String(message.message_id),
-            messageThreadId: message.message_thread_id !== undefined
-                ? String(message.message_thread_id)
-                : undefined,
-        });
-    }
-
     private assertUniqueBotTokens(bindings: TelegramGatewayBinding[]): void {
         const tokenOwners = new Map<string, string>();
 
@@ -631,33 +585,16 @@ export class TelegramGatewayService {
         client: TelegramBotClient,
         binding: TelegramGatewayBinding
     ): Promise<number | undefined> {
-        let offset: number | undefined;
-        let skipped = 0;
-
-        while (true) {
-            const updates = await client.getUpdates({
-                offset,
-                timeoutSeconds: 0,
-                limit: this.pollLimit,
-                allowedUpdates: ["message", "edited_message", "callback_query"],
+        const { nextOffset, skippedCount } = await skipTelegramBacklog(client, this.pollLimit);
+        if (skippedCount > 0) {
+            logger.info("[TelegramGatewayService] Skipped pending Telegram backlog on startup", {
+                projectId: this.options.projectId,
+                agentSlug: binding.agent.slug,
+                skippedUpdates: skippedCount,
+                nextOffset,
             });
-
-            if (updates.length === 0) {
-                if (skipped > 0) {
-                    logger.info("[TelegramGatewayService] Skipped pending Telegram backlog on startup", {
-                        projectId: this.options.projectId,
-                        agentSlug: binding.agent.slug,
-                        skippedUpdates: skipped,
-                        nextOffset: offset,
-                    });
-                }
-                return offset;
-            }
-
-            skipped += updates.length;
-            const lastUpdate = updates[updates.length - 1];
-            offset = lastUpdate ? lastUpdate.update_id + 1 : offset;
         }
+        return nextOffset;
     }
 
     private createPoller(
@@ -679,53 +616,42 @@ export class TelegramGatewayService {
     }
 
     private async runPollLoop(poller: ActivePoller): Promise<void> {
-        while (this.running) {
-            const abortController = new AbortController();
-            poller.abortController = abortController;
-
-            try {
-                const updates = await poller.client.getUpdates({
-                    offset: poller.nextOffset,
-                    timeoutSeconds: this.pollTimeoutSeconds,
-                    limit: this.pollLimit,
-                    allowedUpdates: ["message", "edited_message", "callback_query"],
-                    signal: abortController.signal,
+        await runTelegramPollingLoop({
+            shouldContinue: () => this.running,
+            client: poller.client,
+            getNextOffset: () => poller.nextOffset,
+            setNextOffset: (offset) => {
+                poller.nextOffset = offset;
+            },
+            assignAbortController: (abortController) => {
+                poller.abortController = abortController;
+            },
+            releaseAbortController: (abortController) => {
+                if (poller.abortController === abortController) {
+                    poller.abortController = undefined;
+                }
+            },
+            timeoutSeconds: this.pollTimeoutSeconds,
+            pollLimit: this.pollLimit,
+            errorBackoffMs: this.errorBackoffMs,
+            processUpdate: async (update) => {
+                await this.processUpdate(poller.binding, update, poller.botIdentity);
+            },
+            onProcessUpdateError: (update, error) => {
+                logger.warn("[TelegramGatewayService] Failed to process Telegram update", {
+                    projectId: this.options.projectId,
+                    agentSlug: poller.binding.agent.slug,
+                    updateId: update.update_id,
+                    error: error instanceof Error ? error.message : String(error),
                 });
-
-                for (const update of updates) {
-                    if (!this.running) {
-                        break;
-                    }
-
-                    try {
-                        await this.processUpdate(poller.binding, update, poller.botIdentity);
-                    } catch (error) {
-                        logger.warn("[TelegramGatewayService] Failed to process Telegram update", {
-                            projectId: this.options.projectId,
-                            agentSlug: poller.binding.agent.slug,
-                            updateId: update.update_id,
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    } finally {
-                        poller.nextOffset = update.update_id + 1;
-                    }
-                }
-            } catch (error) {
-                if (!this.running || isAbortError(error)) {
-                    break;
-                }
-
+            },
+            onLoopError: (error) => {
                 logger.warn("[TelegramGatewayService] Telegram poll loop error", {
                     projectId: this.options.projectId,
                     agentSlug: poller.binding.agent.slug,
                     error: error instanceof Error ? error.message : String(error),
                 });
-                await sleep(this.errorBackoffMs);
-            } finally {
-                if (poller.abortController === abortController) {
-                    poller.abortController = undefined;
-                }
-            }
-        }
+            },
+        });
     }
 }

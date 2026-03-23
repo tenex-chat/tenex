@@ -6,7 +6,7 @@ import {
     type TelegramConfigSessionRecord,
     type TelegramConfigSessionStore,
 } from "@/services/telegram/TelegramConfigSessionStoreService";
-import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import { createTelegramChannelId } from "@/utils/telegram-identifiers";
 import { ProjectConfigOptionsService } from "@/services/status/ProjectConfigOptionsService";
 import type {
     TelegramBotClient,

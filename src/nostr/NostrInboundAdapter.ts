@@ -21,16 +21,7 @@ function getTagValue(event: NDKEvent, tagName: string): string | undefined {
 }
 
 function getTagValues(event: NDKEvent, tagName: string): string[] {
-    const directValues = event.getMatchingTags(tagName)
-        .map((tag) => tag[1])
-        .filter((value): value is string => !!value);
-
-    if (directValues.length > 0) {
-        return directValues;
-    }
-
-    return event.tags
-        .filter((tag) => tag[0] === tagName)
+    return event.getMatchingTags(tagName)
         .map((tag) => tag[1])
         .filter((value): value is string => !!value);
 }

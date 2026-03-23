@@ -2,7 +2,7 @@ import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import {
     parseTelegramChannelId,
     parseTelegramNativeMessageId,
-} from "@/services/telegram/telegram-identifiers";
+} from "@/utils/telegram-identifiers";
 
 export interface DiagnosticEventSnapshot {
     id: string;

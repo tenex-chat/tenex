@@ -7,7 +7,7 @@ import { getIdentityBindingStore } from "@/services/identity";
 import {
     createTelegramChannelId,
     createTelegramNativeMessageId,
-} from "@/services/telegram/telegram-identifiers";
+} from "@/utils/telegram-identifiers";
 import type {
     TelegramBotIdentity,
     TelegramGatewayBinding,
@@ -17,10 +17,7 @@ import type {
 } from "@/services/telegram/types";
 import { NDKKind } from "@/nostr/kinds";
 import { buildTelegramTransportMetadata } from "@/telemetry/TelegramTelemetry";
-
-function normalizeMessage(update: TelegramUpdate): TelegramMessage | undefined {
-    return update.message ?? update.edited_message;
-}
+import { normalizeTelegramMessage } from "@/services/telegram/telegram-gateway-utils";
 
 function getTelegramDisplayName(message: TelegramMessage): string | undefined {
     const user = message.from;
@@ -51,7 +48,7 @@ export class TelegramInboundAdapter {
         botIdentity?: TelegramBotIdentity;
         transportMetadata?: TelegramTransportMetadata;
     }): TelegramInboundEnvelopeResult {
-        const message = normalizeMessage(params.update);
+        const message = normalizeTelegramMessage(params.update);
         if (!message?.from) {
             throw new Error("Telegram update missing message.from");
         }
@@ -67,6 +64,10 @@ export class TelegramInboundAdapter {
                 params.update,
                 params.botIdentity
             );
+        const equivalentTagCount =
+            1 +
+            (params.projectBinding ? 1 : 0) +
+            (params.replyToNativeMessageId ? 1 : 0);
 
         const envelope: InboundEnvelope = {
             transport: "telegram",
@@ -105,7 +106,7 @@ export class TelegramInboundAdapter {
             ],
             metadata: {
                 eventKind: NDKKind.Text,
-                eventTagCount: 4,
+                eventTagCount: equivalentTagCount,
                 transport: transportMetadata ? { telegram: transportMetadata } : undefined,
             },
         };

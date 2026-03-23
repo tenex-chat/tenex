@@ -1,5 +1,19 @@
-import type { AgentInstance } from "@/agents/types";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
+
+interface AgentPubkeyCarrier {
+    pubkey: string;
+}
+
+function toSystemPubkeys(
+    systemAgents: ReadonlyMap<string, AgentPubkeyCarrier>,
+    projectManagerPubkey?: string
+): Set<string> {
+    const systemPubkeys = new Set(Array.from(systemAgents.values()).map((agent) => agent.pubkey));
+    if (projectManagerPubkey) {
+        systemPubkeys.add(projectManagerPubkey);
+    }
+    return systemPubkeys;
+}
 
 /**
  * Strip transport prefix from a qualified ID.
@@ -12,7 +26,7 @@ export function toNativeId(qualifiedId: string): string {
 
 export function isDirectedToSystem(
     envelope: InboundEnvelope,
-    systemAgents: Map<string, AgentInstance>,
+    systemAgents: ReadonlyMap<string, AgentPubkeyCarrier>,
     projectManagerPubkey?: string
 ): boolean {
     if (envelope.recipients.length === 0) return false;
@@ -21,22 +35,18 @@ export function isDirectedToSystem(
         .map((r) => r.linkedPubkey)
         .filter((pk): pk is string => !!pk);
 
-    const systemPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
-    if (projectManagerPubkey) {
-        systemPubkeys.add(projectManagerPubkey);
-    }
+    const systemPubkeys = toSystemPubkeys(systemAgents, projectManagerPubkey);
 
     return recipientPubkeys.some((pk) => systemPubkeys.has(pk));
 }
 
 export function isFromAgent(
     envelope: InboundEnvelope,
-    systemAgents: Map<string, AgentInstance>
+    systemAgents: ReadonlyMap<string, AgentPubkeyCarrier>
 ): boolean {
     const pubkey = envelope.principal.linkedPubkey;
     if (!pubkey) return false;
-    const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
-    return agentPubkeys.has(pubkey);
+    return toSystemPubkeys(systemAgents).has(pubkey);
 }
 
 export function getReplyTarget(envelope: InboundEnvelope): string | undefined {

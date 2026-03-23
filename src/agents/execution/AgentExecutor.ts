@@ -170,9 +170,7 @@ export class AgentExecutor {
                         span,
                     });
 
-                    // RACE CONDITION FIX: Early kill check
-                    // If this conversation was killed before the agent started (or during RAL resolution),
-                    // abort immediately without spending compute resources.
+                    // Abort before publisher/setup work if the conversation was killed during RAL resolution.
                     const ralRegistry = RALRegistry.getInstance();
                     if (ralRegistry.isAgentConversationKilled(context.agent.pubkey, context.conversationId)) {
                         span.addEvent("executor.aborted_early_kill", {
@@ -438,18 +436,7 @@ export class AgentExecutor {
             ralNumber
         );
 
-        // =====================================================================
-        // RACE CONDITION FIX: Check for ANY outstanding work, not just pending delegations
-        // =====================================================================
-        // This is the key guard against the race condition where delegation results arrive
-        // (via debounce in AgentDispatchService) after the last prepareStep but before
-        // the executor finalizes. The debounce state queues injections that would be
-        // invisible if we only checked pendingDelegations.
-        //
-        // hasOutstandingWork() consolidates checking for:
-        // 1. Queued injections (messages/delegation results waiting for next LLM step)
-        // 2. Pending delegations (delegations that haven't completed yet)
-        // =====================================================================
+        // Final publish/cleanup decisions must consider both queued injections and pending delegations.
         const outstandingWork = ralRegistry.hasOutstandingWork(
             context.agent.pubkey,
             context.conversationId,

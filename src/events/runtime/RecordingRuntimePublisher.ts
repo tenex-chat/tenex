@@ -57,7 +57,7 @@ function fallbackRecipientPrincipal(context: EventContext): PrincipalRef {
     return {
         id: linkedPubkey ? `nostr:${linkedPubkey}` : context.triggeringEnvelope.principal.id,
         transport: linkedPubkey ? "nostr" : context.triggeringEnvelope.principal.transport,
-        linkedPubkey,
+        ...(linkedPubkey ? { linkedPubkey } : {}),
         displayName: context.triggeringEnvelope.principal.displayName,
         username: context.triggeringEnvelope.principal.username,
         kind: context.triggeringEnvelope.principal.kind,

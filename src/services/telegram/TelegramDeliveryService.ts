@@ -6,7 +6,7 @@ import { logger } from "@/utils/logger";
 import {
     parseTelegramChannelId,
     parseTelegramNativeMessageId,
-} from "@/services/telegram/telegram-identifiers";
+} from "@/utils/telegram-identifiers";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 

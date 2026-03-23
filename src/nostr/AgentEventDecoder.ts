@@ -1,7 +1,10 @@
-import type { AgentInstance } from "@/agents/types";
 import { NDKKind } from "@/nostr/kinds";
 import { getProjectContext } from "@/services/projects";
 import type { NDKEvent } from "@nostr-dev-kit/ndk";
+
+interface AgentPubkeyCarrier {
+    pubkey: string;
+}
 
 /**
  * AgentEventDecoder - Utilities for decoding and analyzing Nostr events
@@ -15,7 +18,7 @@ export class AgentEventDecoder {
     /**
      * Check if an event is directed to the system (project or agents)
      */
-    static isDirectedToSystem(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
+    static isDirectedToSystem(event: NDKEvent, systemAgents: ReadonlyMap<string, AgentPubkeyCarrier>): boolean {
         const pTags = event.tags.filter((tag) => tag[0] === "p");
         if (pTags.length === 0) return false;
 
@@ -37,7 +40,7 @@ export class AgentEventDecoder {
     /**
      * Check if event is from an agent in the system
      */
-    static isEventFromAgent(event: NDKEvent, systemAgents: Map<string, AgentInstance>): boolean {
+    static isEventFromAgent(event: NDKEvent, systemAgents: ReadonlyMap<string, AgentPubkeyCarrier>): boolean {
         const agentPubkeys = new Set(Array.from(systemAgents.values()).map((a) => a.pubkey));
         return agentPubkeys.has(event.pubkey);
     }
@@ -82,7 +85,7 @@ export class AgentEventDecoder {
      */
     static isDelegationRequest(
         event: NDKEvent,
-        systemAgents?: Map<string, AgentInstance>
+        systemAgents?: ReadonlyMap<string, AgentPubkeyCarrier>
     ): boolean {
         if (event.kind !== 1) return false;
 

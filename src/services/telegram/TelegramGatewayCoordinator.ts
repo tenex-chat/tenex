@@ -28,7 +28,18 @@ import {
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
-import { createTelegramChannelId } from "@/services/telegram/telegram-identifiers";
+import {
+    isSupportedTelegramChatType,
+    isTextualTelegramMessage,
+    matchesTelegramChatBinding,
+    normalizeTelegramChatId,
+    normalizeTelegramMessage,
+    normalizeTelegramTopicId,
+    runTelegramPollingLoop,
+    sendUnauthorizedTelegramConfigReply,
+    skipTelegramBacklog,
+} from "@/services/telegram/telegram-gateway-utils";
+import { createTelegramChannelId } from "@/utils/telegram-identifiers";
 import {
     buildTelegramTransportMetadata,
     getTelegramUpdateContent,
@@ -55,59 +66,6 @@ interface TelegramPollerState {
     nextOffset?: number;
     abortController?: AbortController;
     loopPromise: Promise<void>;
-}
-
-function normalizeChatId(chatId: string | number): string {
-    return String(chatId);
-}
-
-function normalizeTopicId(topicId: string | number | undefined): string | undefined {
-    return topicId === undefined ? undefined : String(topicId);
-}
-
-function normalizeMessage(update: TelegramUpdate): TelegramMessage | undefined {
-    return update.message ?? update.edited_message;
-}
-
-function isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === "AbortError";
-}
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isTextualMessage(message: TelegramMessage): boolean {
-    return Boolean(message.text?.trim() || message.caption?.trim());
-}
-
-function isSupportedChatType(message: TelegramMessage): boolean {
-    return message.chat.type === "private" ||
-        message.chat.type === "group" ||
-        message.chat.type === "supergroup";
-}
-
-function matchesStaticBinding(
-    binding: TelegramGatewayBinding,
-    chatId: string,
-    topicId?: string
-): boolean {
-    const chatBindings = binding.chatBindings ?? [];
-    if (chatBindings.length === 0) {
-        return false;
-    }
-
-    return chatBindings.some((chatBinding) => {
-        if (chatBinding.chatId !== chatId) {
-            return false;
-        }
-
-        if (chatBinding.topicId === undefined) {
-            return true;
-        }
-
-        return chatBinding.topicId === topicId;
-    });
 }
 
 function deduplicateRegistrations(
@@ -330,66 +288,45 @@ export class TelegramGatewayCoordinator {
     }
 
     private async skipBacklog(client: TelegramBotClient): Promise<number | undefined> {
-        let offset: number | undefined;
-
-        while (true) {
-            const updates = await client.getUpdates({
-                offset,
-                timeoutSeconds: 0,
-                limit: this.pollLimit,
-                allowedUpdates: ["message", "edited_message", "callback_query"],
-            });
-            if (updates.length === 0) {
-                return offset;
-            }
-            const lastUpdate = updates[updates.length - 1];
-            offset = lastUpdate ? lastUpdate.update_id + 1 : offset;
-        }
+        return (await skipTelegramBacklog(client, this.pollLimit)).nextOffset;
     }
 
     private async runPollLoop(poller: TelegramPollerState): Promise<void> {
-        while (this.pollers.has(poller.token)) {
-            const abortController = new AbortController();
-            poller.abortController = abortController;
-
-            try {
-                const updates = await poller.client.getUpdates({
-                    offset: poller.nextOffset,
-                    timeoutSeconds: this.pollTimeoutSeconds,
-                    limit: this.pollLimit,
-                    allowedUpdates: ["message", "edited_message", "callback_query"],
-                    signal: abortController.signal,
+        await runTelegramPollingLoop({
+            shouldContinue: () => this.pollers.has(poller.token),
+            client: poller.client,
+            getNextOffset: () => poller.nextOffset,
+            setNextOffset: (offset) => {
+                poller.nextOffset = offset;
+            },
+            assignAbortController: (abortController) => {
+                poller.abortController = abortController;
+            },
+            releaseAbortController: (abortController) => {
+                if (poller.abortController === abortController) {
+                    poller.abortController = undefined;
+                }
+            },
+            timeoutSeconds: this.pollTimeoutSeconds,
+            pollLimit: this.pollLimit,
+            errorBackoffMs: this.errorBackoffMs,
+            processUpdate: async (update) => {
+                await this.processUpdate(poller, update);
+            },
+            onProcessUpdateError: (update, error) => {
+                logger.warn("[TelegramGatewayCoordinator] Failed to process update", {
+                    tokenSuffix: poller.token.slice(-6),
+                    updateId: update.update_id,
+                    error: error instanceof Error ? error.message : String(error),
                 });
-
-                for (const update of updates) {
-                    try {
-                        await this.processUpdate(poller, update);
-                    } catch (error) {
-                        logger.warn("[TelegramGatewayCoordinator] Failed to process update", {
-                            tokenSuffix: poller.token.slice(-6),
-                            updateId: update.update_id,
-                            error: error instanceof Error ? error.message : String(error),
-                        });
-                    } finally {
-                        poller.nextOffset = update.update_id + 1;
-                    }
-                }
-            } catch (error) {
-                if (!this.pollers.has(poller.token) || isAbortError(error)) {
-                    break;
-                }
-
+            },
+            onLoopError: (error) => {
                 logger.warn("[TelegramGatewayCoordinator] Poll loop error", {
                     tokenSuffix: poller.token.slice(-6),
                     error: error instanceof Error ? error.message : String(error),
                 });
-                await sleep(this.errorBackoffMs);
-            } finally {
-                if (poller.abortController === abortController) {
-                    poller.abortController = undefined;
-                }
-            }
-        }
+            },
+        });
     }
 
     private async processUpdate(poller: TelegramPollerState, update: TelegramUpdate): Promise<void> {
@@ -436,7 +373,7 @@ export class TelegramGatewayCoordinator {
                 return;
             }
 
-            const message = normalizeMessage(update);
+            const message = normalizeTelegramMessage(update);
 
             activeSpan?.addEvent("telegram.registrations_resolved", {
                 "telegram.registration.count": registrations.length,
@@ -459,14 +396,14 @@ export class TelegramGatewayCoordinator {
                 return;
             }
 
-            if (!isSupportedChatType(message)) {
+            if (!isSupportedTelegramChatType(message)) {
                 recordTelegramOutcome("dropped", "unsupported_chat_type", {
                     "telegram.chat.type": message.chat.type,
                 });
                 return;
             }
 
-            if (!isTextualMessage(message)) {
+            if (!isTextualTelegramMessage(message)) {
                 recordTelegramOutcome("dropped", "non_text_message", {
                     "telegram.message.id": String(message.message_id),
                 });
@@ -478,8 +415,8 @@ export class TelegramGatewayCoordinator {
                 return;
             }
 
-            const chatId = normalizeChatId(message.chat.id);
-            const topicId = normalizeTopicId(message.message_thread_id);
+            const chatId = normalizeTelegramChatId(message.chat.id);
+            const topicId = normalizeTelegramTopicId(message.message_thread_id);
             const channelId = createTelegramChannelId(chatId, topicId);
             const agentPubkey = primaryRegistration.binding.agent.pubkey;
             const principalId = `telegram:user:${message.from.id}`;
@@ -555,7 +492,7 @@ export class TelegramGatewayCoordinator {
                         commandKind &&
                         !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
                     ) {
-                        await this.sendUnauthorizedConfigReply(poller.client, message);
+                        await sendUnauthorizedTelegramConfigReply(poller.client, message);
                         recordTelegramOutcome("dropped", "unauthorized_config_command");
                         return;
                     }
@@ -594,7 +531,7 @@ export class TelegramGatewayCoordinator {
                         commandKind &&
                         !this.isAuthorizedConfigPrincipal(principalId, identityBinding?.linkedPubkey, selected)
                     ) {
-                        await this.sendUnauthorizedConfigReply(poller.client, message);
+                        await sendUnauthorizedTelegramConfigReply(poller.client, message);
                         recordTelegramOutcome("dropped", "unauthorized_config_command");
                         return;
                     }
@@ -634,7 +571,7 @@ export class TelegramGatewayCoordinator {
                 );
             } else {
                 const exactMatches = registrations.filter((registration) =>
-                    matchesStaticBinding(registration.binding, chatId, topicId)
+                    matchesTelegramChatBinding(registration.binding.chatBindings, chatId, topicId)
                 );
                 candidates = exactMatches.length > 0 ? exactMatches : registrations;
                 if (commandKind) {
@@ -655,7 +592,7 @@ export class TelegramGatewayCoordinator {
 
             if (candidates.length === 0) {
                 if (commandKind) {
-                    await this.sendUnauthorizedConfigReply(poller.client, message);
+                    await sendUnauthorizedTelegramConfigReply(poller.client, message);
                     recordTelegramOutcome("dropped", "unauthorized_config_command", {
                         "telegram.chat.is_private": isPrivateChat,
                     });
@@ -732,22 +669,23 @@ export class TelegramGatewayCoordinator {
                         : undefined,
                 });
                 return;
-        }
+            }
 
-        await params.registration.runInProjectContext(async () => {
             const commandKind = params.commandKind;
             if (!commandKind) {
                 return;
             }
-            const projectContext = projectContextStore.getContextOrThrow();
-            const agent = params.registration.binding.agent as AgentInstance;
-            await this.configCommandService.openCommandMenu({
-                binding: params.registration.binding,
-                client: params.client,
-                commandKind,
-                currentModel: agent.llmConfig,
-                currentTools: agent.tools,
-                message: params.message,
+
+            await params.registration.runInProjectContext(async () => {
+                const projectContext = projectContextStore.getContextOrThrow();
+                const agent = params.registration.binding.agent as AgentInstance;
+                await this.configCommandService.openCommandMenu({
+                    binding: params.registration.binding,
+                    client: params.client,
+                    commandKind,
+                    currentModel: agent.llmConfig,
+                    currentTools: agent.tools,
+                    message: params.message,
                     principalId: params.principalId,
                     projectBinding: params.registration.projectBinding,
                     projectContext,
@@ -755,6 +693,7 @@ export class TelegramGatewayCoordinator {
                     projectTitle: params.registration.projectTitle,
                 });
             });
+
             recordTelegramOutcome("routed", "config_command_opened", {
                 "project.id": params.registration.projectId,
                 "telegram.channel.id": params.channelId,
@@ -785,20 +724,6 @@ export class TelegramGatewayCoordinator {
         );
     }
 
-    private async sendUnauthorizedConfigReply(
-        client: TelegramBotClient,
-        message: TelegramMessage
-    ): Promise<void> {
-        await client.sendMessage({
-            chatId: String(message.chat.id),
-            text: "You are not allowed to change this agent's Telegram config.",
-            replyToMessageId: String(message.message_id),
-            messageThreadId: message.message_thread_id !== undefined
-                ? String(message.message_thread_id)
-                : undefined,
-        });
-    }
-
     private async routeUpdateToRegistration(
         registration: TelegramRuntimeRegistration,
         update: TelegramUpdate,
@@ -806,7 +731,7 @@ export class TelegramGatewayCoordinator {
         client: TelegramBotClient,
         botIdentity?: TelegramBotIdentity
     ): Promise<void> {
-        const message = normalizeMessage(update);
+        const message = normalizeTelegramMessage(update);
         if (!message) {
             return;
         }
@@ -974,7 +899,7 @@ export class TelegramGatewayCoordinator {
             await client.sendChatAction({
                 chatId: String(message.chat.id),
                 action: "typing",
-                messageThreadId: normalizeTopicId(message.message_thread_id),
+                messageThreadId: normalizeTelegramTopicId(message.message_thread_id),
             });
             activeSpan?.addEvent("telegram.typing_indicator.sent", {
                 "telegram.chat.id": String(message.chat.id),
@@ -1017,7 +942,7 @@ export class TelegramGatewayCoordinator {
             chatId: String(message.chat.id),
             text: lines.join("\n"),
             replyToMessageId: String(message.message_id),
-            messageThreadId: normalizeTopicId(message.message_thread_id),
+            messageThreadId: normalizeTelegramTopicId(message.message_thread_id),
         });
     }
 }
