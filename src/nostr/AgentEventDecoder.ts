@@ -312,7 +312,7 @@ export class AgentEventDecoder {
         if (this.isLessonEvent(event)) return "lesson";
         if (this.isLessonCommentEvent(event)) return "lesson_comment";
         if (this.isConfigUpdate(event)) return "config_update";
-        if (event.kind === NDKKind.Text) {
+        if (event.kind === NDKKind.Text || event.kind === NDKKind.EventMetadata) {
             return "conversation";
         }
         if (event.kind === NDKKind.TenexBootProject) {

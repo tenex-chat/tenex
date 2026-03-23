@@ -12,4 +12,13 @@ describe("AgentEventDecoder.classifyForDaemon", () => {
 
         expect(AgentEventDecoder.classifyForDaemon(event)).toBe("config_update");
     });
+
+    it("classifies EventMetadata as conversation for project routing", () => {
+        const event = new NDKEvent();
+        event.kind = NDKKind.EventMetadata;
+        event.tags = [["a", "31933:owner-pubkey:project-d-tag"], ["e", "conversation-event-id"]];
+        event.content = "";
+
+        expect(AgentEventDecoder.classifyForDaemon(event)).toBe("conversation");
+    });
 });
