@@ -8,7 +8,6 @@ import {
     ScratchpadStrategy,
     SummarizationStrategy,
     SystemPromptCachingStrategy,
-    ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
     type ContextManagementRequestContext,
@@ -36,15 +35,13 @@ import {
     toRuntimeScratchpadState,
 } from "./scratchpad-store";
 import { createTelemetryCallback } from "./telemetry";
+import { InstrumentedToolResultDecayStrategy } from "./tool-result-decay-diagnostics";
 
 export interface ExecutionContextManagement {
     middleware: LanguageModelMiddleware;
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
 }
-
-const TENEX_EMPTY_SCRATCHPAD_GUIDANCE =
-    "If helpful, some commonly useful scratchpad keys in TENEX are: objective, requirements, findings, notes, side-effects, completion-state, next-steps, errors, types, patterns, files, commands, and code. Use whatever keys fit the task. Use scratchpad proactively and often; do not wait for context pressure.";
 
 function createSummarizationModel(options: {
     conversationId: string;
@@ -81,11 +78,11 @@ function createConversationContextManagementRuntime(options: {
         settings.tokenBudget,
         requestEstimator
     );
-    const scratchpadEnabled = settings.scratchpadEnabled && options.scratchpadAvailable;
+    const scratchpadEnabled = options.scratchpadAvailable;
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
-        new ToolResultDecayStrategy({
+        new InstrumentedToolResultDecayStrategy({
             estimator: requestEstimator,
             placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
                 const toolCallEventIdMap = resolveToolCallEventIdMap(
@@ -101,7 +98,7 @@ function createConversationContextManagementRuntime(options: {
         agent: options.agent,
     });
 
-    if (summarizationModel && settings.summarizationFallbackEnabled) {
+    if (summarizationModel) {
         strategies.push(
             new SummarizationStrategy({
                 model: summarizationModel,
@@ -140,24 +137,19 @@ function createConversationContextManagementRuntime(options: {
                             : [],
                 },
                 reminderTone: "informational",
-                emptyStateGuidance: TENEX_EMPTY_SCRATCHPAD_GUIDANCE,
                 budgetProfile: managedBudgetProfile,
-                forceToolThresholdRatio: settings.forceScratchpadEnabled
-                    ? settings.forceScratchpadThresholdPercent / 100
-                    : undefined,
+                forceToolThresholdRatio: settings.forceScratchpadThresholdPercent / 100,
             })
         );
     }
 
-    if (settings.utilizationWarningEnabled) {
-        strategies.push(
-            new ContextUtilizationReminderStrategy({
-                budgetProfile: managedBudgetProfile,
-                warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
-                mode: scratchpadEnabled ? "scratchpad" : "generic",
-            })
-        );
-    }
+    strategies.push(
+        new ContextUtilizationReminderStrategy({
+            budgetProfile: managedBudgetProfile,
+            warningThresholdRatio: settings.utilizationWarningThresholdPercent / 100,
+            mode: scratchpadEnabled ? "scratchpad" : "generic",
+        })
+    );
 
     strategies.push(
         new ContextWindowStatusStrategy({
@@ -207,11 +199,8 @@ export function createExecutionContextManagement(options: {
     conversationStore: ConversationStore;
     nudgeToolPermissions?: NudgeToolPermissions;
 }): ExecutionContextManagement | undefined {
-    const settings = getContextManagementSettings();
-
     const scratchpadAvailable =
-        settings.scratchpadEnabled
-        && (!options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions));
+        !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
 
     const runtime = createConversationContextManagementRuntime({
         conversationStore: options.conversationStore,

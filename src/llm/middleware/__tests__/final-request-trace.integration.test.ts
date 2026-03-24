@@ -84,14 +84,9 @@ import { createTenexSystemRemindersMiddleware } from "../system-reminders";
 
 function buildContextManagementConfig(overrides: Record<string, unknown>) {
     return {
-        enabled: true,
         tokenBudget: 40000,
-        scratchpadEnabled: true,
-        forceScratchpadEnabled: true,
         forceScratchpadThresholdPercent: 70,
-        utilizationWarningEnabled: true,
         utilizationWarningThresholdPercent: 70,
-        summarizationFallbackEnabled: false,
         ...overrides,
     };
 }
@@ -112,6 +107,7 @@ describe("final-request trace integration", () => {
     let storeDir: string;
     let store: ConversationStore;
     let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+    let getSummarizationModelNameSpy: ReturnType<typeof spyOn>;
     let getTenexBasePathSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
@@ -131,6 +127,12 @@ describe("final-request trace integration", () => {
             configService,
             "getContextManagementConfig"
         ).mockReturnValue(buildContextManagementConfig({}) as any);
+        getSummarizationModelNameSpy = spyOn(
+            configService,
+            "getSummarizationModelName"
+        ).mockImplementation(() => {
+            throw new Error("summarization model unavailable in tests");
+        });
         getTenexBasePathSpy = spyOn(constantsModule, "getTenexBasePath").mockReturnValue(
             tempBaseDir
         );
@@ -138,6 +140,7 @@ describe("final-request trace integration", () => {
 
     afterEach(() => {
         getContextManagementConfigSpy?.mockRestore();
+        getSummarizationModelNameSpy?.mockRestore();
         getTenexBasePathSpy?.mockRestore();
         resetSystemReminders();
         rmSync(tempBaseDir, { recursive: true, force: true });

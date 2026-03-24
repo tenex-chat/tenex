@@ -19,17 +19,13 @@ describe("TENEX context management integration", () => {
 
     let store: ConversationStore;
     let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+    let getSummarizationModelNameSpy: ReturnType<typeof spyOn>;
 
     function buildContextManagementConfig(overrides: Record<string, unknown>) {
         return {
-            enabled: true,
             tokenBudget: 40000,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: true,
             forceScratchpadThresholdPercent: 70,
-            utilizationWarningEnabled: true,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackEnabled: true,
             summarizationFallbackThresholdPercent: 90,
             ...overrides,
         };
@@ -47,12 +43,19 @@ describe("TENEX context management integration", () => {
             configService,
             "getContextManagementConfig"
         ).mockReturnValue(undefined);
+        getSummarizationModelNameSpy = spyOn(
+            configService,
+            "getSummarizationModelName"
+        ).mockImplementation(() => {
+            throw new Error("summarization model unavailable in tests");
+        });
         resetSystemReminders();
     });
 
     afterEach(async () => {
         resetSystemReminders();
         getContextManagementConfigSpy?.mockRestore();
+        getSummarizationModelNameSpy?.mockRestore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
@@ -170,9 +173,6 @@ describe("TENEX context management integration", () => {
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            scratchpadEnabled: false,
-            utilizationWarningEnabled: false,
-            summarizationFallbackEnabled: false,
         });
 
         const agent = {
@@ -211,7 +211,7 @@ describe("TENEX context management integration", () => {
                         toolName: "fs_read",
                         output: {
                             type: "text",
-                            value: `result-${index} ${"x".repeat(index === 1 ? 600 : 80)}`,
+                            value: `result-${index} ${"x".repeat(index === 1 ? 12000 : 4000)}`,
                         },
                     },
                 ],
@@ -252,11 +252,8 @@ describe("TENEX context management integration", () => {
     test("utilization warning only appears once the working budget threshold is crossed", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: false,
-            utilizationWarningEnabled: true,
+            forceScratchpadThresholdPercent: 100,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackEnabled: false,
         });
 
         const agent = {
@@ -359,11 +356,8 @@ describe("TENEX context management integration", () => {
     test("managed working budget excludes base system prompts and tool definitions", async () => {
         setContextManagementConfig({
             tokenBudget: 100,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: false,
-            utilizationWarningEnabled: true,
+            forceScratchpadThresholdPercent: 100,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackEnabled: false,
         });
 
         const agent = {
@@ -419,6 +413,7 @@ describe("TENEX context management integration", () => {
         const contextStatusReminder = reminders.find(
             (reminder) => reminder.type === "context-window-status"
         );
+        expect(contextStatusReminder?.content).toContain("[Context status]");
         expect(contextStatusReminder?.content).toContain("managed working budget context:");
         expect(contextStatusReminder?.content).toContain(
             "Static overhead outside the managed working budget:"
@@ -431,11 +426,7 @@ describe("TENEX context management integration", () => {
     test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: true,
             forceScratchpadThresholdPercent: 70,
-            utilizationWarningEnabled: false,
-            summarizationFallbackEnabled: false,
         });
 
         const agent = {
@@ -539,12 +530,8 @@ describe("TENEX context management integration", () => {
     test("only-tool mode disables scratchpad-specific forcing and guidance", async () => {
         setContextManagementConfig({
             tokenBudget: 200,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: true,
             forceScratchpadThresholdPercent: 70,
-            utilizationWarningEnabled: true,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackEnabled: false,
         });
 
         const agent = {
@@ -611,9 +598,6 @@ describe("TENEX context management integration", () => {
     test("context status reminder reports working budget and raw model window from the final prompt state", async () => {
         setContextManagementConfig({
             tokenBudget: 400,
-            scratchpadEnabled: false,
-            utilizationWarningEnabled: false,
-            summarizationFallbackEnabled: false,
         });
 
         using contextWindowSpy = spyOn(contextWindowCache, "getContextWindow").mockReturnValue(
@@ -663,23 +647,27 @@ describe("TENEX context management integration", () => {
 
         expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context status]");
         const contextStatusReminders = await getSystemReminderContext().collect();
-        expect(contextStatusReminders).toEqual([
-            expect.objectContaining({
-                type: "context-window-status",
-                content: expect.stringContaining("Current request after context management:"),
-            }),
-        ]);
-        expect(contextStatusReminders[0]?.content).not.toContain("[Context status]");
-        expect(contextStatusReminders[0]?.content).toContain(
+        expect(contextStatusReminders).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: "scratchpad",
+                }),
+                expect.objectContaining({
+                    type: "context-window-status",
+                }),
+            ])
+        );
+        const contextStatusReminder = contextStatusReminders.find(
+            (reminder) => reminder.type === "context-window-status"
+        );
+        expect(contextStatusReminder?.content).toContain("[Context status]");
+        expect(contextStatusReminder?.content).toContain(
             "Current request after context management:"
         );
-        expect(contextStatusReminders[0]?.content).toContain(
+        expect(contextStatusReminder?.content).toContain(
             "managed working budget context:"
         );
-        expect(contextStatusReminders[0]?.content).toContain(
-            "managed working budget target: ~400 tokens"
-        );
-        expect(contextStatusReminders[0]?.content).toContain(
+        expect(contextStatusReminder?.content).toContain(
             "Raw model context window: ~200,000 tokens"
         );
     });

@@ -78,17 +78,13 @@ describe("TENEX context management telemetry", () => {
 
     let store: ConversationStore;
     let getContextManagementConfigSpy: ReturnType<typeof spyOn>;
+    let getSummarizationModelNameSpy: ReturnType<typeof spyOn>;
 
     function buildContextManagementConfig(overrides: Record<string, unknown>) {
         return {
-            enabled: true,
             tokenBudget: 40000,
-            scratchpadEnabled: true,
-            forceScratchpadEnabled: true,
             forceScratchpadThresholdPercent: 70,
-            utilizationWarningEnabled: true,
             utilizationWarningThresholdPercent: 70,
-            summarizationFallbackEnabled: false,
             ...overrides,
         };
     }
@@ -102,10 +98,17 @@ describe("TENEX context management telemetry", () => {
             configService,
             "getContextManagementConfig"
         ).mockReturnValue(buildContextManagementConfig({}) as any);
+        getSummarizationModelNameSpy = spyOn(
+            configService,
+            "getSummarizationModelName"
+        ).mockImplementation(() => {
+            throw new Error("summarization model unavailable in tests");
+        });
     });
 
     afterEach(async () => {
         getContextManagementConfigSpy?.mockRestore();
+        getSummarizationModelNameSpy?.mockRestore();
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
@@ -337,7 +340,6 @@ describe("TENEX context management telemetry", () => {
         getContextManagementConfigSpy.mockReturnValue(
             buildContextManagementConfig({
                 tokenBudget: 200,
-                utilizationWarningEnabled: false,
             }) as any
         );
 
@@ -388,5 +390,116 @@ describe("TENEX context management telemetry", () => {
         expect(
             String(runtimeCompleteEvent?.attributes?.["context_management.final_tool_choice_json"])
         ).toContain("\"toolName\":\"scratchpad\"");
+    });
+
+    test("emits per-exchange tool-result-decay diagnostics for full, truncate, and placeholder actions", async () => {
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        expect(contextManagement).toBeDefined();
+
+        const prompt = [
+            { role: "system", content: "You are helpful." },
+            ...Array.from({ length: 8 }, (_, index) => ([
+                {
+                    role: "assistant",
+                    content: [
+                        {
+                            type: "tool-call",
+                            toolCallId: `tool-call-${index}`,
+                            toolName: "fs_read",
+                            input: { path: `/tmp/file-${index}.txt`, body: "i".repeat(900) },
+                        },
+                    ],
+                },
+                {
+                    role: "tool",
+                    content: [
+                        {
+                            type: "tool-result",
+                            toolCallId: `tool-call-${index}`,
+                            toolName: "fs_read",
+                            output: { type: "text", value: "o".repeat(4200) },
+                        },
+                    ],
+                },
+            ])).flat(),
+            {
+                role: "user",
+                content: [{ type: "text", text: "Keep going." }],
+            },
+        ];
+
+        await contextManagement?.middleware.transformParams?.({
+            params: {
+                prompt,
+                providerOptions: {
+                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
+                },
+            },
+            model: {
+                specificationVersion: "v3",
+                provider: "mock",
+                modelId: "mock",
+                supportedUrls: {},
+                doGenerate: async () => {
+                    throw new Error("unused");
+                },
+                doStream: async () => {
+                    throw new Error("unused");
+                },
+            },
+        } as any);
+
+        const events = addEvent.mock.calls.map(([eventName, attributes]) => ({
+            eventName,
+            attributes,
+        }));
+        const decayEvent = events.find(
+            (event) =>
+                event.eventName === "context_management.strategy_complete.tool-result-decay"
+        );
+        const reportEvent = events.find(
+            (event) =>
+                event.eventName ===
+                "context_management.strategy_complete.tool-result-decay.report"
+        );
+
+        expect(
+            events.some(
+                (event) =>
+                    event.eventName ===
+                    "context_management.strategy_complete.tool-result-decay.exchange"
+            )
+        ).toBe(false);
+        expect(decayEvent).toBeDefined();
+        expect(reportEvent).toBeDefined();
+        expect(
+            String(decayEvent?.attributes?.["context_management.exchange_report"])
+        ).toContain("Tool-result decay report");
+        expect(
+            String(decayEvent?.attributes?.["context_management.exchange_report"])
+        ).toContain("Tool exchange 1:");
+        expect(
+            String(decayEvent?.attributes?.["context_management.exchange_report"])
+        ).toContain("Depth:");
+        expect(
+            String(decayEvent?.attributes?.["context_management.exchange_report"])
+        ).toContain("Output action: planned");
+        expect(
+            String(reportEvent?.attributes?.["context_management.exchange_report"])
+        ).toContain("Field guide:");
+        expect(
+            reportEvent?.attributes?.["context_management.exchange_report_line_count"]
+        ).toBeGreaterThan(20);
     });
 });
