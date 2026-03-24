@@ -27,6 +27,12 @@ export interface FinishHandlerState {
     clearLastUserMessage: () => void;
 }
 
+export interface FinishHandlerOptions {
+    onFinalStepInputTokens?: (
+        actualInputTokens: number | null | undefined
+    ) => Promise<void> | void;
+}
+
 /**
  * Creates the onFinish handler for LLM streaming.
  * Extracted from LLMService to reduce file size.
@@ -34,7 +40,8 @@ export interface FinishHandlerState {
 export function createFinishHandler(
     emitter: EventEmitter<LLMServiceEventMap>,
     config: FinishHandlerConfig,
-    state: FinishHandlerState
+    state: FinishHandlerState,
+    options?: FinishHandlerOptions
 ): StreamTextOnFinishCallback<Record<string, AISdkTool>> {
     return async (e) => {
         const onFinishStartTime = Date.now();
@@ -111,6 +118,8 @@ export function createFinishHandler(
                 lastStep?.usage ?? e.totalUsage,
                 latestProviderMetadata
             );
+
+            await options?.onFinalStepInputTokens?.(usage.inputTokens);
             const metadata = extractLLMMetadata(config.provider, latestProviderMetadata);
 
             // DIAGNOSTIC: Log right before emitting complete event

@@ -9,6 +9,7 @@ import { config as configService } from "@/services/ConfigService";
 import {
     CONTEXT_MANAGEMENT_KEY,
     createExecutionContextManagement,
+    type ExecutionContextManagement,
 } from "../context-management";
 
 describe("TENEX context management integration", () => {
@@ -33,6 +34,18 @@ describe("TENEX context management integration", () => {
 
     function setContextManagementConfig(overrides: Record<string, unknown>): void {
         getContextManagementConfigSpy.mockReturnValue(buildContextManagementConfig(overrides) as any);
+    }
+
+    async function prepareManagedRequest(
+        contextManagement: ExecutionContextManagement | undefined,
+        messages: Array<Record<string, unknown>>,
+        model: { provider: string; modelId: string } = { provider: "mock", modelId: "mock" }
+    ) {
+        expect(contextManagement).toBeDefined();
+        return await contextManagement?.prepareRequest({
+            messages: messages as any,
+            model,
+        });
     }
 
     beforeEach(async () => {
@@ -76,7 +89,47 @@ describe("TENEX context management integration", () => {
         });
 
         expect(contextManagement).toBeDefined();
-        expect(contextManagement?.middleware).toBeDefined();
+        expect(typeof contextManagement?.prepareRequest).toBe("function");
+    });
+
+    test("normalizes legacy string user and assistant content before prepareRequest", async () => {
+        setContextManagementConfig({});
+
+        const agent = {
+            name: "executor",
+            slug: "executor",
+            pubkey: AGENT_PUBKEY,
+        } as AgentInstance;
+
+        const contextManagement = createExecutionContextManagement({
+            providerId: "openrouter",
+            conversationId: CONVERSATION_ID,
+            agent,
+            conversationStore: store,
+        });
+
+        const prepared = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            { role: "user", content: "Legacy user request" },
+            { role: "assistant", content: "Legacy assistant reply" },
+            { role: "user", content: "Continue working" },
+        ]);
+
+        expect(prepared?.messages).toEqual([
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Legacy user request" }],
+            },
+            {
+                role: "assistant",
+                content: [{ type: "text", text: "Legacy assistant reply" }],
+            },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Continue working" }],
+            },
+        ]);
     });
 
     test("scratchpad tool persists state and affects the next prompt projection", async () => {
@@ -92,7 +145,6 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
         expect(contextManagement?.optionalTools.scratchpad).toBeDefined();
 
         const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
@@ -122,43 +174,24 @@ describe("TENEX context management integration", () => {
             })
         );
 
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "assistant",
-                        content: [{ type: "tool-call", toolCallId: "call-old", toolName: "fs_read", input: { path: "old.ts" } }],
-                    },
-                    {
-                        role: "tool",
-                        content: [{ type: "tool-result", toolCallId: "call-old", toolName: "fs_read", output: { type: "text", value: "old contents" } }],
-                    },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: "Continue." }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        const prepared = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "assistant",
+                content: [{ type: "tool-call", toolCallId: "call-old", toolName: "fs_read", input: { path: "old.ts" } }],
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
+            {
+                role: "tool",
+                content: [{ type: "tool-result", toolCallId: "call-old", toolName: "fs_read", output: { type: "text", value: "old contents" } }],
             },
-        } as any);
+            {
+                role: "user",
+                content: [{ type: "text", text: "Continue." }],
+            },
+        ]);
 
-        expect(JSON.stringify(transformed?.prompt)).not.toContain("Focus on the parser errors");
-        expect(JSON.stringify(transformed?.prompt)).not.toContain("\"toolCallId\":\"call-old\"");
+        expect(JSON.stringify(prepared?.messages)).not.toContain("Focus on the parser errors");
+        expect(JSON.stringify(prepared?.messages)).not.toContain("\"toolCallId\":\"call-old\"");
         const scratchpadReminders = await getSystemReminderContext().collect();
         expect(scratchpadReminders).toEqual(
             expect.arrayContaining([
@@ -172,7 +205,8 @@ describe("TENEX context management integration", () => {
 
     test("default stack decays stale tool results instead of dropping whole exchanges", async () => {
         setContextManagementConfig({
-            tokenBudget: 200,
+            tokenBudget: 12000,
+            forceScratchpadThresholdPercent: 100,
         });
 
         const agent = {
@@ -186,8 +220,6 @@ describe("TENEX context management integration", () => {
             agent,
             conversationStore: store,
         });
-
-        expect(contextManagement).toBeDefined();
 
         const prompt: Array<Record<string, unknown>> = [{ role: "system", content: "You are helpful." }];
         for (let index = 1; index <= 9; index++) {
@@ -222,28 +254,8 @@ describe("TENEX context management integration", () => {
             content: [{ type: "text", text: "Continue." }],
         });
 
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: prompt as any,
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
-            },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
-
-        const transformedJson = JSON.stringify(transformed?.prompt);
+        const prepared = await prepareManagedRequest(contextManagement, prompt);
+        const transformedJson = JSON.stringify(prepared?.messages);
         expect(transformedJson).toContain("fs_read(tool:");
         expect(transformedJson).toContain("\"toolCallId\":\"call-1\"");
         expect(transformedJson).toContain("\"toolCallId\":\"call-9\"");
@@ -268,75 +280,35 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
-
-        const shortPrompt = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: "Short request." }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        const shortPrompt = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Short request." }],
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
-        expect(JSON.stringify(shortPrompt?.prompt)).not.toContain("[Context utilization:");
+        expect(JSON.stringify(shortPrompt?.messages)).not.toContain("[Context utilization:");
         const shortPromptReminders = await getSystemReminderContext().collect();
         expect(shortPromptReminders.map((reminder) => reminder.type)).toEqual([
             "scratchpad",
             "context-window-status",
         ]);
 
-        const longPrompt = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
+        const longPrompt = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [
                     {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: `Long request ${"y".repeat(620)}`,
-                            },
-                        ],
+                        type: "text",
+                        text: `Long request ${"y".repeat(620)}`,
                     },
                 ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
-        expect(JSON.stringify(longPrompt?.prompt)).not.toContain("[Context utilization:");
+        expect(JSON.stringify(longPrompt?.messages)).not.toContain("[Context utilization:");
         const utilizationReminders = await getSystemReminderContext().collect();
         expect(utilizationReminders).toEqual(
             expect.arrayContaining([
@@ -372,39 +344,18 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
-
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    {
-                        role: "system",
-                        content: `You are helpful. ${"s".repeat(800)}`,
-                    },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: "Short request." }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        const prepared = await prepareManagedRequest(contextManagement, [
+            {
+                role: "system",
+                content: `You are helpful. ${"s".repeat(800)}`,
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
+            {
+                role: "user",
+                content: [{ type: "text", text: "Short request." }],
             },
-        } as any);
+        ]);
 
-        expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context utilization:");
+        expect(JSON.stringify(prepared?.messages)).not.toContain("[Context utilization:");
         const reminders = await getSystemReminderContext().collect();
         expect(reminders.map((reminder) => reminder.type)).toEqual([
             "scratchpad",
@@ -413,14 +364,8 @@ describe("TENEX context management integration", () => {
         const contextStatusReminder = reminders.find(
             (reminder) => reminder.type === "context-window-status"
         );
-        expect(contextStatusReminder?.content).toContain("[Context status]");
-        expect(contextStatusReminder?.content).toContain("managed working budget context:");
-        expect(contextStatusReminder?.content).toContain(
-            "Static overhead outside the managed working budget:"
-        );
-        expect(contextStatusReminder?.content).toContain(
-            "managed working budget target: ~100 tokens"
-        );
+        expect(contextStatusReminder?.content).toContain("managed working budget");
+        expect(contextStatusReminder?.content).toContain("~9/100 tokens");
     });
 
     test("forced scratchpad tool choice appears once the configured threshold is crossed", async () => {
@@ -441,88 +386,48 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
-
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        const prepared = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
-        expect(transformed?.toolChoice).toEqual({
+        expect(prepared?.toolChoice).toEqual({
             type: "tool",
             toolName: "scratchpad",
         });
 
-        const postScratchpadPrompt = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
+        const postScratchpadPrompt = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "assistant",
+                content: [
                     {
-                        role: "assistant",
-                        content: [
-                            {
-                                type: "tool-call",
-                                toolCallId: "scratch-call-1",
-                                toolName: "scratchpad",
-                                input: { setEntries: { notes: "Keep parser context" } },
-                            },
-                        ],
-                    },
-                    {
-                        role: "tool",
-                        content: [
-                            {
-                                type: "tool-result",
-                                toolCallId: "scratch-call-1",
-                                toolName: "scratchpad",
-                                output: { type: "json", value: { ok: true } },
-                            },
-                        ],
-                    },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
+                        type: "tool-call",
+                        toolCallId: "scratch-call-1",
+                        toolName: "scratchpad",
+                        input: { setEntries: { notes: "Keep parser context" } },
                     },
                 ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
+            {
+                role: "tool",
+                content: [
+                    {
+                        type: "tool-result",
+                        toolCallId: "scratch-call-1",
+                        toolName: "scratchpad",
+                        output: { type: "json", value: { ok: true } },
+                    },
+                ],
             },
-        } as any);
+            {
+                role: "user",
+                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
+            },
+        ]);
 
         expect(postScratchpadPrompt?.toolChoice).toBeUndefined();
     });
@@ -549,38 +454,18 @@ describe("TENEX context management integration", () => {
             },
         });
 
-        expect(contextManagement).toBeDefined();
         expect(contextManagement?.optionalTools.scratchpad).toBeUndefined();
 
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        const prepared = await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
-        expect(transformed?.toolChoice).toBeUndefined();
-        expect(JSON.stringify(transformed?.prompt)).not.toContain("Use scratchpad(...) now");
+        expect(prepared?.toolChoice).toBeUndefined();
+        expect(JSON.stringify(prepared?.messages)).not.toContain("Use scratchpad(...) now");
         const genericReminder = await getSystemReminderContext().collect();
         expect(genericReminder).toEqual(
             expect.arrayContaining([
@@ -616,36 +501,22 @@ describe("TENEX context management integration", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
-
-        const transformed = await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: "Inspect the parser flow and keep the prompt focused." }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
+        const prepared = await prepareManagedRequest(
+            contextManagement,
+            [
+                { role: "system", content: "You are helpful." },
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "Inspect the parser flow and keep the prompt focused." }],
                 },
-            },
-            model: {
-                specificationVersion: "v3",
+            ],
+            {
                 provider: "anthropic",
                 modelId: "claude-opus-4-5-20251101",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+            }
+        );
 
-        expect(JSON.stringify(transformed?.prompt)).not.toContain("[Context status]");
+        expect(JSON.stringify(prepared?.messages)).not.toContain("[Context status]");
         const contextStatusReminders = await getSystemReminderContext().collect();
         expect(contextStatusReminders).toEqual(
             expect.arrayContaining([
@@ -660,15 +531,8 @@ describe("TENEX context management integration", () => {
         const contextStatusReminder = contextStatusReminders.find(
             (reminder) => reminder.type === "context-window-status"
         );
-        expect(contextStatusReminder?.content).toContain("[Context status]");
-        expect(contextStatusReminder?.content).toContain(
-            "Current request after context management:"
-        );
-        expect(contextStatusReminder?.content).toContain(
-            "managed working budget context:"
-        );
-        expect(contextStatusReminder?.content).toContain(
-            "Raw model context window: ~200,000 tokens"
-        );
+        expect(contextStatusReminder?.content).toContain("managed working budget");
+        expect(contextStatusReminder?.content).toContain("Model window:");
+        expect(contextStatusReminder?.content).toContain("200,000");
     });
 });

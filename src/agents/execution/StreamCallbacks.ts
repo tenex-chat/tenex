@@ -11,15 +11,26 @@ import { config as configService } from "@/services/ConfigService";
 import { createViolationReminders } from "@/services/heuristics";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
+import { SkillService } from "@/services/skill";
 import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
+import type {
+    LanguageModel,
+    ModelMessage,
+    ProviderRegistryProvider,
+    Tool as CoreTool,
+    ToolChoice,
+} from "ai";
+import type { SharedV3ProviderOptions as ProviderOptions } from "@ai-sdk/provider";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
+import type { AISdkTool } from "@/tools/types";
+import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
+import { prepareLLMRequest } from "./request-preparation";
 import { updateReminderData } from "./system-reminders";
-import type { FullRuntimeContext, RALExecutionContext } from "./types";
+import type { FullRuntimeContext, LLMModelRequest, RALExecutionContext } from "./types";
 
 /**
  * Step data passed to prepareStep callback
@@ -54,10 +65,18 @@ export interface PrepareStepConfig {
     context: FullRuntimeContext;
     llmService: {
         provider: string;
+        model: string;
         updateUsageFromSteps: (steps: StepData["steps"]) => void;
-        createLanguageModelFromRegistry: (provider: string, model: string, registry: ProviderRegistryProvider) => LanguageModel;
+        createLanguageModelFromRegistry: (
+            provider: string,
+            model: string,
+            registry: ProviderRegistryProvider
+        ) => LanguageModel;
     };
     messageCompiler: MessageCompiler;
+    toolsObject: Record<string, AISdkTool>;
+    contextManagement?: ExecutionContextManagement;
+    initialRequest: LLMModelRequest;
     nudgeContent: string;
     /** Individual nudge data for system prompt rendering */
     nudges: NudgeData[];
@@ -78,16 +97,32 @@ export interface PrepareStepConfig {
     };
 }
 
+type PreparedStepResult = {
+    model?: LanguageModel;
+    messages?: ModelMessage[];
+    providerOptions?: ProviderOptions;
+    experimental_context?: unknown;
+    toolChoice?: ToolChoice<Record<string, CoreTool>>;
+};
+
+type PreparedStepCacheEntry = {
+    model?: LanguageModel;
+    request: LLMModelRequest;
+};
+
 /**
  * Create the prepareStep callback for message rebuilding and dynamic model switching
  */
 export function createPrepareStep(
     config: PrepareStepConfig
-): (step: StepData) => Promise<{ model?: LanguageModel; messages?: ModelMessage[] } | undefined> {
+): (step: StepData) => Promise<PreparedStepResult | undefined> {
     const {
         context,
         llmService,
         messageCompiler,
+        toolsObject,
+        contextManagement,
+        initialRequest,
         nudgeContent,
         nudges,
         nudgeToolPermissions,
@@ -101,6 +136,9 @@ export function createPrepareStep(
     const conversationStore = context.conversationStore;
     const ralRegistry = RALRegistry.getInstance();
     const isMetaModel = configService.isMetaModelConfig(context.agent.llmConfig);
+    const preparedStepCache = new Map<number, PreparedStepCacheEntry>();
+
+    preparedStepCache.set(0, { request: initialRequest });
 
     // Import project context lazily to avoid circular dependencies
     let projectContextModulePromise: Promise<typeof import("@/services/projects")> | null = null;
@@ -120,8 +158,31 @@ export function createPrepareStep(
         }
 
         try {
+            const lastCompletedStep = step.steps.at(-1);
+            if (lastCompletedStep && execContext.pendingContextManagementUsageReporter) {
+                await execContext.pendingContextManagementUsageReporter(
+                    lastCompletedStep.usage?.inputTokens
+                );
+                execContext.pendingContextManagementUsageReporter = undefined;
+            }
+
             // Pass steps to LLM service for usage tracking
             llmService.updateUsageFromSteps(step.steps);
+
+            const cachedPreparedStep = preparedStepCache.get(step.stepNumber);
+            if (cachedPreparedStep) {
+                execContext.accumulatedMessages = cachedPreparedStep.request.messages;
+                execContext.pendingContextManagementUsageReporter =
+                    cachedPreparedStep.request.reportContextManagementUsage;
+
+                return {
+                    model: cachedPreparedStep.model,
+                    messages: cachedPreparedStep.request.messages,
+                    providerOptions: cachedPreparedStep.request.providerOptions,
+                    experimental_context: cachedPreparedStep.request.experimentalContext,
+                    toolChoice: cachedPreparedStep.request.toolChoice,
+                };
+            }
 
             // Update execution context with latest messages
             execContext.accumulatedMessages = step.messages;
@@ -211,6 +272,14 @@ export function createPrepareStep(
                 ralNumber
             );
 
+            // Rehydrate skills from ConversationStore to pick up mid-RAL self-applied changes
+            const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
+            const selfAppliedSkillIds = conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
+            const currentSkillIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds])];
+            const currentSkillResult = currentSkillIds.length > 0
+                ? await SkillService.getInstance().fetchSkills(currentSkillIds)
+                : { skills: [] as SkillData[], content: "" };
+
             const { messages: rebuiltMessages } = await messageCompiler.compile({
                 agent: context.agent,
                 project: projectContext.project,
@@ -226,8 +295,8 @@ export function createPrepareStep(
                 nudgeContent,
                 nudges,
                 nudgeToolPermissions,
-                skillContent,
-                skills,
+                skillContent: currentSkillResult.content,
+                skills: currentSkillResult.skills,
                 pendingDelegations,
                 completedDelegations,
                 ralNumber,
@@ -308,9 +377,36 @@ export function createPrepareStep(
                 }
             }
 
-            return modelState.currentModel
-                ? { model: modelState.currentModel, messages: rebuiltMessages }
-                : { messages: rebuiltMessages };
+            const preparedModel = modelState.currentModel;
+            const preparedProvider = preparedModel?.provider ?? llmService.provider;
+            const preparedModelId = preparedModel?.modelId ?? llmService.model;
+            const preparedRequest = await prepareLLMRequest({
+                messages: rebuiltMessages,
+                tools: toolsObject,
+                providerId: preparedProvider,
+                model: {
+                    provider: preparedProvider,
+                    modelId: preparedModelId,
+                },
+                contextManagement,
+            });
+
+            execContext.accumulatedMessages = preparedRequest.messages;
+            execContext.pendingContextManagementUsageReporter =
+                preparedRequest.reportContextManagementUsage;
+
+            preparedStepCache.set(step.stepNumber, {
+                model: preparedModel,
+                request: preparedRequest,
+            });
+
+            return {
+                ...(preparedModel ? { model: preparedModel } : {}),
+                messages: preparedRequest.messages,
+                providerOptions: preparedRequest.providerOptions,
+                experimental_context: preparedRequest.experimentalContext,
+                toolChoice: preparedRequest.toolChoice,
+            };
         } catch (error) {
             logger.writeToWarnLog({
                 timestamp: new Date().toISOString(),

@@ -1,4 +1,4 @@
-import type { LanguageModelMiddleware, Tool as CoreTool, ModelMessage } from "ai";
+import type { Tool as CoreTool, ModelMessage, ToolChoice } from "ai";
 import type { AgentInstance } from "@/agents/types";
 import type { MessageCompiler } from "@/agents/execution/MessageCompiler";
 import type { ConversationStore } from "@/conversations/ConversationStore";
@@ -72,6 +72,9 @@ export interface RALExecutionContext {
      * Contains messages up to but not including the current step.
      */
     accumulatedMessages: ModelMessage[];
+    pendingContextManagementUsageReporter?: (
+        actualInputTokens: number | null | undefined
+    ) => Promise<void>;
 }
 
 /**
@@ -100,5 +103,8 @@ export interface LLMModelRequest {
     messages: ModelMessage[];
     providerOptions?: ProviderOptions;
     experimentalContext?: unknown;
-    middlewares?: LanguageModelMiddleware[];
+    toolChoice?: ToolChoice<Record<string, CoreTool>>;
+    reportContextManagementUsage?: (
+        actualInputTokens: number | null | undefined
+    ) => Promise<void>;
 }

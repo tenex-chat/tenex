@@ -1,15 +1,17 @@
 import { trace } from "@opentelemetry/api";
-import type { LanguageModelV3CallOptions } from "@ai-sdk/provider";
-import type { LanguageModel, LanguageModelMiddleware } from "ai";
+import type { LanguageModel } from "ai";
 import {
     CONTEXT_MANAGEMENT_KEY,
     ContextUtilizationReminderStrategy,
     ContextWindowStatusStrategy,
+    type ContextManagementPreparedRequest,
     ScratchpadStrategy,
     SummarizationStrategy,
     SystemPromptCachingStrategy,
+    ToolResultDecayStrategy,
     createContextManagementRuntime,
     createDefaultPromptTokenEstimator,
+    type PrepareContextManagementRequestOptions,
     type ContextManagementRequestContext,
     type ContextManagementRuntime,
     type ContextManagementStrategy,
@@ -28,19 +30,24 @@ import {
     createManagedContextBudgetProfile,
     normalizeProviderId,
 } from "./budget-profile";
-import { getContextManagementSettings } from "./settings";
+import { normalizeMessagesForContextManagement } from "./normalize-messages";
+import {
+    DEFAULT_TOOL_RESULT_DECAY_THRESHOLD_PERCENT,
+    getContextManagementSettings,
+} from "./settings";
 import {
     fromRuntimeScratchpadState,
     toRuntimeScratchpadConversationEntries,
     toRuntimeScratchpadState,
 } from "./scratchpad-store";
 import { createTelemetryCallback } from "./telemetry";
-import { InstrumentedToolResultDecayStrategy } from "./tool-result-decay-diagnostics";
 
 export interface ExecutionContextManagement {
-    middleware: LanguageModelMiddleware;
     optionalTools: Record<string, AISdkTool>;
     requestContext: ContextManagementRequestContext;
+    prepareRequest(
+        options: Omit<PrepareContextManagementRequestOptions, "requestContext">
+    ): Promise<ContextManagementPreparedRequest>;
 }
 
 function createSummarizationModel(options: {
@@ -71,7 +78,9 @@ function createConversationContextManagementRuntime(options: {
     conversationId: string;
     agent: AgentInstance;
     scratchpadAvailable: boolean;
-}): ContextManagementRuntime {
+}): {
+    runtime: ContextManagementRuntime;
+} {
     const settings = getContextManagementSettings();
     const requestEstimator = createDefaultPromptTokenEstimator();
     const managedBudgetProfile = createManagedContextBudgetProfile(
@@ -79,37 +88,14 @@ function createConversationContextManagementRuntime(options: {
         requestEstimator
     );
     const scratchpadEnabled = options.scratchpadAvailable;
+    const toolResultDecayThresholdTokens = Math.floor(
+        settings.tokenBudget
+            * (DEFAULT_TOOL_RESULT_DECAY_THRESHOLD_PERCENT / 100)
+    );
 
     const strategies: ContextManagementStrategy[] = [
         new SystemPromptCachingStrategy(),
-        new InstrumentedToolResultDecayStrategy({
-            estimator: requestEstimator,
-            placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
-                const toolCallEventIdMap = resolveToolCallEventIdMap(
-                    options.conversationStore.getAllMessages()
-                );
-                return buildDecayPlaceholder(toolName, toolCallId, toolCallEventIdMap);
-            },
-        }),
     ];
-
-    const summarizationModel = createSummarizationModel({
-        conversationId: options.conversationId,
-        agent: options.agent,
-    });
-
-    if (summarizationModel) {
-        strategies.push(
-            new SummarizationStrategy({
-                model: summarizationModel,
-                maxPromptTokens: Math.floor(
-                    settings.tokenBudget
-                        * (settings.summarizationFallbackThresholdPercent / 100)
-                ),
-                estimator: managedBudgetProfile.estimator,
-            })
-        );
-    }
 
     if (scratchpadEnabled) {
         strategies.push(
@@ -136,9 +122,39 @@ function createConversationContextManagementRuntime(options: {
                             )
                             : [],
                 },
-                reminderTone: "informational",
                 budgetProfile: managedBudgetProfile,
                 forceToolThresholdRatio: settings.forceScratchpadThresholdPercent / 100,
+            })
+        );
+    }
+
+    strategies.push(
+        new ToolResultDecayStrategy({
+            estimator: managedBudgetProfile.estimator,
+            maxPromptTokens: toolResultDecayThresholdTokens,
+            placeholder: ({ toolName, toolCallId }: DecayedToolContext) => {
+                const toolCallEventIdMap = resolveToolCallEventIdMap(
+                    options.conversationStore.getAllMessages()
+                );
+                return buildDecayPlaceholder(toolName, toolCallId, toolCallEventIdMap);
+            },
+        })
+    );
+
+    const summarizationModel = createSummarizationModel({
+        conversationId: options.conversationId,
+        agent: options.agent,
+    });
+
+    if (summarizationModel) {
+        strategies.push(
+            new SummarizationStrategy({
+                model: summarizationModel,
+                maxPromptTokens: Math.floor(
+                    settings.tokenBudget
+                        * (settings.summarizationFallbackThresholdPercent / 100)
+                ),
+                estimator: managedBudgetProfile.estimator,
             })
         );
     }
@@ -171,25 +187,11 @@ function createConversationContextManagementRuntime(options: {
     const telemetry = createTelemetryCallback();
     const runtime = createContextManagementRuntime({
         strategies,
-        telemetry: telemetry.emit,
+        telemetry,
         estimator: requestEstimator,
         systemReminderContext: getSystemReminderContext(),
     });
-
-    const middleware: LanguageModelMiddleware = {
-        specificationVersion: "v3",
-        transformParams: async (args) => {
-            const transformed = await runtime.middleware.transformParams?.(args as never)
-                ?? args.params;
-            telemetry.finalizeRuntimeComplete(transformed as Partial<LanguageModelV3CallOptions>);
-            return transformed;
-        },
-    };
-
-    return {
-        ...runtime,
-        middleware,
-    };
+    return { runtime };
 }
 
 export function createExecutionContextManagement(options: {
@@ -202,7 +204,7 @@ export function createExecutionContextManagement(options: {
     const scratchpadAvailable =
         !options.nudgeToolPermissions || !isOnlyToolMode(options.nudgeToolPermissions);
 
-    const runtime = createConversationContextManagementRuntime({
+    const { runtime } = createConversationContextManagementRuntime({
         conversationStore: options.conversationStore,
         conversationId: options.conversationId,
         agent: options.agent,
@@ -213,12 +215,24 @@ export function createExecutionContextManagement(options: {
         : {};
 
     return {
-        middleware: runtime.middleware as LanguageModelMiddleware,
         optionalTools,
         requestContext: {
             conversationId: options.conversationId,
             agentId: options.agent.pubkey,
             agentLabel: options.agent.name || options.agent.slug,
+        },
+        async prepareRequest(requestOptions) {
+            return await runtime.prepareRequest({
+                ...requestOptions,
+                messages: normalizeMessagesForContextManagement(
+                    requestOptions.messages
+                ),
+                requestContext: {
+                    conversationId: options.conversationId,
+                    agentId: options.agent.pubkey,
+                    agentLabel: options.agent.name || options.agent.slug,
+                },
+            });
         },
     };
 }

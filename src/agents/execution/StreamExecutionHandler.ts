@@ -26,9 +26,9 @@ import { createEventContext } from "@/services/event-context";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
 import type { LanguageModel } from "ai";
-import { CONTEXT_MANAGEMENT_KEY } from "ai-sdk-context-management";
 import chalk from "chalk";
 import type { LLMService } from "@/llm/service";
+import type { ExecutionContextManagement } from "./context-management";
 import type { MessageCompiler } from "./MessageCompiler";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { createPrepareStep } from "./StreamCallbacks";
@@ -54,6 +54,7 @@ export interface StreamExecutionConfig {
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
+    contextManagement?: ExecutionContextManagement;
     nudgeContent: string;
     /** Individual nudge data for system prompt rendering */
     nudges: NudgeData[];
@@ -98,7 +99,10 @@ export class StreamExecutionHandler {
             config.abortSignal,
             this.internalAbortController.signal
         );
-        this.execContext = { accumulatedMessages: [] };
+        this.execContext = {
+            accumulatedMessages: [],
+            pendingContextManagementUsageReporter: config.request.reportContextManagementUsage,
+        };
     }
 
     /**
@@ -159,16 +163,15 @@ export class StreamExecutionHandler {
                 context,
                 llmService: {
                     provider: llmService.provider,
+                    model: llmService.model,
                     updateUsageFromSteps: (steps) => llmService.updateUsageFromSteps(steps),
                     createLanguageModelFromRegistry: (provider, model, registry) =>
-                        llmService.createLanguageModelFromRegistry(
-                            provider,
-                            model,
-                            registry,
-                            request.middlewares
-                        ),
+                        llmService.createLanguageModelFromRegistry(provider, model, registry),
                 },
                 messageCompiler: this.config.messageCompiler,
+                toolsObject,
+                contextManagement: this.config.contextManagement,
+                initialRequest: request,
                 nudgeContent: this.config.nudgeContent,
                 nudges: this.config.nudges,
                 nudgeToolPermissions: this.config.nudgeToolPermissions,
@@ -195,21 +198,18 @@ export class StreamExecutionHandler {
                 "ral.number": ralNumber,
             });
 
-            const contextManagementRequest = request.providerOptions?.[CONTEXT_MANAGEMENT_KEY];
-            if (!contextManagementRequest) {
-                throw new Error(`[StreamExecutionHandler] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${context.agent.slug} in conversation ${shortenConversationId(context.conversationId)}.`);
-            }
-            if (!request.middlewares || request.middlewares.length === 0) {
-                throw new Error(`[StreamExecutionHandler] Missing required context management middleware for agent ${context.agent.slug} in conversation ${shortenConversationId(context.conversationId)}.`);
-            }
-
             await llmService.stream(messages, toolsObject, {
                 abortSignal: this.effectiveAbortSignal,
                 prepareStep,
                 onStopCheck: async () => this.silentTerminationRequested,
                 providerOptions: request.providerOptions,
                 experimentalContext: request.experimentalContext,
-                middlewares: request.middlewares,
+                toolChoice: request.toolChoice,
+                onFinalStepInputTokens: async (actualInputTokens) => {
+                    const reporter = this.execContext.pendingContextManagementUsageReporter;
+                    this.execContext.pendingContextManagementUsageReporter = undefined;
+                    await reporter?.(actualInputTokens);
+                },
             });
 
             if (this.silentTerminationRequested && !this.result) {

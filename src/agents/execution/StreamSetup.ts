@@ -15,14 +15,17 @@ import { RALRegistry } from "@/services/ral";
 import { getToolsObject } from "@/tools/registry";
 import { logger } from "@/utils/logger";
 import { trace } from "@opentelemetry/api";
-import type { LanguageModelMiddleware } from "ai";
 import type { LLMService } from "@/llm/service";
 import { MessageCompiler } from "./MessageCompiler";
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import { initializeReminderProviders, updateReminderData } from "./system-reminders";
 import type { ToolExecutionTracker } from "./ToolExecutionTracker";
 import { wrapToolsWithSupervision } from "./ToolSupervisionWrapper";
-import { CONTEXT_MANAGEMENT_KEY, createExecutionContextManagement } from "./context-management";
+import {
+    createExecutionContextManagement,
+    type ExecutionContextManagement,
+} from "./context-management";
+import { prepareLLMRequest } from "./request-preparation";
 import type { FullRuntimeContext, LLMModelRequest } from "./types";
 import type { AISdkTool } from "@/tools/types";
 
@@ -34,6 +37,7 @@ export interface StreamSetupResult {
     llmService: LLMService;
     messageCompiler: MessageCompiler;
     request: LLMModelRequest;
+    contextManagement?: ExecutionContextManagement;
     nudgeContent: string;
     /** Individual nudge data for system prompt rendering */
     nudges: NudgeData[];
@@ -76,7 +80,10 @@ export async function setupStreamExecution(
 
     // === FETCH SKILLS ===
     // Skills do NOT affect tools, but we fetch them early to download attached files
-    const skillEventIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
+    // Merge delegation-provided skills with self-applied skills from conversation state
+    const delegationSkillIds = context.triggeringEnvelope.metadata.skillEventIds ?? [];
+    const selfAppliedSkillIds = context.conversationStore?.getSelfAppliedSkillIds(context.agent.pubkey) ?? [];
+    const skillEventIds = [...new Set([...delegationSkillIds, ...selfAppliedSkillIds])];
     const skillResult = skillEventIds.length > 0
         ? await SkillService.getInstance().fetchSkills(skillEventIds)
         : { skills: [], content: "" };
@@ -292,24 +299,23 @@ export async function setupStreamExecution(
         "conversation.count": counts.conversation,
     });
 
+    const request = await prepareLLMRequest({
+        messages,
+        tools: toolsObject,
+        providerId: llmService.provider,
+        model: {
+            provider: llmService.provider,
+            modelId: llmService.model,
+        },
+        contextManagement,
+    });
+
     return {
         toolsObject,
         llmService,
         messageCompiler,
-        request: {
-            messages,
-            ...(contextManagement
-                ? {
-                    providerOptions: {
-                        [CONTEXT_MANAGEMENT_KEY]: contextManagement.requestContext,
-                    },
-                    experimentalContext: {
-                        [CONTEXT_MANAGEMENT_KEY]: contextManagement.requestContext,
-                    },
-                    middlewares: [contextManagement.middleware as LanguageModelMiddleware],
-                }
-                : {}),
-        } as LLMModelRequest,
+        request,
+        contextManagement,
         nudgeContent,
         nudges: nudgeResult.nudges,
         nudgeToolPermissions: nudgeResult.toolPermissions,

@@ -3,45 +3,7 @@ import type {
     ContextManagementStrategyPayload,
     ContextManagementTelemetryEvent,
 } from "ai-sdk-context-management";
-import type { LanguageModelV3CallOptions, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import { MANAGED_CONTEXT_BUDGET_SCOPE } from "./budget-profile";
-
-function serializeTelemetryValue(value: unknown): string {
-    const seen = new WeakSet<object>();
-
-    try {
-        return JSON.stringify(value, (_key, current) => {
-            if (current instanceof Error) {
-                return {
-                    name: current.name,
-                    message: current.message,
-                    stack: current.stack,
-                };
-            }
-
-            if (typeof current === "bigint") {
-                return current.toString();
-            }
-
-            if (typeof current === "object" && current !== null) {
-                if (seen.has(current)) {
-                    return "[Circular]";
-                }
-                seen.add(current);
-            }
-
-            return current;
-        }) ?? "null";
-    } catch (error) {
-        const fallbackError = error instanceof Error
-            ? { name: error.name, message: error.message, stack: error.stack }
-            : { message: String(error) };
-        return JSON.stringify({
-            serializationError: fallbackError,
-            fallback: String(value),
-        });
-    }
-}
 
 function addAttribute(
     attributes: Record<string, string | number | boolean>,
@@ -168,14 +130,6 @@ function getScratchpadEntryCharCount(value: unknown): number {
         + (getRecordStringCharCount(value, "replaceEntries") ?? 0);
 }
 
-function getRuntimeCompletePrompt(
-    event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>
-): LanguageModelV3Prompt | undefined {
-    return Array.isArray(event.payloads.prompt)
-        ? event.payloads.prompt as LanguageModelV3Prompt
-        : undefined;
-}
-
 function formatTelemetryNumber(value: number): string {
     return Math.round(value).toLocaleString("en-US");
 }
@@ -206,13 +160,16 @@ function buildSystemPromptCachingSummary(payload: Extract<ContextManagementStrat
     return `Reordered ${formatCount(payload.systemMessageCountBefore, "system message")} into a stable prefix.`;
 }
 
-function buildToolResultDecaySummary(payload: Extract<ContextManagementStrategyPayload, { kind: "tool-result-decay" }> | undefined): string {
+function buildToolResultDecaySummary(
+    event: Extract<ContextManagementTelemetryEvent, { type: "strategy-complete" }>,
+    payload: Extract<ContextManagementStrategyPayload, { kind: "tool-result-decay" }> | undefined
+): string {
     if (!payload) {
         return "Evaluated tool-result decay.";
     }
 
     return clipTelemetrySummary(
-        `Evaluated tool-result decay across ${formatTelemetryNumber(payload.totalToolExchanges ?? 0)} exchanges; ${formatTelemetryNumber(payload.truncatedCount ?? 0)} truncated, ${formatTelemetryNumber(payload.placeholderCount ?? 0)} placeholdered.`
+        `Evaluated tool-result decay across ${formatTelemetryNumber(payload.totalToolExchanges ?? 0)} exchanges; ${formatTelemetryNumber(payload.placeholderCount ?? 0)} outputs and ${formatTelemetryNumber(payload.inputPlaceholderCount ?? 0)} inputs placeholdered.`
     );
 }
 
@@ -272,7 +229,7 @@ function buildStrategyCompleteSummary(
         case "system-prompt-caching":
             return buildSystemPromptCachingSummary(payload);
         case "tool-result-decay":
-            return buildToolResultDecaySummary(payload);
+            return buildToolResultDecaySummary(event, payload);
         case "scratchpad":
             return buildScratchpadSummary(payload);
         case "context-utilization-reminder":
@@ -349,9 +306,9 @@ function buildDerivedTelemetryAttributes(
                     addAttribute(attributes, "context_management.warning_forecast_extra_tokens", payload.warningForecastExtraTokens);
                     addAttribute(attributes, "context_management.depth_factor", payload.depthFactor);
                     addAttribute(attributes, "context_management.forecast_depth_factor", payload.forecastDepthFactor);
-                    addAttribute(attributes, "context_management.truncated_tool_result_count", payload.truncatedCount);
+                    addAttribute(attributes, "context_management.max_result_tokens", payload.maxResultTokens);
+                    addAttribute(attributes, "context_management.placeholder_min_source_tokens", payload.placeholderMinSourceTokens);
                     addAttribute(attributes, "context_management.placeholder_tool_result_count", payload.placeholderCount);
-                    addAttribute(attributes, "context_management.truncated_tool_input_count", payload.inputTruncatedCount);
                     addAttribute(attributes, "context_management.placeholder_tool_input_count", payload.inputPlaceholderCount);
                     addAttribute(attributes, "context_management.total_tool_exchanges", payload.totalToolExchanges);
                     addAttribute(attributes, "context_management.warning_count", payload.warningCount);
@@ -435,20 +392,13 @@ function sanitizeTelemetrySegment(value: string): string {
 function buildTelemetryAttributes(
     event: ContextManagementTelemetryEvent
 ): Record<string, string | number | boolean> {
-    const attributes: Record<string, string | number | boolean> = {
-        "context_management.request_context_json": serializeTelemetryValue(
-            "requestContext" in event ? event.requestContext : null
-        ),
-    };
+    const attributes: Record<string, string | number | boolean> = {};
 
     switch (event.type) {
         case "runtime-start":
             attributes["context_management.strategy_names"] = event.strategyNames.join(",");
             attributes["context_management.optional_tool_names"] = event.optionalToolNames.join(",");
             attributes["context_management.estimated_tokens_before"] = event.estimatedTokensBefore;
-            attributes["context_management.provider_options_json"] = serializeTelemetryValue(
-                event.payloads.providerOptions
-            );
             break;
         case "strategy-complete":
             attributes["context_management.strategy_name"] = event.strategyName;
@@ -464,39 +414,21 @@ function buildTelemetryAttributes(
                 "context_management.working_token_budget",
                 event.workingTokenBudget
             );
-            attributes["context_management.strategy_payloads_json"] = serializeTelemetryValue(
-                event.strategyPayload ?? null
-            );
             break;
         case "tool-execute-start":
             attributes["context_management.tool_name"] = event.toolName;
             addAttribute(attributes, "context_management.strategy_name", event.strategyName);
             addAttribute(attributes, "context_management.tool_call_id", event.toolCallId);
-            attributes["context_management.tool_input_json"] = serializeTelemetryValue(
-                event.payloads.input
-            );
             break;
         case "tool-execute-complete":
             attributes["context_management.tool_name"] = event.toolName;
             addAttribute(attributes, "context_management.strategy_name", event.strategyName);
             addAttribute(attributes, "context_management.tool_call_id", event.toolCallId);
-            attributes["context_management.tool_input_json"] = serializeTelemetryValue(
-                event.payloads.input
-            );
-            attributes["context_management.tool_result_json"] = serializeTelemetryValue(
-                event.payloads.result
-            );
             break;
         case "tool-execute-error":
             attributes["context_management.tool_name"] = event.toolName;
             addAttribute(attributes, "context_management.strategy_name", event.strategyName);
             addAttribute(attributes, "context_management.tool_call_id", event.toolCallId);
-            attributes["context_management.tool_input_json"] = serializeTelemetryValue(
-                event.payloads.input
-            );
-            attributes["context_management.tool_error_json"] = serializeTelemetryValue(
-                event.payloads.error
-            );
             break;
         case "runtime-complete":
             attributes["context_management.estimated_tokens_before"] = event.estimatedTokensBefore;
@@ -505,14 +437,6 @@ function buildTelemetryAttributes(
                 event.removedToolExchangesTotal;
             attributes["context_management.pinned_tool_call_ids_total"] =
                 event.pinnedToolCallIdsTotal;
-            {
-                const prompt = getRuntimeCompletePrompt(event);
-                if (prompt !== undefined) {
-                    attributes["context_management.final_prompt_json"] = serializeTelemetryValue(
-                        prompt
-                    );
-                }
-            }
             break;
     }
 
@@ -547,93 +471,39 @@ function buildTelemetryEventName(event: ContextManagementTelemetryEvent): string
     }
 }
 
-function buildFinalRuntimeTelemetryAttributes(
-    params: Partial<LanguageModelV3CallOptions> | undefined
-): Record<string, string> {
-    const attributes: Record<string, string> = {};
-
-    if (params?.prompt !== undefined) {
-        attributes["context_management.final_prompt_json"] = serializeTelemetryValue(params.prompt);
-    }
-    if (params?.providerOptions !== undefined) {
-        attributes["context_management.final_provider_options_json"] = serializeTelemetryValue(
-            params.providerOptions
-        );
-    }
-    if (params?.toolChoice !== undefined) {
-        attributes["context_management.final_tool_choice_json"] = serializeTelemetryValue(
-            params.toolChoice
-        );
-    }
-
-    return attributes;
-}
-
-export function createTelemetryCallback(): {
-    emit: (event: ContextManagementTelemetryEvent) => void;
-    finalizeRuntimeComplete: (params?: Partial<LanguageModelV3CallOptions>) => void;
-} {
+export function createTelemetryCallback(): (event: ContextManagementTelemetryEvent) => void {
     const tracer = trace.getTracer("tenex");
     let runtimeSpan: Span | undefined;
-    let pendingRuntimeComplete: {
-        event: Extract<ContextManagementTelemetryEvent, { type: "runtime-complete" }>;
-        eventName: string;
-        attributes: Record<string, string | number | boolean>;
-    } | undefined;
+    return (event: ContextManagementTelemetryEvent): void => {
+        const attributes = buildTelemetryAttributes(event);
+        const eventName = buildTelemetryEventName(event);
 
-    return {
-        emit(event: ContextManagementTelemetryEvent): void {
-            const attributes = buildTelemetryAttributes(event);
-            const eventName = buildTelemetryEventName(event);
+        if (event.type === "runtime-start") {
+            runtimeSpan = tracer.startSpan(
+                "tenex.context_management",
+                { attributes },
+                otelContext.active()
+            );
+            runtimeSpan.addEvent(eventName, attributes);
+            return;
+        }
 
-            if (event.type === "runtime-start") {
-                runtimeSpan = tracer.startSpan(
-                    "tenex.context_management",
-                    { attributes },
-                    otelContext.active()
-                );
-                runtimeSpan.addEvent(eventName, attributes);
-                return;
-            }
+        const span = runtimeSpan ?? trace.getActiveSpan();
+        if (span) {
+            span.addEvent(eventName, attributes);
+        }
 
-            if (event.type === "runtime-complete") {
-                pendingRuntimeComplete = { event, eventName, attributes };
-                return;
-            }
-
-            const span = runtimeSpan ?? trace.getActiveSpan();
-            if (span) {
-                span.addEvent(eventName, attributes);
-            }
-        },
-        finalizeRuntimeComplete(params?: Partial<LanguageModelV3CallOptions>): void {
-            if (!pendingRuntimeComplete) {
-                return;
-            }
-
-            const { event, eventName, attributes } = pendingRuntimeComplete;
-            const finalAttributes = {
-                ...attributes,
-                ...buildFinalRuntimeTelemetryAttributes(params),
-            };
-
-            if (runtimeSpan) {
-                runtimeSpan.addEvent(eventName, finalAttributes);
-                runtimeSpan.setAttribute(
-                    "context_management.estimated_tokens_before",
-                    event.estimatedTokensBefore
-                );
-                runtimeSpan.setAttribute(
-                    "context_management.estimated_tokens_after",
-                    event.estimatedTokensAfter
-                );
-                runtimeSpan.end();
-                runtimeSpan = undefined;
-            } else {
-                trace.getActiveSpan()?.addEvent(eventName, finalAttributes);
-            }
-
-            pendingRuntimeComplete = undefined;
-        },
+        if (event.type === "runtime-complete" && runtimeSpan) {
+            runtimeSpan.setAttribute(
+                "context_management.estimated_tokens_before",
+                event.estimatedTokensBefore
+            );
+            runtimeSpan.setAttribute(
+                "context_management.estimated_tokens_after",
+                event.estimatedTokensAfter
+            );
+            runtimeSpan.end();
+            runtimeSpan = undefined;
+        }
     };
 }

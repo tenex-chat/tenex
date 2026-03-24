@@ -68,6 +68,7 @@ import { config as configService } from "@/services/ConfigService";
 import {
     CONTEXT_MANAGEMENT_KEY,
     createExecutionContextManagement,
+    type ExecutionContextManagement,
 } from "../context-management";
 
 describe("TENEX context management telemetry", () => {
@@ -87,6 +88,18 @@ describe("TENEX context management telemetry", () => {
             utilizationWarningThresholdPercent: 70,
             ...overrides,
         };
+    }
+
+    async function prepareManagedRequest(
+        contextManagement: ExecutionContextManagement | undefined,
+        messages: Array<Record<string, unknown>>,
+        model: { provider: string; modelId: string } = { provider: "mock", modelId: "mock" }
+    ) {
+        expect(contextManagement).toBeDefined();
+        return await contextManagement?.prepareRequest({
+            messages: messages as any,
+            model,
+        });
     }
 
     beforeEach(async () => {
@@ -112,7 +125,7 @@ describe("TENEX context management telemetry", () => {
         await rm(TEST_DIR, { recursive: true, force: true });
     });
 
-    test("maps package telemetry into OTel span events with serialized payloads", async () => {
+    test("maps package telemetry into OTel span events with derived attributes", async () => {
         const agent = {
             name: "executor",
             slug: "executor",
@@ -124,8 +137,6 @@ describe("TENEX context management telemetry", () => {
             agent,
             conversationStore: store,
         });
-
-        expect(contextManagement).toBeDefined();
 
         const scratchpadTool = contextManagement?.optionalTools.scratchpad as {
             execute: (
@@ -150,37 +161,18 @@ describe("TENEX context management telemetry", () => {
             }
         );
 
-        await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
+        await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [
                     {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: `Long request ${"z".repeat(620)}`,
-                            },
-                        ],
+                        type: "text",
+                        text: `Long request ${"z".repeat(620)}`,
                     },
                 ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
         const events = addEvent.mock.calls.map(([eventName, attributes]) => ({
             eventName,
@@ -214,6 +206,15 @@ describe("TENEX context management telemetry", () => {
         );
         expect(runtimeStartEvent?.attributes?.["context_management.strategy_count"]).toBe(5);
 
+        const strategyOrder = events
+            .filter((event) => event.eventName.startsWith("context_management.strategy_complete."))
+            .map((event) => String(event.attributes?.["context_management.strategy_name"]));
+        expect(strategyOrder.indexOf("scratchpad")).toBeGreaterThanOrEqual(0);
+        expect(strategyOrder.indexOf("tool-result-decay")).toBeGreaterThanOrEqual(0);
+        expect(strategyOrder.indexOf("scratchpad")).toBeLessThan(
+            strategyOrder.indexOf("tool-result-decay")
+        );
+
         const warningEvent = events.find(
             (event) =>
                 event.eventName ===
@@ -221,11 +222,9 @@ describe("TENEX context management telemetry", () => {
                 event.attributes?.["context_management.strategy_name"] === "context-utilization-reminder"
         );
         expect(warningEvent).toBeDefined();
-        expect(
-            String(warningEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("warningThresholdTokens");
-        // With a 40,000-token managed budget, the small test prompt is well below
-        // the 70% warning threshold, so the strategy skips.
+        expect(warningEvent?.attributes?.["context_management.warning_threshold_tokens"]).toBe(
+            28000
+        );
         expect(warningEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
         expect(warningEvent?.attributes?.["context_management.budget_scope"]).toBe(
             "managed-context"
@@ -240,16 +239,13 @@ describe("TENEX context management telemetry", () => {
                 event.attributes?.["context_management.strategy_name"] === "scratchpad"
         );
         expect(scratchpadEvent).toBeDefined();
-        expect(
-            String(scratchpadEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("forcedToolChoice");
-        // With ~172 managed-context tokens against a 40,000-token budget, the prompt is well below
-        // the force-scratchpad threshold, so forcedToolChoice is false.
         expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(false);
+        expect(scratchpadEvent?.attributes?.["context_management.force_threshold_tokens"]).toBe(
+            28000
+        );
         expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
             "Rendered scratchpad context"
         );
-        expect(scratchpadEvent?.attributes?.["context_management.preserve_turns"]).toBeUndefined();
 
         const statusEvent = events.find(
             (event) =>
@@ -257,27 +253,14 @@ describe("TENEX context management telemetry", () => {
                 event.attributes?.["context_management.strategy_name"] === "context-window-status"
         );
         expect(statusEvent).toBeDefined();
-        expect(
-            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("estimatedPromptTokens");
-        expect(
-            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("workingBudgetUtilizationPercent");
-        expect(
-            String(statusEvent?.attributes?.["context_management.strategy_payloads_json"])
-        ).toContain("budgetScopedTokens");
+        expect(statusEvent?.attributes?.["context_management.estimated_prompt_tokens"]).toBeDefined();
+        expect(statusEvent?.attributes?.["context_management.managed_context_tokens"]).toBeDefined();
         expect(String(statusEvent?.attributes?.["context_management.summary"])).toContain(
             "Inserted context status"
         );
         expect(statusEvent?.attributes?.["context_management.budget_scope"]).toBe(
             "managed-context"
         );
-        expect(
-            typeof statusEvent?.attributes?.["context_management.managed_context_tokens"]
-        ).toBe("number");
-        expect(
-            typeof statusEvent?.attributes?.["context_management.working_budget_utilization_percent"]
-        ).toBe("number");
 
         const decayEvent = events.find(
             (event) =>
@@ -287,29 +270,15 @@ describe("TENEX context management telemetry", () => {
         expect(String(decayEvent?.attributes?.["context_management.summary"])).toContain(
             "tool-result decay"
         );
-        const decayPayloads = String(decayEvent?.attributes?.["context_management.strategy_payloads_json"]);
-        expect(decayPayloads).toContain("currentPromptTokens");
-        if (decayPayloads.includes("toolContextTokens")) {
-            expect(decayPayloads).toContain("forecastToolContextTokens");
-            expect(typeof decayEvent?.attributes?.["context_management.tool_context_tokens"]).toBe("number");
-            expect(typeof decayEvent?.attributes?.["context_management.forecast_tool_context_tokens"]).toBe("number");
-            expect(typeof decayEvent?.attributes?.["context_management.warning_forecast_extra_tokens"]).toBe("number");
-        }
 
         const toolEvent = events.find(
             (event) => event.eventName === "context_management.tool_execute_complete.scratchpad"
         );
         expect(toolEvent).toBeDefined();
-        expect(
-            String(toolEvent?.attributes?.["context_management.tool_input_json"])
-        ).toContain("Track the current parser state");
-        // The omit tool call IDs appear in the input, not the result
-        expect(
-            String(toolEvent?.attributes?.["context_management.tool_input_json"])
-        ).toContain("call-obsolete");
         expect(String(toolEvent?.attributes?.["context_management.summary"])).toContain(
             "Updated scratchpad"
         );
+        expect(toolEvent?.attributes?.["context_management.entry_char_count"]).toBeGreaterThan(0);
         expect(toolEvent?.attributes?.["context_management.entry_update_count"]).toBe(1);
         expect(toolEvent?.attributes?.["context_management.omit_tool_call_id_count"]).toBe(1);
 
@@ -321,22 +290,11 @@ describe("TENEX context management telemetry", () => {
             "Completed context management"
         );
         expect(runtimeCompleteEvent?.attributes?.["context_management.tokens_saved"]).not.toBeUndefined();
-        expect(
-            String(runtimeCompleteEvent?.attributes?.["context_management.final_prompt_json"])
-        ).toContain("Long request");
-        expect(
-            String(
-                runtimeCompleteEvent?.attributes?.[
-                    "context_management.final_provider_options_json"
-                ]
-            )
-        ).toContain(CONTEXT_MANAGEMENT_KEY);
-        expect(
-            runtimeCompleteEvent?.attributes?.["context_management.final_tool_choice_json"]
-        ).toBeUndefined();
+        expect(runtimeCompleteEvent?.attributes?.["context_management.estimated_tokens_before"]).toBeDefined();
+        expect(runtimeCompleteEvent?.attributes?.["context_management.estimated_tokens_after"]).toBeDefined();
     });
 
-    test("includes final tool choice when scratchpad forcing mutates the model call", async () => {
+    test("records forced scratchpad choice on the scratchpad strategy event", async () => {
         getContextManagementConfigSpy.mockReturnValue(
             buildContextManagementConfig({
                 tokenBudget: 200,
@@ -355,44 +313,38 @@ describe("TENEX context management telemetry", () => {
             conversationStore: store,
         });
 
-        await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt: [
-                    { role: "system", content: "You are helpful." },
-                    {
-                        role: "user",
-                        content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
-                    },
-                ],
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
+        await prepareManagedRequest(contextManagement, [
+            { role: "system", content: "You are helpful." },
+            {
+                role: "user",
+                content: [{ type: "text", text: `Long request ${"z".repeat(620)}` }],
             },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
-        const runtimeCompleteEvent = addEvent.mock.calls
+        const scratchpadEvent = addEvent.mock.calls
             .map(([eventName, attributes]) => ({ eventName, attributes }))
-            .find((event) => event.eventName === "context_management.runtime_complete");
+            .find(
+                (event) =>
+                    event.eventName === "context_management.strategy_complete.scratchpad"
+            );
 
-        expect(runtimeCompleteEvent).toBeDefined();
-        expect(
-            String(runtimeCompleteEvent?.attributes?.["context_management.final_tool_choice_json"])
-        ).toContain("\"toolName\":\"scratchpad\"");
+        expect(scratchpadEvent).toBeDefined();
+        expect(scratchpadEvent?.attributes?.["context_management.forced_tool_choice"]).toBe(true);
+        expect(String(scratchpadEvent?.attributes?.["context_management.summary"])).toContain(
+            "forced scratchpad tool choice"
+        );
     });
 
-    test("emits per-exchange tool-result-decay diagnostics for full, truncate, and placeholder actions", async () => {
+    test("tool-result decay threshold uses the managed working budget gate", async () => {
+        getContextManagementConfigSpy.mockReturnValue(
+            buildContextManagementConfig({
+                tokenBudget: 100,
+                forceScratchpadThresholdPercent: 100,
+                utilizationWarningThresholdPercent: 100,
+                summarizationFallbackThresholdPercent: 100,
+            }) as any
+        );
+
         const agent = {
             name: "executor",
             slug: "executor",
@@ -405,60 +357,16 @@ describe("TENEX context management telemetry", () => {
             conversationStore: store,
         });
 
-        expect(contextManagement).toBeDefined();
-
-        const prompt = [
-            { role: "system", content: "You are helpful." },
-            ...Array.from({ length: 8 }, (_, index) => ([
-                {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "tool-call",
-                            toolCallId: `tool-call-${index}`,
-                            toolName: "fs_read",
-                            input: { path: `/tmp/file-${index}.txt`, body: "i".repeat(900) },
-                        },
-                    ],
-                },
-                {
-                    role: "tool",
-                    content: [
-                        {
-                            type: "tool-result",
-                            toolCallId: `tool-call-${index}`,
-                            toolName: "fs_read",
-                            output: { type: "text", value: "o".repeat(4200) },
-                        },
-                    ],
-                },
-            ])).flat(),
+        await prepareManagedRequest(contextManagement, [
+            {
+                role: "system",
+                content: `You are helpful. ${"s".repeat(2400)}`,
+            },
             {
                 role: "user",
-                content: [{ type: "text", text: "Keep going." }],
+                content: [{ type: "text", text: "Short request." }],
             },
-        ];
-
-        await contextManagement?.middleware.transformParams?.({
-            params: {
-                prompt,
-                providerOptions: {
-                    [CONTEXT_MANAGEMENT_KEY]: contextManagement?.requestContext,
-                },
-            },
-            model: {
-                specificationVersion: "v3",
-                provider: "mock",
-                modelId: "mock",
-                supportedUrls: {},
-                doGenerate: async () => {
-                    throw new Error("unused");
-                },
-                doStream: async () => {
-                    throw new Error("unused");
-                },
-            },
-        } as any);
+        ]);
 
         const events = addEvent.mock.calls.map(([eventName, attributes]) => ({
             eventName,
@@ -468,38 +376,16 @@ describe("TENEX context management telemetry", () => {
             (event) =>
                 event.eventName === "context_management.strategy_complete.tool-result-decay"
         );
-        const reportEvent = events.find(
-            (event) =>
-                event.eventName ===
-                "context_management.strategy_complete.tool-result-decay.report"
-        );
 
-        expect(
-            events.some(
-                (event) =>
-                    event.eventName ===
-                    "context_management.strategy_complete.tool-result-decay.exchange"
-            )
-        ).toBe(false);
         expect(decayEvent).toBeDefined();
-        expect(reportEvent).toBeDefined();
-        expect(
-            String(decayEvent?.attributes?.["context_management.exchange_report"])
-        ).toContain("Tool-result decay report");
-        expect(
-            String(decayEvent?.attributes?.["context_management.exchange_report"])
-        ).toContain("Tool exchange 1:");
-        expect(
-            String(decayEvent?.attributes?.["context_management.exchange_report"])
-        ).toContain("Depth:");
-        expect(
-            String(decayEvent?.attributes?.["context_management.exchange_report"])
-        ).toContain("Output action: planned");
-        expect(
-            String(reportEvent?.attributes?.["context_management.exchange_report"])
-        ).toContain("Field guide:");
-        expect(
-            reportEvent?.attributes?.["context_management.exchange_report_line_count"]
-        ).toBeGreaterThan(20);
+        expect(decayEvent?.attributes?.["context_management.outcome"]).toBe("skipped");
+        expect(decayEvent?.attributes?.["context_management.reason"]).toBe(
+            "below-token-threshold"
+        );
+        expect(decayEvent?.attributes?.["context_management.current_prompt_tokens"]).toBeLessThan(
+            20
+        );
+        expect(decayEvent?.attributes?.["context_management.working_token_budget"]).toBe(85);
     });
+
 });

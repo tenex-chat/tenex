@@ -728,6 +728,7 @@ export class AgentExecutor {
             llmService: setup.llmService,
             messageCompiler: setup.messageCompiler,
             request: setup.request,
+            contextManagement: setup.contextManagement,
             nudgeContent: setup.nudgeContent,
             nudges: setup.nudges,
             nudgeToolPermissions: setup.nudgeToolPermissions,

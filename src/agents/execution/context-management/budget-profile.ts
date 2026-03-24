@@ -2,13 +2,11 @@ import type {
     ContextBudgetProfile,
     PromptTokenEstimator,
 } from "ai-sdk-context-management";
-import type { LanguageModelV3CallOptions, LanguageModelV3Message, LanguageModelV3Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV3Message, LanguageModelV3Prompt } from "@ai-sdk/provider";
 import { isFullEventId, shortenEventId } from "@/types/event-ids";
 
 export const MANAGED_CONTEXT_BUDGET_SCOPE = "managed-context";
 const MANAGED_CONTEXT_LABEL = "managed working budget";
-const MANAGED_CONTEXT_DESCRIPTION =
-    "This excludes base system prompts, tool definitions, and reminder blocks.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -56,7 +54,6 @@ export function createManagedContextBudgetProfile(
         tokenBudget,
         estimator: createManagedContextTokenEstimator(requestEstimator),
         label: MANAGED_CONTEXT_LABEL,
-        description: MANAGED_CONTEXT_DESCRIPTION,
     };
 }
 
@@ -73,12 +70,4 @@ export function buildDecayPlaceholder(
     const rawId = eventId ?? toolCallId;
     const id = isFullEventId(rawId) ? shortenEventId(rawId) : rawId;
     return `[${toolName} was used, id: ${id} -- use fs_read(tool: "${id}") to retrieve]`;
-}
-
-export function estimateRequestTokens(
-    estimator: PromptTokenEstimator,
-    prompt: LanguageModelV3Prompt,
-    tools: LanguageModelV3CallOptions["tools"]
-): number {
-    return estimator.estimatePrompt(prompt) + (estimator.estimateTools?.(tools) ?? 0);
 }
