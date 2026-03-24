@@ -105,7 +105,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         return { providers, stash, active, mode, keysTarget, keysActive };
     }
 
-    function requestAddKey(providerId: string, returnTo: "browse" | "keys") {
+    function requestAddKey(providerId: string, returnTo: "browse" | "keys"): void {
         done({ action: "add-key", providerId, returnTo, state: currentState() });
     }
 
@@ -120,7 +120,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         }
     });
 
-    function handleBrowse(key: KeypressEvent) {
+    function handleBrowse(key: KeypressEvent): void {
         if (isUpKey(key)) {
             setActive(Math.max(0, active - 1));
         } else if (isDownKey(key)) {
@@ -136,12 +136,13 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         }
     }
 
-    function toggleProvider(pid: string) {
+    function toggleProvider(pid: string): void {
         const enabled = pid in providers;
         if (enabled) {
             const updated = { ...providers };
             const newStash = { ...stash };
-            newStash[pid] = updated[pid]!;
+            const providerEntry = updated[pid];
+            if (providerEntry) newStash[pid] = providerEntry;
             delete updated[pid];
             setProviders(updated);
             setStash(newStash);
@@ -149,7 +150,8 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
             setProviders({ ...providers, [pid]: { apiKey: "none" } });
         } else if (stash[pid]) {
             const newStash = { ...stash };
-            const restored = newStash[pid]!;
+            const restored = newStash[pid];
+            if (!restored) return;
             delete newStash[pid];
             setProviders({ ...providers, [pid]: restored });
             setStash(newStash);
@@ -158,19 +160,19 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         }
     }
 
-    function enterKeysMode(pid: string) {
+    function enterKeysMode(pid: string): void {
         setMode("keys");
         setKeysTarget(pid);
         setKeysActive(0);
     }
 
-    function exitKeysMode() {
+    function exitKeysMode(): void {
         setMode("browse");
         setKeysTarget(null);
         setKeysActive(0);
     }
 
-    function handleKeys(key: KeypressEvent) {
+    function handleKeys(key: KeypressEvent): void {
         if (!keysTarget) return;
 
         const keys = getKeys(providers[keysTarget]?.apiKey);
@@ -194,7 +196,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         }
     }
 
-    function deleteKey(pid: string, index: number, keys: string[]) {
+    function deleteKey(pid: string, index: number, keys: string[]): void {
         const remaining = keys.filter((_, i) => i !== index);
         if (remaining.length === 0) {
             const updated = { ...providers };
@@ -204,7 +206,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         } else {
             setProviders({
                 ...providers,
-                [pid]: { ...providers[pid], apiKey: remaining.length === 1 ? remaining[0]! : remaining },
+                [pid]: { ...providers[pid], apiKey: remaining.length === 1 ? remaining[0] ?? remaining : remaining },
             });
             setKeysActive(Math.min(keysActive, remaining.length - 1));
         }
@@ -223,9 +225,8 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
 
     return `${lines.join("\n")}${cursorHide}`;
 
-    function renderBrowseView(out: string[]) {
-        for (let i = 0; i < providerIds.length; i++) {
-            const pid = providerIds[i]!;
+    function renderBrowseView(out: string[]): void {
+        for (const [i, pid] of providerIds.entries()) {
             const name = getProviderDisplayName(pid);
             const pfx = i === active ? `${CURSOR} ` : "  ";
             const enabled = pid in providers;
@@ -251,7 +252,7 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         out.push(chalk.dim(`  ${help.join(chalk.dim(" • "))}`));
     }
 
-    function renderKeysView(out: string[], pid: string) {
+    function renderKeysView(out: string[], pid: string): void {
         const name = getProviderDisplayName(pid);
         const keys = getKeys(providers[pid]?.apiKey);
         const addIndex = keys.length;
@@ -260,9 +261,9 @@ export default createPrompt<PromptResult, ProviderSelectConfig>((config, done) =
         out.push(`  ${chalk.bold(name)} ${chalk.dim("— API Keys")}`);
         out.push(`  ${chalk.dim("─".repeat(RULE_WIDTH))}`);
 
-        for (let i = 0; i < keys.length; i++) {
+        for (const [i, key] of keys.entries()) {
             const pfx = keysActive === i ? `${CURSOR} ` : "  ";
-            const masked = maskKey(pid, keys[i]!);
+            const masked = maskKey(pid, key);
             const deleteHint = keysActive === i ? chalk.dim("  d delete") : "";
             out.push(`${pfx}${masked}${deleteHint}`);
         }

@@ -119,9 +119,9 @@ const variantListRawPrompt = createPrompt<VariantListResult, VariantListConfig>(
         lines.push("");
         lines.push(chalk.dim("  Variants:"));
 
-        for (let i = 0; i < variantNames.length; i++) {
-            const name = variantNames[i]!;
-            const variant = variants[name]!;
+        for (const [i, name] of variantNames.entries()) {
+            const variant = variants[name];
+            if (!variant) continue;
             const isDefault = name === defaultVariant;
             const pfx = i === active ? `${cursor} ` : "  ";
             const defaultTag = isDefault ? chalk.dim(" (default)") : "";
@@ -286,7 +286,8 @@ async function addVariant(
 
     const isFirst = Object.keys(state.variants).length === 0;
 
-    state.variants[name] = { model };
+    const newVariant: MetaModelVariant = { model };
+    state.variants[name] = newVariant;
 
     // First variant auto-becomes default
     if (!state.defaultVariant || isFirst) {
@@ -302,7 +303,7 @@ async function addVariant(
             theme: inquirerTheme,
         }]);
         if (desc) {
-            state.variants[name]!.description = desc;
+            newVariant.description = desc;
         }
     }
 }

@@ -306,8 +306,8 @@ async function runRoleAssignment(): Promise<void> {
                 setActive(Math.min(itemCount - 1, active + 1));
             } else if (isEnterKey(key)) {
                 if (active < roleCount) {
-                    const role = promptConfig.roles[active]!;
-                    done({ action: "edit", roleKey: role.key });
+                    const role = promptConfig.roles[active];
+                    if (role) done({ action: "edit", roleKey: role.key });
                 } else {
                     done({ action: "done" });
                 }
@@ -319,8 +319,7 @@ async function runRoleAssignment(): Promise<void> {
         lines.push(`${prefix} ${theme.style.message(promptConfig.message, "idle")}`);
         lines.push("");
 
-        for (let i = 0; i < roleCount; i++) {
-            const role = promptConfig.roles[i]!;
+        for (const [i, role] of promptConfig.roles.entries()) {
             const assigned = promptConfig.assignments[role.key] || defaultConfig;
             const isActive = i === active;
             const pfx = isActive ? `${cursor} ` : "  ";
@@ -359,8 +358,9 @@ async function runRoleAssignment(): Promise<void> {
 
         if (result.action === "done") break;
 
-        const role = MODEL_ROLES.find((r) => r.key === result.roleKey)!;
-        const currentValue = assignments[result.roleKey]!;
+        const role = MODEL_ROLES.find((r) => r.key === result.roleKey);
+        if (!role) throw new Error(`Unknown role key: ${result.roleKey}`);
+        const currentValue = assignments[result.roleKey] ?? defaultConfig;
 
         const { config: picked } = await inquirer.prompt([{
             type: "select",
@@ -1348,7 +1348,7 @@ async function runOnboarding(options: OnboardingOptions): Promise<void> {
                 display.blank();
                 display.success("Identity created");
                 display.blank();
-                display.summaryLine("username", newIdentityUsername!);
+                display.summaryLine("username", username.trim());
                 display.summaryLine("npub", npub);
                 display.summaryLine("nsec", nsec);
                 display.blank();

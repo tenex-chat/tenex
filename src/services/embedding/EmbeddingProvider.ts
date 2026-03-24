@@ -253,7 +253,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         if (this.dimensions === null) {
             await this.embed("test");
         }
-        return this.dimensions!;
+        if (this.dimensions === null) {
+            throw new Error("Failed to determine embedding dimensions after test embed call");
+        }
+        return this.dimensions;
     }
 
     public getModelId(): string {

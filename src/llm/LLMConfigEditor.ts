@@ -96,10 +96,11 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
         } else if (key.name === "t" && active > doneIndex) {
             const item = items[active - doneIndex - 1];
             if (item?.configName && config.onTest) {
-                if (resultsRef.current[item.configName]) return;
-                setTesting(item.configName);
-                config.onTest(item.configName).then((result) => {
-                    resultsRef.current[item.configName!] = result;
+                const { configName } = item;
+                if (resultsRef.current[configName]) return;
+                setTesting(configName);
+                config.onTest(configName).then((result) => {
+                    resultsRef.current[configName] = result;
                     setTesting(null);
                 });
             }
@@ -123,8 +124,7 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
 
     lines.push(`${prefix} ${message}`);
 
-    for (let i = 0; i < actions.length; i++) {
-        const action = actions[i]!;
+    for (const [i, action] of actions.entries()) {
         const isActive = active === i;
         const pfx = isActive ? `${cursor} ` : "  ";
         lines.push(`${pfx}${chalk.cyan(action.name)}`);
@@ -138,8 +138,7 @@ const selectWithFooter = createPrompt<string, MenuConfig>((config, done) => {
     if (items.length === 0) {
         lines.push(chalk.dim("  No configurations yet"));
     } else {
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i]!;
+        for (const [i, item] of items.entries()) {
             const idx = doneIndex + 1 + i;
             const isActive = idx === active;
             const pfx = isActive ? `${cursor} ` : "  ";
