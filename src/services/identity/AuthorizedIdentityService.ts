@@ -9,40 +9,7 @@ export class AuthorizedIdentityService {
     private static instance: AuthorizedIdentityService;
 
     private getConfiguredPrincipalIds(): Set<string> {
-        const loadedConfig =
-            typeof config.getConfig === "function"
-                ? config.getConfig()
-                : ((config as any).loadedConfig?.config ?? {});
-
-        if (typeof (config as any).getWhitelistedIdentities === "function") {
-            return new Set((config as any).getWhitelistedIdentities(loadedConfig));
-        }
-
-        const configured = new Set<string>();
-
-        const whitelistedIdentities = Array.isArray((loadedConfig as any).whitelistedIdentities)
-            ? (loadedConfig as any).whitelistedIdentities
-            : [];
-        for (const principalId of whitelistedIdentities) {
-            if (typeof principalId === "string" && principalId.trim()) {
-                configured.add(principalId.trim());
-            }
-        }
-
-        const whitelistedPubkeys = Array.isArray((loadedConfig as any).whitelistedPubkeys)
-            ? (loadedConfig as any).whitelistedPubkeys
-            : [];
-        for (const pubkey of whitelistedPubkeys) {
-            if (typeof pubkey !== "string") {
-                continue;
-            }
-            const nostrPrincipalId = toNostrPrincipalId(pubkey.trim());
-            if (nostrPrincipalId) {
-                configured.add(nostrPrincipalId);
-            }
-        }
-
-        return configured;
+        return new Set(config.getWhitelistedIdentities());
     }
 
     static getInstance(): AuthorizedIdentityService {

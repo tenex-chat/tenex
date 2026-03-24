@@ -4,7 +4,9 @@ import { ConversationStore } from "@/conversations/ConversationStore";
 import type { InboundEnvelope } from "@/events/runtime/InboundEnvelope";
 import { ChannelSessionStore } from "@/services/ingress/ChannelSessionStoreService";
 import {
-    TELEGRAM_CONFIG_BOT_COMMANDS,
+    TELEGRAM_BOT_COMMANDS,
+    TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
+    TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE,
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramGatewayService } from "@/services/telegram/TelegramGatewayService";
@@ -34,6 +36,27 @@ function createBinding(agent: any): TelegramGatewayBinding {
         agent,
         config: agent.telegram,
         chatBindings: agent.telegram?.chatBindings ?? [],
+    };
+}
+
+function createPrivateUpdate(
+    updateId: number,
+    messageId: number,
+    text: string
+): TelegramUpdate {
+    return {
+        update_id: updateId,
+        message: {
+            message_id: messageId,
+            date: 123 + updateId,
+            chat: { id: 1001, type: "private" },
+            from: {
+                id: 42,
+                is_bot: false,
+                first_name: "Alice",
+            },
+            text,
+        },
     };
 }
 
@@ -511,6 +534,288 @@ describe("TelegramGatewayService", () => {
         expect(rememberSession).toHaveBeenCalledTimes(0);
     });
 
+    it("resets DM continuity on /new and lets the next message start a fresh root", async () => {
+        const metadataPath = join(tmpdir(), `telegram-gateway-${Date.now()}-new-dm`);
+        const sessionPath = join(metadataPath, "channel-sessions.json");
+        tempDirs.push(metadataPath);
+        mkdirSync(join(metadataPath, "conversations"), { recursive: true });
+        ConversationStore.initialize(metadataPath, ["a".repeat(64)]);
+
+        const agent = {
+            slug: "telegram-agent",
+            name: "Telegram Agent",
+            pubkey: "a".repeat(64),
+            telegram: {
+                botToken: "token",
+                allowDMs: true,
+            },
+        };
+        const sessionStore = new ChannelSessionStore(sessionPath);
+        sessionStore.rememberSession({
+            projectId: "telegram-project",
+            agentPubkey: agent.pubkey,
+            channelId: "telegram:chat:1001",
+            conversationId: "conversation-old",
+            lastMessageId: "tg_1001_5",
+        });
+        const replyToIds: Array<string | undefined> = [];
+        const runtimeIngress = {
+            handleChatMessage: mock(async ({ envelope }: { envelope: InboundEnvelope }) => {
+                replyToIds.push(envelope.message.replyToId);
+                const conversation = ConversationStore.getOrLoad(`conversation-${envelope.message.nativeId}`);
+                conversation.addMessage({
+                    pubkey: envelope.principal.linkedPubkey ?? "1".repeat(64),
+                    content: envelope.content,
+                    eventId: envelope.message.nativeId,
+                    messageType: "text",
+                    senderPrincipal: envelope.principal,
+                    targetedPrincipals: envelope.recipients,
+                    timestamp: envelope.occurredAt,
+                });
+                await conversation.save();
+            }),
+        };
+        const client = {
+            sendMessage: mock(async () => undefined),
+        };
+        const gateway = new TelegramGatewayService({
+            projectId: "telegram-project",
+            projectContext: createProjectContext(agent),
+            agentExecutor: {} as any,
+            runtimeIngressService: runtimeIngress,
+            channelSessionStore: sessionStore,
+            authorizedIdentityService: {
+                isAuthorizedPrincipal: () => true,
+            } as any,
+            clientFactory: () => client as any,
+        });
+
+        await gateway.processUpdate(createBinding(agent), createPrivateUpdate(20, 6, "/new"));
+
+        expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(0);
+        expect(client.sendMessage).toHaveBeenCalledWith({
+            chatId: "1001",
+            text: TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
+            replyToMessageId: "6",
+            messageThreadId: undefined,
+        });
+        expect(
+            sessionStore.getSession("telegram-project", agent.pubkey, "telegram:chat:1001")
+        ).toBeUndefined();
+
+        await gateway.processUpdate(createBinding(agent), createPrivateUpdate(21, 7, "fresh start"));
+
+        expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(1);
+        expect(replyToIds).toEqual([undefined]);
+        expect(
+            sessionStore.getSession("telegram-project", agent.pubkey, "telegram:chat:1001")
+        ).toMatchObject({
+            lastMessageId: "tg_1001_7",
+        });
+    });
+
+    it("keeps DM sessions intact when /new is sent with arguments", async () => {
+        const metadataPath = join(tmpdir(), `telegram-gateway-${Date.now()}-new-usage`);
+        const sessionPath = join(metadataPath, "channel-sessions.json");
+        tempDirs.push(metadataPath);
+        mkdirSync(join(metadataPath, "conversations"), { recursive: true });
+        ConversationStore.initialize(metadataPath, ["a".repeat(64)]);
+
+        const agent = {
+            slug: "telegram-agent",
+            name: "Telegram Agent",
+            pubkey: "a".repeat(64),
+            telegram: {
+                botToken: "token",
+                allowDMs: true,
+            },
+        };
+        const sessionStore = new ChannelSessionStore(sessionPath);
+        sessionStore.rememberSession({
+            projectId: "telegram-project",
+            agentPubkey: agent.pubkey,
+            channelId: "telegram:chat:1001",
+            conversationId: "conversation-old",
+            lastMessageId: "tg_1001_5",
+        });
+        const runtimeIngress = {
+            handleChatMessage: mock(async () => {
+                throw new Error("runtime ingress should not run for /new usage");
+            }),
+        };
+        const client = {
+            sendMessage: mock(async () => undefined),
+        };
+        const gateway = new TelegramGatewayService({
+            projectId: "telegram-project",
+            projectContext: createProjectContext(agent),
+            agentExecutor: {} as any,
+            runtimeIngressService: runtimeIngress,
+            channelSessionStore: sessionStore,
+            authorizedIdentityService: {
+                isAuthorizedPrincipal: () => true,
+            } as any,
+            clientFactory: () => client as any,
+        });
+
+        await gateway.processUpdate(createBinding(agent), createPrivateUpdate(22, 8, "/new please"));
+
+        expect(client.sendMessage).toHaveBeenCalledWith({
+            chatId: "1001",
+            text: TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE,
+            replyToMessageId: "8",
+            messageThreadId: undefined,
+        });
+        expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(0);
+        expect(
+            sessionStore.getSession("telegram-project", agent.pubkey, "telegram:chat:1001")
+        ).toMatchObject({
+            conversationId: "conversation-old",
+            lastMessageId: "tg_1001_5",
+        });
+    });
+
+    it("ignores unauthorized DM /new requests", async () => {
+        const metadataPath = join(tmpdir(), `telegram-gateway-${Date.now()}-new-unauthorized`);
+        const sessionPath = join(metadataPath, "channel-sessions.json");
+        tempDirs.push(metadataPath);
+        mkdirSync(join(metadataPath, "conversations"), { recursive: true });
+        ConversationStore.initialize(metadataPath, ["a".repeat(64)]);
+
+        const agent = {
+            slug: "telegram-agent",
+            name: "Telegram Agent",
+            pubkey: "a".repeat(64),
+            telegram: {
+                botToken: "token",
+                allowDMs: true,
+            },
+        };
+        const sessionStore = new ChannelSessionStore(sessionPath);
+        sessionStore.rememberSession({
+            projectId: "telegram-project",
+            agentPubkey: agent.pubkey,
+            channelId: "telegram:chat:1001",
+            conversationId: "conversation-old",
+            lastMessageId: "tg_1001_5",
+        });
+        const runtimeIngress = {
+            handleChatMessage: mock(async () => {
+                throw new Error("runtime ingress should not run for unauthorized /new");
+            }),
+        };
+        const client = {
+            sendMessage: mock(async () => undefined),
+        };
+        const gateway = new TelegramGatewayService({
+            projectId: "telegram-project",
+            projectContext: createProjectContext(agent),
+            agentExecutor: {} as any,
+            runtimeIngressService: runtimeIngress,
+            channelSessionStore: sessionStore,
+            authorizedIdentityService: {
+                isAuthorizedPrincipal: () => false,
+            } as any,
+            clientFactory: () => client as any,
+        });
+
+        await gateway.processUpdate(createBinding(agent), createPrivateUpdate(23, 9, "/new"));
+
+        expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(0);
+        expect(client.sendMessage).toHaveBeenCalledTimes(0);
+        expect(
+            sessionStore.getSession("telegram-project", agent.pubkey, "telegram:chat:1001")
+        ).toMatchObject({
+            conversationId: "conversation-old",
+            lastMessageId: "tg_1001_5",
+        });
+    });
+
+    it("resets group continuity on /new without opening config auth or rebinding", async () => {
+        const agent = {
+            slug: "telegram-agent",
+            name: "Telegram Agent",
+            pubkey: "a".repeat(64),
+            telegram: {
+                botToken: "token",
+            },
+        };
+        const clearSession = mock(() => true);
+        const getSession = mock(() => ({
+            projectId: "telegram-project",
+            agentPubkey: agent.pubkey,
+            channelId: "telegram:chat:-2001",
+            conversationId: "conversation-group",
+            lastMessageId: "tg_n2001_7",
+            updatedAt: 1,
+        }));
+        const rememberProjectBinding = mock(async () => {
+            throw new Error("binding persistence should not run for /new");
+        });
+        const runtimeIngress = {
+            handleChatMessage: mock(async () => {
+                throw new Error("runtime ingress should not run for /new");
+            }),
+        };
+        const isAuthorizedPrincipal = mock(() => {
+            throw new Error("group /new should not use config auth");
+        });
+        const client = {
+            sendMessage: mock(async () => undefined),
+        };
+        const gateway = new TelegramGatewayService({
+            projectId: "telegram-project",
+            projectContext: createProjectContext(agent),
+            agentExecutor: {} as any,
+            runtimeIngressService: runtimeIngress,
+            channelSessionStore: {
+                getSession,
+                rememberSession: mock(() => undefined),
+                clearSession,
+            } as any,
+            authorizedIdentityService: {
+                isAuthorizedPrincipal,
+            } as any,
+            bindingPersistenceService: {
+                rememberProjectBinding,
+            } as any,
+            clientFactory: () => client as any,
+        });
+
+        await gateway.processUpdate(
+            createBinding(agent),
+            {
+                update_id: 24,
+                message: {
+                    message_id: 10,
+                    date: 140,
+                    chat: { id: -2001, type: "supergroup", title: "Operators" },
+                    from: {
+                        id: 77,
+                        is_bot: false,
+                        first_name: "Eve",
+                    },
+                    text: "/new",
+                },
+            }
+        );
+
+        expect(clearSession).toHaveBeenCalledWith(
+            "telegram-project",
+            agent.pubkey,
+            "telegram:chat:-2001"
+        );
+        expect(client.sendMessage).toHaveBeenCalledWith({
+            chatId: "-2001",
+            text: TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
+            replyToMessageId: "10",
+            messageThreadId: undefined,
+        });
+        expect(runtimeIngress.handleChatMessage).toHaveBeenCalledTimes(0);
+        expect(rememberProjectBinding).toHaveBeenCalledTimes(0);
+        expect(isAuthorizedPrincipal).toHaveBeenCalledTimes(0);
+    });
+
     it("rejects unauthorized /config commands in groups before runtime routing", async () => {
         const agent = {
             slug: "telegram-agent",
@@ -630,7 +935,7 @@ describe("TelegramGatewayService", () => {
             await gateway.start();
 
             expect(client.setMyCommands).toHaveBeenCalledWith({
-                commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+                commands: TELEGRAM_BOT_COMMANDS,
             });
         } finally {
             gatewayAny.skipBacklog = originalSkipBacklog;

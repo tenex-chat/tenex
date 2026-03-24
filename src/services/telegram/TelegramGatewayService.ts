@@ -28,7 +28,8 @@ import { trace } from "@opentelemetry/api";
 import { logger } from "@/utils/logger";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import {
-    TELEGRAM_CONFIG_BOT_COMMANDS,
+    TELEGRAM_BOT_COMMANDS,
+    TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
@@ -290,11 +291,14 @@ export class TelegramGatewayService {
                 binding.agent.pubkey,
                 channelId
             );
-            const commandKind = this.configCommandService.getCommandKind(
+            const command = this.configCommandService.getCommand(
                 update,
                 botIdentity?.username
             );
+            const commandKind = command?.type === "config" ? command.kind : undefined;
+            const isNewCommand = command?.type === "new";
             const commandUsage = commandKind
+                || isNewCommand
                 ? this.configCommandService.getCommandUsage(update, botIdentity?.username)
                 : undefined;
 
@@ -365,17 +369,48 @@ export class TelegramGatewayService {
                 }
 
                 if (!matchesStaticBinding && !matchesDynamicBinding) {
-                    await this.bindingPersistenceService.rememberProjectBinding({
-                        projectId: this.options.projectId,
-                        binding,
-                        channelId,
-                        message: normalizedMessage,
-                        projectContext: this.options.projectContext,
-                    });
+                    if (!isNewCommand) {
+                        await this.bindingPersistenceService.rememberProjectBinding({
+                            projectId: this.options.projectId,
+                            binding,
+                            channelId,
+                            message: normalizedMessage,
+                            projectContext: this.options.projectContext,
+                        });
+                    }
                 }
             }
 
             const projectBinding = this.options.projectContext.project.tagReference()[1];
+            if (isNewCommand) {
+                if (commandUsage) {
+                    await this.clientFactory(binding).sendMessage({
+                        chatId,
+                        text: commandUsage,
+                        replyToMessageId: String(normalizedMessage.message_id),
+                        messageThreadId: topicId,
+                    });
+                    recordTelegramOutcome("routed", "new_command_usage");
+                    return;
+                }
+
+                this.channelSessionStore.clearSession(
+                    this.options.projectId,
+                    binding.agent.pubkey,
+                    channelId
+                );
+                await this.clientFactory(binding).sendMessage({
+                    chatId,
+                    text: TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
+                    replyToMessageId: String(normalizedMessage.message_id),
+                    messageThreadId: topicId,
+                });
+                recordTelegramOutcome("routed", "new_command_reset", {
+                    "telegram.channel.id": channelId,
+                });
+                return;
+            }
+
             if (commandKind) {
                 if (commandUsage) {
                     await this.clientFactory(binding).sendMessage({
@@ -517,7 +552,7 @@ export class TelegramGatewayService {
         message: TelegramMessage;
         update: TelegramUpdate;
         botIdentity?: TelegramBotIdentity;
-    }) {
+    }): Promise<ReturnType<typeof buildTelegramTransportMetadata>> {
         const chatContext = params.message.chat.type === "private"
             ? undefined
             : await this.chatContextService.rememberChatContext({
@@ -549,7 +584,7 @@ export class TelegramGatewayService {
     ): Promise<void> {
         try {
             await client.setMyCommands({
-                commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+                commands: TELEGRAM_BOT_COMMANDS,
             });
         } catch (error) {
             logger.warn("[TelegramGatewayService] Failed to register Telegram bot commands", {

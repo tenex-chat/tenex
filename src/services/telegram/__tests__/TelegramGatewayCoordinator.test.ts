@@ -3,7 +3,8 @@ import { projectContextStore } from "@/services/projects";
 import type { TelegramBindingPersistenceService } from "@/services/telegram/TelegramBindingPersistenceService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import {
-    TELEGRAM_CONFIG_BOT_COMMANDS,
+    TELEGRAM_BOT_COMMANDS,
+    TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramGatewayCoordinator } from "@/services/telegram/TelegramGatewayCoordinator";
@@ -65,6 +66,26 @@ function createGroupUpdate(updateId: number, text: string) {
     };
 }
 
+function createPrivateUpdate(updateId: number, text: string) {
+    return {
+        update_id: updateId,
+        message: {
+            message_id: updateId + 40,
+            date: 123,
+            chat: {
+                id: 1001,
+                type: "private" as const,
+            },
+            from: {
+                id: 42,
+                is_bot: false as const,
+                first_name: "Alice",
+            },
+            text,
+        },
+    };
+}
+
 describe("TelegramGatewayCoordinator", () => {
     afterEach(() => {
         TelegramGatewayCoordinator.resetInstance();
@@ -98,7 +119,7 @@ describe("TelegramGatewayCoordinator", () => {
             expect(sawRegisteredPoller).toBe(true);
             expect(coordinator.pollers.has("shared-token")).toBe(true);
             expect(setMyCommands).toHaveBeenCalledWith({
-                commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+                commands: TELEGRAM_BOT_COMMANDS,
             });
         } finally {
             TelegramBotClient.prototype.getMe = originalGetMe;
@@ -314,5 +335,179 @@ describe("TelegramGatewayCoordinator", () => {
         expect(openCommandMenu).toHaveBeenCalledTimes(0);
         expect(routeUpdateToRegistration).toHaveBeenCalledTimes(0);
         expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears pending shared-bot selection on /new without re-prompting", async () => {
+        const coordinator = TelegramGatewayCoordinator.getInstance() as any;
+        const alpha = createRegistration("project-alpha", "Project Alpha");
+        const beta = createRegistration("project-beta", "Project Beta");
+        const sentMessages: string[] = [];
+        const clearSessionsByAgentChannel = mock(() => 0);
+
+        coordinator.registrations.set("shared-token", [alpha, beta]);
+        coordinator.pendingBindingStore = {
+            getPending: () => ({
+                agentPubkey: alpha.binding.agent.pubkey,
+                channelId: "telegram:chat:-2001",
+                projects: [
+                    { projectId: alpha.projectId, title: alpha.projectTitle },
+                    { projectId: beta.projectId, title: beta.projectTitle },
+                ],
+                requestedAt: Date.now(),
+            }),
+            rememberPending: mock(() => undefined),
+            clearPending: mock(() => undefined),
+        };
+        coordinator.channelSessionStore = {
+            findSessionByAgentChannel: () => undefined,
+            clearSessionsByAgentChannel,
+        };
+        coordinator.channelBindingStore = {
+            getBinding: () => undefined,
+        };
+        coordinator.authorizedIdentityService = {
+            isAuthorizedPrincipal: () => true,
+        };
+        coordinator.routeUpdateToRegistration = mock(async () => undefined);
+
+        await coordinator.processUpdate({
+            token: "shared-token",
+            agentPubkey: alpha.binding.agent.pubkey,
+            client: {
+                sendMessage: mock(async ({ text }: { text: string }) => {
+                    sentMessages.push(text);
+                }),
+            },
+            botIdentity: {
+                id: 101,
+                is_bot: true,
+                first_name: "test-bot",
+                username: "test_bot",
+            },
+            loopPromise: Promise.resolve(),
+        }, createGroupUpdate(10, "/new"));
+
+        expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledWith(
+            alpha.binding.agent.pubkey,
+            "telegram:chat:-2001"
+        );
+        expect(clearSessionsByAgentChannel).toHaveBeenCalledWith(
+            alpha.binding.agent.pubkey,
+            "telegram:chat:-2001"
+        );
+        expect(coordinator.pendingBindingStore.rememberPending).toHaveBeenCalledTimes(0);
+        expect(coordinator.routeUpdateToRegistration).toHaveBeenCalledTimes(0);
+        expect(sentMessages).toEqual([TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE]);
+    });
+
+    it("clears shared-bot session continuity on /new without forcing project selection", async () => {
+        const coordinator = TelegramGatewayCoordinator.getInstance() as any;
+        const alpha = createRegistration("project-alpha", "Project Alpha");
+        const beta = createRegistration("project-beta", "Project Beta");
+        const sentMessages: string[] = [];
+        const clearSessionsByAgentChannel = mock(() => 2);
+        const rememberProjectBinding = mock(async () => {
+            throw new Error("binding persistence should not run for /new");
+        });
+
+        coordinator.registrations.set("shared-token", [alpha, beta]);
+        coordinator.pendingBindingStore = {
+            getPending: () => undefined,
+            rememberPending: mock(() => undefined),
+            clearPending: mock(() => undefined),
+        };
+        coordinator.channelSessionStore = {
+            findSessionByAgentChannel: () => ({
+                projectId: alpha.projectId,
+                agentPubkey: alpha.binding.agent.pubkey,
+                channelId: "telegram:chat:-2001",
+                conversationId: "conversation-old",
+                lastMessageId: "tg_n2001_5",
+                updatedAt: 1,
+            }),
+            clearSessionsByAgentChannel,
+        };
+        coordinator.channelBindingStore = {
+            getBinding: () => undefined,
+        };
+        coordinator.authorizedIdentityService = {
+            isAuthorizedPrincipal: () => true,
+        };
+        coordinator.bindingPersistenceService = {
+            rememberProjectBinding,
+        } satisfies Pick<TelegramBindingPersistenceService, "rememberProjectBinding">;
+        coordinator.routeUpdateToRegistration = mock(async () => undefined);
+
+        await coordinator.processUpdate({
+            token: "shared-token",
+            agentPubkey: alpha.binding.agent.pubkey,
+            client: {
+                sendMessage: mock(async ({ text }: { text: string }) => {
+                    sentMessages.push(text);
+                }),
+            },
+            botIdentity: {
+                id: 101,
+                is_bot: true,
+                first_name: "test-bot",
+                username: "test_bot",
+            },
+            loopPromise: Promise.resolve(),
+        }, createGroupUpdate(11, "/new"));
+
+        expect(clearSessionsByAgentChannel).toHaveBeenCalledWith(
+            alpha.binding.agent.pubkey,
+            "telegram:chat:-2001"
+        );
+        expect(coordinator.pendingBindingStore.rememberPending).toHaveBeenCalledTimes(0);
+        expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledTimes(1);
+        expect(rememberProjectBinding).toHaveBeenCalledTimes(0);
+        expect(coordinator.routeUpdateToRegistration).toHaveBeenCalledTimes(0);
+        expect(sentMessages).toEqual([TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE]);
+    });
+
+    it("drops unauthorized DM /new requests in the shared-bot coordinator", async () => {
+        const coordinator = TelegramGatewayCoordinator.getInstance() as any;
+        const registration = createRegistration("project-alpha", "Project Alpha");
+        const clearSessionsByAgentChannel = mock(() => 1);
+
+        coordinator.registrations.set("shared-token", [registration]);
+        coordinator.pendingBindingStore = {
+            getPending: () => undefined,
+            rememberPending: mock(() => undefined),
+            clearPending: mock(() => undefined),
+        };
+        coordinator.channelSessionStore = {
+            findSessionByAgentChannel: () => undefined,
+            clearSessionsByAgentChannel,
+        };
+        coordinator.channelBindingStore = {
+            getBinding: () => undefined,
+        };
+        coordinator.authorizedIdentityService = {
+            isAuthorizedPrincipal: () => false,
+        };
+        coordinator.routeUpdateToRegistration = mock(async () => undefined);
+
+        const sendMessage = mock(async () => undefined);
+        await coordinator.processUpdate({
+            token: "shared-token",
+            agentPubkey: registration.binding.agent.pubkey,
+            client: {
+                sendMessage,
+            },
+            botIdentity: {
+                id: 101,
+                is_bot: true,
+                first_name: "test-bot",
+                username: "test_bot",
+            },
+            loopPromise: Promise.resolve(),
+        }, createPrivateUpdate(12, "/new"));
+
+        expect(clearSessionsByAgentChannel).toHaveBeenCalledTimes(0);
+        expect(coordinator.pendingBindingStore.clearPending).toHaveBeenCalledTimes(0);
+        expect(coordinator.routeUpdateToRegistration).toHaveBeenCalledTimes(0);
+        expect(sendMessage).toHaveBeenCalledTimes(0);
     });
 });

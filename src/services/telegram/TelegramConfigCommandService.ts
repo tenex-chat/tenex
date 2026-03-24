@@ -23,7 +23,12 @@ import type {
 const CALLBACK_PREFIX = "tgcfg";
 const PAGE_SIZE = 6;
 
-export const TELEGRAM_CONFIG_BOT_COMMANDS: TelegramBotCommand[] = [
+export const TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE =
+    "Started a new conversation. Send your next message to begin fresh.";
+export const TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE =
+    "Telegram `/new` does not take arguments yet. Send `/new`, then your next message.";
+
+export const TELEGRAM_BOT_COMMANDS: TelegramBotCommand[] = [
     {
         command: "model",
         description: "Change the agent model",
@@ -31,6 +36,10 @@ export const TELEGRAM_CONFIG_BOT_COMMANDS: TelegramBotCommand[] = [
     {
         command: "config",
         description: "Change the agent tools",
+    },
+    {
+        command: "new",
+        description: "Start a fresh conversation",
     },
 ];
 
@@ -41,6 +50,10 @@ type ConfigAction =
     | { index: number; type: "select-model" }
     | { index: number; type: "toggle-tool" }
     | { type: "save" };
+
+export type TelegramGatewayCommand =
+    | { type: "config"; kind: TelegramConfigSessionKind }
+    | { type: "new" };
 
 export interface TelegramConfigCommandContext {
     action: ConfigAction;
@@ -91,8 +104,32 @@ function toCommandKind(
     return undefined;
 }
 
-function toCommandUsage(kind: TelegramConfigSessionKind): string {
-    return kind === "model"
+function toGatewayCommand(
+    commandText: string,
+    botUsername?: string
+): TelegramGatewayCommand | undefined {
+    const configKind = toCommandKind(commandText, botUsername);
+    if (configKind) {
+        return {
+            type: "config",
+            kind: configKind,
+        };
+    }
+
+    const token = normalizeCommandToken(commandText, botUsername);
+    if (token === "new") {
+        return { type: "new" };
+    }
+
+    return undefined;
+}
+
+function toCommandUsage(command: TelegramGatewayCommand): string {
+    if (command.type === "new") {
+        return TELEGRAM_NEW_CONVERSATION_USAGE_MESSAGE;
+    }
+
+    return command.kind === "model"
         ? "Telegram `/model` does not take arguments yet. Use the buttons in the picker."
         : "Telegram `/config` does not take arguments yet. Use the buttons in the picker.";
 }
@@ -285,24 +322,32 @@ export class TelegramConfigCommandService {
         update: TelegramUpdate,
         botUsername?: string
     ): TelegramConfigSessionKind | undefined {
+        const command = this.getCommand(update, botUsername);
+        return command?.type === "config" ? command.kind : undefined;
+    }
+
+    getCommand(
+        update: TelegramUpdate,
+        botUsername?: string
+    ): TelegramGatewayCommand | undefined {
         const message = update.message ?? update.edited_message;
         const content = message?.text?.trim() || message?.caption?.trim();
-        return content ? toCommandKind(content, botUsername) : undefined;
+        return content ? toGatewayCommand(content, botUsername) : undefined;
     }
 
     getCommandUsage(
         update: TelegramUpdate,
         botUsername?: string
     ): string | undefined {
-        const kind = this.getCommandKind(update, botUsername);
-        if (!kind) {
+        const command = this.getCommand(update, botUsername);
+        if (!command) {
             return undefined;
         }
 
         const message = update.message ?? update.edited_message;
         const content = message?.text?.trim() || message?.caption?.trim() || "";
         const [, ...rest] = content.split(/\s+/);
-        return rest.length > 0 ? toCommandUsage(kind) : undefined;
+        return rest.length > 0 ? toCommandUsage(command) : undefined;
     }
 
     getCallbackContext(update: TelegramUpdate): TelegramConfigCommandContext | null {

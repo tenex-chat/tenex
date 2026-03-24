@@ -67,6 +67,35 @@ export class ChannelSessionStore {
         return next;
     }
 
+    clearSession(projectId: string, agentPubkey: string, channelId: string): boolean {
+        this.ensureLoaded();
+        const deleted = this.sessions.delete(makeKey(projectId, agentPubkey, channelId));
+        if (deleted) {
+            this.persist();
+        }
+        return deleted;
+    }
+
+    clearSessionsByAgentChannel(agentPubkey: string, channelId: string): number {
+        this.ensureLoaded();
+
+        let deletedCount = 0;
+        for (const [key, session] of this.sessions.entries()) {
+            if (session.agentPubkey !== agentPubkey || session.channelId !== channelId) {
+                continue;
+            }
+
+            this.sessions.delete(key);
+            deletedCount += 1;
+        }
+
+        if (deletedCount > 0) {
+            this.persist();
+        }
+
+        return deletedCount;
+    }
+
     clear(): void {
         this.sessions.clear();
         this.loaded = true;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
-import { TELEGRAM_CONFIG_BOT_COMMANDS } from "@/services/telegram/TelegramConfigCommandService";
+import { TELEGRAM_BOT_COMMANDS } from "@/services/telegram/TelegramConfigCommandService";
 
 describe("TelegramBotClient", () => {
     afterEach(() => {
@@ -359,14 +359,14 @@ describe("TelegramBotClient", () => {
         });
 
         await client.setMyCommands({
-            commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+            commands: TELEGRAM_BOT_COMMANDS,
         });
 
         expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
             "https://telegram.example/bottest-token/setMyCommands"
         );
         expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
-            commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+            commands: TELEGRAM_BOT_COMMANDS,
         });
     });
 });

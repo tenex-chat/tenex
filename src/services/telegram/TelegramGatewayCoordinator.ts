@@ -24,7 +24,8 @@ import { getTelegramChannelBindingStore } from "@/services/telegram/TelegramChan
 import { getTelegramPendingBindingStore } from "@/services/telegram/TelegramPendingBindingStoreService";
 import { TelegramBotClient } from "@/services/telegram/TelegramBotClient";
 import {
-    TELEGRAM_CONFIG_BOT_COMMANDS,
+    TELEGRAM_BOT_COMMANDS,
+    TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
     TelegramConfigCommandService,
 } from "@/services/telegram/TelegramConfigCommandService";
 import { TelegramInboundAdapter } from "@/services/telegram/TelegramInboundAdapter";
@@ -275,7 +276,7 @@ export class TelegramGatewayCoordinator {
     ): Promise<void> {
         try {
             await client.setMyCommands({
-                commands: TELEGRAM_CONFIG_BOT_COMMANDS,
+                commands: TELEGRAM_BOT_COMMANDS,
             });
         } catch (error) {
             logger.warn("[TelegramGatewayCoordinator] Failed to register Telegram bot commands", {
@@ -423,11 +424,13 @@ export class TelegramGatewayCoordinator {
             const identityBinding = getIdentityBindingStore().getBinding(principalId);
             const pending = this.pendingBindingStore.getPending(agentPubkey, channelId);
             const content = getTelegramUpdateContent(update);
-            const commandKind = this.configCommandService.getCommandKind(
+            const command = this.configCommandService.getCommand(
                 update,
                 poller.botIdentity.username
             );
-            const commandUsage = commandKind
+            const commandKind = command?.type === "config" ? command.kind : undefined;
+            const isNewCommand = command?.type === "new";
+            const commandUsage = commandKind || isNewCommand
                 ? this.configCommandService.getCommandUsage(update, poller.botIdentity.username)
                 : undefined;
 
@@ -441,6 +444,59 @@ export class TelegramGatewayCoordinator {
                 registrationCount: registrations.length,
                 content,
             }));
+
+            const isPrivateChat = message.chat.type === "private";
+            if (isNewCommand) {
+                if (commandUsage) {
+                    await poller.client.sendMessage({
+                        chatId,
+                        text: commandUsage,
+                        replyToMessageId: String(message.message_id),
+                        messageThreadId: topicId,
+                    });
+                    recordTelegramOutcome("routed", "new_command_usage", {
+                        "telegram.chat.is_private": isPrivateChat,
+                    });
+                    return;
+                }
+
+                if (isPrivateChat) {
+                    const dmCandidates = registrations.filter((registration) =>
+                        registration.binding.config.allowDMs !== false &&
+                        this.authorizedIdentityService.isAuthorizedPrincipal(
+                            {
+                                id: principalId,
+                                linkedPubkey: identityBinding?.linkedPubkey,
+                            },
+                            registration.binding.config.authorizedIdentityIds
+                        )
+                    );
+                    if (dmCandidates.length === 0) {
+                        recordTelegramOutcome("dropped", "no_matching_candidate", {
+                            "telegram.chat.is_private": true,
+                        });
+                        return;
+                    }
+                }
+
+                this.pendingBindingStore.clearPending(agentPubkey, channelId);
+                const clearedSessionCount = this.channelSessionStore.clearSessionsByAgentChannel(
+                    agentPubkey,
+                    channelId
+                );
+                await poller.client.sendMessage({
+                    chatId,
+                    text: TELEGRAM_NEW_CONVERSATION_SUCCESS_MESSAGE,
+                    replyToMessageId: String(message.message_id),
+                    messageThreadId: topicId,
+                });
+                recordTelegramOutcome("routed", "new_command_reset", {
+                    "telegram.channel.id": channelId,
+                    "telegram.chat.is_private": isPrivateChat,
+                    "telegram.cleared_session_count": clearedSessionCount,
+                });
+                return;
+            }
 
             if (pending) {
                 activeSpan?.addEvent("telegram.project_binding.pending_found", {
@@ -555,7 +611,6 @@ export class TelegramGatewayCoordinator {
                 }
             }
 
-            const isPrivateChat = message.chat.type === "private";
             let candidates: TelegramRuntimeRegistration[];
 
             if (isPrivateChat) {
@@ -840,7 +895,7 @@ export class TelegramGatewayCoordinator {
         message: TelegramMessage;
         update: TelegramUpdate;
         botIdentity?: TelegramBotIdentity;
-    }) {
+    }): Promise<ReturnType<typeof buildTelegramTransportMetadata>> {
         const chatContext = params.message.chat.type === "private"
             ? undefined
             : await this.chatContextService.rememberChatContext({
