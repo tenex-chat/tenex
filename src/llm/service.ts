@@ -1,9 +1,7 @@
 import { ProgressMonitor } from "@/agents/execution/ProgressMonitor";
 import type { AISdkTool } from "@/tools/types";
-import { shortenConversationId } from "@/utils/conversation-id";
 import { logger } from "@/utils/logger";
 import { devToolsMiddleware } from "@ai-sdk/devtools";
-import { CONTEXT_MANAGEMENT_KEY } from "ai-sdk-context-management";
 import { trace } from "@opentelemetry/api";
 import {
     type LanguageModel,
@@ -11,6 +9,8 @@ import {
     type LanguageModelUsage,
     type ProviderRegistryProvider,
     type StepResult,
+    type Tool as CoreTool,
+    type ToolChoice,
     type TextStreamPart,
     extractReasoningMiddleware,
     generateObject,
@@ -24,11 +24,8 @@ import { EventEmitter } from "tseep";
 import type { z } from "zod";
 import { ChunkHandler, type ChunkHandlerState } from "./ChunkHandler";
 import { createFinishHandler, type FinishHandlerConfig, type FinishHandlerState } from "./FinishHandler";
-import { extractLastUserMessage, extractSystemContent, prepareMessagesForRequest } from "./MessageProcessor";
-import { createFinalRequestTraceMiddleware } from "./middleware/final-request-trace";
-import { createMessageSanitizerMiddleware } from "./middleware/message-sanitizer";
-import { createTenexSystemRemindersMiddleware } from "./middleware/system-reminders";
-import { mergeProviderOptions } from "./provider-options";
+import { extractLastUserMessage, extractSystemContent } from "./MessageProcessor";
+import { getDefaultProviderOptions, mergeProviderOptions } from "./provider-options";
 import { getFullTelemetryConfig, getOpenRouterMetadata, getTraceCorrelationId } from "./TracingUtils";
 import type { ProviderCapabilities } from "./providers/types";
 import type { LanguageModelUsageWithCostUsd, LLMServiceEventMap } from "./types";
@@ -185,6 +182,23 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
         });
     }
 
+    private getRequestProviderOptions(extra?: ProviderOptions): ProviderOptions | undefined {
+        const defaults = mergeProviderOptions(
+            getDefaultProviderOptions(this.provider),
+            this.provider === "openrouter"
+                ? {
+                      openrouter: {
+                          usage: { include: true },
+                          user: getTraceCorrelationId(),
+                          metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
+                      },
+                  }
+                : undefined
+        );
+
+        return mergeProviderOptions(defaults, extra);
+    }
+
     /**
      * Extract system content and record it on the active span for provider-agnostic telemetry.
      */
@@ -257,20 +271,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     /**
      * Wrap a base model with the standard middleware chain.
      * Used by both getLanguageModel() and createLanguageModelFromRegistry()
-     * so all call paths get sanitization, reminder injection, and final-request tracing.
+     * so all call paths get devtools and reasoning extraction.
      */
     private wrapWithMiddleware(baseModel: LanguageModel): LanguageModel {
         const middlewares: LanguageModelMiddleware[] = [];
 
         // DevTools middleware — must be outermost to capture full request/response
         middlewares.push(devToolsMiddleware() as LanguageModelMiddleware);
-
-        // Message sanitizer — fix message array issues before every API call
-        // Must be first so it sanitizes before anything else processes messages
-        middlewares.push(createMessageSanitizerMiddleware());
-
-        // System reminders — apply request-scoped reminder tags to the latest user message
-        middlewares.push(createTenexSystemRemindersMiddleware() as LanguageModelMiddleware);
 
         // Extract reasoning from thinking tags
         middlewares.push(
@@ -281,25 +288,8 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             })
         );
 
-        // Final-request trace — observe the provider-facing prompt after all other mutations
-        middlewares.push(createFinalRequestTraceMiddleware() as LanguageModelMiddleware);
-
         return wrapLanguageModel({
             model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
-            middleware: middlewares,
-        });
-    }
-
-    private wrapWithRequestMiddleware(
-        model: LanguageModel,
-        middlewares?: LanguageModelMiddleware[]
-    ): LanguageModel {
-        if (!middlewares || middlewares.length === 0) {
-            return model;
-        }
-
-        return wrapLanguageModel({
-            model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
             middleware: middlewares,
         });
     }
@@ -311,35 +301,37 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             abortSignal?: AbortSignal;
             providerOptions?: ProviderOptions;
             experimentalContext?: unknown;
-            middlewares?: LanguageModelMiddleware[];
+            toolChoice?: ToolChoice<Record<string, CoreTool>>;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined>
-                | { model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions }
+                | PromiseLike<{
+                      model?: LanguageModel;
+                      messages?: ModelMessage[];
+                      providerOptions?: ProviderOptions;
+                      experimental_context?: unknown;
+                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
+                  } | undefined>
+                | {
+                      model?: LanguageModel;
+                      messages?: ModelMessage[];
+                      providerOptions?: ProviderOptions;
+                      experimental_context?: unknown;
+                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
+                  }
                 | undefined;
             /** Custom stopWhen callback that wraps the default progress monitor check */
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
+            onFinalStepInputTokens?: (
+                actualInputTokens: number | null | undefined
+            ) => Promise<void> | void;
         }
     ): Promise<void> {
         const attempt = this.createStandardAttemptContext(messages);
         const attemptKey = attempt.failedKey;
-        const model = this.wrapWithRequestMiddleware(attempt.model, options?.middlewares);
-
-        if (!this.conversationId) {
-            throw new Error(`[LLMService] Missing required conversationId for agent ${this.agentSlug}.`);
-        }
-
-        if (!options?.providerOptions || !(CONTEXT_MANAGEMENT_KEY in options.providerOptions)) {
-            throw new Error(`[LLMService] Missing required context management request context. providerOptions must include ${CONTEXT_MANAGEMENT_KEY} for agent ${this.agentSlug} in conversation ${shortenConversationId(this.conversationId)}.`);
-        }
-        if (!options?.middlewares || options.middlewares.length === 0) {
-            throw new Error(`[LLMService] Missing required context management middleware for agent ${this.agentSlug} in conversation ${shortenConversationId(this.conversationId)}.`);
-        }
-
-        const processedMessages = prepareMessagesForRequest(messages, this.provider);
+        const model = attempt.model;
 
         // Extract last user message for logging
         this.lastUserMessage = extractLastUserMessage(messages);
@@ -348,7 +340,11 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         // First attempt: suppress stream-error to allow retry
         const firstResult = await this.runStreamAttempt(
-            model, processedMessages, tools, options, startTime,
+            model,
+            messages,
+            tools,
+            options,
+            startTime,
             { emitStreamError: false }
         );
 
@@ -394,9 +390,13 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         // Retry with fresh model from rotated provider
         const retryAttempt = this.createStandardAttemptContext(messages);
-        const retryModel = this.wrapWithRequestMiddleware(retryAttempt.model, options?.middlewares);
+        const retryModel = retryAttempt.model;
         const retryResult = await this.runStreamAttempt(
-            retryModel, processedMessages, tools, options, startTime,
+            retryModel,
+            messages,
+            tools,
+            options,
+            startTime,
             { emitStreamError: true }
         );
 
@@ -413,21 +413,37 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
      */
     private async runStreamAttempt(
         model: LanguageModel,
-        processedMessages: ModelMessage[],
+        preparedMessages: ModelMessage[],
         tools: Record<string, AISdkTool>,
         options: {
             abortSignal?: AbortSignal;
             providerOptions?: ProviderOptions;
             experimentalContext?: unknown;
+            toolChoice?: ToolChoice<Record<string, CoreTool>>;
             prepareStep?: (step: {
                 messages: ModelMessage[];
                 stepNumber: number;
                 steps: StepResult<Record<string, AISdkTool>>[];
             }) =>
-                | PromiseLike<{ model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions } | undefined>
-                | { model?: LanguageModel; messages?: ModelMessage[]; providerOptions?: ProviderOptions }
+                | PromiseLike<{
+                      model?: LanguageModel;
+                      messages?: ModelMessage[];
+                      providerOptions?: ProviderOptions;
+                      experimental_context?: unknown;
+                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
+                  } | undefined>
+                | {
+                      model?: LanguageModel;
+                      messages?: ModelMessage[];
+                      providerOptions?: ProviderOptions;
+                      experimental_context?: unknown;
+                      toolChoice?: ToolChoice<Record<string, CoreTool>>;
+                  }
                 | undefined;
             onStopCheck?: (steps: StepResult<Record<string, AISdkTool>>[]) => Promise<boolean>;
+            onFinalStepInputTokens?: (
+                actualInputTokens: number | null | undefined
+            ) => Promise<void> | void;
         } | undefined,
         startTime: number,
         { emitStreamError }: { emitStreamError: boolean }
@@ -483,7 +499,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         const activeSpan = trace.getActiveSpan();
         activeSpan?.addEvent("llm.streamText_preparing", {
-            "stream.messages_count": processedMessages.length,
+            "stream.messages_count": preparedMessages.length,
             "stream.tools_count": this.capabilities.builtInTools ? 0 : Object.keys(tools).length,
             "stream.abort_signal_present": !!options?.abortSignal,
             "stream.abort_signal_aborted": options?.abortSignal?.aborted ?? false,
@@ -514,8 +530,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
         const { fullStream } = streamText({
             model,
-            messages: processedMessages,
+            messages: preparedMessages,
             ...(!this.capabilities.builtInTools && { tools }),
+            ...(!this.capabilities.builtInTools &&
+                options?.toolChoice !== undefined && { toolChoice: options.toolChoice }),
             temperature: this.temperature,
             maxOutputTokens: this.maxTokens,
             stopWhen,
@@ -525,19 +543,12 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
             experimental_telemetry: this.getTelemetryConfig(),
 
-            providerOptions: mergeProviderOptions(
-                {
-                    openrouter: {
-                        usage: { include: true },
-                        user: getTraceCorrelationId(),
-                        metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
-                    },
-                },
-                options?.providerOptions
-            ),
+            providerOptions: this.getRequestProviderOptions(options?.providerOptions),
 
             onChunk: (event) => this.chunkHandler.handleChunk(event),
-            onFinish: createFinishHandler(this, finishConfig, finishState),
+            onFinish: createFinishHandler(this, finishConfig, finishState, {
+                onFinalStepInputTokens: options?.onFinalStepInputTokens,
+            }),
             onError: ({ error }) => {
                 activeSpan?.addEvent("llm.onError_called", {
                     "error.message": error instanceof Error ? error.message : String(error),
@@ -784,11 +795,10 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     createLanguageModelFromRegistry(
         provider: string,
         model: string,
-        registry: ProviderRegistryProvider,
-        middlewares?: LanguageModelMiddleware[]
+        registry: ProviderRegistryProvider
     ): LanguageModel {
         const baseModel = registry.languageModel(`${provider}:${model}`);
-        return this.wrapWithRequestMiddleware(this.wrapWithMiddleware(baseModel), middlewares);
+        return this.wrapWithMiddleware(baseModel);
     }
 
     /**
@@ -812,16 +822,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
             // ✨ Enable full AI SDK telemetry
             experimental_telemetry: this.getTelemetryConfig(),
 
-            providerOptions: mergeProviderOptions(
-                {
-                    openrouter: {
-                        usage: { include: true },
-                        user: getTraceCorrelationId(),
-                        metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
-                    },
-                },
-                providerOptions
-            ),
+            providerOptions: this.getRequestProviderOptions(providerOptions),
         });
     }
 
@@ -900,16 +901,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
 
                         experimental_telemetry: this.getTelemetryConfig(),
 
-                        providerOptions: mergeProviderOptions(
-                            {
-                                openrouter: {
-                                    usage: { include: true },
-                                    user: getTraceCorrelationId(),
-                                    metadata: getOpenRouterMetadata(this.agentSlug, this.conversationId),
-                                },
-                            },
-                            options?.providerOptions
-                        ),
+                        providerOptions: this.getRequestProviderOptions(options?.providerOptions),
                     })
                 );
 

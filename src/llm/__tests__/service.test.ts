@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, beforeAll, afterAll, mock } from "bun:test";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
 import { createFinishHandler } from "../FinishHandler";
-import { addCacheControl } from "../MessageProcessor";
 import { LLMService, type StandardProviderAccessor, type KeyRotationHandler } from "../service";
 import type { ProviderCapabilities } from "../providers/types";
 
@@ -236,6 +235,8 @@ describe("LLMService", () => {
     beforeEach(() => {
         mockRegistry = createMockRegistry();
         mockStreamText.mockClear();
+        mockGenerateText.mockClear();
+        mockGenerateObject.mockClear();
     });
 
     describe("constructor", () => {
@@ -296,67 +297,145 @@ describe("LLMService", () => {
     });
 
     describe("cache control", () => {
-        test("adds cache control for Anthropic with large system messages", async () => {
-            const service = new LLMService(createMockAccessor(mockRegistry),"anthropic", "claude-3", mockCapabilities);
+        test("enables Anthropic automatic caching for stream requests", async () => {
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "anthropic",
+                "claude-opus-4-6",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
 
-            // Create a large system message (> 4096 chars = 1024 tokens * 4 chars/token)
-            const largeSystemContent = "x".repeat(5000);
             const messages: ModelMessage[] = [
-                { role: "system", content: largeSystemContent },
+                { role: "system", content: "System prompt" },
                 { role: "user", content: [{ type: "text", text: "Hello" }] },
             ];
 
             await service.stream(messages, {});
 
             const callArgs = mockStreamText.mock.calls[0][0];
-            const systemMessage = callArgs.messages[0];
-
-            expect(systemMessage.providerOptions).toEqual({
+            expect(callArgs.providerOptions).toEqual({
                 anthropic: {
                     cacheControl: { type: "ephemeral" },
                 },
             });
         });
 
-        test("does not add cache control for small system messages", async () => {
-            const service = new LLMService(createMockAccessor(mockRegistry),"anthropic", "claude-3", mockCapabilities);
+        test("preserves caller Anthropic provider options over defaults", async () => {
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "anthropic",
+                "claude-opus-4-6",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
 
-            const messages: ModelMessage[] = [
-                { role: "system", content: "Short system prompt" },
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await service.stream(messages, {});
-
-            const callArgs = mockStreamText.mock.calls[0][0];
-            const systemMessage = callArgs.messages[0];
-
-            expect(systemMessage.providerOptions).toBeUndefined();
-        });
-
-        test("does not add cache control for non-Anthropic providers", async () => {
-            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
-
-            const largeSystemContent = "x".repeat(5000);
-            const messages: ModelMessage[] = [
-                { role: "system", content: largeSystemContent },
-                { role: "user", content: [{ type: "text", text: "Hello" }] },
-            ];
-
-            await service.stream(messages, {});
+            await service.stream(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                {},
+                {
+                    providerOptions: {
+                        anthropic: {
+                            cacheControl: { type: "ephemeral", ttl: "1h" },
+                        },
+                    },
+                }
+            );
 
             const callArgs = mockStreamText.mock.calls[0][0];
-            const systemMessage = callArgs.messages[0];
-
-            expect(systemMessage.providerOptions).toBeUndefined();
+            expect(callArgs.providerOptions.anthropic).toEqual({
+                cacheControl: { type: "ephemeral", ttl: "1h" },
+            });
         });
 
+        test("does not add Anthropic cache control for non-Anthropic providers", async () => {
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "openrouter",
+                "gpt-4",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
+
+            await service.stream([{ role: "user", content: [{ type: "text", text: "Hello" }] }], {});
+
+            const callArgs = mockStreamText.mock.calls[0][0];
+            expect(callArgs.providerOptions.anthropic).toBeUndefined();
+        });
+
+        test("enables Anthropic automatic caching for generateText", async () => {
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "anthropic",
+                "claude-opus-4-6",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
+
+            await service.generateText([{ role: "user", content: [{ type: "text", text: "Hello" }] }]);
+
+            const callArgs = mockGenerateText.mock.calls[0][0];
+            expect(callArgs.providerOptions.anthropic).toEqual({
+                cacheControl: { type: "ephemeral" },
+            });
+        });
+
+        test("enables Anthropic automatic caching for generateObject", async () => {
+            const { z } = await import("zod");
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "anthropic",
+                "claude-haiku-4-5",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
+
+            await service.generateObject(
+                [{ role: "user", content: [{ type: "text", text: "Hello" }] }],
+                z.object({ result: z.string() })
+            );
+
+            const callArgs = mockGenerateObject.mock.calls[0][0];
+            expect(callArgs.providerOptions.anthropic).toEqual({
+                cacheControl: { type: "ephemeral" },
+            });
+        });
     });
 
     describe("generateObject()", () => {
         test("generates a structured object", async () => {
             const { z } = await import("zod");
-            const service = new LLMService(createMockAccessor(mockRegistry),"openrouter", "gpt-4", mockCapabilities);
+            const service = new LLMService(
+                createMockAccessor(mockRegistry),
+                "openrouter",
+                "gpt-4",
+                mockCapabilities,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                "test-agent"
+            );
 
             const schema = z.object({
                 result: z.string(),
@@ -632,7 +711,9 @@ describe("LLMService telemetry configuration", () => {
 
         const getTelemetryConfig = (service as any).getTelemetryConfig.bind(service);
 
-        expect(() => getTelemetryConfig()).toThrow("[Tracing] Missing agent slug for telemetry config.");
+        expect(() => getTelemetryConfig()).toThrow(
+            "[TracingUtils] Missing required agentSlug for telemetry."
+        );
     });
 });
 
@@ -1312,30 +1393,32 @@ describe("LLMService handleStreamError", () => {
     });
 });
 
-describe("LLMService addCacheControl edge cases", () => {
-    test("preserves existing message properties", async () => {
+describe("LLMService message preparation", () => {
+    test("preserves messages when preparing request input", async () => {
+        const service = new LLMService(
+            createMockAccessor(createMockRegistry()),
+            "anthropic",
+            "claude-opus-4-6",
+            mockCapabilities,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            "test-agent"
+        );
         const messages: ModelMessage[] = [
             {
                 role: "system",
-                content: "x".repeat(5000),
+                content: "system",
                 customProperty: "preserved",
             } as any,
         ];
 
-        const result = addCacheControl(messages, "anthropic");
+        await service.stream(messages, {});
 
-        expect((result[0] as any).customProperty).toBe("preserved");
-        expect(result[0].providerOptions).toBeDefined();
-    });
-
-    test("only caches system messages, not user messages", async () => {
-        const messages: ModelMessage[] = [
-            { role: "user", content: "x".repeat(5000) },
-        ];
-
-        const result = addCacheControl(messages, "anthropic");
-
-        expect(result[0].providerOptions).toBeUndefined();
+        const callArgs = mockStreamText.mock.calls[0][0];
+        expect((callArgs.messages[0] as any).customProperty).toBe("preserved");
+        expect(callArgs.messages[0].providerOptions).toBeUndefined();
     });
 });
 

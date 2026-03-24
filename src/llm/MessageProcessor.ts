@@ -1,43 +1,12 @@
 import type { ModelMessage } from "ai";
-import { PROVIDER_IDS } from "./providers/provider-ids";
-
-/**
- * Add provider-specific cache control to messages.
- * Only Anthropic requires explicit cache control; OpenAI and Gemini cache automatically.
- */
-export function addCacheControl(messages: ModelMessage[], provider: string): ModelMessage[] {
-    // Only add cache control for Anthropic
-    if (provider !== PROVIDER_IDS.ANTHROPIC) {
-        return messages;
-    }
-
-    // Rough estimate: 4 characters per token (configurable if needed)
-    const CHARS_PER_TOKEN_ESTIMATE = 4;
-    const MIN_TOKENS_FOR_CACHE = 1024;
-    const minCharsForCache = MIN_TOKENS_FOR_CACHE * CHARS_PER_TOKEN_ESTIMATE;
-
-    return messages.map((msg) => {
-        // Only cache system messages and only if they're large enough
-        if (msg.role === "system" && typeof msg.content === "string" && msg.content.length > minCharsForCache) {
-            return {
-                ...msg,
-                providerOptions: {
-                    anthropic: {
-                        cacheControl: { type: "ephemeral" },
-                    },
-                },
-            };
-        }
-        return msg;
-    });
-}
 
 /**
  * Prepare messages for sending to the LLM.
- * Handles provider-specific transformations.
+ * Prompt caching is handled through request-level provider options,
+ * so message content is left unchanged.
  */
-export function prepareMessagesForRequest(messages: ModelMessage[], provider: string): ModelMessage[] {
-    return addCacheControl(messages, provider);
+export function prepareMessagesForRequest(messages: ModelMessage[], _provider: string): ModelMessage[] {
+    return messages;
 }
 
 /**

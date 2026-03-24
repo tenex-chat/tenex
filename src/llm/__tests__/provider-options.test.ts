@@ -1,5 +1,19 @@
 import { describe, test, expect } from "bun:test";
-import { mergeProviderOptions } from "../provider-options";
+import { getDefaultProviderOptions, mergeProviderOptions } from "../provider-options";
+
+describe("getDefaultProviderOptions", () => {
+    test("enables Anthropic automatic prompt caching by default", () => {
+        expect(getDefaultProviderOptions("anthropic")).toEqual({
+            anthropic: {
+                cacheControl: { type: "ephemeral" },
+            },
+        });
+    });
+
+    test("returns undefined for non-Anthropic providers", () => {
+        expect(getDefaultProviderOptions("openrouter")).toBeUndefined();
+    });
+});
 
 describe("mergeProviderOptions", () => {
     test("returns extra when base is undefined", () => {
