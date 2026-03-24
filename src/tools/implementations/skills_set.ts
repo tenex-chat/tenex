@@ -23,7 +23,7 @@ export function createSkillsSetTool(context: ConversationToolContext) {
 
     return tool({
         description:
-            "Activate skills on yourself for this conversation. Pass the full set of skill event IDs you want active. This is a full replacement — passing an empty array clears all self-applied skills. Skills take effect on the next message cycle.",
+            "Activate skills on yourself for this conversation. Pass the full set of skill event IDs you want active. This is a full replacement — passing an empty array clears all self-applied skills. Skill content is returned immediately and persisted for future cycles.",
         inputSchema: skillsSetSchema,
         execute: async (input: SkillsSetInput) => {
             const { skills: skillEventIds } = input;
@@ -36,6 +36,7 @@ export function createSkillsSetTool(context: ConversationToolContext) {
                     success: true,
                     message: "All self-applied skills cleared.",
                     activeSkills: [] as string[],
+                    skillContent: "",
                 };
             }
 
@@ -48,10 +49,11 @@ export function createSkillsSetTool(context: ConversationToolContext) {
                     success: false,
                     message: `Could not resolve any skills from the provided identifiers: ${skillEventIds.join(", ")}`,
                     activeSkills: [] as string[],
+                    skillContent: "",
                 };
             }
 
-            // Store the resolved IDs on the conversation
+            // Store the resolved IDs on the conversation for persistence across RAL cycles
             conversationStore.setSelfAppliedSkills(skillEventIds, agentPubkey);
 
             // Build feedback about which skills were activated
@@ -61,8 +63,10 @@ export function createSkillsSetTool(context: ConversationToolContext) {
 
             return {
                 success: true,
-                message: `Activated ${result.skills.length} skill(s): ${activatedNames.join(", ")}. Skills will take effect on the next message cycle.`,
+                message: `Activated ${result.skills.length} skill(s): ${activatedNames.join(", ")}. Skill content is included below — apply it immediately.`,
                 activeSkills: activatedNames,
+                // Return full skill content so the LLM sees it in the current turn
+                skillContent: result.content,
             };
         },
     }) as AISdkTool;

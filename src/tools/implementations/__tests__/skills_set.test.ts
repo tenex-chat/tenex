@@ -76,6 +76,7 @@ describe("skills_set tool", () => {
             success: true,
             message: "All self-applied skills cleared.",
             activeSkills: [],
+            skillContent: "",
         });
         // Should NOT call SkillService when clearing
         expect(mockFetchSkills).not.toHaveBeenCalled();
@@ -101,8 +102,9 @@ describe("skills_set tool", () => {
         expect(mockSetSelfAppliedSkills).toHaveBeenCalledWith([SKILL_ID_1, SKILL_ID_2], AGENT_PUBKEY);
         expect(result).toEqual({
             success: true,
-            message: "Activated 2 skill(s): Brainstorming, Wikifreedia Writer. Skills will take effect on the next message cycle.",
+            message: "Activated 2 skill(s): Brainstorming, Wikifreedia Writer. Skill content is included below — apply it immediately.",
             activeSkills: ["Brainstorming", "Wikifreedia Writer"],
+            skillContent: "skill content",
         });
     });
 
@@ -126,6 +128,7 @@ describe("skills_set tool", () => {
             success: false,
             message: `Could not resolve any skills from the provided identifiers: ${SKILL_ID_1}`,
             activeSkills: [],
+            skillContent: "",
         });
     });
 
