@@ -701,8 +701,8 @@ export class ConversationStore {
             return false;
         }
 
-        // Update the marker (delegationMarker is guaranteed present since messageType === "delegation-marker")
-        const dm = markerEntry.delegationMarker!;
+        const dm = markerEntry.delegationMarker;
+        if (!dm) throw new Error(`Delegation marker missing on message of type "delegation-marker" for conversation ${delegationConversationId}`);
         dm.status = updates.status;
         dm.completedAt = updates.completedAt;
         if (updates.abortReason) {
@@ -770,7 +770,9 @@ export class ConversationStore {
         const activeRals = new Set(this.getActiveRals(agentPubkey));
 
         // Callback to get delegation messages for marker expansion
-        const getDelegationMessages = (delegationConversationId: string) => {
+        const getDelegationMessages = (
+            delegationConversationId: string
+        ): ConversationRecord[] | undefined => {
             const store = conversationRegistry.get(delegationConversationId);
             return store?.getAllMessages();
         };

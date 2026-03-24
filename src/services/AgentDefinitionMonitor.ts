@@ -489,7 +489,7 @@ export class AgentDefinitionMonitor {
         // Load current agent from storage to compare timestamps
         const loadStart = Date.now();
         const storedAgent = await this.storage.loadAgent(monitoredAgent.pubkey);
-        logger.debug("[AgentDefinitionMonitor] loadAgent", {
+        logger.info("[AgentDefinitionMonitor] loadAgent", {
             slug: monitoredAgent.slug,
             durationMs: Date.now() - loadStart,
         });
@@ -647,7 +647,7 @@ export class AgentDefinitionMonitor {
         // Save the updated agent
         const saveStart = Date.now();
         await this.storage.saveAgent(storedAgent);
-        logger.debug("[AgentDefinitionMonitor] saveAgent", {
+        logger.info("[AgentDefinitionMonitor] saveAgent", {
             slug: monitoredAgent.slug,
             durationMs: Date.now() - saveStart,
         });
@@ -697,7 +697,7 @@ export class AgentDefinitionMonitor {
                 const registryStart = Date.now();
                 await context.agentRegistry.reloadAgent(pubkey);
                 reloadCount++;
-                logger.debug("[AgentDefinitionMonitor] reloadAgent in registry", {
+                logger.info("[AgentDefinitionMonitor] reloadAgent in registry", {
                     agentSlug: slug,
                     projectId,
                     durationMs: Date.now() - registryStart,
@@ -706,7 +706,7 @@ export class AgentDefinitionMonitor {
                 if (context.statusPublisher) {
                     const publishStart = Date.now();
                     await context.statusPublisher.publishImmediately();
-                    logger.debug("[AgentDefinitionMonitor] publishImmediately", {
+                    logger.info("[AgentDefinitionMonitor] publishImmediately", {
                         agentSlug: slug,
                         projectId,
                         durationMs: Date.now() - publishStart,

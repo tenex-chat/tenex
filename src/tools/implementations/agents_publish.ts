@@ -392,12 +392,15 @@ async function executeAgentsPublish(
 
     const ndk = getNDK();
 
-    // Backend signer is only needed when NOT publishing as user (backend signs the 4199 event).
-    // File uploads are always signed by the agent's own signer when publish_as_user=true.
-    const backendSigner = !publish_as_user ? await config.getBackendSigner() : undefined;
-
-    // Choose the signer for file uploads: agent's own signer when publishing as user, backend signer otherwise
-    const fileSigner: NDKSigner = publish_as_user ? context.agent.signer : backendSigner!;
+    // Choose the signer for file uploads and definition signing based on publish_as_user flag.
+    // Agent's own signer is used when publishing as user; backend signer otherwise.
+    const fileSigner: NDKSigner = publish_as_user
+        ? context.agent.signer
+        : await (async (): Promise<NDKSigner> => {
+            const signer = await config.getBackendSigner();
+            if (!signer) throw new Error("Backend signer could not be obtained");
+            return signer;
+        })();
 
     // Upload files and create kind:1063 events if provided
     const fileMetadataEvents: FileMetadataEvent[] = [];
@@ -416,7 +419,9 @@ async function executeAgentsPublish(
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 logger.error(`Failed to upload file: ${file.path}`, { error: errorMessage });
-                throw new Error(`Failed to upload file "${file.name}": ${errorMessage}`);
+                throw new Error(`Failed to upload file "${file.name}": ${errorMessage}`, {
+                    cause: error,
+                });
             }
         }
     }
@@ -532,15 +537,15 @@ async function executeAgentsPublish(
             filesAttached: fileMetadataEvents.length,
         });
     } else {
-        // Backend signer (original behavior)
-        agentDefinition.pubkey = backendSigner!.pubkey;
+        // Backend signer (original behavior) — fileSigner is the backend signer when !publish_as_user
+        agentDefinition.pubkey = fileSigner.pubkey;
 
-        await agentDefinition.sign(backendSigner!, { pTags: false });
+        await agentDefinition.sign(fileSigner, { pTags: false });
         await agentDefinition.publish();
 
         logger.info(`Successfully published backend-signed agent definition for "${agent.name}" (${slug})`, {
             eventId: agentDefinition.id,
-            pubkey: backendSigner?.pubkey,
+            pubkey: fileSigner.pubkey,
             signerType: "backend",
             filesAttached: fileMetadataEvents.length,
         });

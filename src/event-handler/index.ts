@@ -310,7 +310,6 @@ export class EventHandler {
                 }
             }
 
-            const isProjectScoped = projectDTag !== undefined;
             const agent = projectContext.getAgentByPubkey(agentPubkey);
 
             if (!agent) {
@@ -336,7 +335,7 @@ export class EventHandler {
             const hasPMTag = event.tags.some((tag) => tag[0] === "pm");
             const hasResetTag = event.tags.some((tag) => tag[0] === "reset");
 
-            if (isProjectScoped) {
+            if (projectDTag !== undefined) {
                 // PROJECT-SCOPED CONFIG UPDATE (new schema)
                 // Uses updateProjectOverride() which handles dedup and delta tools
                 logger.info("Processing project-scoped agent config update", {
@@ -354,7 +353,7 @@ export class EventHandler {
                     // Reset tag: clear entire project override
                     updated = await agentStorage.updateProjectOverride(
                         agentPubkey,
-                        projectDTag!,
+                        projectDTag,
                         {},
                         true // reset=true
                     );
@@ -391,7 +390,7 @@ export class EventHandler {
 
                     updated = await agentStorage.updateProjectOverride(
                         agentPubkey,
-                        projectDTag!,
+                        projectDTag,
                         projectOverride
                     );
                 }
@@ -412,11 +411,11 @@ export class EventHandler {
                 // - no pm tag (and no reset): no change to PM
                 if (hasResetTag) {
                     // A reset clears ALL project config including PM designation
-                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag!, undefined);
+                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag, undefined);
                     await agentRegistry.reloadAgent(agentPubkey);
                     configUpdated = true;
                 } else if (hasPMTag) {
-                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag!, true);
+                    await agentStorage.updateProjectScopedIsPM(agentPubkey, projectDTag, true);
                     await agentRegistry.reloadAgent(agentPubkey);
                     configUpdated = true;
                 }
@@ -499,7 +498,7 @@ export class EventHandler {
                 logger.info("Published updated project status after agent config change", {
                     agentSlug: agent.slug,
                     agentPubkey: agentPubkey.substring(0, 8),
-                    projectScoped: isProjectScoped,
+                    projectScoped: projectDTag !== undefined,
                     projectDTag,
                 });
             }

@@ -376,8 +376,10 @@ export class AgentDispatchService {
         );
 
         try {
+            const projectDTag = projectCtx.project.dTag;
+            if (!projectDTag) throw new Error("Project missing d-tag");
             const isInCooldown = await this.checkAndBlockIfCooldown(
-                projectCtx.project.dTag!,
+                projectDTag,
                 delegationTarget.conversationId,
                 delegationTarget.agent.pubkey,
                 delegationTarget.agent.slug,
@@ -694,8 +696,10 @@ export class AgentDispatchService {
             );
 
             try {
+                const projectDTag = projectCtx.project.dTag;
+                if (!projectDTag) throw new Error("Project missing d-tag");
                 const isInCooldown = await this.checkAndBlockIfCooldown(
-                    projectCtx.project.dTag!,
+                    projectDTag,
                     conversationId,
                     targetAgent.pubkey,
                     targetAgent.slug,

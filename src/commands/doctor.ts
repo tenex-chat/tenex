@@ -42,7 +42,7 @@ async function repairAgents(): Promise<void> {
     const ndk = getNDK();
 
     const agents = await agentStorage.getAllStoredAgents();
-    const nostrAgents = agents.filter((a) => a.eventId);
+    const nostrAgents = agents.filter((a): a is typeof a & { eventId: string } => !!a.eventId);
     const skipped = agents.length - nostrAgents.length;
 
     console.log(chalk.blue(`Checking ${nostrAgents.length} Nostr agent(s)...`));
@@ -54,7 +54,7 @@ async function repairAgents(): Promise<void> {
         const pubkey = new NDKPrivateKeySigner(agent.nsec).pubkey;
         const label = `${agent.slug} (${pubkey.substring(0, 8)}...)`;
 
-        const event = await ndk.fetchEvent(agent.eventId!, { groupable: false });
+        const event = await ndk.fetchEvent(agent.eventId, { groupable: false });
         if (!event) {
             console.log(chalk.yellow(`  ⚠ ${label}: event not found on relays, skipping`));
             failed++;

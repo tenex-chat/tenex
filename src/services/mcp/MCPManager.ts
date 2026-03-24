@@ -70,7 +70,9 @@ export class MCPManager {
     ): CoreTool<Record<string, unknown>, string> {
         return tool<Record<string, unknown>, string>({
             description: mcpTool.description || `Tool ${toolName} from ${serverName}`,
-            inputSchema: jsonSchema<Record<string, unknown>>(mcpTool.inputSchema as any),
+            inputSchema: jsonSchema<Record<string, unknown>>(
+                mcpTool.inputSchema as unknown as Parameters<typeof jsonSchema>[0]
+            ),
             execute: async (args) => {
                 const entry = this.clients.get(serverName);
                 if (!entry) {
@@ -86,11 +88,11 @@ export class MCPManager {
                     // Extract text content from MCP CallToolResult
                     if (callResult.content && Array.isArray(callResult.content)) {
                         const textContent = callResult.content
-                            .filter((c): c is { type: 'text'; text: string } =>
-                                typeof c === 'object' && 'text' in c
+                            .filter((c): c is { type: "text"; text: string } =>
+                                typeof c === "object" && "text" in c
                             )
                             .map(c => c.text)
-                            .join('\n');
+                            .join("\n");
                         return textContent || JSON.stringify(callResult);
                     }
 
@@ -230,7 +232,7 @@ export class MCPManager {
             const client = new Client(
                 {
                     name: `tenex-${name}`,
-                    version: '1.0.0'
+                    version: "1.0.0"
                 },
                 {
                     capabilities: {}
@@ -654,7 +656,8 @@ export class MCPManager {
             );
         }
 
-        const handlers = this.resourceNotificationHandlers.get(serverName)!;
+        const handlers = this.resourceNotificationHandlers.get(serverName);
+        if (!handlers) throw new Error(`Resource notification handlers missing for server '${serverName}'`);
         handlers.push(handler);
 
         trace.getActiveSpan()?.addEvent("mcp.resource_handler_registered", {

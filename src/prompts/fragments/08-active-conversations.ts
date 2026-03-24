@@ -148,7 +148,8 @@ export function buildConversationTree(entries: ActiveConversationEntry[]): Conve
 
     // Link children to parents (skip self-referential links)
     for (const entry of entries) {
-        const node = nodeMap.get(entry.conversationId)!;
+        const node = nodeMap.get(entry.conversationId);
+        if (!node) continue;
         const parentId = entry.parentConversationId;
         if (parentId && parentId !== entry.conversationId) {
             const parentNode = nodeMap.get(parentId);

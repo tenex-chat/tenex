@@ -75,9 +75,10 @@ function parseEventInput(
     if (typeof input === "string") {
         try {
             raw = JSON.parse(input);
-        } catch (e) {
+        } catch (error) {
             throw new Error(
-                `Invalid JSON in event field: ${e instanceof Error ? e.message : String(e)}`
+                `Invalid JSON in event field: ${error instanceof Error ? error.message : String(error)}`,
+                { cause: error }
             );
         }
     } else {
@@ -209,7 +210,7 @@ async function executeNostrPublishAsUser(
     // Root-level extras are NOT part of the NIP-01 event hash
     // ([0, pubkey, created_at, kind, tags, content]), so the signature
     // is computed over the clean event regardless.
-    (ndkEvent as any).tenex_explanation = explanation;
+    (ndkEvent as NDKEvent & { tenex_explanation?: string }).tenex_explanation = explanation;
 
     // Set pubkey to the owner's
     ndkEvent.pubkey = ownerPubkey;
@@ -257,7 +258,7 @@ async function executeNostrPublishAsUser(
     // Strip the root-level tenex_explanation property now that signing is done.
     // This is purely cosmetic cleanup — the property was never part of the
     // event hash or signature.
-    (ndkEvent as any).tenex_explanation = undefined;
+    (ndkEvent as NDKEvent & { tenex_explanation?: string }).tenex_explanation = undefined;
 
     // Validate timestamp is in seconds, not milliseconds
     if (ndkEvent.created_at && ndkEvent.created_at > 1_000_000_000_000) {
