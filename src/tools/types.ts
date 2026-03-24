@@ -73,7 +73,8 @@ export type ToolName =
     | "change_model"
     | "kill"
     | "no_response"
-    | "generate_image";
+    | "generate_image"
+    | "skills_set";
 
 /**
  * AI SDK tool with optional transcript arg declaration and side effect declaration.

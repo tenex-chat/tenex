@@ -1486,4 +1486,55 @@ describe("ConversationStore", () => {
             expect(messages).toHaveLength(0);
         });
     });
+
+    describe("Self-Applied Skills", () => {
+        beforeEach(() => {
+            store.load(PROJECT_ID, CONVERSATION_ID);
+        });
+
+        it("should return empty array when no skills are set", () => {
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual([]);
+        });
+
+        it("should store and retrieve skills for an agent", () => {
+            const skillIds = ["skill-aaa", "skill-bbb"];
+            store.setSelfAppliedSkills(skillIds, AGENT1_PUBKEY);
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual(skillIds);
+        });
+
+        it("should replace skills on subsequent calls (not merge)", () => {
+            store.setSelfAppliedSkills(["skill-aaa", "skill-bbb"], AGENT1_PUBKEY);
+            store.setSelfAppliedSkills(["skill-ccc"], AGENT1_PUBKEY);
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual(["skill-ccc"]);
+        });
+
+        it("should clear skills when set to empty array", () => {
+            store.setSelfAppliedSkills(["skill-aaa"], AGENT1_PUBKEY);
+            store.setSelfAppliedSkills([], AGENT1_PUBKEY);
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual([]);
+        });
+
+        it("should isolate skills between different agents", () => {
+            store.setSelfAppliedSkills(["skill-aaa"], AGENT1_PUBKEY);
+            store.setSelfAppliedSkills(["skill-bbb"], AGENT2_PUBKEY);
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual(["skill-aaa"]);
+            expect(store.getSelfAppliedSkillIds(AGENT2_PUBKEY)).toEqual(["skill-bbb"]);
+        });
+
+        it("should use _default key when no pubkey provided", () => {
+            store.setSelfAppliedSkills(["skill-aaa"]);
+            expect(store.getSelfAppliedSkillIds()).toEqual(["skill-aaa"]);
+            // Different from agent-keyed skills
+            expect(store.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual([]);
+        });
+
+        it("should persist skills across save/load cycles", async () => {
+            store.setSelfAppliedSkills(["skill-aaa", "skill-bbb"], AGENT1_PUBKEY);
+            await store.save();
+
+            const store2 = new ConversationStore(testDir);
+            store2.load(PROJECT_ID, CONVERSATION_ID);
+            expect(store2.getSelfAppliedSkillIds(AGENT1_PUBKEY)).toEqual(["skill-aaa", "skill-bbb"]);
+        });
+    });
 });

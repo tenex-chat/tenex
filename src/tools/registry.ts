@@ -90,6 +90,9 @@ import { createRAGSearchTool } from "./implementations/rag_search";
 // Image generation tools
 import { createGenerateImageTool } from "./implementations/generate_image";
 
+// Skills tools
+import { createSkillsSetTool } from "./implementations/skills_set";
+
 // Meta model tools
 import { createChangeModelTool } from "./implementations/change_model";
 
@@ -173,6 +176,7 @@ const CONVERSATION_REQUIRED_TOOLS: Set<ToolName> = new Set([
     "conversation_get", // Needs conversation for current-conversation optimization
     "change_model", // Needs conversation to persist variant override
     "mcp_subscribe", // Needs conversation to bind subscription to it
+    "skills_set", // Needs conversation to store self-applied skills
 ]);
 
 /**
@@ -273,6 +277,7 @@ const toolFactories: Record<ToolName, ToolFactory> = {
 
     // Image generation
     generate_image: createGenerateImageTool,
+    skills_set: createSkillsSetTool as ToolFactory,
 
     // Meta model tools - requires ConversationToolContext (filtered out when no conversation)
     change_model: createChangeModelTool as ToolFactory,

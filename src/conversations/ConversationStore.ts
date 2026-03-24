@@ -328,6 +328,7 @@ export class ConversationStore {
         blockedAgents: [],
         executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
         contextManagementScratchpads: {},
+        selfAppliedSkills: {},
     };
     private eventIdSet: Set<string> = new Set();
     private blockedAgentsSet: Set<string> = new Set();
@@ -381,6 +382,7 @@ export class ConversationStore {
                         | Record<string, ContextManagementScratchpadState>
                         | undefined
                 ),
+                selfAppliedSkills: loaded.selfAppliedSkills ?? {},
             };
             this.eventIdSet = new Set(
                 this.state.messages.map((m) => m.eventId).filter((id): id is string => id !== undefined)
@@ -398,6 +400,7 @@ export class ConversationStore {
                 blockedAgents: [],
                 executionTime: { totalSeconds: 0, isActive: false, lastUpdated: Date.now() },
                 contextManagementScratchpads: {},
+                selfAppliedSkills: {},
             };
             this.eventIdSet = new Set();
             this.blockedAgentsSet = new Set();
@@ -846,6 +849,19 @@ export class ConversationStore {
 
     getBlockedAgents(): Set<string> {
         return this.blockedAgentsSet;
+    }
+
+    // Self-Applied Skills Operations
+
+    setSelfAppliedSkills(skillEventIds: string[], agentPubkey?: string): void {
+        const key = agentPubkey ?? "_default";
+        if (!this.state.selfAppliedSkills) this.state.selfAppliedSkills = {};
+        this.state.selfAppliedSkills[key] = [...skillEventIds];
+    }
+
+    getSelfAppliedSkillIds(agentPubkey?: string): string[] {
+        const key = agentPubkey ?? "_default";
+        return this.state.selfAppliedSkills?.[key] ?? [];
     }
 
     // Envelope Message Operations
