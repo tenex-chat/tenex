@@ -666,9 +666,10 @@ describe("TENEX context management integration", () => {
         expect(contextStatusReminders).toEqual([
             expect.objectContaining({
                 type: "context-window-status",
-                content: expect.stringContaining("[Context status]"),
+                content: expect.stringContaining("Current request after context management:"),
             }),
         ]);
+        expect(contextStatusReminders[0]?.content).not.toContain("[Context status]");
         expect(contextStatusReminders[0]?.content).toContain(
             "Current request after context management:"
         );

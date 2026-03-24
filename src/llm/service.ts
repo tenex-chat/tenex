@@ -25,6 +25,7 @@ import type { z } from "zod";
 import { ChunkHandler, type ChunkHandlerState } from "./ChunkHandler";
 import { createFinishHandler, type FinishHandlerConfig, type FinishHandlerState } from "./FinishHandler";
 import { extractLastUserMessage, extractSystemContent, prepareMessagesForRequest } from "./MessageProcessor";
+import { createFinalRequestTraceMiddleware } from "./middleware/final-request-trace";
 import { createMessageSanitizerMiddleware } from "./middleware/message-sanitizer";
 import { createTenexSystemRemindersMiddleware } from "./middleware/system-reminders";
 import { mergeProviderOptions } from "./provider-options";
@@ -256,7 +257,7 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
     /**
      * Wrap a base model with the standard middleware chain.
      * Used by both getLanguageModel() and createLanguageModelFromRegistry()
-     * so all call paths get sanitization and reasoning extraction.
+     * so all call paths get sanitization, reminder injection, and final-request tracing.
      */
     private wrapWithMiddleware(baseModel: LanguageModel): LanguageModel {
         const middlewares: LanguageModelMiddleware[] = [];
@@ -279,6 +280,9 @@ export class LLMService extends EventEmitter<LLMServiceEventMap> {
                 startWithReasoning: false,
             })
         );
+
+        // Final-request trace — observe the provider-facing prompt after all other mutations
+        middlewares.push(createFinalRequestTraceMiddleware() as LanguageModelMiddleware);
 
         return wrapLanguageModel({
             model: baseModel as Parameters<typeof wrapLanguageModel>[0]["model"],
