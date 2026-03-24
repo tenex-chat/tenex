@@ -1,9 +1,8 @@
 import { NDKKind } from "@/nostr/kinds";
 import { getNDK } from "@/nostr/ndkClient";
-import { config } from "@/services/ConfigService";
 import { Nip46SigningService, Nip46SigningLog } from "@/services/nip46";
 import { logger } from "@/utils/logger";
-import { NDKEvent, NDKPrivateKeySigner, type NDKSubscription } from "@nostr-dev-kit/ndk";
+import { NDKEvent, type NDKSubscription } from "@nostr-dev-kit/ndk";
 import { shortenOptionalEventId, shortenPubkey } from "@/utils/conversation-id";
 
 const DEBOUNCE_MS = 5000;
@@ -91,6 +90,9 @@ export class OwnerAgentListService {
             logger.warn("[OwnerAgentListService] Not initialized, ignoring registerAgents call");
             return;
         }
+        if (this.ownerPubkeys.length === 0) {
+            return;
+        }
 
         let anyNew = false;
 
@@ -133,6 +135,9 @@ export class OwnerAgentListService {
     unregisterAgent(projectDTag: string, agentPubkey: string): void {
         if (!this.initialized) {
             logger.warn("[OwnerAgentListService] Not initialized, ignoring unregisterAgent call");
+            return;
+        }
+        if (this.ownerPubkeys.length === 0) {
             return;
         }
 
@@ -264,13 +269,20 @@ export class OwnerAgentListService {
      */
     private async publishPendingUpdates(): Promise<void> {
         const owners = Array.from(this.pendingOwners);
-        this.pendingOwners.clear();
-        this.pendingAdditions.clear();
-
         if (owners.length === 0) return;
 
         const nip46Service = Nip46SigningService.getInstance();
-        const useNip46 = nip46Service.isEnabled();
+        if (!nip46Service.isEnabled()) {
+            this.pendingOwners.clear();
+            this.pendingAdditions.clear();
+            logger.info("[OwnerAgentListService] NIP-46 disabled — skipping 14199 publish", {
+                ownerCount: owners.length,
+            });
+            return;
+        }
+
+        this.pendingOwners.clear();
+        this.pendingAdditions.clear();
 
         for (const owner of owners) {
             const agentPubkeys = this.ownerAgentSets.get(owner);
@@ -286,11 +298,7 @@ export class OwnerAgentListService {
                 ev.tag(["p", pk]);
             }
 
-            if (useNip46) {
-                await this.publishWithNip46(owner, ev, allPubkeys.length, nip46Service);
-            } else {
-                await this.publishWithBackendKey(ev, allPubkeys.length);
-            }
+            await this.publishWithNip46(owner, ev, allPubkeys.length, nip46Service);
         }
     }
 
@@ -333,23 +341,5 @@ export class OwnerAgentListService {
             outcome: result.outcome,
             reason: "reason" in result ? result.reason : undefined,
         });
-    }
-
-    private async publishWithBackendKey(ev: NDKEvent, pTagCount: number): Promise<void> {
-        const tenexNsec = await config.ensureBackendPrivateKey();
-        const signer = new NDKPrivateKeySigner(tenexNsec);
-
-        await ev.sign(signer);
-        try {
-            await ev.publish();
-            logger.info("[OwnerAgentListService] Published backend-signed 14199", {
-                pTagCount,
-            });
-        } catch (error) {
-            logger.warn("[OwnerAgentListService] Failed to publish backend-signed 14199", {
-                error: error instanceof Error ? error.message : String(error),
-                eventId: shortenOptionalEventId(ev.id),
-            });
-        }
     }
 }

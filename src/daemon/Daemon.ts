@@ -270,15 +270,15 @@ export class Daemon {
 
             // 6c. Initialize OwnerAgentListService (global 14199 management)
             const nip46Service = Nip46SigningService.getInstance();
-            const ownerPubkeys = nip46Service.isEnabled()
+            const ownerAgentListPubkeys = nip46Service.isEnabled()
                 ? [...this.whitelistedPubkeys]
-                : [backendSigner.pubkey];
-            OwnerAgentListService.getInstance().initialize(ownerPubkeys);
+                : [];
+            OwnerAgentListService.getInstance().initialize(ownerAgentListPubkeys);
 
             // 6d. Initialize NudgeSkillWhitelistService (global nudge/skill whitelist)
             // Nudges are user-scoped, not project-scoped — initialize once at daemon level
-            // with the same owner pubkeys used for agent list management.
-            NudgeSkillWhitelistService.getInstance().initialize(ownerPubkeys);
+            // with the configured whitelisted user pubkeys, independent of 14199 publishing.
+            NudgeSkillWhitelistService.getInstance().initialize([...this.whitelistedPubkeys]);
 
             // 7. Initialize runtime lifecycle manager
             logger.debug("Initializing runtime lifecycle manager");
@@ -1480,12 +1480,12 @@ export class Daemon {
         // Prevent EPIPE from crashing the daemon when stdout/stderr pipe breaks
         // (e.g. when the TUI exits). The daemon logs to ~/.tenex/daemon/daemon.log
         // so silently dropping broken-pipe writes is correct behavior.
-        process.stdout.on('error', (err) => {
-            if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+        process.stdout.on("error", (err) => {
+            if ((err as NodeJS.ErrnoException).code === "EPIPE") return;
             throw err;
         });
-        process.stderr.on('error', (err) => {
-            if ((err as NodeJS.ErrnoException).code === 'EPIPE') return;
+        process.stderr.on("error", (err) => {
+            if ((err as NodeJS.ErrnoException).code === "EPIPE") return;
             throw err;
         });
         /**

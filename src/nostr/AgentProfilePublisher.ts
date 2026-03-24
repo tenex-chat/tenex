@@ -81,7 +81,7 @@ export function publishProjectAgentSnapshot(projectDTag: string): void {
  * by that owner via NIP-46 remote signing. If signing fails, the event is simply
  * not published — there is no fallback to backend key signing.
  *
- * When NIP-46 is disabled, the event is signed with the backend key.
+ * When NIP-46 is disabled, 14199 publishing is skipped entirely.
  */
 async function executeSnapshotPublish(projectDTag: string): Promise<void> {
     const projectAgents = await agentStorage.getProjectAgents(projectDTag);
@@ -105,16 +105,20 @@ async function executeSnapshotPublish(projectDTag: string): Promise<void> {
 
     const nip46Service = Nip46SigningService.getInstance();
 
-    if (nip46Service.isEnabled()) {
-        for (const ownerPubkey of whitelisted) {
-            await publishSnapshotForOwner(
-                ownerPubkey,
-                agentPubkeys,
-                nip46Service,
-            );
-        }
-    } else {
-        await publishSnapshotWithBackendKey(agentPubkeys);
+    if (!nip46Service.isEnabled()) {
+        logger.info("[NIP-46] Disabled — skipping 14199 snapshot publish", {
+            projectDTag,
+            agentCount: agentPubkeys.length,
+        });
+        return;
+    }
+
+    for (const ownerPubkey of whitelisted) {
+        await publishSnapshotForOwner(
+            ownerPubkey,
+            agentPubkeys,
+            nip46Service,
+        );
     }
 }
 
@@ -180,49 +184,6 @@ async function publishSnapshotForOwner(
         outcome: result.outcome,
         reason: result.reason,
     });
-}
-
-/**
- * Publish a 14199 snapshot signed with the backend key.
- * Additively merges this project's agent pubkeys into the existing 14199.
- * If all project agents are already present, skips the publish entirely.
- * Used when NIP-46 is not enabled.
- */
-async function publishSnapshotWithBackendKey(
-    projectAgentPubkeys: string[],
-): Promise<void> {
-    const tenexNsec = await config.ensureBackendPrivateKey();
-    const signer = new NDKPrivateKeySigner(tenexNsec);
-
-    const existingPTags = await fetchExistingPTags(signer.pubkey);
-    const existingSet = new Set(existingPTags);
-    const newPubkeys = projectAgentPubkeys.filter((pk) => !existingSet.has(pk));
-
-    if (newPubkeys.length === 0 && existingPTags.length > 0) {
-        logger.debug("All project agents already in 14199, skipping backend publish", {
-            existingCount: existingPTags.length,
-        });
-        return;
-    }
-
-    const mergedPubkeys = [...existingPTags, ...newPubkeys];
-    const ndk = getNDK();
-    const ev = buildSnapshotEvent(ndk, mergedPubkeys);
-
-    await ev.sign(signer);
-    try {
-        await ev.publish();
-        logger.info("Published backend-signed 14199 snapshot", {
-            existingPTags: existingPTags.length,
-            newPubkeys: newPubkeys.length,
-            totalPTags: mergedPubkeys.length,
-        });
-    } catch (error) {
-        logger.warn("Failed to publish backend-signed 14199 snapshot", {
-            error: error instanceof Error ? error.message : String(error),
-            eventId: shortenOptionalEventId(ev.id),
-        });
-    }
 }
 
 /**
