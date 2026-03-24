@@ -30,6 +30,7 @@ import { handleDelegationCompletion } from "@/services/dispatch/DelegationComple
 
 const tracer = trace.getTracer("tenex.dispatch");
 const DELEGATION_COMPLETION_DEBOUNCE_MS = 2500;
+const LIVE_INJECTION_TIMEOUT_MS = 2000;
 
 const getSafeContext = (): ReturnType<typeof otelContext.active> => {
     const activeContext = otelContext.active();
@@ -718,7 +719,7 @@ export class AgentDispatchService {
                     "ral.number": activeRal?.ralNumber ?? 0,
                 });
 
-                const shouldSkipExecution = this.handleDeliveryInjection({
+                const shouldSkipExecution = await this.handleDeliveryInjection({
                     activeRal,
                     agent: targetAgent,
                     conversationId,
@@ -837,7 +838,7 @@ export class AgentDispatchService {
         return false;
     }
 
-    private handleDeliveryInjection(params: {
+    private async handleDeliveryInjection(params: {
         activeRal: RALRegistryEntry | undefined;
         agent: AgentInstance;
         conversationId: string;
@@ -847,7 +848,7 @@ export class AgentDispatchService {
         targetedPrincipals?: PrincipalSnapshot[];
         eventId?: string;
         agentSpan: ReturnType<typeof tracer.startSpan>;
-    }): boolean {
+    }): Promise<boolean> {
         const {
             activeRal,
             agent,
@@ -877,21 +878,36 @@ export class AgentDispatchService {
 
         if (activeRal.isStreaming) {
             const llmConfig = config.getLLMConfig(agent.llmConfig);
+            const liveInjection = await this.tryDeliverQueuedMessageToLiveStream({
+                agent,
+                conversationId,
+                message,
+                eventId,
+                agentSpan,
+                provider: llmConfig.provider,
+            });
+
             getSafeActiveSpan()?.addEvent("reply.message_injected_no_abort", {
                 "agent.slug": agent.slug,
                 "ral.number": activeRal.ralNumber,
                 "message.length": messageLength,
                 provider: llmConfig.provider,
+                "injection.injector_available": liveInjection.injectorAvailable,
+                "injection.delivered_live": liveInjection.delivered,
             });
             logger.info("[reply] Queued message for streaming provider (no abort, skipping execution)", {
                 agent: agent.slug,
                 ralNumber: activeRal.ralNumber,
                 injectionLength: messageLength,
                 provider: llmConfig.provider,
+                injectorAvailable: liveInjection.injectorAvailable,
+                deliveredLive: liveInjection.delivered,
             });
             agentSpan.addEvent("dispatch.injection_stream_no_abort_skip_execution", {
                 "message.length": messageLength,
                 provider: llmConfig.provider,
+                "injection.injector_available": liveInjection.injectorAvailable,
+                "injection.delivered_live": liveInjection.delivered,
             });
             return true;
         }
@@ -912,5 +928,79 @@ export class AgentDispatchService {
             senderPrincipal: envelope.principal,
             targetedPrincipals: envelope.recipients.length > 0 ? envelope.recipients : undefined,
         };
+    }
+
+    private async tryDeliverQueuedMessageToLiveStream(params: {
+        agent: AgentInstance;
+        conversationId: string;
+        message: string;
+        eventId?: string;
+        provider: string;
+        agentSpan: ReturnType<typeof tracer.startSpan>;
+    }): Promise<{ injectorAvailable: boolean; delivered: boolean }> {
+        const { agent, conversationId, message, eventId, provider, agentSpan } = params;
+        const injector = llmOpsRegistry.getMessageInjector(agent.pubkey, conversationId);
+
+        if (!injector) {
+            agentSpan.addEvent("dispatch.injection_live_unavailable", {
+                provider,
+            });
+            return { injectorAvailable: false, delivered: false };
+        }
+
+        const delivered = await new Promise<boolean>((resolve) => {
+            let settled = false;
+            const timeoutId = setTimeout(() => {
+                if (!settled) {
+                    settled = true;
+                    resolve(false);
+                }
+            }, LIVE_INJECTION_TIMEOUT_MS);
+
+            const finish = (result: boolean) => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                clearTimeout(timeoutId);
+                resolve(result);
+            };
+
+            try {
+                injector.inject(message, finish);
+            } catch (error) {
+                logger.warn("[reply] Live message injection threw synchronously", {
+                    agent: agent.slug,
+                    conversationId: shortenConversationId(conversationId),
+                    provider,
+                    error: formatAnyError(error),
+                });
+                finish(false);
+            }
+        });
+
+        if (!delivered) {
+            agentSpan.addEvent("dispatch.injection_live_failed", {
+                provider,
+            });
+            return { injectorAvailable: true, delivered: false };
+        }
+
+        let clearedCount = 0;
+        if (eventId) {
+            clearedCount = RALRegistry.getInstance().clearQueuedInjectionByEventId(
+                agent.pubkey,
+                conversationId,
+                eventId
+            );
+        }
+
+        agentSpan.addEvent("dispatch.injection_live_delivered", {
+            provider,
+            "queue.cleared_count": clearedCount,
+        });
+
+        return { injectorAvailable: true, delivered: true };
     }
 }

@@ -1097,6 +1097,39 @@ export class RALRegistry extends EventEmitter<RALRegistryEvents> {
   }
 
   /**
+   * Clear a specific queued injection identified by its source event ID.
+   * Used after a live MessageInjector delivery succeeds so unrelated queued
+   * follow-ups remain pending for the same conversation.
+   */
+  clearQueuedInjectionByEventId(agentPubkey: string, conversationId: string, eventId: string): number {
+    const key = this.makeKey(agentPubkey, conversationId);
+    const ralMap = this.states.get(key);
+    if (!ralMap) return 0;
+
+    let totalCleared = 0;
+    for (const ral of ralMap.values()) {
+      if (ral.queuedInjections.length === 0) {
+        continue;
+      }
+
+      const beforeCount = ral.queuedInjections.length;
+      ral.queuedInjections = ral.queuedInjections.filter((injection) => injection.eventId !== eventId);
+      totalCleared += beforeCount - ral.queuedInjections.length;
+    }
+
+    if (totalCleared > 0) {
+      trace.getActiveSpan()?.addEvent("ral.injection_cleared_after_delivery", {
+        "agent.pubkey": shortenPubkey(agentPubkey),
+        "conversation.id": shortenConversationId(conversationId),
+        "event.id": shortenEventId(eventId),
+        "cleared.count": totalCleared,
+      });
+    }
+
+    return totalCleared;
+  }
+
+  /**
    * Clear all queued injections for an agent's conversation.
    * Called by AgentDispatchService after MessageInjector successfully delivers a message.
    * This prevents hasOutstandingWork() from incorrectly reporting queued injections
