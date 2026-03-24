@@ -7,17 +7,14 @@
 
 import { formatAnyError } from "@/lib/error-formatter";
 import { llmServiceFactory } from "@/llm/LLMServiceFactory";
-import { shortenConversationId } from "@/utils/conversation-id";
 import { config as configService } from "@/services/ConfigService";
 import { createViolationReminders } from "@/services/heuristics";
 import type { NudgeToolPermissions, NudgeData } from "@/services/nudge";
 import { RALRegistry } from "@/services/ral";
 import type { SkillData } from "@/services/skill";
 import { logger } from "@/utils/logger";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { trace } from "@opentelemetry/api";
 import type { LanguageModel, ModelMessage, ProviderRegistryProvider } from "ai";
-
-const tracer = trace.getTracer("tenex.stream-callbacks");
 import { getSystemReminderContext } from "@/llm/system-reminder-context";
 import type { MessageCompiler } from "./MessageCompiler";
 import { MessageSyncer } from "./MessageSyncer";
@@ -122,229 +119,214 @@ export function createPrepareStep(
             throw new Error("Conversation store unavailable during prepareStep");
         }
 
-        return tracer.startActiveSpan("tenex.agent.prepare_step", async (span) => {
-            try {
-                span.setAttribute("ral.number", ralNumber);
-                span.setAttribute("agent.pubkey", context.agent.pubkey.substring(0, 8));
-                span.setAttribute("conversation.id", shortenConversationId(context.conversationId));
-                span.setAttribute("step.number", step.stepNumber);
+        try {
+            // Pass steps to LLM service for usage tracking
+            llmService.updateUsageFromSteps(step.steps);
 
-                // Pass steps to LLM service for usage tracking
-                llmService.updateUsageFromSteps(step.steps);
+            // Update execution context with latest messages
+            execContext.accumulatedMessages = step.messages;
 
-                // Update execution context with latest messages
-                execContext.accumulatedMessages = step.messages;
+            // Sync any tool calls/results from AI SDK to ConversationStore
+            const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
+            syncer.syncFromSDK(step.messages);
 
-                // Sync any tool calls/results from AI SDK to ConversationStore
-                // (sub-span removed - parent prepare_step span is sufficient)
-                const syncer = new MessageSyncer(conversationStore, context.agent.pubkey, ralNumber);
-                syncer.syncFromSDK(step.messages);
+            // Process any new injections before recompiling messages
+            const newInjections = ralRegistry.getAndConsumeInjections(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
 
-                // Process any new injections (sub-span removed - parent prepare_step span is sufficient)
-                const newInjections = ralRegistry.getAndConsumeInjections(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
+            if (newInjections.length > 0) {
+                const triggeringPrincipalId =
+                    context.triggeringEnvelope.principal.linkedPubkey ??
+                    context.triggeringEnvelope.principal.id;
+                for (const injection of newInjections) {
+                    const relocated = injection.eventId
+                        ? conversationStore.relocateToEnd(injection.eventId, {
+                              ral: ralNumber,
+                              senderPubkey: injection.senderPubkey,
+                              senderPrincipal: injection.senderPrincipal,
+                              targetedPubkeys: [context.agent.pubkey],
+                              targetedPrincipals: injection.targetedPrincipals,
+                          })
+                        : false;
 
-                if (newInjections.length > 0) {
-                    const triggeringPrincipalId =
-                        context.triggeringEnvelope.principal.linkedPubkey ??
-                        context.triggeringEnvelope.principal.id;
-                    for (const injection of newInjections) {
-                        const relocated = injection.eventId
-                            ? conversationStore.relocateToEnd(injection.eventId, {
-                                  ral: ralNumber,
-                                  senderPubkey: injection.senderPubkey,
-                                  senderPrincipal: injection.senderPrincipal,
-                                  targetedPubkeys: [context.agent.pubkey],
-                                  targetedPrincipals: injection.targetedPrincipals,
-                              })
-                            : false;
+                    if (!relocated) {
+                        conversationStore.addMessage({
+                            pubkey: triggeringPrincipalId,
+                            ral: ralNumber,
+                            content: injection.content,
+                            messageType: "text",
+                            targetedPubkeys: [context.agent.pubkey],
+                            targetedPrincipals: injection.targetedPrincipals,
+                            senderPubkey: injection.senderPubkey,
+                            senderPrincipal: injection.senderPrincipal,
+                            eventId: injection.eventId,
+                        });
+                    }
+                }
 
-                        if (!relocated) {
-                            conversationStore.addMessage({
-                                pubkey: triggeringPrincipalId,
-                                ral: ralNumber,
-                                content: injection.content,
-                                messageType: "text",
-                                targetedPubkeys: [context.agent.pubkey],
-                                targetedPrincipals: injection.targetedPrincipals,
-                                senderPubkey: injection.senderPubkey,
-                                senderPrincipal: injection.senderPrincipal,
-                                eventId: injection.eventId,
+                executionSpan?.addEvent("ral_injection.process", {
+                    "injection.message_count": newInjections.length,
+                    "ral.number": ralNumber,
+                });
+            }
+
+            // === HEURISTIC VIOLATIONS INJECTION ===
+            const heuristicViolations = ralRegistry.getAndConsumeHeuristicViolations(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+
+            if (heuristicViolations.length > 0) {
+                const reminders = createViolationReminders(heuristicViolations);
+
+                for (const reminder of reminders) {
+                    getSystemReminderContext().queue(reminder);
+                }
+
+                executionSpan?.addEvent("heuristic.violations_injected", {
+                    "ral.number": ralNumber,
+                    "violation.count": heuristicViolations.length,
+                    "violation.ids": heuristicViolations.map((v) => v.id).join(","),
+                });
+
+                logger.info("[StreamCallbacks] Injected heuristic violations", {
+                    agent: context.agent.slug,
+                    ralNumber,
+                    violationCount: heuristicViolations.length,
+                });
+            }
+
+            const pendingDelegations = ralRegistry.getConversationPendingDelegations(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+            const completedDelegations = ralRegistry.getConversationCompletedDelegations(
+                context.agent.pubkey,
+                context.conversationId,
+                ralNumber
+            );
+
+            const { messages: rebuiltMessages } = await messageCompiler.compile({
+                agent: context.agent,
+                project: projectContext.project,
+                conversation,
+                triggeringEnvelope: context.triggeringEnvelope,
+                projectBasePath: context.projectBasePath,
+                workingDirectory: context.workingDirectory,
+                currentBranch: context.currentBranch,
+                availableAgents: Array.from(projectContext.agents.values()),
+                mcpManager: projectContext.mcpManager,
+                agentLessons: projectContext.agentLessons,
+                agentComments: projectContext.agentComments,
+                nudgeContent,
+                nudges,
+                nudgeToolPermissions,
+                skillContent,
+                skills,
+                pendingDelegations,
+                completedDelegations,
+                ralNumber,
+                includeMcpResources: false,
+            });
+
+            updateReminderData({
+                agent: context.agent,
+                conversation,
+                respondingToPrincipal: context.triggeringEnvelope.principal,
+                pendingDelegations,
+                completedDelegations,
+            });
+
+            // Dynamic model switching
+            if (isMetaModel) {
+                const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
+
+                if (currentVariant !== modelState.lastUsedVariant) {
+                    const resolution = configService.resolveMetaModel(
+                        context.agent.llmConfig,
+                        undefined,
+                        currentVariant
+                    );
+
+                    if (resolution.isMetaModel) {
+                        const newLlmConfig = configService.getLLMConfig(resolution.configName);
+
+                        try {
+                            const registry = llmServiceFactory.getRegistry();
+                            const newModel = llmService.createLanguageModelFromRegistry(
+                                newLlmConfig.provider,
+                                newLlmConfig.model,
+                                registry
+                            );
+
+                            const previousVariant = modelState.lastUsedVariant;
+
+                            executionSpan?.addEvent("executor.model_switched", {
+                                "ral.number": ralNumber,
+                                "meta_model.previous_variant": previousVariant || "default",
+                                "meta_model.new_variant": currentVariant || "default",
+                                "meta_model.new_config": resolution.configName,
+                                "meta_model.new_provider": newLlmConfig.provider,
+                                "meta_model.new_model": newLlmConfig.model,
+                            });
+
+                            logger.info("[StreamCallbacks] Dynamic model switch via change_model tool", {
+                                agent: context.agent.slug,
+                                previousVariant: previousVariant || "default",
+                                newVariant: currentVariant || "default",
+                                newConfig: resolution.configName,
+                            });
+
+                            modelState.setVariant(currentVariant);
+                            modelState.setModel(newModel);
+                        } catch (modelError) {
+                            logger.error("[StreamCallbacks] Failed to create new model for variant switch", {
+                                error: formatAnyError(modelError),
+                                variant: currentVariant,
+                                config: resolution.configName,
+                            });
+                            logger.writeToWarnLog({
+                                timestamp: new Date().toISOString(),
+                                level: "error",
+                                component: "StreamCallbacks",
+                                message: "Failed to create new model for variant switch",
+                                context: {
+                                    agent: context.agent.slug,
+                                    variant: currentVariant,
+                                    config: resolution.configName,
+                                },
+                                error: formatAnyError(modelError),
+                                stack: modelError instanceof Error ? modelError.stack : undefined,
                             });
                         }
                     }
-
-                    executionSpan?.addEvent("ral_injection.process", {
-                        "injection.message_count": newInjections.length,
-                        "ral.number": ralNumber,
-                    });
                 }
-
-                // === HEURISTIC VIOLATIONS INJECTION ===
-                const heuristicViolations = ralRegistry.getAndConsumeHeuristicViolations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                if (heuristicViolations.length > 0) {
-                    const reminders = createViolationReminders(heuristicViolations);
-
-                    for (const reminder of reminders) {
-                        getSystemReminderContext().queue(reminder);
-                    }
-
-                    executionSpan?.addEvent("heuristic.violations_injected", {
-                        "ral.number": ralNumber,
-                        "violation.count": heuristicViolations.length,
-                        "violation.ids": heuristicViolations.map((v) => v.id).join(","),
-                    });
-
-                    logger.info("[StreamCallbacks] Injected heuristic violations", {
-                        agent: context.agent.slug,
-                        ralNumber,
-                        violationCount: heuristicViolations.length,
-                    });
-                }
-
-                const pendingDelegations = ralRegistry.getConversationPendingDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-                const completedDelegations = ralRegistry.getConversationCompletedDelegations(
-                    context.agent.pubkey,
-                    context.conversationId,
-                    ralNumber
-                );
-
-                // Compile messages (sub-span removed - MessageCompiler.compile has its own span)
-                const { messages: rebuiltMessages } = await messageCompiler.compile({
-                    agent: context.agent,
-                    project: projectContext.project,
-                    conversation,
-                    triggeringEnvelope: context.triggeringEnvelope,
-                    projectBasePath: context.projectBasePath,
-                    workingDirectory: context.workingDirectory,
-                    currentBranch: context.currentBranch,
-                    availableAgents: Array.from(projectContext.agents.values()),
-                    mcpManager: projectContext.mcpManager,
-                    agentLessons: projectContext.agentLessons,
-                    agentComments: projectContext.agentComments,
-                    nudgeContent,
-                    nudges,
-                    nudgeToolPermissions,
-                    skillContent,
-                    skills,
-                    pendingDelegations,
-                    completedDelegations,
-                    ralNumber,
-                    includeMcpResources: false,
-                });
-
-                updateReminderData({
-                    agent: context.agent,
-                    conversation,
-                    respondingToPrincipal: context.triggeringEnvelope.principal,
-                    pendingDelegations,
-                    completedDelegations,
-                });
-
-                span.setAttribute("compiled.message_count", rebuiltMessages.length);
-
-                // Dynamic model switching
-                if (isMetaModel) {
-                    const currentVariant = conversationStore.getMetaModelVariantOverride(context.agent.pubkey);
-
-                    if (currentVariant !== modelState.lastUsedVariant) {
-                        const resolution = configService.resolveMetaModel(
-                            context.agent.llmConfig,
-                            undefined,
-                            currentVariant
-                        );
-
-                        if (resolution.isMetaModel) {
-                            const newLlmConfig = configService.getLLMConfig(resolution.configName);
-
-                            try {
-                                const registry = llmServiceFactory.getRegistry();
-                                const newModel = llmService.createLanguageModelFromRegistry(
-                                    newLlmConfig.provider,
-                                    newLlmConfig.model,
-                                    registry
-                                );
-
-                                const previousVariant = modelState.lastUsedVariant;
-
-                                executionSpan?.addEvent("executor.model_switched", {
-                                    "ral.number": ralNumber,
-                                    "meta_model.previous_variant": previousVariant || "default",
-                                    "meta_model.new_variant": currentVariant || "default",
-                                    "meta_model.new_config": resolution.configName,
-                                    "meta_model.new_provider": newLlmConfig.provider,
-                                    "meta_model.new_model": newLlmConfig.model,
-                                });
-
-                                logger.info("[StreamCallbacks] Dynamic model switch via change_model tool", {
-                                    agent: context.agent.slug,
-                                    previousVariant: previousVariant || "default",
-                                    newVariant: currentVariant || "default",
-                                    newConfig: resolution.configName,
-                                });
-
-                                modelState.setVariant(currentVariant);
-                                modelState.setModel(newModel);
-                            } catch (modelError) {
-                                logger.error("[StreamCallbacks] Failed to create new model for variant switch", {
-                                    error: formatAnyError(modelError),
-                                    variant: currentVariant,
-                                    config: resolution.configName,
-                                });
-                                logger.writeToWarnLog({
-                                    timestamp: new Date().toISOString(),
-                                    level: "error",
-                                    component: "StreamCallbacks",
-                                    message: "Failed to create new model for variant switch",
-                                    context: {
-                                        agent: context.agent.slug,
-                                        variant: currentVariant,
-                                        config: resolution.configName,
-                                    },
-                                    error: formatAnyError(modelError),
-                                    stack: modelError instanceof Error ? modelError.stack : undefined,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                return modelState.currentModel
-                    ? { model: modelState.currentModel, messages: rebuiltMessages }
-                    : { messages: rebuiltMessages };
-            } catch (error) {
-                span.recordException(error as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
-                logger.writeToWarnLog({
-                    timestamp: new Date().toISOString(),
-                    level: "error",
-                    component: "StreamCallbacks",
-                    message: "LLM streaming prepareStep failed",
-                    context: {
-                        agent: context.agent.slug,
-                        conversationId: context.conversationId,
-                        stepNumber: step.stepNumber,
-                        ralNumber,
-                    },
-                    error: error instanceof Error ? error.message : String(error),
-                    stack: error instanceof Error ? error.stack : undefined,
-                });
-                throw error;
-            } finally {
-                span.end();
             }
-        });
+
+            return modelState.currentModel
+                ? { model: modelState.currentModel, messages: rebuiltMessages }
+                : { messages: rebuiltMessages };
+        } catch (error) {
+            logger.writeToWarnLog({
+                timestamp: new Date().toISOString(),
+                level: "error",
+                component: "StreamCallbacks",
+                message: "LLM streaming prepareStep failed",
+                context: {
+                    agent: context.agent.slug,
+                    conversationId: context.conversationId,
+                    stepNumber: step.stepNumber,
+                    ralNumber,
+                },
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+            });
+            throw error;
+        }
     };
 }
