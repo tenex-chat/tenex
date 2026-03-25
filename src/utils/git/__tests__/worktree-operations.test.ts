@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { getCurrentBranch } from "../initializeGitRepo";
+import { getCurrentBranch, getCurrentBranchWithFallback } from "../initializeGitRepo";
 import { listWorktrees, createWorktree, sanitizeBranchName, WORKTREES_DIR } from "../worktree";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -67,6 +67,15 @@ describe("Git Worktree Operations", () => {
         const branch = await getCurrentBranch(projectPath);
         // Default branch could be "main" or "master" depending on git config
         expect(["main", "master"]).toContain(branch);
+    });
+
+    test("getCurrentBranchWithFallback returns branch in detached HEAD state", async () => {
+        const originalBranch = await getCurrentBranch(projectPath);
+        await execAsync("git checkout --detach HEAD", { cwd: projectPath });
+
+        const branch = await getCurrentBranchWithFallback(projectPath);
+
+        expect(branch).toBe(originalBranch);
     });
 
     test("createWorktree creates new worktree in .worktrees directory", async () => {

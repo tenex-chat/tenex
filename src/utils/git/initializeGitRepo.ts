@@ -1,12 +1,124 @@
 import { exec } from "node:child_process";
 import * as fs from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { logger } from "@/utils/logger";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 
 const execAsync = promisify(exec);
 const tracer = trace.getTracer("tenex.git");
+const SLOW_GIT_COMMAND_THRESHOLD_MS = 500;
+
+function describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function truncateOutput(output: string, maxLength = 160): string {
+    const trimmed = output.trim();
+    if (!trimmed) {
+        return "";
+    }
+
+    if (trimmed.length <= maxLength) {
+        return trimmed;
+    }
+
+    return `${trimmed.slice(0, maxLength)}...`;
+}
+
+async function runGitCommandWithTelemetry(params: {
+    command: string;
+    cwd: string;
+    span: Span;
+}): Promise<{ stdout: string; stderr: string; durationMs: number }> {
+    const startedAt = performance.now();
+
+    params.span.addEvent("git.command_started", {
+        "git.command": params.command,
+        "git.cwd": params.cwd,
+    });
+
+    try {
+        const { stdout, stderr } = await execAsync(params.command, { cwd: params.cwd });
+        const durationMs = Math.round(performance.now() - startedAt);
+        const stdoutPreview = truncateOutput(stdout);
+        const stderrPreview = truncateOutput(stderr);
+
+        params.span.addEvent("git.command_completed", {
+            "git.command": params.command,
+            "git.cwd": params.cwd,
+            "duration_ms": durationMs,
+            "stdout.preview": stdoutPreview,
+            "stderr.present": Boolean(stderrPreview),
+            ...(stderrPreview ? { "stderr.preview": stderrPreview } : {}),
+        });
+
+        if (durationMs >= SLOW_GIT_COMMAND_THRESHOLD_MS) {
+            logger.warn("Slow git command detected", {
+                command: params.command,
+                cwd: params.cwd,
+                durationMs,
+                stdout: stdoutPreview || undefined,
+                stderr: stderrPreview || undefined,
+            });
+        }
+
+        return { stdout, stderr, durationMs };
+    } catch (error) {
+        const durationMs = Math.round(performance.now() - startedAt);
+        const errorMessage = describeError(error);
+
+        params.span.addEvent("git.command_failed", {
+            "git.command": params.command,
+            "git.cwd": params.cwd,
+            "duration_ms": durationMs,
+            "error.message": errorMessage,
+        });
+
+        logger.warn("Git command failed", {
+            command: params.command,
+            cwd: params.cwd,
+            durationMs,
+            error: errorMessage,
+        });
+
+        throw error;
+    }
+}
+
+async function branchRefExists(params: {
+    projectPath: string;
+    branch: string;
+    span: Span;
+}): Promise<boolean> {
+    const refPath = path.join(params.projectPath, ".git", "refs", "heads", params.branch);
+    const startedAt = performance.now();
+
+    params.span.addEvent("git.current_branch_fallback_check_started", {
+        "git.branch": params.branch,
+        "git.ref_path": refPath,
+    });
+
+    try {
+        await fs.access(refPath);
+        params.span.addEvent("git.current_branch_fallback_check_completed", {
+            "git.branch": params.branch,
+            "git.ref_path": refPath,
+            "duration_ms": Math.round(performance.now() - startedAt),
+            "exists": true,
+        });
+        return true;
+    } catch {
+        params.span.addEvent("git.current_branch_fallback_check_completed", {
+            "git.branch": params.branch,
+            "git.ref_path": refPath,
+            "duration_ms": Math.round(performance.now() - startedAt),
+            "exists": false,
+        });
+        return false;
+    }
+}
 
 /**
  * Result from git repository initialization or cloning.
@@ -179,23 +291,41 @@ export async function cloneGitRepository(
 export async function getCurrentBranch(repoPath: string): Promise<string> {
     return tracer.startActiveSpan("tenex.git.get_current_branch", async (span) => {
         span.setAttribute("git.repo_path", repoPath);
-        span.addEvent("git.command_started", {
-            "git.command": "git branch --show-current",
-        });
 
         try {
-            const { stdout } = await execAsync("git branch --show-current", { cwd: repoPath });
+            const { stdout, durationMs } = await runGitCommandWithTelemetry({
+                command: "git branch --show-current",
+                cwd: repoPath,
+                span,
+            });
             const branch = stdout.trim();
-            span.setAttribute("git.branch", branch);
+            span.setAttributes({
+                "git.branch": branch,
+                "git.command.duration_ms": durationMs,
+            });
+            span.addEvent("git.current_branch_resolved", {
+                "git.branch": branch,
+                "duration_ms": durationMs,
+                "branch.empty": branch.length === 0,
+            });
+
+            if (!branch) {
+                logger.warn("Git current branch lookup returned empty output", {
+                    repoPath,
+                    durationMs,
+                });
+            }
+
             span.setStatus({ code: SpanStatusCode.OK });
             return branch;
         } catch (error) {
+            const errorMessage = describeError(error);
             span.recordException(error as Error);
             span.setStatus({
                 code: SpanStatusCode.ERROR,
-                message: error instanceof Error ? error.message : String(error),
+                message: errorMessage,
             });
-            logger.error("Failed to get current branch", { repoPath, error });
+            logger.error("Failed to get current branch", { repoPath, error: errorMessage });
             throw error;
         } finally {
             span.end();
@@ -209,42 +339,90 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
 export async function getCurrentBranchWithFallback(projectPath: string): Promise<string> {
     return tracer.startActiveSpan("tenex.git.get_current_branch_with_fallback", async (span) => {
         span.setAttribute("git.project_path", projectPath);
+        const startedAt = performance.now();
+
+        span.addEvent("git.current_branch_lookup_started", {
+            "git.project_path": projectPath,
+        });
 
         try {
             const branch = await getCurrentBranch(projectPath);
-            span.setAttribute("git.branch", branch);
-            span.setAttribute("git.branch.fallback_used", false);
+            if (!branch) {
+                const errorMessage = "git branch --show-current returned empty output";
+                span.addEvent("git.current_branch_lookup_empty_result", {
+                    "error.message": errorMessage,
+                });
+                logger.warn("Git current branch lookup returned empty output, trying fallbacks", {
+                    projectPath,
+                });
+                throw new Error(errorMessage);
+            }
+            const totalDurationMs = Math.round(performance.now() - startedAt);
+
+            span.setAttributes({
+                "git.branch": branch,
+                "git.branch.fallback_used": false,
+                "git.lookup.duration_ms": totalDurationMs,
+            });
+            span.addEvent("git.current_branch_lookup_completed", {
+                "git.branch": branch,
+                "git.branch.fallback_used": false,
+                "duration_ms": totalDurationMs,
+            });
+
+            if (totalDurationMs >= SLOW_GIT_COMMAND_THRESHOLD_MS) {
+                logger.warn("Slow git branch lookup detected", {
+                    projectPath,
+                    branch,
+                    durationMs: totalDurationMs,
+                    fallbackUsed: false,
+                });
+            }
+
             span.setStatus({ code: SpanStatusCode.OK });
             return branch;
         } catch (error) {
-            logger.warn("Failed to get current branch, trying fallbacks", { projectPath, error });
+            const errorMessage = describeError(error);
 
-            span.addEvent("git.current_branch_lookup_failed", {
-                "error": error instanceof Error ? error.message : String(error),
+            logger.warn("Failed to get current branch, trying fallbacks", {
+                projectPath,
+                error: errorMessage,
             });
 
-            try {
-                await fs.access(path.join(projectPath, ".git/refs/heads/main"));
-                span.setAttributes({
-                    "git.branch": "main",
-                    "git.branch.fallback_used": true,
+            span.addEvent("git.current_branch_lookup_failed", {
+                "error.message": errorMessage,
+            });
+
+            const fallbackBranch = (await branchRefExists({
+                projectPath,
+                branch: "main",
+                span,
+            }))
+                ? "main"
+                : "master";
+            const totalDurationMs = Math.round(performance.now() - startedAt);
+
+            span.setAttributes({
+                "git.branch": fallbackBranch,
+                "git.branch.fallback_used": true,
+                "git.lookup.duration_ms": totalDurationMs,
+            });
+            span.addEvent("git.current_branch_fallback_selected", {
+                "git.branch": fallbackBranch,
+                "duration_ms": totalDurationMs,
+            });
+
+            if (totalDurationMs >= SLOW_GIT_COMMAND_THRESHOLD_MS) {
+                logger.warn("Slow git branch lookup detected", {
+                    projectPath,
+                    branch: fallbackBranch,
+                    durationMs: totalDurationMs,
+                    fallbackUsed: true,
                 });
-                span.addEvent("git.current_branch_fallback_selected", {
-                    "git.branch": "main",
-                });
-                span.setStatus({ code: SpanStatusCode.OK });
-                return "main";
-            } catch {
-                span.setAttributes({
-                    "git.branch": "master",
-                    "git.branch.fallback_used": true,
-                });
-                span.addEvent("git.current_branch_fallback_selected", {
-                    "git.branch": "master",
-                });
-                span.setStatus({ code: SpanStatusCode.OK });
-                return "master";
             }
+
+            span.setStatus({ code: SpanStatusCode.OK });
+            return fallbackBranch;
         } finally {
             span.end();
         }
