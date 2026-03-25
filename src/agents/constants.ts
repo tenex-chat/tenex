@@ -35,6 +35,8 @@ export const CORE_AGENT_TOOLS: ToolName[] = [
     // MCP resource reading and subscriptions (self-gating: only works if agent has MCP tools from that server)
     "mcp_resource_read", // All agents can read MCP resources from servers they have tools for
     "mcp_subscribe", // All agents can subscribe to MCP resource notifications
+    // Skills management
+    "skills_set", // All agents can activate/deactivate skills mid-conversation
 ] as const;
 
 /**
